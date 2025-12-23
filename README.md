@@ -82,7 +82,8 @@ Restart Claude Code after adding the configuration.
 | `scan_metro` | Scan for running Metro servers and auto-connect |
 | `connect_metro` | Connect to a specific Metro port |
 | `get_apps` | List connected React Native apps |
-| `get_logs` | Retrieve console logs (with optional filtering) |
+| `get_logs` | Retrieve console logs (with optional filtering and start position) |
+| `search_logs` | Search logs for specific text (case-insensitive) |
 | `clear_logs` | Clear the log buffer |
 
 ## Usage
@@ -111,6 +112,22 @@ get_logs with maxLogs=20 and level="error"
 ```
 
 Available levels: `all`, `log`, `warn`, `error`, `info`, `debug`
+
+### Start from Specific Line
+
+```
+get_logs with startFromText="iOS Bundled" and maxLogs=100
+```
+
+This finds the **last** (most recent) line containing the text and returns logs from that point forward. Useful for getting logs since the last app reload.
+
+### Search Logs
+
+```
+search_logs with text="error" and maxResults=20
+```
+
+Case-insensitive search across all log messages.
 
 ## Supported React Native Versions
 

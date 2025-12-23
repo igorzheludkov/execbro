@@ -48,18 +48,38 @@ class LogBuffer {
     }
   }
 
-  get(count?: number, level?: string): LogEntry[] {
+  get(count?: number, level?: string, startFromText?: string): LogEntry[] {
     let filtered = this.logs;
+
+    // If startFromText is provided, find the LAST matching line and start from there
+    if (startFromText) {
+      let startIndex = -1;
+      for (let i = filtered.length - 1; i >= 0; i--) {
+        if (filtered[i].message.includes(startFromText)) {
+          startIndex = i;
+          break;
+        }
+      }
+      if (startIndex !== -1) {
+        filtered = filtered.slice(startIndex);
+      }
+    }
 
     if (level && level !== "all") {
       filtered = filtered.filter((log) => log.level === level);
     }
 
     if (count && count > 0) {
-      filtered = filtered.slice(-count);
+      filtered = filtered.slice(0, count);
     }
 
     return filtered;
+  }
+
+  search(text: string): LogEntry[] {
+    return this.logs.filter((log) =>
+      log.message.toLowerCase().includes(text.toLowerCase())
+    );
   }
 
   clear(): void {
@@ -449,17 +469,53 @@ server.registerTool(
         .optional()
         .default("all")
         .describe("Filter by log level (default: all)"),
+      startFromText: z
+        .string()
+        .optional()
+        .describe("Start from the first log line containing this text"),
     },
   },
-  async ({ maxLogs, level }) => {
-    const logs = logBuffer.get(maxLogs, level);
+  async ({ maxLogs, level, startFromText }) => {
+    const logs = logBuffer.get(maxLogs, level, startFromText);
+    const formatted = formatLogs(logs);
+
+    const startNote = startFromText ? ` (starting from "${startFromText}")` : "";
+    return {
+      content: [
+        {
+          type: "text",
+          text: `React Native Console Logs (${logs.length} entries)${startNote}:\n\n${formatted}`,
+        },
+      ],
+    };
+  }
+);
+
+// Tool: Search logs
+server.registerTool(
+  "search_logs",
+  {
+    description: "Search console logs for text (case-insensitive)",
+    inputSchema: {
+      text: z
+        .string()
+        .describe("Text to search for in log messages"),
+      maxResults: z
+        .number()
+        .optional()
+        .default(50)
+        .describe("Maximum number of results to return (default: 50)"),
+    },
+  },
+  async ({ text, maxResults }) => {
+    const logs = logBuffer.search(text).slice(0, maxResults);
     const formatted = formatLogs(logs);
 
     return {
       content: [
         {
           type: "text",
-          text: `React Native Console Logs (${logs.length} entries):\n\n${formatted}`,
+          text: `Search results for "${text}" (${logs.length} matches):\n\n${formatted}`,
         },
       ],
     };
