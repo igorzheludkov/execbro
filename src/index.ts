@@ -319,20 +319,22 @@ const server = new McpServer({
 });
 
 // Tool: Scan for Metro servers
-server.tool(
+server.registerTool(
   "scan_metro",
-  "Scan for running Metro bundler servers on common ports",
   {
-    startPort: z
-      .number()
-      .optional()
-      .default(8081)
-      .describe("Start port for scanning (default: 8081)"),
-    endPort: z
-      .number()
-      .optional()
-      .default(19002)
-      .describe("End port for scanning (default: 19002)"),
+    description: "Scan for running Metro bundler servers on common ports",
+    inputSchema: {
+      startPort: z
+        .number()
+        .optional()
+        .default(8081)
+        .describe("Start port for scanning (default: 8081)"),
+      endPort: z
+        .number()
+        .optional()
+        .default(19002)
+        .describe("End port for scanning (default: 19002)"),
+    },
   },
   async ({ startPort, endPort }) => {
     const openPorts = await scanMetroPorts(startPort, endPort);
@@ -385,10 +387,12 @@ server.tool(
 );
 
 // Tool: Get connected apps
-server.tool(
+server.registerTool(
   "get_apps",
-  "List connected React Native apps and Metro server status",
-  {},
+  {
+    description: "List connected React Native apps and Metro server status",
+    inputSchema: {},
+  },
   async () => {
     const connections = Array.from(connectedApps.entries());
 
@@ -421,20 +425,22 @@ server.tool(
 );
 
 // Tool: Get console logs
-server.tool(
+server.registerTool(
   "get_logs",
-  "Retrieve console logs from connected React Native app",
   {
-    maxLogs: z
-      .number()
-      .optional()
-      .default(50)
-      .describe("Maximum number of logs to return (default: 50)"),
-    level: z
-      .enum(["all", "log", "warn", "error", "info", "debug"])
-      .optional()
-      .default("all")
-      .describe("Filter by log level (default: all)"),
+    description: "Retrieve console logs from connected React Native app",
+    inputSchema: {
+      maxLogs: z
+        .number()
+        .optional()
+        .default(50)
+        .describe("Maximum number of logs to return (default: 50)"),
+      level: z
+        .enum(["all", "log", "warn", "error", "info", "debug"])
+        .optional()
+        .default("all")
+        .describe("Filter by log level (default: all)"),
+    },
   },
   async ({ maxLogs, level }) => {
     const logs = logBuffer.get(maxLogs, level);
@@ -452,10 +458,12 @@ server.tool(
 );
 
 // Tool: Clear logs
-server.tool(
+server.registerTool(
   "clear_logs",
-  "Clear the log buffer",
-  {},
+  {
+    description: "Clear the log buffer",
+    inputSchema: {},
+  },
   async () => {
     const count = logBuffer.size;
     logBuffer.clear();
@@ -472,14 +480,16 @@ server.tool(
 );
 
 // Tool: Connect to specific Metro port
-server.tool(
+server.registerTool(
   "connect_metro",
-  "Connect to a specific Metro server port",
   {
-    port: z
-      .number()
-      .default(8081)
-      .describe("Metro server port (default: 8081)"),
+    description: "Connect to a specific Metro server port",
+    inputSchema: {
+      port: z
+        .number()
+        .default(8081)
+        .describe("Metro server port (default: 8081)"),
+    },
   },
   async ({ port }) => {
     try {
