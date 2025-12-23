@@ -22,7 +22,7 @@ An MCP (Model Context Protocol) server that captures React Native console logs f
 ### Option 1: Clone and Build
 
 ```bash
-git clone <repo-url> ~/metro-logs-mcp
+git clone git@github.com:igorzheludkov/metro-logs-mcp.git ~/metro-logs-mcp
 cd ~/metro-logs-mcp
 npm install
 npm run build
