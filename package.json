@@ -1,0 +1,28 @@
+{
+  "name": "metro-logs-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for capturing React Native Metro bundler logs",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "metro-logs-mcp": "./build/index.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod 755 build/index.js",
+    "start": "node build/index.js"
+  },
+  "keywords": ["mcp", "react-native", "metro", "debugging"],
+  "author": "",
+  "license": "MIT",
+  "files": ["build"],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "ws": "^8.18.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  }
+}
