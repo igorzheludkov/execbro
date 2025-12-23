@@ -361,10 +361,19 @@ server.registerTool(
 
       results.push(`Port ${port}: Found ${devices.length} device(s)`);
 
-      // Connect to the first "React Native Bridgeless" device (main JS runtime)
+      // Select the main JS runtime device (priority order)
       const mainDevice = devices.find(d =>
-        d.description.includes("React Native") ||
-        d.description.includes("Bridgeless")
+        // SDK 54+ uses "React Native Bridgeless" in description
+        d.description.includes("React Native Bridgeless")
+      ) || devices.find(d =>
+        // Hermes runtime (RN 0.70+)
+        d.title === "Hermes React Native" ||
+        d.title.includes("Hermes")
+      ) || devices.find(d =>
+        // Fallback: any React Native in title, excluding Reanimated/Experimental
+        d.title.includes("React Native") &&
+        !d.title.includes("Reanimated") &&
+        !d.title.includes("Experimental")
       ) || devices[0];
 
       try {
