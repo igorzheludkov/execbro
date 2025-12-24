@@ -9,6 +9,9 @@ An MCP (Model Context Protocol) server that captures React Native console logs f
 - Auto-discovers running Metro servers on common ports
 - Filters logs by level (log, warn, error, info, debug)
 - Circular buffer stores last 1000 log entries
+- **Execute JavaScript** directly in the running app (REPL-style)
+- **Inspect global objects** like Apollo Client, Redux store, Expo Router
+- **Discover debug globals** available in the app
 
 ## Requirements
 
@@ -77,6 +80,8 @@ Restart Claude Code after adding the configuration.
 
 ## Available Tools
 
+### Connection & Logs
+
 | Tool | Description |
 |------|-------------|
 | `scan_metro` | Scan for running Metro servers and auto-connect |
@@ -85,6 +90,14 @@ Restart Claude Code after adding the configuration.
 | `get_logs` | Retrieve console logs (with optional filtering and start position) |
 | `search_logs` | Search logs for specific text (case-insensitive) |
 | `clear_logs` | Clear the log buffer |
+
+### App Inspection & Execution
+
+| Tool | Description |
+|------|-------------|
+| `execute_in_app` | Execute JavaScript code in the connected app and return the result |
+| `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.) |
+| `inspect_global` | Inspect a global object to see its properties and callable methods |
 
 ## Usage
 
@@ -128,6 +141,69 @@ search_logs with text="error" and maxResults=20
 ```
 
 Case-insensitive search across all log messages.
+
+## App Inspection
+
+### Discover Debug Globals
+
+Find what debugging objects are available in your app:
+
+```
+list_debug_globals
+```
+
+Example output:
+```json
+{
+  "Apollo Client": ["__APOLLO_CLIENT__"],
+  "Redux": ["__REDUX_STORE__"],
+  "Expo": ["__EXPO_ROUTER__"],
+  "Reanimated": ["__reanimatedModuleProxy"]
+}
+```
+
+### Inspect an Object
+
+Before calling methods on an unfamiliar object, inspect it to see what's callable:
+
+```
+inspect_global with objectName="__EXPO_ROUTER__"
+```
+
+Example output:
+```json
+{
+  "navigate": { "type": "function", "callable": true },
+  "push": { "type": "function", "callable": true },
+  "currentPath": { "type": "string", "callable": false, "value": "/" },
+  "routes": { "type": "array", "callable": false }
+}
+```
+
+### Execute Code in App
+
+Run JavaScript directly in the connected app:
+
+```
+execute_in_app with expression="__DEV__"
+// Returns: true
+
+execute_in_app with expression="__APOLLO_CLIENT__.cache.extract()"
+// Returns: Full Apollo cache contents
+
+execute_in_app with expression="__EXPO_ROUTER__.navigate('/settings')"
+// Navigates the app to /settings
+```
+
+### Async Code
+
+For async operations, promises are awaited by default:
+
+```
+execute_in_app with expression="AsyncStorage.getItem('userToken')"
+```
+
+Set `awaitPromise=false` for synchronous execution only.
 
 ## Supported React Native Versions
 
