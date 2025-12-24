@@ -2,10 +2,21 @@
 export * from "./types.js";
 
 // State
-export { logBuffer, connectedApps, pendingExecutions, getNextMessageId } from "./state.js";
+export { logBuffer, networkBuffer, connectedApps, pendingExecutions, getNextMessageId } from "./state.js";
 
 // Logs
 export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs } from "./logs.js";
+
+// Network
+export {
+    NetworkBuffer,
+    formatRequest,
+    formatRequests,
+    formatRequestDetails,
+    getNetworkRequests,
+    searchNetworkRequests,
+    getNetworkStats
+} from "./network.js";
 
 // Metro
 export {
@@ -28,4 +39,4 @@ export {
 } from "./connection.js";
 
 // Executor
-export { executeInApp, listDebugGlobals, inspectGlobal } from "./executor.js";
+export { executeInApp, listDebugGlobals, inspectGlobal, reloadApp } from "./executor.js";

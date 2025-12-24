@@ -90,3 +90,42 @@ export async function inspectGlobal(objectName: string): Promise<ExecutionResult
 
     return executeInApp(expression, false);
 }
+
+// Reload the React Native app
+export async function reloadApp(): Promise<ExecutionResult> {
+    const app = getFirstConnectedApp();
+
+    if (!app) {
+        return { success: false, error: "No apps connected. Run 'scan_metro' first." };
+    }
+
+    if (app.ws.readyState !== WebSocket.OPEN) {
+        return { success: false, error: "WebSocket connection is not open." };
+    }
+
+    const TIMEOUT_MS = 5000;
+    const currentMessageId = getNextMessageId();
+
+    return new Promise((resolve) => {
+        const timeoutId = setTimeout(() => {
+            pendingExecutions.delete(currentMessageId);
+            // Timeout is actually expected - the app reloads and connection may drop
+            resolve({ success: true, result: "Reload command sent (app is reloading)" });
+        }, TIMEOUT_MS);
+
+        pendingExecutions.set(currentMessageId, {
+            resolve: (result) => {
+                clearTimeout(timeoutId);
+                resolve(result);
+            },
+            timeoutId
+        });
+
+        app.ws.send(
+            JSON.stringify({
+                id: currentMessageId,
+                method: "Page.reload"
+            })
+        );
+    });
+}

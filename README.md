@@ -5,10 +5,11 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 ## Features
 
 - Captures `console.log`, `console.warn`, `console.error` from React Native apps
+- **Network request tracking** - capture HTTP requests/responses with headers, timing, and status
 - Supports both **Expo SDK 54+** (React Native Bridgeless) and **RN 0.70+** (Hermes)
 - Auto-discovers running Metro servers on common ports
 - Filters logs by level (log, warn, error, info, debug)
-- Circular buffer stores last 1000 log entries
+- Circular buffer stores last 1000 log entries and 500 network requests
 - **Execute JavaScript** directly in the running app (REPL-style)
 - **Inspect global objects** like Apollo Client, Redux store, Expo Router
 - **Discover debug globals** available in the app
@@ -91,6 +92,16 @@ Restart Claude Code after adding the configuration.
 | `search_logs` | Search logs for specific text (case-insensitive) |
 | `clear_logs` | Clear the log buffer |
 
+### Network Tracking
+
+| Tool | Description |
+|------|-------------|
+| `get_network_requests` | Retrieve captured network requests with optional filtering |
+| `search_network` | Search requests by URL pattern (case-insensitive) |
+| `get_request_details` | Get full details of a request (headers, body, timing) |
+| `get_network_stats` | Get statistics: counts by method, status code, domain |
+| `clear_network` | Clear the network request buffer |
+
 ### App Inspection & Execution
 
 | Tool | Description |
@@ -98,6 +109,7 @@ Restart Claude Code after adding the configuration.
 | `execute_in_app` | Execute JavaScript code in the connected app and return the result |
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.) |
 | `inspect_global` | Inspect a global object to see its properties and callable methods |
+| `reload_app` | Reload the app (like pressing 'r' in Metro or shaking the device) |
 
 ## Usage
 
@@ -141,6 +153,70 @@ search_logs with text="error" and maxResults=20
 ```
 
 Case-insensitive search across all log messages.
+
+## Network Tracking
+
+### View Recent Requests
+
+```
+get_network_requests with maxRequests=20
+```
+
+### Filter by Method
+
+```
+get_network_requests with method="POST"
+```
+
+### Filter by Status Code
+
+Useful for debugging auth issues:
+
+```
+get_network_requests with status=401
+```
+
+### Search by URL
+
+```
+search_network with urlPattern="api/auth"
+```
+
+### Get Full Request Details
+
+After finding a request ID from `get_network_requests`:
+
+```
+get_request_details with requestId="123.45"
+```
+
+Shows full headers, request body, response headers, and timing.
+
+### View Statistics
+
+```
+get_network_stats
+```
+
+Example output:
+```
+Total requests: 47
+Completed: 45
+Errors: 2
+Avg duration: 234ms
+
+By Method:
+  GET: 32
+  POST: 15
+
+By Status:
+  2xx: 43
+  4xx: 2
+
+By Domain:
+  api.example.com: 40
+  cdn.example.com: 7
+```
 
 ## App Inspection
 
@@ -218,7 +294,8 @@ Set `awaitPromise=false` for synchronous execution only.
 1. Fetches device list from Metro's `/json` endpoint
 2. Connects to the main JS runtime via CDP (Chrome DevTools Protocol) WebSocket
 3. Enables `Runtime.enable` to receive `Runtime.consoleAPICalled` events
-4. Stores logs in a circular buffer for retrieval
+4. Enables `Network.enable` to receive network request/response events
+5. Stores logs and network requests in circular buffers for retrieval
 
 ## Troubleshooting
 

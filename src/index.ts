@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import {
     logBuffer,
+    networkBuffer,
     scanMetroPorts,
     fetchDevices,
     selectMainDevice,
@@ -14,8 +15,13 @@ import {
     executeInApp,
     listDebugGlobals,
     inspectGlobal,
+    reloadApp,
     getLogs,
-    searchLogs
+    searchLogs,
+    getNetworkRequests,
+    searchNetworkRequests,
+    getNetworkStats,
+    formatRequestDetails
 } from "./core/index.js";
 
 // Create MCP server
@@ -351,6 +357,192 @@ server.registerTool(
                 {
                     type: "text",
                     text: `Properties of ${objectName}:\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Get network requests
+server.registerTool(
+    "get_network_requests",
+    {
+        description:
+            "Retrieve captured network requests from connected React Native app. Shows URL, method, status, and timing.",
+        inputSchema: {
+            maxRequests: z
+                .number()
+                .optional()
+                .default(50)
+                .describe("Maximum number of requests to return (default: 50)"),
+            method: z
+                .string()
+                .optional()
+                .describe("Filter by HTTP method (GET, POST, PUT, DELETE, etc.)"),
+            urlPattern: z
+                .string()
+                .optional()
+                .describe("Filter by URL pattern (case-insensitive substring match)"),
+            status: z
+                .number()
+                .optional()
+                .describe("Filter by HTTP status code (e.g., 200, 401, 500)")
+        }
+    },
+    async ({ maxRequests, method, urlPattern, status }) => {
+        const { requests, formatted } = getNetworkRequests(networkBuffer, {
+            maxRequests,
+            method,
+            urlPattern,
+            status
+        });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Network Requests (${requests.length} entries):\n\n${formatted}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Search network requests
+server.registerTool(
+    "search_network",
+    {
+        description: "Search network requests by URL pattern (case-insensitive)",
+        inputSchema: {
+            urlPattern: z.string().describe("URL pattern to search for"),
+            maxResults: z
+                .number()
+                .optional()
+                .default(50)
+                .describe("Maximum number of results to return (default: 50)")
+        }
+    },
+    async ({ urlPattern, maxResults }) => {
+        const { requests, formatted } = searchNetworkRequests(networkBuffer, urlPattern, maxResults);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Network search results for "${urlPattern}" (${requests.length} matches):\n\n${formatted}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Get request details
+server.registerTool(
+    "get_request_details",
+    {
+        description:
+            "Get full details of a specific network request including headers, body, and timing. Use get_network_requests first to find the request ID.",
+        inputSchema: {
+            requestId: z.string().describe("The request ID to get details for")
+        }
+    },
+    async ({ requestId }) => {
+        const request = networkBuffer.get(requestId);
+
+        if (!request) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Request not found: ${requestId}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: formatRequestDetails(request)
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Get network stats
+server.registerTool(
+    "get_network_stats",
+    {
+        description:
+            "Get statistics about captured network requests: counts by method, status code, and domain.",
+        inputSchema: {}
+    },
+    async () => {
+        const stats = getNetworkStats(networkBuffer);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Network Statistics:\n\n${stats}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Clear network requests
+server.registerTool(
+    "clear_network",
+    {
+        description: "Clear the network request buffer",
+        inputSchema: {}
+    },
+    async () => {
+        const count = networkBuffer.clear();
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Cleared ${count} network requests from buffer.`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Reload the app
+server.registerTool(
+    "reload_app",
+    {
+        description:
+            "Reload the connected React Native app. Triggers a JavaScript bundle reload (like pressing 'r' in Metro or shaking the device).",
+        inputSchema: {}
+    },
+    async () => {
+        const result = await reloadApp();
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.result ?? "App reload triggered"
                 }
             ]
         };

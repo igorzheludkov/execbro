@@ -78,3 +78,25 @@ export interface ExecutionResult {
 
 // Log level type
 export type LogLevel = "all" | "log" | "warn" | "error" | "info" | "debug";
+
+// Network request entry
+export interface NetworkRequest {
+    requestId: string;
+    timestamp: Date;
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    postData?: string;
+    status?: number;
+    statusText?: string;
+    responseHeaders?: Record<string, string>;
+    mimeType?: string;
+    contentLength?: number;
+    timing?: {
+        requestTime?: number;
+        responseTime?: number;
+        duration?: number;
+    };
+    error?: string;
+    completed: boolean;
+}

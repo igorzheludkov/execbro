@@ -1,6 +1,6 @@
 import WebSocket from "ws";
-import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp } from "./types.js";
-import { connectedApps, pendingExecutions, getNextMessageId, logBuffer } from "./state.js";
+import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest } from "./types.js";
+import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 
 // Format CDP RemoteObject to readable string
@@ -143,6 +143,102 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             });
         }
     }
+
+    // Handle Network.requestWillBeSent
+    if (method === "Network.requestWillBeSent") {
+        const params = message.params as {
+            requestId: string;
+            request: {
+                url: string;
+                method: string;
+                headers: Record<string, string>;
+                postData?: string;
+            };
+            timestamp?: number;
+        };
+
+        const request: NetworkRequest = {
+            requestId: params.requestId,
+            timestamp: new Date(),
+            method: params.request.method,
+            url: params.request.url,
+            headers: params.request.headers || {},
+            postData: params.request.postData,
+            timing: {
+                requestTime: params.timestamp
+            },
+            completed: false
+        };
+
+        networkBuffer.set(params.requestId, request);
+    }
+
+    // Handle Network.responseReceived
+    if (method === "Network.responseReceived") {
+        const params = message.params as {
+            requestId: string;
+            response: {
+                url: string;
+                status: number;
+                statusText: string;
+                headers: Record<string, string>;
+                mimeType?: string;
+            };
+            timestamp?: number;
+        };
+
+        const existing = networkBuffer.get(params.requestId);
+        if (existing) {
+            existing.status = params.response.status;
+            existing.statusText = params.response.statusText;
+            existing.responseHeaders = params.response.headers || {};
+            existing.mimeType = params.response.mimeType;
+
+            if (params.timestamp && existing.timing?.requestTime) {
+                existing.timing.responseTime = params.timestamp;
+            }
+
+            networkBuffer.set(params.requestId, existing);
+        }
+    }
+
+    // Handle Network.loadingFinished
+    if (method === "Network.loadingFinished") {
+        const params = message.params as {
+            requestId: string;
+            timestamp?: number;
+            encodedDataLength?: number;
+        };
+
+        const existing = networkBuffer.get(params.requestId);
+        if (existing) {
+            existing.completed = true;
+            existing.contentLength = params.encodedDataLength;
+
+            if (params.timestamp && existing.timing?.requestTime) {
+                existing.timing.duration = Math.round((params.timestamp - existing.timing.requestTime) * 1000);
+            }
+
+            networkBuffer.set(params.requestId, existing);
+        }
+    }
+
+    // Handle Network.loadingFailed
+    if (method === "Network.loadingFailed") {
+        const params = message.params as {
+            requestId: string;
+            errorText?: string;
+            canceled?: boolean;
+        };
+
+        const existing = networkBuffer.get(params.requestId);
+        if (existing) {
+            existing.completed = true;
+            existing.error = params.canceled ? "Canceled" : (params.errorText || "Request failed");
+
+            networkBuffer.set(params.requestId, existing);
+        }
+    }
 }
 
 // Connect to a device via CDP WebSocket
@@ -175,6 +271,14 @@ export async function connectToDevice(device: DeviceInfo, port: number): Promise
                     JSON.stringify({
                         id: getNextMessageId(),
                         method: "Log.enable"
+                    })
+                );
+
+                // Enable Network domain to track requests
+                ws.send(
+                    JSON.stringify({
+                        id: getNextMessageId(),
+                        method: "Network.enable"
                     })
                 );
 
