@@ -25,3 +25,5 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+PRODUCT_ROADMAP.md
