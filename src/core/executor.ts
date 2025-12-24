@@ -116,7 +116,12 @@ export async function reloadApp(): Promise<ExecutionResult> {
         pendingExecutions.set(currentMessageId, {
             resolve: (result) => {
                 clearTimeout(timeoutId);
-                resolve(result);
+                // Page.reload returns empty result on success, provide a friendly message
+                if (result.success && (!result.result || result.result === "undefined")) {
+                    resolve({ success: true, result: "App reload triggered successfully" });
+                } else {
+                    resolve(result);
+                }
             },
             timeoutId
         });
