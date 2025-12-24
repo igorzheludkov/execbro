@@ -293,7 +293,7 @@ async function connectToDevice(device: DeviceInfo, port: number): Promise<string
 
             ws.on("open", () => {
                 connectedApps.set(appKey, { ws, deviceInfo: device, port });
-                console.error(`[metro-logs-mcp] Connected to ${device.title}`);
+                console.error(`[rn-ai-debugger] Connected to ${device.title}`);
 
                 // Enable Runtime domain to receive console messages
                 ws.send(
@@ -325,7 +325,7 @@ async function connectToDevice(device: DeviceInfo, port: number): Promise<string
 
             ws.on("close", () => {
                 connectedApps.delete(appKey);
-                console.error(`[metro-logs-mcp] Disconnected from ${device.title}`);
+                console.error(`[rn-ai-debugger] Disconnected from ${device.title}`);
             });
 
             ws.on("error", (error: Error) => {
@@ -491,7 +491,7 @@ function formatLogs(logs: LogEntry[]): string {
 
 // Create MCP server
 const server = new McpServer({
-    name: "metro-logs-mcp",
+    name: "react-native-ai-debugger",
     version: "1.0.0"
 });
 
@@ -888,10 +888,10 @@ server.registerTool(
 async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("[metro-logs-mcp] Server started on stdio");
+    console.error("[rn-ai-debugger] Server started on stdio");
 }
 
 main().catch((error) => {
-    console.error("[metro-logs-mcp] Fatal error:", error);
+    console.error("[rn-ai-debugger] Fatal error:", error);
     process.exit(1);
 });

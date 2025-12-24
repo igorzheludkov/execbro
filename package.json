@@ -1,17 +1,17 @@
 {
-  "name": "metro-logs-mcp",
+  "name": "react-native-ai-debugger",
   "version": "1.0.0",
-  "description": "MCP server for capturing React Native Metro bundler logs",
+  "description": "MCP server for AI-powered React Native debugging - logs, REPL, state inspection",
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "metro-logs-mcp": "./build/index.js"
+    "react-native-ai-debugger": "./build/index.js"
   },
   "scripts": {
     "build": "tsc && chmod 755 build/index.js",
     "start": "node build/index.js"
   },
-  "keywords": ["mcp", "react-native", "metro", "debugging"],
+  "keywords": ["mcp", "react-native", "metro", "debugging", "ai", "claude", "expo"],
   "author": "",
   "license": "MIT",
   "files": ["build"],

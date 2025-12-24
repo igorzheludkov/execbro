@@ -1,6 +1,6 @@
-# Metro Logs MCP
+# React Native AI Debugger
 
-An MCP (Model Context Protocol) server that captures React Native console logs from Metro bundler, enabling AI assistants like Claude to access app logs without manual copy/paste.
+An MCP (Model Context Protocol) server for AI-powered React Native debugging. Enables AI assistants like Claude to capture logs, execute code, inspect state, and control navigation in your React Native app.
 
 ## Features
 
@@ -25,8 +25,8 @@ An MCP (Model Context Protocol) server that captures React Native console logs f
 ### Option 1: Clone and Build
 
 ```bash
-git clone git@github.com:igorzheludkov/metro-logs-mcp.git ~/metro-logs-mcp
-cd ~/metro-logs-mcp
+git clone git@github.com:igorzheludkov/react-native-ai-debugger.git ~/react-native-ai-debugger
+cd ~/react-native-ai-debugger
 npm install
 npm run build
 ```
@@ -34,8 +34,8 @@ npm run build
 ### Option 2: Manual Setup
 
 ```bash
-mkdir ~/metro-logs-mcp
-cd ~/metro-logs-mcp
+mkdir ~/react-native-ai-debugger
+cd ~/react-native-ai-debugger
 npm init -y
 npm install @modelcontextprotocol/sdk zod@3 ws
 npm install -D @types/node @types/ws typescript
@@ -51,13 +51,13 @@ npm run build
 ### Global (all projects)
 
 ```bash
-claude mcp add metro-logs node ~/metro-logs-mcp/build/index.js --scope user
+claude mcp add rn-debugger node ~/react-native-ai-debugger/build/index.js --scope user
 ```
 
 ### Project-specific
 
 ```bash
-claude mcp add metro-logs node ~/metro-logs-mcp/build/index.js --scope project
+claude mcp add rn-debugger node ~/react-native-ai-debugger/build/index.js --scope project
 ```
 
 ### Manual Configuration
@@ -67,10 +67,10 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
 ```json
 {
   "mcpServers": {
-    "metro-logs": {
+    "rn-debugger": {
       "type": "stdio",
       "command": "node",
-      "args": ["/path/to/metro-logs-mcp/build/index.js"]
+      "args": ["/path/to/react-native-ai-debugger/build/index.js"]
     }
   }
 }
