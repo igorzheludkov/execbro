@@ -40,3 +40,27 @@ export {
 
 // Executor
 export { executeInApp, listDebugGlobals, inspectGlobal, reloadApp } from "./executor.js";
+
+// Android (ADB)
+export {
+    isAdbAvailable,
+    listAndroidDevices,
+    getDefaultAndroidDevice,
+    androidScreenshot,
+    androidInstallApp,
+    androidLaunchApp,
+    androidListPackages
+} from "./android.js";
+
+// iOS (simctl)
+export {
+    isSimctlAvailable,
+    listIOSSimulators,
+    getBootedSimulatorUdid,
+    iosScreenshot,
+    iosInstallApp,
+    iosLaunchApp,
+    iosOpenUrl,
+    iosTerminateApp,
+    iosBootSimulator
+} from "./ios.js";

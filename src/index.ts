@@ -21,7 +21,21 @@ import {
     getNetworkRequests,
     searchNetworkRequests,
     getNetworkStats,
-    formatRequestDetails
+    formatRequestDetails,
+    // Android
+    listAndroidDevices,
+    androidScreenshot,
+    androidInstallApp,
+    androidLaunchApp,
+    androidListPackages,
+    // iOS
+    listIOSSimulators,
+    iosScreenshot,
+    iosInstallApp,
+    iosLaunchApp,
+    iosOpenUrl,
+    iosTerminateApp,
+    iosBootSimulator
 } from "./core/index.js";
 
 // Create MCP server
@@ -545,6 +559,421 @@ server.registerTool(
                     text: result.result ?? "App reload triggered"
                 }
             ]
+        };
+    }
+);
+
+// ============================================================================
+// Android Tools
+// ============================================================================
+
+// Tool: List Android devices
+server.registerTool(
+    "list_android_devices",
+    {
+        description: "List connected Android devices and emulators via ADB",
+        inputSchema: {}
+    },
+    async () => {
+        const result = await listAndroidDevices();
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android screenshot
+server.registerTool(
+    "android_screenshot",
+    {
+        description:
+            "Take a screenshot from an Android device/emulator. Returns the image data that can be displayed.",
+        inputSchema: {
+            outputPath: z
+                .string()
+                .optional()
+                .describe("Optional path to save the screenshot. If not provided, saves to temp directory."),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID (from list_android_devices). Uses first available device if not specified.")
+        }
+    },
+    async ({ outputPath, deviceId }) => {
+        const result = await androidScreenshot(outputPath, deviceId);
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        // Include image data if available
+        if (result.data) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Screenshot saved to: ${result.result}`
+                    },
+                    {
+                        type: "image" as const,
+                        data: result.data.toString("base64"),
+                        mimeType: "image/png"
+                    }
+                ]
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: `Screenshot saved to: ${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Android install app
+server.registerTool(
+    "android_install_app",
+    {
+        description: "Install an APK on an Android device/emulator",
+        inputSchema: {
+            apkPath: z.string().describe("Path to the APK file to install"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified."),
+            replace: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Replace existing app if already installed (default: true)"),
+            grantPermissions: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Grant all runtime permissions on install (default: false)")
+        }
+    },
+    async ({ apkPath, deviceId, replace, grantPermissions }) => {
+        const result = await androidInstallApp(apkPath, deviceId, { replace, grantPermissions });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android launch app
+server.registerTool(
+    "android_launch_app",
+    {
+        description: "Launch an app on an Android device/emulator by package name",
+        inputSchema: {
+            packageName: z.string().describe("Package name of the app (e.g., com.example.myapp)"),
+            activityName: z
+                .string()
+                .optional()
+                .describe("Optional activity name to launch (e.g., .MainActivity). If not provided, launches the main activity."),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ packageName, activityName, deviceId }) => {
+        const result = await androidLaunchApp(packageName, activityName, deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android list packages
+server.registerTool(
+    "android_list_packages",
+    {
+        description: "List installed packages on an Android device/emulator",
+        inputSchema: {
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified."),
+            filter: z
+                .string()
+                .optional()
+                .describe("Optional filter to search packages by name (case-insensitive)")
+        }
+    },
+    async ({ deviceId, filter }) => {
+        const result = await androidListPackages(deviceId, filter);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// ============================================================================
+// iOS Simulator Tools
+// ============================================================================
+
+// Tool: List iOS simulators
+server.registerTool(
+    "list_ios_simulators",
+    {
+        description: "List available iOS simulators",
+        inputSchema: {
+            onlyBooted: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Only show currently running simulators (default: false)")
+        }
+    },
+    async ({ onlyBooted }) => {
+        const result = await listIOSSimulators(onlyBooted);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS screenshot
+server.registerTool(
+    "ios_screenshot",
+    {
+        description:
+            "Take a screenshot from an iOS simulator. Returns the image data that can be displayed.",
+        inputSchema: {
+            outputPath: z
+                .string()
+                .optional()
+                .describe("Optional path to save the screenshot. If not provided, saves to temp directory."),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID (from list_ios_simulators). Uses booted simulator if not specified.")
+        }
+    },
+    async ({ outputPath, udid }) => {
+        const result = await iosScreenshot(outputPath, udid);
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        // Include image data if available
+        if (result.data) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Screenshot saved to: ${result.result}`
+                    },
+                    {
+                        type: "image" as const,
+                        data: result.data.toString("base64"),
+                        mimeType: "image/png"
+                    }
+                ]
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: `Screenshot saved to: ${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: iOS install app
+server.registerTool(
+    "ios_install_app",
+    {
+        description: "Install an app bundle (.app) on an iOS simulator",
+        inputSchema: {
+            appPath: z.string().describe("Path to the .app bundle to install"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ appPath, udid }) => {
+        const result = await iosInstallApp(appPath, udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS launch app
+server.registerTool(
+    "ios_launch_app",
+    {
+        description: "Launch an app on an iOS simulator by bundle ID",
+        inputSchema: {
+            bundleId: z.string().describe("Bundle ID of the app (e.g., com.example.myapp)"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ bundleId, udid }) => {
+        const result = await iosLaunchApp(bundleId, udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS open URL
+server.registerTool(
+    "ios_open_url",
+    {
+        description: "Open a URL in the iOS simulator (opens in default handler or Safari)",
+        inputSchema: {
+            url: z.string().describe("URL to open (e.g., https://example.com or myapp://path)"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ url, udid }) => {
+        const result = await iosOpenUrl(url, udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS terminate app
+server.registerTool(
+    "ios_terminate_app",
+    {
+        description: "Terminate a running app on an iOS simulator",
+        inputSchema: {
+            bundleId: z.string().describe("Bundle ID of the app to terminate"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ bundleId, udid }) => {
+        const result = await iosTerminateApp(bundleId, udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS boot simulator
+server.registerTool(
+    "ios_boot_simulator",
+    {
+        description: "Boot an iOS simulator by UDID. Use list_ios_simulators to find available simulators.",
+        inputSchema: {
+            udid: z.string().describe("UDID of the simulator to boot (from list_ios_simulators)")
+        }
+    },
+    async ({ udid }) => {
+        const result = await iosBootSimulator(udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
         };
     }
 );
