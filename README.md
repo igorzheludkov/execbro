@@ -6,6 +6,7 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 
 -   Captures `console.log`, `console.warn`, `console.error` from React Native apps
 -   **Network request tracking** - capture HTTP requests/responses with headers, timing, and status
+-   **Debug Web Dashboard** - browser-based UI to view logs and network requests in real-time
 -   Supports both **Expo SDK 54+** (React Native Bridgeless) and **RN 0.70+** (Hermes)
 -   Auto-discovers running Metro servers on common ports
 -   Filters logs by level (log, warn, error, info, debug)
@@ -125,6 +126,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.) |
 | `inspect_global`     | Inspect a global object to see its properties and callable methods  |
 | `reload_app`         | Reload the app (like pressing 'r' in Metro or shaking the device)   |
+| `get_debug_server`   | Get the debug HTTP server URL for browser-based viewing             |
 
 ### Android (ADB)
 
@@ -263,6 +265,57 @@ By Domain:
   api.example.com: 40
   cdn.example.com: 7
 ```
+
+## Debug Web Dashboard
+
+The MCP server includes a built-in web dashboard for viewing logs and network requests in your browser. This is useful for real-time monitoring without using MCP tools.
+
+### Getting the Dashboard URL
+
+Use the `get_debug_server` tool to find the dashboard URL:
+
+```
+get_debug_server
+```
+
+The server automatically finds an available port starting from 3456. Each MCP instance gets its own port, so multiple Claude Code sessions can run simultaneously.
+
+### Available Pages
+
+| URL        | Description                                    |
+| ---------- | ---------------------------------------------- |
+| `/`        | Dashboard with overview stats                  |
+| `/logs`    | Console logs with color-coded levels           |
+| `/network` | Network requests with expandable details       |
+| `/apps`    | Connected React Native apps                    |
+
+### Features
+
+-   **Auto-refresh** - Pages update automatically every 3 seconds
+-   **Color-coded logs** - Errors (red), warnings (yellow), info (blue), debug (gray)
+-   **Expandable network requests** - Click any request to see full details:
+    -   Request/response headers
+    -   Request body (with JSON formatting)
+    -   Timing information
+    -   Error details
+-   **GraphQL support** - Shows operation name and variables in compact view:
+    ```
+    POST  200  https://api.example.com/graphql         1ms  ▶
+               GetMeetingsBasic (timeFilter: "Future", first: 20)
+    ```
+-   **REST body preview** - Shows JSON body preview for non-GraphQL requests
+
+### JSON API Endpoints
+
+For programmatic access, JSON endpoints are also available:
+
+| URL                  | Description                   |
+| -------------------- | ----------------------------- |
+| `/api/status`        | Server status and buffer sizes |
+| `/api/logs`          | All logs as JSON              |
+| `/api/network`       | All network requests as JSON  |
+| `/api/bundle-errors` | Metro bundle errors as JSON   |
+| `/api/apps`          | Connected apps as JSON        |
 
 ## App Inspection
 

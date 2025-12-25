@@ -86,3 +86,6 @@ export {
     getBundleErrors,
     getBundleStatusWithErrors
 } from "./bundle.js";
+
+// Debug HTTP Server
+export { startDebugHttpServer, getDebugServerPort } from "./httpServer.js";

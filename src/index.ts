@@ -48,7 +48,10 @@ import {
     iosLaunchApp,
     iosOpenUrl,
     iosTerminateApp,
-    iosBootSimulator
+    iosBootSimulator,
+    // Debug HTTP Server
+    startDebugHttpServer,
+    getDebugServerPort
 } from "./core/index.js";
 
 // Create MCP server
@@ -1303,8 +1306,56 @@ server.registerTool(
     }
 );
 
+// Tool: Get debug server info
+server.registerTool(
+    "get_debug_server",
+    {
+        description:
+            "Get the debug HTTP server URL. Use this to find where you can access logs, network requests, and other debug data via HTTP.",
+        inputSchema: {}
+    },
+    async () => {
+        const port = getDebugServerPort();
+
+        if (!port) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "Debug HTTP server is not running."
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        const info = {
+            url: `http://localhost:${port}`,
+            endpoints: {
+                status: `http://localhost:${port}/api/status`,
+                logs: `http://localhost:${port}/api/logs`,
+                network: `http://localhost:${port}/api/network`,
+                bundleErrors: `http://localhost:${port}/api/bundle-errors`,
+                apps: `http://localhost:${port}/api/apps`
+            }
+        };
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Debug HTTP server running at:\n\n${JSON.stringify(info, null, 2)}`
+                }
+            ]
+        };
+    }
+);
+
 // Main function
 async function main() {
+    // Start debug HTTP server for buffer inspection (finds available port automatically)
+    await startDebugHttpServer();
+
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("[rn-ai-debugger] Server started on stdio");
