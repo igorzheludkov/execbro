@@ -13,6 +13,8 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 - **Execute JavaScript** directly in the running app (REPL-style)
 - **Inspect global objects** like Apollo Client, Redux store, Expo Router
 - **Discover debug globals** available in the app
+- **Android device control** - screenshots, tap, swipe, text input, key events via ADB
+- **iOS simulator control** - screenshots, app management, URL handling via simctl
 
 ## Requirements
 
@@ -84,6 +86,34 @@ Restart Claude Code after adding the configuration.
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.) |
 | `inspect_global` | Inspect a global object to see its properties and callable methods |
 | `reload_app` | Reload the app (like pressing 'r' in Metro or shaking the device) |
+
+### Android (ADB)
+
+| Tool | Description |
+|------|-------------|
+| `list_android_devices` | List connected Android devices and emulators via ADB |
+| `android_screenshot` | Take a screenshot from an Android device/emulator |
+| `android_install_app` | Install an APK on an Android device/emulator |
+| `android_launch_app` | Launch an app by package name |
+| `android_list_packages` | List installed packages (with optional filter) |
+| `android_tap` | Tap at specific coordinates on screen |
+| `android_long_press` | Long press at specific coordinates |
+| `android_swipe` | Swipe from one point to another |
+| `android_input_text` | Type text at current focus point |
+| `android_key_event` | Send key events (HOME, BACK, ENTER, etc.) |
+| `android_get_screen_size` | Get device screen resolution |
+
+### iOS (Simulator)
+
+| Tool | Description |
+|------|-------------|
+| `list_ios_simulators` | List available iOS simulators |
+| `ios_screenshot` | Take a screenshot from an iOS simulator |
+| `ios_install_app` | Install an app bundle (.app) on a simulator |
+| `ios_launch_app` | Launch an app by bundle ID |
+| `ios_open_url` | Open a URL (deep links or web URLs) |
+| `ios_terminate_app` | Terminate a running app |
+| `ios_boot_simulator` | Boot a simulator by UDID |
 
 ## Usage
 
@@ -254,6 +284,70 @@ execute_in_app with expression="AsyncStorage.getItem('userToken')"
 ```
 
 Set `awaitPromise=false` for synchronous execution only.
+
+## Device Interaction
+
+### Android (requires ADB)
+
+List connected devices:
+```
+list_android_devices
+```
+
+Take a screenshot:
+```
+android_screenshot
+```
+
+Tap on screen (coordinates in pixels):
+```
+android_tap with x=540 y=960
+```
+
+Swipe gesture:
+```
+android_swipe with startX=540 startY=1500 endX=540 endY=500
+```
+
+Type text (tap input field first):
+```
+android_tap with x=540 y=400
+android_input_text with text="hello@example.com"
+```
+
+Send key events:
+```
+android_key_event with key="BACK"
+android_key_event with key="HOME"
+android_key_event with key="ENTER"
+```
+
+### iOS Simulator (requires Xcode)
+
+List available simulators:
+```
+list_ios_simulators
+```
+
+Boot a simulator:
+```
+ios_boot_simulator with udid="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+```
+
+Take a screenshot:
+```
+ios_screenshot
+```
+
+Launch an app:
+```
+ios_launch_app with bundleId="com.example.myapp"
+```
+
+Open a deep link:
+```
+ios_open_url with url="myapp://settings"
+```
 
 ## Supported React Native Versions
 
