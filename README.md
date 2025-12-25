@@ -19,19 +19,9 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 - Node.js 18+
 - React Native app running with Metro bundler
 
-## Installation
-
-```bash
-npm install -g react-native-ai-debugger
-```
-
-Or install locally in your project:
-
-```bash
-npm install --save-dev react-native-ai-debugger
-```
-
 ## Claude Code Setup
+
+No installation required - Claude Code uses `npx` to run the latest version automatically.
 
 ### Global (all projects)
 
