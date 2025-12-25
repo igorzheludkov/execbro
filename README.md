@@ -55,6 +55,45 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
 
 Restart Claude Code after adding the configuration.
 
+## VS Code Copilot Setup
+
+Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)).
+
+**Via Command Palette**: `Cmd+Shift+P` → "MCP: Add Server"
+
+**Manual config** - add to `.vscode/mcp.json`:
+
+```json
+{
+    "servers": {
+        "rn-debugger": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "react-native-ai-debugger"]
+        }
+    }
+}
+```
+
+## Cursor Setup
+
+[Docs](https://docs.cursor.com/context/model-context-protocol)
+
+**Via Command Palette**: `Cmd+Shift+P` → "View: Open MCP Settings"
+
+**Manual config** - add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+
+```json
+{
+    "mcpServers": {
+        "rn-debugger": {
+            "command": "npx",
+            "args": ["-y", "react-native-ai-debugger"]
+        }
+    }
+}
+```
+
 ## Available Tools
 
 ### Connection & Logs
