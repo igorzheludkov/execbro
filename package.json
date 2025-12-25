@@ -11,12 +11,23 @@
     "build": "tsc && chmod 755 build/index.js",
     "start": "node build/index.js"
   },
-  "keywords": ["mcp", "react-native", "metro", "debugging", "ai", "claude", "expo"],
+  "keywords": [
+    "mcp",
+    "react-native",
+    "metro",
+    "debugging",
+    "ai",
+    "claude",
+    "expo"
+  ],
   "author": "",
   "license": "MIT",
-  "files": ["build"],
+  "files": [
+    "build"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.1",
+    "sharp": "^0.34.5",
     "ws": "^8.18.3",
     "zod": "^3.25.76"
   },

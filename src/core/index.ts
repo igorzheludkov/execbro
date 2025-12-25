@@ -49,7 +49,15 @@ export {
     androidScreenshot,
     androidInstallApp,
     androidLaunchApp,
-    androidListPackages
+    androidListPackages,
+    // UI Input (Phase 2)
+    ANDROID_KEY_EVENTS,
+    androidTap,
+    androidLongPress,
+    androidSwipe,
+    androidInputText,
+    androidKeyEvent,
+    androidGetScreenSize
 } from "./android.js";
 
 // iOS (simctl)

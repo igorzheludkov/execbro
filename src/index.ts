@@ -28,6 +28,14 @@ import {
     androidInstallApp,
     androidLaunchApp,
     androidListPackages,
+    // Android UI Input (Phase 2)
+    ANDROID_KEY_EVENTS,
+    androidTap,
+    androidLongPress,
+    androidSwipe,
+    androidInputText,
+    androidKeyEvent,
+    androidGetScreenSize,
     // iOS
     listIOSSimulators,
     iosScreenshot,
@@ -623,11 +631,18 @@ server.registerTool(
 
         // Include image data if available
         if (result.data) {
+            // Build info text with scale factor for coordinate conversion
+            let infoText = `Screenshot captured (${result.originalWidth}x${result.originalHeight})`;
+            if (result.scaleFactor && result.scaleFactor > 1) {
+                infoText += `\n⚠️ Image was scaled down to fit API limits. Scale factor: ${result.scaleFactor.toFixed(3)}`;
+                infoText += `\nTo tap/swipe: multiply image coordinates by ${result.scaleFactor.toFixed(3)} to get device coordinates.`;
+            }
+
             return {
                 content: [
                     {
                         type: "text" as const,
-                        text: `Screenshot saved to: ${result.result}`
+                        text: infoText
                     },
                     {
                         type: "image" as const,
@@ -751,6 +766,213 @@ server.registerTool(
 );
 
 // ============================================================================
+// Android UI Input Tools (Phase 2)
+// ============================================================================
+
+// Tool: Android tap
+server.registerTool(
+    "android_tap",
+    {
+        description: "Tap at specific coordinates on an Android device/emulator screen",
+        inputSchema: {
+            x: z.number().describe("X coordinate in pixels"),
+            y: z.number().describe("Y coordinate in pixels"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ x, y, deviceId }) => {
+        const result = await androidTap(x, y, deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android long press
+server.registerTool(
+    "android_long_press",
+    {
+        description: "Long press at specific coordinates on an Android device/emulator screen",
+        inputSchema: {
+            x: z.number().describe("X coordinate in pixels"),
+            y: z.number().describe("Y coordinate in pixels"),
+            durationMs: z
+                .number()
+                .optional()
+                .default(1000)
+                .describe("Press duration in milliseconds (default: 1000)"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ x, y, durationMs, deviceId }) => {
+        const result = await androidLongPress(x, y, durationMs, deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android swipe
+server.registerTool(
+    "android_swipe",
+    {
+        description: "Swipe from one point to another on an Android device/emulator screen",
+        inputSchema: {
+            startX: z.number().describe("Starting X coordinate in pixels"),
+            startY: z.number().describe("Starting Y coordinate in pixels"),
+            endX: z.number().describe("Ending X coordinate in pixels"),
+            endY: z.number().describe("Ending Y coordinate in pixels"),
+            durationMs: z
+                .number()
+                .optional()
+                .default(300)
+                .describe("Swipe duration in milliseconds (default: 300)"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ startX, startY, endX, endY, durationMs, deviceId }) => {
+        const result = await androidSwipe(startX, startY, endX, endY, durationMs, deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android input text
+server.registerTool(
+    "android_input_text",
+    {
+        description:
+            "Type text on an Android device/emulator. The text will be input at the current focus point (tap an input field first).",
+        inputSchema: {
+            text: z.string().describe("Text to type"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ text, deviceId }) => {
+        const result = await androidInputText(text, deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android key event
+server.registerTool(
+    "android_key_event",
+    {
+        description: `Send a key event to an Android device/emulator. Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}`,
+        inputSchema: {
+            key: z
+                .string()
+                .describe(
+                    `Key name (${Object.keys(ANDROID_KEY_EVENTS).join(", ")}) or numeric keycode`
+                ),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ key, deviceId }) => {
+        // Try to parse as number first, otherwise treat as key name
+        const keyCode = /^\d+$/.test(key)
+            ? parseInt(key, 10)
+            : (key.toUpperCase() as keyof typeof ANDROID_KEY_EVENTS);
+
+        const result = await androidKeyEvent(keyCode, deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android get screen size
+server.registerTool(
+    "android_get_screen_size",
+    {
+        description: "Get the screen size (resolution) of an Android device/emulator",
+        inputSchema: {
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ deviceId }) => {
+        const result = await androidGetScreenSize(deviceId);
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Screen size: ${result.width}x${result.height} pixels`
+                }
+            ]
+        };
+    }
+);
+
+// ============================================================================
 // iOS Simulator Tools
 // ============================================================================
 
@@ -816,11 +1038,18 @@ server.registerTool(
 
         // Include image data if available
         if (result.data) {
+            // Build info text with scale factor for coordinate conversion
+            let infoText = `Screenshot captured (${result.originalWidth}x${result.originalHeight})`;
+            if (result.scaleFactor && result.scaleFactor > 1) {
+                infoText += `\n⚠️ Image was scaled down to fit API limits. Scale factor: ${result.scaleFactor.toFixed(3)}`;
+                infoText += `\nTo tap/swipe: multiply image coordinates by ${result.scaleFactor.toFixed(3)} to get device coordinates.`;
+            }
+
             return {
                 content: [
                     {
                         type: "text" as const,
-                        text: `Screenshot saved to: ${result.result}`
+                        text: infoText
                     },
                     {
                         type: "image" as const,

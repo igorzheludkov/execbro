@@ -1,9 +1,9 @@
 import { exec } from "child_process";
 import { promisify } from "util";
-import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import os from "os";
+import sharp from "sharp";
 
 const execAsync = promisify(exec);
 
@@ -26,6 +26,10 @@ export interface iOSResult {
     result?: string;
     error?: string;
     data?: Buffer;
+    // For screenshots: scale factor to convert image coords to device coords
+    scaleFactor?: number;
+    originalWidth?: number;
+    originalHeight?: number;
 }
 
 /**
@@ -193,13 +197,41 @@ export async function iosScreenshot(outputPath?: string, udid?: string): Promise
             timeout: SIMCTL_TIMEOUT
         });
 
-        // Read the screenshot file
-        const imageData = await readFile(finalOutputPath);
+        // Resize image if needed (API limit: 2000px max for multi-image requests)
+        // Return scale factor so AI can convert image coords to device coords
+        const MAX_DIMENSION = 2000;
+        const image = sharp(finalOutputPath);
+        const metadata = await image.metadata();
+        const originalWidth = metadata.width || 0;
+        const originalHeight = metadata.height || 0;
+
+        let imageData: Buffer;
+        let scaleFactor = 1;
+
+        if (originalWidth > MAX_DIMENSION || originalHeight > MAX_DIMENSION) {
+            // Calculate scale to fit within MAX_DIMENSION
+            scaleFactor = Math.max(originalWidth, originalHeight) / MAX_DIMENSION;
+
+            imageData = await image
+                .resize(MAX_DIMENSION, MAX_DIMENSION, {
+                    fit: "inside",
+                    withoutEnlargement: true
+                })
+                .png({ compressionLevel: 9 })
+                .toBuffer();
+        } else {
+            imageData = await image
+                .png({ compressionLevel: 9 })
+                .toBuffer();
+        }
 
         return {
             success: true,
             result: finalOutputPath,
-            data: imageData
+            data: imageData,
+            scaleFactor,
+            originalWidth,
+            originalHeight
         };
     } catch (error) {
         return {
