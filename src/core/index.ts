@@ -2,7 +2,7 @@
 export * from "./types.js";
 
 // State
-export { logBuffer, networkBuffer, connectedApps, pendingExecutions, getNextMessageId } from "./state.js";
+export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId } from "./state.js";
 
 // Logs
 export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs } from "./logs.js";
@@ -72,3 +72,17 @@ export {
     iosTerminateApp,
     iosBootSimulator
 } from "./ios.js";
+
+// Bundle (Metro build errors)
+export {
+    BundleErrorBuffer,
+    parseMetroError,
+    formatBundleError,
+    formatBundleErrors,
+    connectMetroBuildEvents,
+    disconnectMetroBuildEvents,
+    isConnectedToMetroBuildEvents,
+    fetchBundleStatus,
+    getBundleErrors,
+    getBundleStatusWithErrors
+} from "./bundle.js";

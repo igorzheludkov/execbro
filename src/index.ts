@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
     logBuffer,
     networkBuffer,
+    bundleErrorBuffer,
     scanMetroPorts,
     fetchDevices,
     selectMainDevice,
@@ -22,6 +23,10 @@ import {
     searchNetworkRequests,
     getNetworkStats,
     formatRequestDetails,
+    // Bundle (Metro build errors)
+    connectMetroBuildEvents,
+    getBundleErrors,
+    getBundleStatusWithErrors,
     // Android
     listAndroidDevices,
     androidScreenshot,
@@ -92,6 +97,14 @@ server.registerTool(
                 try {
                     const connectionResult = await connectToDevice(mainDevice, port);
                     results.push(`  - ${connectionResult}`);
+
+                    // Also connect to Metro build events for this port
+                    try {
+                        await connectMetroBuildEvents(port);
+                        results.push(`  - Connected to Metro build events`);
+                    } catch {
+                        // Build events connection is optional, don't fail the scan
+                    }
                 } catch (error) {
                     results.push(`  - Failed: ${error}`);
                 }
@@ -253,6 +266,14 @@ server.registerTool(
                 } catch (error) {
                     results.push(`  - ${device.title}: Failed - ${error}`);
                 }
+            }
+
+            // Also connect to Metro build events
+            try {
+                await connectMetroBuildEvents(port);
+                results.push(`  - Connected to Metro build events`);
+            } catch {
+                // Build events connection is optional
             }
 
             return {
@@ -565,6 +586,81 @@ server.registerTool(
                 {
                     type: "text",
                     text: result.result ?? "App reload triggered"
+                }
+            ]
+        };
+    }
+);
+
+// ============================================================================
+// Bundle/Build Error Tools
+// ============================================================================
+
+// Tool: Get bundle status
+server.registerTool(
+    "get_bundle_status",
+    {
+        description:
+            "Get the current Metro bundler status including build state and any recent bundling errors. Use this to check if there are compilation/bundling errors that prevent the app from loading.",
+        inputSchema: {}
+    },
+    async () => {
+        const { formatted } = await getBundleStatusWithErrors(bundleErrorBuffer);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: formatted
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Get bundle errors
+server.registerTool(
+    "get_bundle_errors",
+    {
+        description:
+            "Retrieve captured Metro bundling/compilation errors. These are errors that occur during the bundle build process (import resolution, syntax errors, transform errors) that prevent the app from loading.",
+        inputSchema: {
+            maxErrors: z
+                .number()
+                .optional()
+                .default(10)
+                .describe("Maximum number of errors to return (default: 10)")
+        }
+    },
+    async ({ maxErrors }) => {
+        const { errors, formatted } = getBundleErrors(bundleErrorBuffer, { maxErrors });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Bundle Errors (${errors.length} captured):\n\n${formatted}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Clear bundle errors
+server.registerTool(
+    "clear_bundle_errors",
+    {
+        description: "Clear the bundle error buffer",
+        inputSchema: {}
+    },
+    async () => {
+        const count = bundleErrorBuffer.clear();
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Cleared ${count} bundle errors from buffer.`
                 }
             ]
         };
