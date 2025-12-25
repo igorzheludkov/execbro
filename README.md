@@ -21,30 +21,14 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 
 ## Installation
 
-> **Note:** This package is not published to npm. Only local build installation is available.
-
-### Option 1: Clone and Build
-
 ```bash
-git clone git@github.com:igorzheludkov/react-native-ai-debugger.git ~/react-native-ai-debugger
-cd ~/react-native-ai-debugger
-npm install
-npm run build
+npm install -g react-native-ai-debugger
 ```
 
-### Option 2: Manual Setup
+Or install locally in your project:
 
 ```bash
-mkdir ~/react-native-ai-debugger
-cd ~/react-native-ai-debugger
-npm init -y
-npm install @modelcontextprotocol/sdk zod@3 ws
-npm install -D @types/node @types/ws typescript
-```
-
-Copy the source files and build:
-```bash
-npm run build
+npm install --save-dev react-native-ai-debugger
 ```
 
 ## Claude Code Setup
@@ -52,13 +36,13 @@ npm run build
 ### Global (all projects)
 
 ```bash
-claude mcp add rn-debugger node ~/react-native-ai-debugger/build/index.js --scope user
+claude mcp add rn-debugger -- npx react-native-ai-debugger --scope user
 ```
 
 ### Project-specific
 
 ```bash
-claude mcp add rn-debugger node ~/react-native-ai-debugger/build/index.js --scope project
+claude mcp add rn-debugger -- npx react-native-ai-debugger --scope project
 ```
 
 ### Manual Configuration
@@ -70,8 +54,8 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
   "mcpServers": {
     "rn-debugger": {
       "type": "stdio",
-      "command": "node",
-      "args": ["/path/to/react-native-ai-debugger/build/index.js"]
+      "command": "npx",
+      "args": ["react-native-ai-debugger"]
     }
   }
 }

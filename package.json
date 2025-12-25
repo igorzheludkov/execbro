@@ -20,8 +20,19 @@
     "claude",
     "expo"
   ],
-  "author": "",
+  "author": "Ihor Zheludkov <500griven@gmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/igorzheludkov/react-native-ai-debugger.git"
+  },
+  "homepage": "https://github.com/igorzheludkov/react-native-ai-debugger#readme",
+  "bugs": {
+    "url": "https://github.com/igorzheludkov/react-native-ai-debugger/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "files": [
     "build"
   ],
