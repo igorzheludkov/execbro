@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { promisify } from "util";
 import { existsSync } from "fs";
 import path from "path";
@@ -6,9 +6,83 @@ import os from "os";
 import sharp from "sharp";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // simctl command timeout in milliseconds
 const SIMCTL_TIMEOUT = 30000;
+
+// IDB command timeout in milliseconds
+const IDB_TIMEOUT = 30000;
+
+// Valid button types for IDB ui button command
+export const IOS_BUTTON_TYPES = ["HOME", "LOCK", "SIDE_BUTTON", "SIRI", "APPLE_PAY"] as const;
+export type iOSButtonType = (typeof IOS_BUTTON_TYPES)[number];
+
+// Track connected IDB simulators to avoid redundant connect calls
+const connectedIdbSimulators = new Set<string>();
+
+/**
+ * Get the IDB executable path
+ * Supports IDB_PATH environment variable for custom installations
+ */
+function getIdbPath(): string {
+    return process.env.IDB_PATH || "idb";
+}
+
+/**
+ * Run IDB command with execFile (no shell) for proper argument handling
+ * This matches the original ios-simulator-mcp implementation
+ */
+async function runIdb(...args: string[]): Promise<{ stdout: string; stderr: string }> {
+    const idbPath = getIdbPath();
+    const { stdout, stderr } = await execFileAsync(idbPath, args, {
+        timeout: IDB_TIMEOUT
+    });
+    return {
+        stdout: stdout.trim(),
+        stderr: stderr.trim()
+    };
+}
+
+/**
+ * Check if IDB is available
+ */
+export async function isIdbAvailable(): Promise<boolean> {
+    try {
+        await runIdb("--help");
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Ensure IDB is connected to the specified simulator
+ * IDB requires `idb connect <UDID>` before any UI commands work
+ */
+async function ensureIdbConnected(udid: string): Promise<{ success: boolean; error?: string }> {
+    // Skip if already connected in this session
+    if (connectedIdbSimulators.has(udid)) {
+        return { success: true };
+    }
+
+    try {
+        await runIdb("connect", udid);
+        connectedIdbSimulators.add(udid);
+        return { success: true };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        // "Already connected" is not an error
+        if (errorMessage.includes("already connected") || errorMessage.includes("Connected")) {
+            connectedIdbSimulators.add(udid);
+            return { success: true };
+        }
+        return {
+            success: false,
+            error: `Failed to connect IDB to simulator: ${errorMessage}`
+        };
+    }
+}
 
 // iOS Simulator info
 export interface iOSSimulator {
@@ -30,6 +104,23 @@ export interface iOSResult {
     scaleFactor?: number;
     originalWidth?: number;
     originalHeight?: number;
+}
+
+// Accessibility element from IDB describe commands
+export interface iOSAccessibilityElement {
+    AXLabel?: string;
+    AXValue?: string;
+    AXFrame?: string; // String format: "{{x, y}, {width, height}}"
+    frame?: { x: number; y: number; width: number; height: number }; // Parsed object format
+    AXUniqueId?: string;
+    type?: string;
+    children?: iOSAccessibilityElement[];
+    [key: string]: unknown; // Allow additional accessibility properties
+}
+
+// Result for describe commands that include elements
+export interface iOSDescribeResult extends iOSResult {
+    elements?: iOSAccessibilityElement[];
 }
 
 /**
@@ -457,6 +548,496 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
         return {
             success: false,
             error: `Failed to boot simulator: ${errorMessage}`
+        };
+    }
+}
+
+// ============================================================================
+// IDB-Based UI Interaction Tools
+// These tools require Facebook IDB (iOS Development Bridge) to be installed
+// Install with: brew install idb-companion
+// ============================================================================
+
+/**
+ * Tap at coordinates on an iOS simulator using IDB
+ */
+export async function iosTap(
+    x: number,
+    y: number,
+    options?: { duration?: number; udid?: string }
+): Promise<iOSResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        // Get simulator UDID (use provided or find booted one)
+        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        const xRounded = Math.round(x);
+        const yRounded = Math.round(y);
+
+        // Build args array for execFile (no shell)
+        const args: string[] = ["ui", "tap", "--udid", targetUdid];
+        if (options?.duration !== undefined) {
+            args.push("--duration", String(options.duration));
+        }
+        args.push("--json", "--", String(xRounded), String(yRounded));
+
+        const { stderr } = await runIdb(...args);
+        if (stderr) throw new Error(stderr);
+
+        return {
+            success: true,
+            result: `Tapped at (${xRounded}, ${yRounded})`
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to tap: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Swipe gesture on an iOS simulator using IDB
+ */
+export async function iosSwipe(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    options?: { duration?: number; delta?: number; udid?: string }
+): Promise<iOSResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        const x1 = Math.round(startX);
+        const y1 = Math.round(startY);
+        const x2 = Math.round(endX);
+        const y2 = Math.round(endY);
+
+        // Build args array for execFile (no shell)
+        const args: string[] = ["ui", "swipe", "--udid", targetUdid];
+        if (options?.duration !== undefined) {
+            args.push("--duration", String(options.duration));
+        }
+        if (options?.delta !== undefined) {
+            args.push("--delta", String(options.delta));
+        }
+        args.push("--json", "--", String(x1), String(y1), String(x2), String(y2));
+
+        const { stderr } = await runIdb(...args);
+        if (stderr) throw new Error(stderr);
+
+        return {
+            success: true,
+            result: `Swiped from (${x1}, ${y1}) to (${x2}, ${y2})`
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to swipe: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Input text into the active field on an iOS simulator using IDB
+ */
+export async function iosInputText(text: string, udid?: string): Promise<iOSResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        const targetUdid = udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        // Use execFile with args array (no shell escaping needed)
+        const { stderr } = await runIdb("ui", "text", "--udid", targetUdid, text);
+        if (stderr) throw new Error(stderr);
+
+        return {
+            success: true,
+            result: `Typed text: "${text}"`
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to input text: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Press a hardware button on an iOS simulator using IDB
+ */
+export async function iosButton(
+    button: iOSButtonType,
+    options?: { duration?: number; udid?: string }
+): Promise<iOSResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        // Validate button type
+        if (!IOS_BUTTON_TYPES.includes(button)) {
+            return {
+                success: false,
+                error: `Invalid button type: ${button}. Valid options: ${IOS_BUTTON_TYPES.join(", ")}`
+            };
+        }
+
+        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        // Build args array for execFile (no shell)
+        const args: string[] = ["ui", "button", "--udid", targetUdid];
+        if (options?.duration !== undefined) {
+            args.push("--duration", String(options.duration));
+        }
+        args.push(button);
+
+        const { stderr } = await runIdb(...args);
+        if (stderr) throw new Error(stderr);
+
+        return {
+            success: true,
+            result: `Pressed ${button} button`
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to press button: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Send a key event to an iOS simulator using IDB
+ */
+export async function iosKeyEvent(
+    keycode: number,
+    options?: { duration?: number; udid?: string }
+): Promise<iOSResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        // Build args array for execFile (no shell)
+        const args: string[] = ["ui", "key", "--udid", targetUdid];
+        if (options?.duration !== undefined) {
+            args.push("--duration", String(options.duration));
+        }
+        args.push(String(keycode));
+
+        const { stderr } = await runIdb(...args);
+        if (stderr) throw new Error(stderr);
+
+        return {
+            success: true,
+            result: `Sent key event: ${keycode}`
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to send key event: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Send a sequence of key events to an iOS simulator using IDB
+ */
+export async function iosKeySequence(keycodes: number[], udid?: string): Promise<iOSResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        if (!keycodes || keycodes.length === 0) {
+            return {
+                success: false,
+                error: "At least one keycode is required"
+            };
+        }
+
+        const targetUdid = udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        // Build args array for execFile (no shell)
+        const args: string[] = ["ui", "key-sequence", "--udid", targetUdid, ...keycodes.map(String)];
+
+        const { stderr } = await runIdb(...args);
+        if (stderr) throw new Error(stderr);
+
+        return {
+            success: true,
+            result: `Sent key sequence: ${keycodes.join(", ")}`
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to send key sequence: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Format accessibility tree for human-readable output
+ */
+function formatAccessibilityTree(elements: iOSAccessibilityElement[], depth: number = 0): string {
+    const lines: string[] = [];
+    const indent = "  ".repeat(depth);
+
+    for (const element of elements) {
+        const parts: string[] = [];
+
+        if (element.type) parts.push(`[${element.type}]`);
+        if (element.AXLabel) parts.push(`"${element.AXLabel}"`);
+        if (element.AXValue) parts.push(`value="${element.AXValue}"`);
+        if (element.frame) {
+            const f = element.frame;
+            const centerX = Math.round(f.x + f.width / 2);
+            const centerY = Math.round(f.y + f.height / 2);
+            parts.push(`frame=(${f.x}, ${f.y}, ${f.width}x${f.height}) tap=(${centerX}, ${centerY})`);
+        }
+
+        if (parts.length > 0) {
+            lines.push(`${indent}${parts.join(" ")}`);
+        }
+
+        if (element.children && element.children.length > 0) {
+            lines.push(formatAccessibilityTree(element.children, depth + 1));
+        }
+    }
+
+    return lines.join("\n");
+}
+
+/**
+ * Get accessibility info for the entire screen using IDB
+ */
+export async function iosDescribeAll(udid?: string): Promise<iOSDescribeResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        const targetUdid = udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        // Use execFile with args array (no shell)
+        const { stdout, stderr } = await runIdb("ui", "describe-all", "--udid", targetUdid, "--json", "--nested");
+        if (stderr) throw new Error(stderr);
+
+        // Parse JSON response
+        const elements = JSON.parse(stdout) as iOSAccessibilityElement[];
+
+        // Format for human-readable output
+        const formatted = formatAccessibilityTree(elements);
+
+        return {
+            success: true,
+            result: formatted || "No accessibility elements found",
+            elements
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to describe screen: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Get accessibility info at a specific point using IDB
+ */
+export async function iosDescribePoint(x: number, y: number, udid?: string): Promise<iOSDescribeResult> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        const targetUdid = udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        // Ensure IDB is connected to the simulator
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        const xRounded = Math.round(x);
+        const yRounded = Math.round(y);
+
+        // Use execFile with args array (no shell)
+        const { stdout, stderr } = await runIdb("ui", "describe-point", "--udid", targetUdid, "--json", "--", String(xRounded), String(yRounded));
+        if (stderr) throw new Error(stderr);
+
+        // Parse JSON response - may be single element or array
+        let element: iOSAccessibilityElement;
+        try {
+            const parsed = JSON.parse(stdout);
+            element = Array.isArray(parsed) ? parsed[0] : parsed;
+        } catch {
+            return {
+                success: true,
+                result: `No accessibility element found at (${xRounded}, ${yRounded})`,
+                elements: []
+            };
+        }
+
+        // Format for human-readable output
+        const parts: string[] = [];
+        if (element.type) parts.push(`Type: ${element.type}`);
+        if (element.AXLabel) parts.push(`Label: "${element.AXLabel}"`);
+        if (element.AXValue) parts.push(`Value: "${element.AXValue}"`);
+        if (element.frame) {
+            const f = element.frame;
+            const centerX = Math.round(f.x + f.width / 2);
+            const centerY = Math.round(f.y + f.height / 2);
+            parts.push(`Frame: (${f.x}, ${f.y}) ${f.width}x${f.height}`);
+            parts.push(`Tap: (${centerX}, ${centerY})`);
+        }
+
+        return {
+            success: true,
+            result: parts.length > 0
+                ? `Element at (${xRounded}, ${yRounded}):\n${parts.join("\n")}`
+                : `No accessibility element found at (${xRounded}, ${yRounded})`,
+            elements: element ? [element] : []
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to describe point: ${error instanceof Error ? error.message : String(error)}`
         };
     }
 }

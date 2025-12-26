@@ -16,11 +16,14 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 -   **Discover debug globals** available in the app
 -   **Android device control** - screenshots, tap, swipe, text input, key events via ADB
 -   **iOS simulator control** - screenshots, app management, URL handling via simctl
+-   **iOS UI automation** - tap, swipe, text input, button presses via IDB (optional)
+-   **iOS accessibility inspection** - get UI element tree and element info at coordinates via IDB
 
 ## Requirements
 
 -   Node.js 18+
 -   React Native app running with Metro bundler
+-   **Optional for iOS UI automation**: [Facebook IDB](https://fbidb.io/) - `brew install idb-companion`
 
 ## Claude Code Setup
 
@@ -155,6 +158,21 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `ios_open_url`        | Open a URL (deep links or web URLs)         |
 | `ios_terminate_app`   | Terminate a running app                     |
 | `ios_boot_simulator`  | Boot a simulator by UDID                    |
+
+### iOS UI Interaction (requires IDB)
+
+These tools require [Facebook IDB](https://fbidb.io/) to be installed: `brew install idb-companion`
+
+| Tool                | Description                                           |
+| ------------------- | ----------------------------------------------------- |
+| `ios_tap`           | Tap at specific coordinates on screen                 |
+| `ios_swipe`         | Swipe from one point to another                       |
+| `ios_input_text`    | Type text into the active input field                 |
+| `ios_button`        | Press hardware buttons (HOME, LOCK, SIRI, etc.)       |
+| `ios_key_event`     | Send a key event by keycode                           |
+| `ios_key_sequence`  | Send multiple key events in sequence                  |
+| `ios_describe_all`  | Get accessibility tree for entire screen              |
+| `ios_describe_point`| Get accessibility info for element at specific point  |
 
 ## Usage
 
@@ -455,6 +473,61 @@ Open a deep link:
 
 ```
 ios_open_url with url="myapp://settings"
+```
+
+### iOS UI Automation (requires IDB)
+
+Install IDB first: `brew install idb-companion`
+
+**Important: Coordinate System**
+- iOS IDB uses **points** (logical coordinates), not pixels
+- For 2x Retina displays: 1 point = 2 pixels
+- Example: 1640x2360 pixel screenshot = 820x1180 points
+- Use `ios_describe_all` to get exact element coordinates in points
+
+Tap on screen (coordinates in points):
+
+```
+ios_tap with x=200 y=400
+```
+
+Long press (hold for 2 seconds):
+
+```
+ios_tap with x=200 y=400 duration=2
+```
+
+Swipe gesture:
+
+```
+ios_swipe with startX=200 startY=600 endX=200 endY=200
+```
+
+Type text (tap input field first):
+
+```
+ios_tap with x=200 y=300
+ios_input_text with text="hello@example.com"
+```
+
+Press hardware buttons:
+
+```
+ios_button with button="HOME"
+ios_button with button="LOCK"
+ios_button with button="SIRI"
+```
+
+Get accessibility info for the screen:
+
+```
+ios_describe_all
+```
+
+Get accessibility info at a specific point:
+
+```
+ios_describe_point with x=200 y=400
 ```
 
 ## Supported React Native Versions

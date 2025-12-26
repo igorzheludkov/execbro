@@ -49,6 +49,16 @@ import {
     iosOpenUrl,
     iosTerminateApp,
     iosBootSimulator,
+    // iOS IDB-based UI tools
+    iosTap,
+    iosSwipe,
+    iosInputText,
+    iosButton,
+    iosKeyEvent,
+    iosKeySequence,
+    iosDescribeAll,
+    iosDescribePoint,
+    IOS_BUTTON_TYPES,
     // Debug HTTP Server
     startDebugHttpServer,
     getDebugServerPort
@@ -1137,12 +1147,21 @@ server.registerTool(
 
         // Include image data if available
         if (result.data) {
-            // Build info text with scale factor for coordinate conversion
-            let infoText = `Screenshot captured (${result.originalWidth}x${result.originalHeight})`;
+            // Build info text with coordinate guidance for iOS
+            // iOS simulators use points, not pixels. Retina displays are typically 2x or 3x.
+            const pixelWidth = result.originalWidth || 0;
+            const pixelHeight = result.originalHeight || 0;
+            // Assume 2x Retina scale for most iOS simulators
+            const pointWidth = Math.round(pixelWidth / 2);
+            const pointHeight = Math.round(pixelHeight / 2);
+
+            let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+            infoText += `\n📱 iOS IDB coordinates use POINTS: ${pointWidth}x${pointHeight}`;
+            infoText += `\nTo convert image coords to IDB points: divide pixel coordinates by 2`;
             if (result.scaleFactor && result.scaleFactor > 1) {
-                infoText += `\n⚠️ Image was scaled down to fit API limits. Scale factor: ${result.scaleFactor.toFixed(3)}`;
-                infoText += `\nTo tap/swipe: multiply image coordinates by ${result.scaleFactor.toFixed(3)} to get device coordinates.`;
+                infoText += `\n⚠️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
             }
+            infoText += `\n💡 Use ios_describe_all to get exact element coordinates`;
 
             return {
                 content: [
@@ -1293,6 +1312,257 @@ server.registerTool(
     },
     async ({ udid }) => {
         const result = await iosBootSimulator(udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// ============================================================================
+// iOS IDB-Based UI Tools (require Facebook IDB)
+// Install with: brew install idb-companion
+// ============================================================================
+
+// Tool: iOS tap
+server.registerTool(
+    "ios_tap",
+    {
+        description:
+            "Tap at specific coordinates on an iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            x: z.number().describe("X coordinate in pixels"),
+            y: z.number().describe("Y coordinate in pixels"),
+            duration: z
+                .number()
+                .optional()
+                .describe("Optional tap duration in seconds (for long press)"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ x, y, duration, udid }) => {
+        const result = await iosTap(x, y, { duration, udid });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS swipe
+server.registerTool(
+    "ios_swipe",
+    {
+        description:
+            "Swipe gesture on an iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            startX: z.number().describe("Starting X coordinate in pixels"),
+            startY: z.number().describe("Starting Y coordinate in pixels"),
+            endX: z.number().describe("Ending X coordinate in pixels"),
+            endY: z.number().describe("Ending Y coordinate in pixels"),
+            duration: z.number().optional().describe("Optional swipe duration in seconds"),
+            delta: z.number().optional().describe("Optional delta between touch events (step size)"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ startX, startY, endX, endY, duration, delta, udid }) => {
+        const result = await iosSwipe(startX, startY, endX, endY, { duration, delta, udid });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS input text
+server.registerTool(
+    "ios_input_text",
+    {
+        description:
+            "Type text into the active input field on an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            text: z.string().describe("Text to type into the active input field"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ text, udid }) => {
+        const result = await iosInputText(text, udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS button
+server.registerTool(
+    "ios_button",
+    {
+        description:
+            "Press a hardware button on an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            button: z
+                .enum(IOS_BUTTON_TYPES)
+                .describe("Hardware button to press: HOME, LOCK, SIDE_BUTTON, SIRI, or APPLE_PAY"),
+            duration: z.number().optional().describe("Optional button press duration in seconds"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ button, duration, udid }) => {
+        const result = await iosButton(button, { duration, udid });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS key event
+server.registerTool(
+    "ios_key_event",
+    {
+        description:
+            "Send a key event to an iOS simulator by keycode. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            keycode: z.number().describe("iOS keycode to send"),
+            duration: z.number().optional().describe("Optional key press duration in seconds"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ keycode, duration, udid }) => {
+        const result = await iosKeyEvent(keycode, { duration, udid });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS key sequence
+server.registerTool(
+    "ios_key_sequence",
+    {
+        description:
+            "Send a sequence of key events to an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            keycodes: z.array(z.number()).describe("Array of iOS keycodes to send in sequence"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ keycodes, udid }) => {
+        const result = await iosKeySequence(keycodes, udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS describe all (accessibility tree)
+server.registerTool(
+    "ios_describe_all",
+    {
+        description:
+            "Get accessibility information for the entire iOS simulator screen. Returns a nested tree of UI elements with labels, values, and frames. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ udid }) => {
+        const result = await iosDescribeAll(udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS describe point
+server.registerTool(
+    "ios_describe_point",
+    {
+        description:
+            "Get accessibility information for the UI element at a specific point on the iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
+        inputSchema: {
+            x: z.number().describe("X coordinate in pixels"),
+            y: z.number().describe("Y coordinate in pixels"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ x, y, udid }) => {
+        const result = await iosDescribePoint(x, y, udid);
 
         return {
             content: [

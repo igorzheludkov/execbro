@@ -60,8 +60,9 @@ export {
     androidGetScreenSize
 } from "./android.js";
 
-// iOS (simctl)
+// iOS (simctl + IDB)
 export {
+    // simctl-based tools
     isSimctlAvailable,
     listIOSSimulators,
     getBootedSimulatorUdid,
@@ -70,8 +71,22 @@ export {
     iosLaunchApp,
     iosOpenUrl,
     iosTerminateApp,
-    iosBootSimulator
+    iosBootSimulator,
+    // IDB-based UI tools
+    isIdbAvailable,
+    iosTap,
+    iosSwipe,
+    iosInputText,
+    iosButton,
+    iosKeyEvent,
+    iosKeySequence,
+    iosDescribeAll,
+    iosDescribePoint,
+    IOS_BUTTON_TYPES
 } from "./ios.js";
+
+// iOS types
+export type { iOSButtonType, iOSAccessibilityElement, iOSDescribeResult } from "./ios.js";
 
 // Bundle (Metro build errors)
 export {
