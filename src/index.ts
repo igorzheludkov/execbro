@@ -887,7 +887,7 @@ server.registerTool(
 server.registerTool(
     "android_tap",
     {
-        description: "Tap at specific coordinates on an Android device/emulator screen",
+        description: "Tap at specific coordinates on an Android device/emulator screen. NOTE: Prefer using android_tap_element instead, which finds elements by text/content-desc and is more reliable.",
         inputSchema: {
             x: z.number().describe("X coordinate in pixels"),
             y: z.number().describe("Y coordinate in pixels"),
@@ -1153,7 +1153,7 @@ server.registerTool(
     "android_tap_element",
     {
         description:
-            "Tap an element by its text, content-description, or resource-id. Automatically finds the element using uiautomator and taps its center.",
+            "PREFERRED: Tap an element by its text, content-description, or resource-id. More reliable than coordinate-based tapping. Automatically finds the element using uiautomator and taps its center.",
         inputSchema: {
             text: z
                 .string()
@@ -1462,7 +1462,7 @@ server.registerTool(
     "ios_tap",
     {
         description:
-            "Tap at specific coordinates on an iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
+            "Tap at specific coordinates on an iOS simulator screen. NOTE: Prefer using ios_tap_element instead, which finds elements by accessibility label and is more reliable. Requires IDB (brew install idb-companion).",
         inputSchema: {
             x: z.number().describe("X coordinate in pixels"),
             y: z.number().describe("Y coordinate in pixels"),
@@ -1496,7 +1496,7 @@ server.registerTool(
     "ios_tap_element",
     {
         description:
-            "Tap an element by its accessibility label. Automatically finds the element and taps its center. Requires IDB (brew install idb-companion).",
+            "PREFERRED: Tap an element by its accessibility label. More reliable than coordinate-based tapping. Automatically finds the element and taps its center. Requires IDB (brew install idb-companion).",
         inputSchema: {
             label: z
                 .string()

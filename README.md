@@ -411,6 +411,20 @@ Set `awaitPromise=false` for synchronous execution only.
 
 ## Device Interaction
 
+> **💡 Best Practice: Use Element-Based Tapping**
+>
+> Prefer `android_tap_element` and `ios_tap_element` over coordinate-based tapping (`android_tap`, `ios_tap`).
+>
+> **Why?**
+> - More reliable - elements are found by text/label, not fragile coordinates
+> - Self-documenting - `tap_element(text="Settings")` is clearer than `tap(x=540, y=1200)`
+> - Resolution-independent - works across different screen sizes
+>
+> **Workflow:**
+> 1. Use `android_describe_all` or `ios_describe_all` to see available elements
+> 2. Use `android_tap_element` or `ios_tap_element` to interact by text/label
+> 3. Fall back to coordinate-based tapping only when elements lack accessible text
+
 ### Android (requires ADB)
 
 List connected devices:
