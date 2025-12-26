@@ -51,6 +51,7 @@ import {
     iosBootSimulator,
     // iOS IDB-based UI tools
     iosTap,
+    iosTapElement,
     iosSwipe,
     iosInputText,
     iosButton,
@@ -1351,6 +1352,50 @@ server.registerTool(
     },
     async ({ x, y, duration, udid }) => {
         const result = await iosTap(x, y, { duration, udid });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS tap element by label
+server.registerTool(
+    "ios_tap_element",
+    {
+        description:
+            "Tap an element by its accessibility label. Automatically finds the element and taps its center. Requires IDB (brew install idb-companion).",
+        inputSchema: {
+            label: z
+                .string()
+                .optional()
+                .describe("Exact accessibility label to match (e.g., 'Home', 'Settings')"),
+            labelContains: z
+                .string()
+                .optional()
+                .describe("Partial label match, case-insensitive (e.g., 'Circular' matches 'Circulars, 3, 12 total')"),
+            index: z
+                .number()
+                .optional()
+                .describe("If multiple elements match, tap the nth one (0-indexed, default: 0)"),
+            duration: z
+                .number()
+                .optional()
+                .describe("Optional tap duration in seconds (for long press)"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ label, labelContains, index, duration, udid }) => {
+        const result = await iosTapElement({ label, labelContains, index, duration, udid });
 
         return {
             content: [

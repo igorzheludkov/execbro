@@ -1041,3 +1041,107 @@ export async function iosDescribePoint(x: number, y: number, udid?: string): Pro
         };
     }
 }
+
+/**
+ * Helper to flatten nested accessibility elements
+ */
+function flattenElements(elements: iOSAccessibilityElement[]): iOSAccessibilityElement[] {
+    const result: iOSAccessibilityElement[] = [];
+    for (const el of elements) {
+        result.push(el);
+        if (el.children && el.children.length > 0) {
+            result.push(...flattenElements(el.children));
+        }
+    }
+    return result;
+}
+
+/**
+ * Tap an element by its accessibility label using IDB
+ * This simplifies the workflow: no need to manually find coordinates
+ */
+export async function iosTapElement(
+    options: {
+        label?: string;
+        labelContains?: string;
+        index?: number;
+        duration?: number;
+        udid?: string;
+    }
+): Promise<iOSResult> {
+    try {
+        const { label, labelContains, index = 0, duration, udid } = options;
+
+        if (!label && !labelContains) {
+            return {
+                success: false,
+                error: "Either 'label' (exact match) or 'labelContains' (partial match) is required"
+            };
+        }
+
+        // Get all accessibility elements
+        const describeResult = await iosDescribeAll(udid);
+        if (!describeResult.success || !describeResult.elements) {
+            return {
+                success: false,
+                error: describeResult.error || "Failed to get accessibility elements"
+            };
+        }
+
+        // Flatten the tree and find matching elements
+        const allElements = flattenElements(describeResult.elements);
+        const matches = allElements.filter(el => {
+            if (!el.AXLabel) return false;
+            if (label) return el.AXLabel === label;
+            if (labelContains) return el.AXLabel.toLowerCase().includes(labelContains.toLowerCase());
+            return false;
+        });
+
+        if (matches.length === 0) {
+            const searchTerm = label ? `label="${label}"` : `labelContains="${labelContains}"`;
+            return {
+                success: false,
+                error: `No element found with ${searchTerm}`
+            };
+        }
+
+        // Select element by index (default 0 = first match)
+        if (index >= matches.length) {
+            return {
+                success: false,
+                error: `Index ${index} out of range. Found ${matches.length} matching element(s).`
+            };
+        }
+
+        const element = matches[index];
+
+        // Check if element has frame coordinates
+        if (!element.frame) {
+            return {
+                success: false,
+                error: `Element "${element.AXLabel}" has no frame coordinates`
+            };
+        }
+
+        // Calculate center
+        const centerX = Math.round(element.frame.x + element.frame.width / 2);
+        const centerY = Math.round(element.frame.y + element.frame.height / 2);
+
+        // Tap at center
+        const tapResult = await iosTap(centerX, centerY, { duration, udid });
+
+        if (tapResult.success) {
+            return {
+                success: true,
+                result: `Tapped "${element.AXLabel}" at (${centerX}, ${centerY})`
+            };
+        }
+
+        return tapResult;
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to tap element: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}

@@ -166,6 +166,7 @@ These tools require [Facebook IDB](https://fbidb.io/) to be installed: `brew ins
 | Tool                | Description                                           |
 | ------------------- | ----------------------------------------------------- |
 | `ios_tap`           | Tap at specific coordinates on screen                 |
+| `ios_tap_element`   | Tap an element by its accessibility label             |
 | `ios_swipe`         | Swipe from one point to another                       |
 | `ios_input_text`    | Type text into the active input field                 |
 | `ios_button`        | Press hardware buttons (HOME, LOCK, SIRI, etc.)       |
@@ -528,6 +529,24 @@ Get accessibility info at a specific point:
 
 ```
 ios_describe_point with x=200 y=400
+```
+
+Tap an element by accessibility label:
+
+```
+ios_tap_element with label="Settings"
+```
+
+Tap using partial label match:
+
+```
+ios_tap_element with labelContains="Sign"
+```
+
+When multiple elements match, use index (0-based):
+
+```
+ios_tap_element with labelContains="Button" index=1
 ```
 
 ## Supported React Native Versions

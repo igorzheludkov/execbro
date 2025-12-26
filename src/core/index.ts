@@ -75,6 +75,7 @@ export {
     // IDB-based UI tools
     isIdbAvailable,
     iosTap,
+    iosTapElement,
     iosSwipe,
     iosInputText,
     iosButton,
