@@ -7,6 +7,9 @@ import sharp from "sharp";
 
 const execAsync = promisify(exec);
 
+// XML parsing for uiautomator dump
+import { XMLParser } from "fast-xml-parser";
+
 // ADB command timeout in milliseconds
 const ADB_TIMEOUT = 30000;
 
@@ -827,6 +830,477 @@ export async function androidGetScreenSize(deviceId?: string): Promise<{
         return {
             success: false,
             error: `Failed to get screen size: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+// ============================================================================
+// Accessibility Functions (UI Hierarchy)
+// ============================================================================
+
+/**
+ * Android UI element from uiautomator dump
+ */
+export interface AndroidAccessibilityElement {
+    class: string;
+    text?: string;
+    contentDesc?: string;
+    resourceId?: string;
+    bounds: {
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+    };
+    frame: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+    tap: {
+        x: number;
+        y: number;
+    };
+    children: AndroidAccessibilityElement[];
+    // Raw attributes for detailed view
+    checkable?: boolean;
+    checked?: boolean;
+    clickable?: boolean;
+    enabled?: boolean;
+    focusable?: boolean;
+    focused?: boolean;
+    scrollable?: boolean;
+    selected?: boolean;
+}
+
+/**
+ * Result type for accessibility operations
+ */
+export interface AndroidDescribeResult {
+    success: boolean;
+    elements?: AndroidAccessibilityElement[];
+    formatted?: string;
+    error?: string;
+}
+
+/**
+ * Simplify Android class name for display
+ * android.widget.Button -> Button
+ * android.widget.TextView -> TextView
+ */
+function simplifyClassName(className: string): string {
+    if (!className) return "Unknown";
+    const parts = className.split(".");
+    return parts[parts.length - 1];
+}
+
+/**
+ * Parse bounds string "[left,top][right,bottom]" to object
+ */
+function parseBounds(boundsStr: string): {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+} | null {
+    const match = boundsStr?.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+    if (!match) return null;
+    return {
+        left: parseInt(match[1], 10),
+        top: parseInt(match[2], 10),
+        right: parseInt(match[3], 10),
+        bottom: parseInt(match[4], 10)
+    };
+}
+
+/**
+ * Parse a single node from uiautomator XML
+ */
+function parseUiNode(node: Record<string, unknown>): AndroidAccessibilityElement | null {
+    const attrs = node["@_bounds"]
+        ? node
+        : node.node
+          ? (Array.isArray(node.node) ? node.node[0] : node.node)
+          : null;
+
+    if (!attrs) return null;
+
+    const boundsStr = attrs["@_bounds"] as string;
+    const bounds = parseBounds(boundsStr);
+    if (!bounds) return null;
+
+    const width = bounds.right - bounds.left;
+    const height = bounds.bottom - bounds.top;
+    const centerX = Math.round(bounds.left + width / 2);
+    const centerY = Math.round(bounds.top + height / 2);
+
+    const element: AndroidAccessibilityElement = {
+        class: simplifyClassName(attrs["@_class"] as string || ""),
+        bounds,
+        frame: {
+            x: bounds.left,
+            y: bounds.top,
+            width,
+            height
+        },
+        tap: {
+            x: centerX,
+            y: centerY
+        },
+        children: []
+    };
+
+    // Add optional attributes
+    if (attrs["@_text"]) element.text = attrs["@_text"] as string;
+    if (attrs["@_content-desc"]) element.contentDesc = attrs["@_content-desc"] as string;
+    if (attrs["@_resource-id"]) element.resourceId = attrs["@_resource-id"] as string;
+    if (attrs["@_checkable"] === "true") element.checkable = true;
+    if (attrs["@_checked"] === "true") element.checked = true;
+    if (attrs["@_clickable"] === "true") element.clickable = true;
+    if (attrs["@_enabled"] === "true") element.enabled = true;
+    if (attrs["@_focusable"] === "true") element.focusable = true;
+    if (attrs["@_focused"] === "true") element.focused = true;
+    if (attrs["@_scrollable"] === "true") element.scrollable = true;
+    if (attrs["@_selected"] === "true") element.selected = true;
+
+    return element;
+}
+
+/**
+ * Recursively parse UI hierarchy from XML node
+ */
+function parseHierarchy(node: Record<string, unknown>): AndroidAccessibilityElement[] {
+    const results: AndroidAccessibilityElement[] = [];
+
+    // Handle the node itself
+    if (node["@_bounds"]) {
+        const element = parseUiNode(node);
+        if (element) {
+            // Parse children
+            if (node.node) {
+                const children = Array.isArray(node.node) ? node.node : [node.node];
+                for (const child of children) {
+                    element.children.push(...parseHierarchy(child as Record<string, unknown>));
+                }
+            }
+            results.push(element);
+        }
+    } else if (node.node) {
+        // This is a container without bounds (like hierarchy root)
+        const children = Array.isArray(node.node) ? node.node : [node.node];
+        for (const child of children) {
+            results.push(...parseHierarchy(child as Record<string, unknown>));
+        }
+    }
+
+    return results;
+}
+
+/**
+ * Format accessibility tree for display (similar to iOS format)
+ */
+function formatAndroidAccessibilityTree(elements: AndroidAccessibilityElement[], indent: number = 0): string {
+    const lines: string[] = [];
+    const prefix = "  ".repeat(indent);
+
+    for (const element of elements) {
+        const parts: string[] = [];
+
+        // [ClassName] "text" or "content-desc"
+        parts.push(`[${element.class}]`);
+
+        // Add label (text or content-desc)
+        const label = element.text || element.contentDesc;
+        if (label) {
+            parts.push(`"${label}"`);
+        }
+
+        // Add frame and tap coordinates
+        const f = element.frame;
+        parts.push(`frame=(${f.x}, ${f.y}, ${f.width}x${f.height}) tap=(${element.tap.x}, ${element.tap.y})`);
+
+        lines.push(`${prefix}${parts.join(" ")}`);
+
+        // Recurse into children
+        if (element.children.length > 0) {
+            lines.push(formatAndroidAccessibilityTree(element.children, indent + 1));
+        }
+    }
+
+    return lines.join("\n");
+}
+
+/**
+ * Flatten element tree to array for searching
+ */
+function flattenElements(elements: AndroidAccessibilityElement[]): AndroidAccessibilityElement[] {
+    const result: AndroidAccessibilityElement[] = [];
+    for (const element of elements) {
+        result.push(element);
+        if (element.children.length > 0) {
+            result.push(...flattenElements(element.children));
+        }
+    }
+    return result;
+}
+
+/**
+ * Get the UI hierarchy from the connected Android device using uiautomator dump
+ */
+export async function androidDescribeAll(deviceId?: string): Promise<AndroidDescribeResult> {
+    try {
+        const adbAvailable = await isAdbAvailable();
+        if (!adbAvailable) {
+            return {
+                success: false,
+                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+            };
+        }
+
+        const deviceArg = buildDeviceArg(deviceId);
+        const device = deviceId || (await getDefaultAndroidDevice());
+
+        if (!device) {
+            return {
+                success: false,
+                error: "No Android device connected. Connect a device or start an emulator."
+            };
+        }
+
+        // Use file-based approach (most reliable across devices)
+        // /dev/tty doesn't work on most emulators/devices
+        const remotePath = "/sdcard/ui_dump.xml";
+        await execAsync(`adb ${deviceArg} shell uiautomator dump ${remotePath}`, {
+            timeout: ADB_TIMEOUT
+        });
+        const { stdout } = await execAsync(`adb ${deviceArg} shell cat ${remotePath}`, {
+            timeout: ADB_TIMEOUT,
+            maxBuffer: 10 * 1024 * 1024
+        });
+        const xmlContent = stdout.trim();
+        // Clean up
+        await execAsync(`adb ${deviceArg} shell rm ${remotePath}`, {
+            timeout: 5000
+        }).catch(() => {});
+
+        if (!xmlContent || !xmlContent.includes("<hierarchy")) {
+            return {
+                success: false,
+                error: "Failed to get UI hierarchy. Make sure the device screen is unlocked and the app is in foreground."
+            };
+        }
+
+        // Parse XML
+        const parser = new XMLParser({
+            ignoreAttributes: false,
+            attributeNamePrefix: "@_"
+        });
+        const parsed = parser.parse(xmlContent);
+
+        if (!parsed.hierarchy) {
+            return {
+                success: false,
+                error: "Invalid UI hierarchy XML structure"
+            };
+        }
+
+        const elements = parseHierarchy(parsed.hierarchy);
+        const formatted = formatAndroidAccessibilityTree(elements);
+
+        return {
+            success: true,
+            elements,
+            formatted
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to get UI hierarchy: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Get accessibility info for the UI element at specific coordinates
+ */
+export async function androidDescribePoint(
+    x: number,
+    y: number,
+    deviceId?: string
+): Promise<AndroidDescribeResult> {
+    try {
+        // First get the full hierarchy
+        const result = await androidDescribeAll(deviceId);
+        if (!result.success || !result.elements) {
+            return result;
+        }
+
+        // Flatten and find elements containing the point
+        const allElements = flattenElements(result.elements);
+
+        // Find all elements whose bounds contain the point
+        const matchingElements = allElements.filter((el) => {
+            const b = el.bounds;
+            return x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
+        });
+
+        if (matchingElements.length === 0) {
+            return {
+                success: true,
+                formatted: `No element found at (${x}, ${y})`
+            };
+        }
+
+        // Return the deepest (smallest) element that contains the point
+        // Sort by area (smallest first) to get the most specific element
+        matchingElements.sort((a, b) => {
+            const areaA = a.frame.width * a.frame.height;
+            const areaB = b.frame.width * b.frame.height;
+            return areaA - areaB;
+        });
+
+        const element = matchingElements[0];
+
+        // Format detailed output
+        const lines: string[] = [];
+        const label = element.text || element.contentDesc;
+        lines.push(`[${element.class}]${label ? ` "${label}"` : ""} frame=(${element.frame.x}, ${element.frame.y}, ${element.frame.width}x${element.frame.height}) tap=(${element.tap.x}, ${element.tap.y})`);
+
+        if (element.resourceId) {
+            lines.push(`  resource-id: ${element.resourceId}`);
+        }
+        if (element.contentDesc && element.text) {
+            // Show content-desc separately if we showed text as label
+            lines.push(`  content-desc: ${element.contentDesc}`);
+        }
+        if (element.text && element.contentDesc) {
+            // Show text separately if we showed content-desc as label
+            lines.push(`  text: ${element.text}`);
+        }
+
+        // Show state flags
+        const flags: string[] = [];
+        if (element.clickable) flags.push("clickable");
+        if (element.enabled) flags.push("enabled");
+        if (element.focusable) flags.push("focusable");
+        if (element.focused) flags.push("focused");
+        if (element.scrollable) flags.push("scrollable");
+        if (element.selected) flags.push("selected");
+        if (element.checked) flags.push("checked");
+        if (flags.length > 0) {
+            lines.push(`  state: ${flags.join(", ")}`);
+        }
+
+        return {
+            success: true,
+            elements: [element],
+            formatted: lines.join("\n")
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to describe point: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Tap an element by its text, content-description, or resource-id
+ */
+export async function androidTapElement(
+    options: {
+        text?: string;
+        textContains?: string;
+        contentDesc?: string;
+        contentDescContains?: string;
+        resourceId?: string;
+        index?: number;
+        deviceId?: string;
+    }
+): Promise<AdbResult> {
+    try {
+        const { text, textContains, contentDesc, contentDescContains, resourceId, index = 0, deviceId } = options;
+
+        // Validate that at least one search criterion is provided
+        if (!text && !textContains && !contentDesc && !contentDescContains && !resourceId) {
+            return {
+                success: false,
+                error: "At least one of text, textContains, contentDesc, contentDescContains, or resourceId must be provided"
+            };
+        }
+
+        // Get the UI hierarchy
+        const result = await androidDescribeAll(deviceId);
+        if (!result.success || !result.elements) {
+            return {
+                success: false,
+                error: result.error || "Failed to get UI hierarchy"
+            };
+        }
+
+        // Flatten and search
+        const allElements = flattenElements(result.elements);
+
+        // Filter elements based on search criteria
+        const matchingElements = allElements.filter((el) => {
+            if (text && el.text !== text) return false;
+            if (textContains && (!el.text || !el.text.toLowerCase().includes(textContains.toLowerCase()))) return false;
+            if (contentDesc && el.contentDesc !== contentDesc) return false;
+            if (contentDescContains && (!el.contentDesc || !el.contentDesc.toLowerCase().includes(contentDescContains.toLowerCase()))) return false;
+            if (resourceId) {
+                // Support both full resource-id and short form
+                if (!el.resourceId) return false;
+                if (el.resourceId !== resourceId && !el.resourceId.endsWith(`:id/${resourceId}`)) return false;
+            }
+            return true;
+        });
+
+        if (matchingElements.length === 0) {
+            const criteria: string[] = [];
+            if (text) criteria.push(`text="${text}"`);
+            if (textContains) criteria.push(`textContains="${textContains}"`);
+            if (contentDesc) criteria.push(`contentDesc="${contentDesc}"`);
+            if (contentDescContains) criteria.push(`contentDescContains="${contentDescContains}"`);
+            if (resourceId) criteria.push(`resourceId="${resourceId}"`);
+            return {
+                success: false,
+                error: `Element not found: ${criteria.join(", ")}`
+            };
+        }
+
+        if (index >= matchingElements.length) {
+            return {
+                success: false,
+                error: `Index ${index} out of range. Found ${matchingElements.length} matching element(s).`
+            };
+        }
+
+        const element = matchingElements[index];
+        const label = element.text || element.contentDesc || element.resourceId || element.class;
+
+        // Log if multiple matches
+        let resultMessage: string;
+        if (matchingElements.length > 1) {
+            resultMessage = `Found ${matchingElements.length} elements, tapping "${label}" (index ${index}) at (${element.tap.x}, ${element.tap.y})`;
+        } else {
+            resultMessage = `Tapped "${label}" at (${element.tap.x}, ${element.tap.y})`;
+        }
+
+        // Perform the tap
+        const tapResult = await androidTap(element.tap.x, element.tap.y, deviceId);
+        if (!tapResult.success) {
+            return tapResult;
+        }
+
+        return {
+            success: true,
+            result: resultMessage
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to tap element: ${error instanceof Error ? error.message : String(error)}`
         };
     }
 }

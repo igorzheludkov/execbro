@@ -41,6 +41,10 @@ import {
     androidInputText,
     androidKeyEvent,
     androidGetScreenSize,
+    // Android Accessibility (UI Hierarchy)
+    androidDescribeAll,
+    androidDescribePoint,
+    androidTapElement,
     // iOS
     listIOSSimulators,
     iosScreenshot,
@@ -1078,6 +1082,128 @@ server.registerTool(
                     text: `Screen size: ${result.width}x${result.height} pixels`
                 }
             ]
+        };
+    }
+);
+
+// ============================================================================
+// Android Accessibility Tools (UI Hierarchy)
+// ============================================================================
+
+// Tool: Android describe all (UI hierarchy)
+server.registerTool(
+    "android_describe_all",
+    {
+        description:
+            "Get the full UI accessibility tree from the Android device using uiautomator. Returns a hierarchical view of all UI elements with their text, content-description, resource-id, bounds, and tap coordinates.",
+        inputSchema: {
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ deviceId }) => {
+        const result = await androidDescribeAll(deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.formatted! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android describe point
+server.registerTool(
+    "android_describe_point",
+    {
+        description:
+            "Get UI element info at specific coordinates on an Android device. Returns the element's text, content-description, resource-id, bounds, and state flags.",
+        inputSchema: {
+            x: z.number().describe("X coordinate in pixels"),
+            y: z.number().describe("Y coordinate in pixels"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ x, y, deviceId }) => {
+        const result = await androidDescribePoint(x, y, deviceId);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.formatted! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Android tap element
+server.registerTool(
+    "android_tap_element",
+    {
+        description:
+            "Tap an element by its text, content-description, or resource-id. Automatically finds the element using uiautomator and taps its center.",
+        inputSchema: {
+            text: z
+                .string()
+                .optional()
+                .describe("Exact text match for the element"),
+            textContains: z
+                .string()
+                .optional()
+                .describe("Partial text match (case-insensitive)"),
+            contentDesc: z
+                .string()
+                .optional()
+                .describe("Exact content-description match"),
+            contentDescContains: z
+                .string()
+                .optional()
+                .describe("Partial content-description match (case-insensitive)"),
+            resourceId: z
+                .string()
+                .optional()
+                .describe("Resource ID match (e.g., 'com.app:id/button' or just 'button')"),
+            index: z
+                .number()
+                .optional()
+                .describe("If multiple elements match, tap the nth one (0-indexed, default: 0)"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ text, textContains, contentDesc, contentDescContains, resourceId, index, deviceId }) => {
+        const result = await androidTapElement({
+            text,
+            textContains,
+            contentDesc,
+            contentDescContains,
+            resourceId,
+            index,
+            deviceId
+        });
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
         };
     }
 );

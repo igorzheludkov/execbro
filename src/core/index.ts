@@ -57,8 +57,15 @@ export {
     androidSwipe,
     androidInputText,
     androidKeyEvent,
-    androidGetScreenSize
+    androidGetScreenSize,
+    // Accessibility (UI Hierarchy)
+    androidDescribeAll,
+    androidDescribePoint,
+    androidTapElement
 } from "./android.js";
+
+// Android types
+export type { AndroidAccessibilityElement, AndroidDescribeResult } from "./android.js";
 
 // iOS (simctl + IDB)
 export {

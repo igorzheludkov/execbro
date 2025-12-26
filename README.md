@@ -147,6 +147,14 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `android_key_event`       | Send key events (HOME, BACK, ENTER, etc.)            |
 | `android_get_screen_size` | Get device screen resolution                         |
 
+### Android Accessibility (UI Hierarchy)
+
+| Tool                    | Description                                           |
+| ----------------------- | ----------------------------------------------------- |
+| `android_describe_all`  | Get full UI hierarchy tree using uiautomator          |
+| `android_describe_point`| Get UI element info at specific coordinates           |
+| `android_tap_element`   | Tap element by text, content-desc, or resource-id     |
+
 ### iOS (Simulator)
 
 | Tool                  | Description                                 |
@@ -442,6 +450,53 @@ Send key events:
 android_key_event with key="BACK"
 android_key_event with key="HOME"
 android_key_event with key="ENTER"
+```
+
+### Android UI Automation (Accessibility)
+
+Get the full UI hierarchy:
+
+```
+android_describe_all
+```
+
+Example output:
+```
+[FrameLayout] frame=(0, 0, 1080x2340) tap=(540, 1170)
+  [LinearLayout] frame=(0, 63, 1080x147) tap=(540, 136)
+    [TextView] "Settings" frame=(48, 77, 200x63) tap=(148, 108)
+  [RecyclerView] frame=(0, 210, 1080x2130) tap=(540, 1275)
+    [Button] "Save" frame=(800, 2200, 200x80) tap=(900, 2240)
+```
+
+Get element info at coordinates:
+
+```
+android_describe_point with x=540 y=1170
+```
+
+Tap an element by text:
+
+```
+android_tap_element with text="Settings"
+```
+
+Tap using partial text match:
+
+```
+android_tap_element with textContains="Save"
+```
+
+Tap by resource ID:
+
+```
+android_tap_element with resourceId="save_button"
+```
+
+Tap by content description:
+
+```
+android_tap_element with contentDesc="Navigate up"
 ```
 
 ### iOS Simulator (requires Xcode)
