@@ -74,7 +74,10 @@ import {
     iosWaitForElement,
     // Debug HTTP Server
     startDebugHttpServer,
-    getDebugServerPort
+    getDebugServerPort,
+    // Telemetry
+    initTelemetry,
+    trackToolInvocation
 } from "./core/index.js";
 
 // Create MCP server
@@ -83,8 +86,40 @@ const server = new McpServer({
     version: "1.0.0"
 });
 
+// ============================================================================
+// Telemetry Wrapper
+// ============================================================================
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function registerToolWithTelemetry(
+    toolName: string,
+    config: any,
+    handler: (args: any) => Promise<any>
+): void {
+    server.registerTool(toolName, config, async (args: any) => {
+        const startTime = Date.now();
+        let success = true;
+
+        try {
+            const result = await handler(args);
+            // Check if result indicates an error
+            if (result?.isError) {
+                success = false;
+            }
+            return result;
+        } catch (error) {
+            success = false;
+            throw error;
+        } finally {
+            const duration = Date.now() - startTime;
+            trackToolInvocation(toolName, success, duration);
+        }
+    });
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 // Tool: Scan for Metro servers
-server.registerTool(
+registerToolWithTelemetry(
     "scan_metro",
     {
         description: "Scan for running Metro bundler servers on common ports",
@@ -149,7 +184,7 @@ server.registerTool(
 );
 
 // Tool: Get connected apps
-server.registerTool(
+registerToolWithTelemetry(
     "get_apps",
     {
         description: "List connected React Native apps and Metro server status",
@@ -186,7 +221,7 @@ server.registerTool(
 );
 
 // Tool: Get console logs
-server.registerTool(
+registerToolWithTelemetry(
     "get_logs",
     {
         description: "Retrieve console logs from connected React Native app",
@@ -216,7 +251,7 @@ server.registerTool(
 );
 
 // Tool: Search logs
-server.registerTool(
+registerToolWithTelemetry(
     "search_logs",
     {
         description: "Search console logs for text (case-insensitive)",
@@ -240,7 +275,7 @@ server.registerTool(
 );
 
 // Tool: Clear logs
-server.registerTool(
+registerToolWithTelemetry(
     "clear_logs",
     {
         description: "Clear the log buffer",
@@ -261,7 +296,7 @@ server.registerTool(
 );
 
 // Tool: Connect to specific Metro port
-server.registerTool(
+registerToolWithTelemetry(
     "connect_metro",
     {
         description: "Connect to a specific Metro server port",
@@ -324,7 +359,7 @@ server.registerTool(
 );
 
 // Tool: Execute JavaScript in app
-server.registerTool(
+registerToolWithTelemetry(
     "execute_in_app",
     {
         description:
@@ -361,7 +396,7 @@ server.registerTool(
 );
 
 // Tool: List debug globals available in the app
-server.registerTool(
+registerToolWithTelemetry(
     "list_debug_globals",
     {
         description:
@@ -395,7 +430,7 @@ server.registerTool(
 );
 
 // Tool: Inspect a global object to see its properties and types
-server.registerTool(
+registerToolWithTelemetry(
     "inspect_global",
     {
         description:
@@ -433,7 +468,7 @@ server.registerTool(
 );
 
 // Tool: Get network requests
-server.registerTool(
+registerToolWithTelemetry(
     "get_network_requests",
     {
         description:
@@ -478,7 +513,7 @@ server.registerTool(
 );
 
 // Tool: Search network requests
-server.registerTool(
+registerToolWithTelemetry(
     "search_network",
     {
         description: "Search network requests by URL pattern (case-insensitive)",
@@ -506,7 +541,7 @@ server.registerTool(
 );
 
 // Tool: Get request details
-server.registerTool(
+registerToolWithTelemetry(
     "get_request_details",
     {
         description:
@@ -542,7 +577,7 @@ server.registerTool(
 );
 
 // Tool: Get network stats
-server.registerTool(
+registerToolWithTelemetry(
     "get_network_stats",
     {
         description:
@@ -564,7 +599,7 @@ server.registerTool(
 );
 
 // Tool: Clear network requests
-server.registerTool(
+registerToolWithTelemetry(
     "clear_network",
     {
         description: "Clear the network request buffer",
@@ -585,7 +620,7 @@ server.registerTool(
 );
 
 // Tool: Reload the app
-server.registerTool(
+registerToolWithTelemetry(
     "reload_app",
     {
         description:
@@ -623,7 +658,7 @@ server.registerTool(
 // ============================================================================
 
 // Tool: Get bundle status
-server.registerTool(
+registerToolWithTelemetry(
     "get_bundle_status",
     {
         description:
@@ -645,7 +680,7 @@ server.registerTool(
 );
 
 // Tool: Get bundle errors
-server.registerTool(
+registerToolWithTelemetry(
     "get_bundle_errors",
     {
         description:
@@ -673,7 +708,7 @@ server.registerTool(
 );
 
 // Tool: Clear bundle errors
-server.registerTool(
+registerToolWithTelemetry(
     "clear_bundle_errors",
     {
         description: "Clear the bundle error buffer",
@@ -698,7 +733,7 @@ server.registerTool(
 // ============================================================================
 
 // Tool: List Android devices
-server.registerTool(
+registerToolWithTelemetry(
     "list_android_devices",
     {
         description: "List connected Android devices and emulators via ADB",
@@ -720,7 +755,7 @@ server.registerTool(
 );
 
 // Tool: Android screenshot
-server.registerTool(
+registerToolWithTelemetry(
     "android_screenshot",
     {
         description:
@@ -815,7 +850,7 @@ server.registerTool(
 );
 
 // Tool: Android install app
-server.registerTool(
+registerToolWithTelemetry(
     "android_install_app",
     {
         description: "Install an APK on an Android device/emulator",
@@ -853,7 +888,7 @@ server.registerTool(
 );
 
 // Tool: Android launch app
-server.registerTool(
+registerToolWithTelemetry(
     "android_launch_app",
     {
         description: "Launch an app on an Android device/emulator by package name",
@@ -885,7 +920,7 @@ server.registerTool(
 );
 
 // Tool: Android list packages
-server.registerTool(
+registerToolWithTelemetry(
     "android_list_packages",
     {
         description: "List installed packages on an Android device/emulator",
@@ -920,7 +955,7 @@ server.registerTool(
 // ============================================================================
 
 // Tool: Android tap
-server.registerTool(
+registerToolWithTelemetry(
     "android_tap",
     {
         description: "Tap at specific coordinates on an Android device/emulator screen. NOTE: Prefer using android_tap_element instead, which finds elements by text/content-desc and is more reliable.",
@@ -949,7 +984,7 @@ server.registerTool(
 );
 
 // Tool: Android long press
-server.registerTool(
+registerToolWithTelemetry(
     "android_long_press",
     {
         description: "Long press at specific coordinates on an Android device/emulator screen",
@@ -983,7 +1018,7 @@ server.registerTool(
 );
 
 // Tool: Android swipe
-server.registerTool(
+registerToolWithTelemetry(
     "android_swipe",
     {
         description: "Swipe from one point to another on an Android device/emulator screen",
@@ -1019,7 +1054,7 @@ server.registerTool(
 );
 
 // Tool: Android input text
-server.registerTool(
+registerToolWithTelemetry(
     "android_input_text",
     {
         description:
@@ -1048,7 +1083,7 @@ server.registerTool(
 );
 
 // Tool: Android key event
-server.registerTool(
+registerToolWithTelemetry(
     "android_key_event",
     {
         description: `Send a key event to an Android device/emulator. Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}`,
@@ -1085,7 +1120,7 @@ server.registerTool(
 );
 
 // Tool: Android get screen size
-server.registerTool(
+registerToolWithTelemetry(
     "android_get_screen_size",
     {
         description: "Get the screen size (resolution) of an Android device/emulator",
@@ -1424,7 +1459,7 @@ server.registerTool(
 // ============================================================================
 
 // Tool: List iOS simulators
-server.registerTool(
+registerToolWithTelemetry(
     "list_ios_simulators",
     {
         description: "List available iOS simulators",
@@ -1452,7 +1487,7 @@ server.registerTool(
 );
 
 // Tool: iOS screenshot
-server.registerTool(
+registerToolWithTelemetry(
     "ios_screenshot",
     {
         description:
@@ -1574,7 +1609,7 @@ server.registerTool(
 );
 
 // Tool: iOS install app
-server.registerTool(
+registerToolWithTelemetry(
     "ios_install_app",
     {
         description: "Install an app bundle (.app) on an iOS simulator",
@@ -1602,7 +1637,7 @@ server.registerTool(
 );
 
 // Tool: iOS launch app
-server.registerTool(
+registerToolWithTelemetry(
     "ios_launch_app",
     {
         description: "Launch an app on an iOS simulator by bundle ID",
@@ -1630,7 +1665,7 @@ server.registerTool(
 );
 
 // Tool: iOS open URL
-server.registerTool(
+registerToolWithTelemetry(
     "ios_open_url",
     {
         description: "Open a URL in the iOS simulator (opens in default handler or Safari)",
@@ -1658,7 +1693,7 @@ server.registerTool(
 );
 
 // Tool: iOS terminate app
-server.registerTool(
+registerToolWithTelemetry(
     "ios_terminate_app",
     {
         description: "Terminate a running app on an iOS simulator",
@@ -1686,7 +1721,7 @@ server.registerTool(
 );
 
 // Tool: iOS boot simulator
-server.registerTool(
+registerToolWithTelemetry(
     "ios_boot_simulator",
     {
         description: "Boot an iOS simulator by UDID. Use list_ios_simulators to find available simulators.",
@@ -2179,7 +2214,7 @@ server.registerTool(
 );
 
 // Tool: Get debug server info
-server.registerTool(
+registerToolWithTelemetry(
     "get_debug_server",
     {
         description:
@@ -2225,6 +2260,9 @@ server.registerTool(
 
 // Main function
 async function main() {
+    // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
+    initTelemetry();
+
     // Start debug HTTP server for buffer inspection (finds available port automatically)
     await startDebugHttpServer();
 

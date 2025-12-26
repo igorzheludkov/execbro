@@ -1,0 +1,12 @@
+# Cloudflare Worker Configuration for RN AI Debugger Telemetry
+name = "rn-debugger-telemetry"
+main = "worker.ts"
+compatibility_date = "2024-01-01"
+
+# Analytics Engine dataset for storing telemetry events
+[[analytics_engine_datasets]]
+binding = "TELEMETRY"
+dataset = "rn_debugger_events"
+
+# Note: TELEMETRY_API_KEY should be set as a secret via:
+# npx wrangler secret put TELEMETRY_API_KEY

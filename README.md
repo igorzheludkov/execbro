@@ -587,6 +587,37 @@ The server prioritizes devices in this order:
 -   Try `clear_logs` then trigger some actions in the app
 -   Check `get_apps` to verify connection status
 
+## Telemetry
+
+This package collects anonymous usage telemetry to help improve the product. No personal information is collected.
+
+### What is collected
+
+| Data | Purpose |
+|------|---------|
+| Tool names | Which MCP tools are used most |
+| Success/failure | Error rates for reliability improvements |
+| Duration (ms) | Performance monitoring |
+| Session start/end | Retention analysis |
+| Platform | macOS/Linux/Windows distribution |
+| Server version | Adoption of new versions |
+
+**Not collected**: No file paths, code content, network data, or personally identifiable information.
+
+### Opt-out
+
+To disable telemetry, set the environment variable:
+
+```bash
+export RN_DEBUGGER_TELEMETRY=false
+```
+
+Or inline:
+
+```bash
+RN_DEBUGGER_TELEMETRY=false npx react-native-ai-debugger
+```
+
 ## License
 
 MIT
