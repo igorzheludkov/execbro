@@ -1,7 +1,8 @@
 import WebSocket from "ws";
 import { ExecutionResult } from "./types.js";
-import { pendingExecutions, getNextMessageId } from "./state.js";
-import { getFirstConnectedApp } from "./connection.js";
+import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
+import { getFirstConnectedApp, connectToDevice } from "./connection.js";
+import { fetchDevices, selectMainDevice } from "./metro.js";
 
 // Execute JavaScript in the connected React Native app
 export async function executeInApp(
@@ -93,6 +94,14 @@ export async function inspectGlobal(objectName: string): Promise<ExecutionResult
 
 // Reload the React Native app using __ReactRefresh (Page.reload is not supported by Hermes)
 export async function reloadApp(): Promise<ExecutionResult> {
+    // Get current connection info before reload
+    const app = getFirstConnectedApp();
+    if (!app) {
+        return { success: false, error: "No apps connected. Run 'scan_metro' first." };
+    }
+
+    const port = app.port;
+
     // Use __ReactRefresh.performFullRefresh() which is available in Metro bundler dev mode
     // This works with Hermes unlike the CDP Page.reload method
     const expression = `
@@ -117,13 +126,50 @@ export async function reloadApp(): Promise<ExecutionResult> {
 
     const result = await executeInApp(expression, false);
 
-    // After triggering reload, the connection may drop which is expected
-    if (result.success) {
-        return {
-            success: true,
-            result: result.result || "App reload triggered successfully"
-        };
+    if (!result.success) {
+        return result;
     }
 
-    return result;
+    // Auto-reconnect after reload
+    try {
+        // Wait for app to reload (give it time to restart JS context)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Close existing connections to this port
+        for (const [key, connectedApp] of connectedApps.entries()) {
+            if (connectedApp.port === port) {
+                try {
+                    connectedApp.ws.close();
+                } catch {
+                    // Ignore close errors
+                }
+                connectedApps.delete(key);
+            }
+        }
+
+        // Small delay to ensure cleanup
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Reconnect to Metro on the same port
+        const devices = await fetchDevices(port);
+        const mainDevice = selectMainDevice(devices);
+
+        if (mainDevice) {
+            await connectToDevice(mainDevice, port);
+            return {
+                success: true,
+                result: `App reloaded and reconnected to ${mainDevice.title}`
+            };
+        } else {
+            return {
+                success: true,
+                result: "App reloaded but could not auto-reconnect. Run 'scan_metro' to reconnect."
+            };
+        }
+    } catch (error) {
+        return {
+            success: true,
+            result: `App reloaded but auto-reconnect failed: ${error instanceof Error ? error.message : String(error)}. Run 'scan_metro' to reconnect.`
+        };
+    }
 }
