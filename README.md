@@ -17,7 +17,7 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 -   **Android device control** - screenshots, tap, swipe, text input, key events via ADB
 -   **iOS simulator control** - screenshots, app management, URL handling via simctl
 -   **iOS UI automation** - tap, swipe, text input, button presses via IDB (optional)
--   **iOS accessibility inspection** - get UI element tree and element info at coordinates via IDB
+-   **Element-based UI automation** - find and wait for elements by text/label without screenshots (faster, cheaper)
 
 ## Requirements
 
@@ -133,55 +133,35 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ### Android (ADB)
 
-| Tool                      | Description                                          |
-| ------------------------- | ---------------------------------------------------- |
-| `list_android_devices`    | List connected Android devices and emulators via ADB |
-| `android_screenshot`      | Take a screenshot from an Android device/emulator    |
-| `android_install_app`     | Install an APK on an Android device/emulator         |
-| `android_launch_app`      | Launch an app by package name                        |
-| `android_list_packages`   | List installed packages (with optional filter)       |
-| `android_tap`             | Tap at specific coordinates on screen                |
-| `android_long_press`      | Long press at specific coordinates                   |
-| `android_swipe`           | Swipe from one point to another                      |
-| `android_input_text`      | Type text at current focus point                     |
-| `android_key_event`       | Send key events (HOME, BACK, ENTER, etc.)            |
-| `android_get_screen_size` | Get device screen resolution                         |
-
-### Android Accessibility (UI Hierarchy)
-
-| Tool                    | Description                                           |
-| ----------------------- | ----------------------------------------------------- |
-| `android_describe_all`  | Get full UI hierarchy tree using uiautomator          |
-| `android_describe_point`| Get UI element info at specific coordinates           |
-| `android_tap_element`   | Tap element by text, content-desc, or resource-id     |
+| Tool                        | Description                                                   |
+| --------------------------- | ------------------------------------------------------------- |
+| `list_android_devices`      | List connected Android devices and emulators via ADB          |
+| `android_screenshot`        | Take a screenshot from an Android device/emulator             |
+| `android_install_app`       | Install an APK on an Android device/emulator                  |
+| `android_launch_app`        | Launch an app by package name                                 |
+| `android_list_packages`     | List installed packages (with optional filter)                |
+| `android_tap`               | Tap at specific coordinates on screen                         |
+| `android_long_press`        | Long press at specific coordinates                            |
+| `android_swipe`             | Swipe from one point to another                               |
+| `android_input_text`        | Type text at current focus point                              |
+| `android_key_event`         | Send key events (HOME, BACK, ENTER, etc.)                     |
+| `android_get_screen_size`   | Get device screen resolution                                  |
+| `android_find_element`      | Find element by text/contentDesc/resourceId (no screenshot)   |
+| `android_wait_for_element`  | Wait for element to appear (useful for screen transitions)    |
 
 ### iOS (Simulator)
 
-| Tool                  | Description                                 |
-| --------------------- | ------------------------------------------- |
-| `list_ios_simulators` | List available iOS simulators               |
-| `ios_screenshot`      | Take a screenshot from an iOS simulator     |
-| `ios_install_app`     | Install an app bundle (.app) on a simulator |
-| `ios_launch_app`      | Launch an app by bundle ID                  |
-| `ios_open_url`        | Open a URL (deep links or web URLs)         |
-| `ios_terminate_app`   | Terminate a running app                     |
-| `ios_boot_simulator`  | Boot a simulator by UDID                    |
-
-### iOS UI Interaction (requires IDB)
-
-These tools require [Facebook IDB](https://fbidb.io/) to be installed: `brew install idb-companion`
-
-| Tool                | Description                                           |
-| ------------------- | ----------------------------------------------------- |
-| `ios_tap`           | Tap at specific coordinates on screen                 |
-| `ios_tap_element`   | Tap an element by its accessibility label             |
-| `ios_swipe`         | Swipe from one point to another                       |
-| `ios_input_text`    | Type text into the active input field                 |
-| `ios_button`        | Press hardware buttons (HOME, LOCK, SIRI, etc.)       |
-| `ios_key_event`     | Send a key event by keycode                           |
-| `ios_key_sequence`  | Send multiple key events in sequence                  |
-| `ios_describe_all`  | Get accessibility tree for entire screen              |
-| `ios_describe_point`| Get accessibility info for element at specific point  |
+| Tool                    | Description                                                     |
+| ----------------------- | --------------------------------------------------------------- |
+| `list_ios_simulators`   | List available iOS simulators                                   |
+| `ios_screenshot`        | Take a screenshot from an iOS simulator                         |
+| `ios_install_app`       | Install an app bundle (.app) on a simulator                     |
+| `ios_launch_app`        | Launch an app by bundle ID                                      |
+| `ios_open_url`          | Open a URL (deep links or web URLs)                             |
+| `ios_terminate_app`     | Terminate a running app                                         |
+| `ios_boot_simulator`    | Boot a simulator by UDID                                        |
+| `ios_find_element`      | Find element by label/value (requires IDB, no screenshot)       |
+| `ios_wait_for_element`  | Wait for element to appear (requires IDB)                       |
 
 ## Usage
 
@@ -411,20 +391,6 @@ Set `awaitPromise=false` for synchronous execution only.
 
 ## Device Interaction
 
-> **💡 Best Practice: Use Element-Based Tapping**
->
-> Prefer `android_tap_element` and `ios_tap_element` over coordinate-based tapping (`android_tap`, `ios_tap`).
->
-> **Why?**
-> - More reliable - elements are found by text/label, not fragile coordinates
-> - Self-documenting - `tap_element(text="Settings")` is clearer than `tap(x=540, y=1200)`
-> - Resolution-independent - works across different screen sizes
->
-> **Workflow:**
-> 1. Use `android_describe_all` or `ios_describe_all` to see available elements
-> 2. Use `android_tap_element` or `ios_tap_element` to interact by text/label
-> 3. Fall back to coordinate-based tapping only when elements lack accessible text
-
 ### Android (requires ADB)
 
 List connected devices:
@@ -466,53 +432,6 @@ android_key_event with key="HOME"
 android_key_event with key="ENTER"
 ```
 
-### Android UI Automation (Accessibility)
-
-Get the full UI hierarchy:
-
-```
-android_describe_all
-```
-
-Example output:
-```
-[FrameLayout] frame=(0, 0, 1080x2340) tap=(540, 1170)
-  [LinearLayout] frame=(0, 63, 1080x147) tap=(540, 136)
-    [TextView] "Settings" frame=(48, 77, 200x63) tap=(148, 108)
-  [RecyclerView] frame=(0, 210, 1080x2130) tap=(540, 1275)
-    [Button] "Save" frame=(800, 2200, 200x80) tap=(900, 2240)
-```
-
-Get element info at coordinates:
-
-```
-android_describe_point with x=540 y=1170
-```
-
-Tap an element by text:
-
-```
-android_tap_element with text="Settings"
-```
-
-Tap using partial text match:
-
-```
-android_tap_element with textContains="Save"
-```
-
-Tap by resource ID:
-
-```
-android_tap_element with resourceId="save_button"
-```
-
-Tap by content description:
-
-```
-android_tap_element with contentDesc="Navigate up"
-```
-
 ### iOS Simulator (requires Xcode)
 
 List available simulators:
@@ -545,78 +464,91 @@ Open a deep link:
 ios_open_url with url="myapp://settings"
 ```
 
-### iOS UI Automation (requires IDB)
+## Efficient UI Automation (No Screenshots)
 
-Install IDB first: `brew install idb-companion`
+For action triggering without layout debugging, use element-based tools instead of screenshots. This is **2-3x faster** and uses fewer tokens.
 
-**Important: Coordinate System**
-- iOS IDB uses **points** (logical coordinates), not pixels
-- For 2x Retina displays: 1 point = 2 pixels
-- Example: 1640x2360 pixel screenshot = 820x1180 points
-- Use `ios_describe_all` to get exact element coordinates in points
-
-Tap on screen (coordinates in points):
+### Android - Find and Tap by Text
 
 ```
-ios_tap with x=200 y=400
+# Wait for screen to load
+android_wait_for_element with text="Login"
+
+# Find element (returns tap coordinates)
+android_find_element with textContains="submit"
+
+# Tap the element (use coordinates from find_element)
+android_tap with x=540 y=960
 ```
 
-Long press (hold for 2 seconds):
+Search options:
+- `text` - exact text match
+- `textContains` - partial text (case-insensitive)
+- `contentDesc` - accessibility content description
+- `contentDescContains` - partial content description
+- `resourceId` - resource ID (e.g., "button" or "com.app:id/button")
+
+### iOS - Find and Tap by Label (requires IDB)
+
+```bash
+# Install IDB first
+brew install idb-companion
+```
 
 ```
-ios_tap with x=200 y=400 duration=2
+# Wait for element
+ios_wait_for_element with label="Sign In"
+
+# Find element by partial label
+ios_find_element with labelContains="welcome"
 ```
 
-Swipe gesture:
+Search options:
+- `label` - exact accessibility label
+- `labelContains` - partial label (case-insensitive)
+- `value` - accessibility value
+- `valueContains` - partial value
+- `type` - element type (e.g., "Button", "TextField")
+
+### Wait for Screen Transitions
+
+Both platforms support waiting with timeout:
 
 ```
-ios_swipe with startX=200 startY=600 endX=200 endY=200
+android_wait_for_element with text="Dashboard" timeoutMs=15000 pollIntervalMs=500
+ios_wait_for_element with label="Home" timeoutMs=10000
 ```
 
-Type text (tap input field first):
+### Recommended Workflow (Priority Order)
+
+**Always try accessibility tools first, fall back to screenshots only when needed:**
+
+1. **Wait for screen** → Use `wait_for_element` with expected text/label
+2. **Find target** → Use `find_element` to get tap coordinates
+3. **Tap** → Use `tap` with coordinates from step 2
+4. **Fallback** → If element not in accessibility tree, use `screenshot`
 
 ```
-ios_tap with x=200 y=300
-ios_input_text with text="hello@example.com"
+# Example: Tap "Submit" button after screen loads
+android_wait_for_element with text="Submit"     # Step 1: Wait
+android_find_element with text="Submit"         # Step 2: Find (returns center coordinates)
+android_tap with x=540 y=1200                   # Step 3: Tap (use returned coordinates)
 ```
 
-Press hardware buttons:
+**Why this order?**
+- `find_element`: ~100-200 tokens, <100ms
+- `screenshot`: ~400-500 tokens, 200-500ms
 
-```
-ios_button with button="HOME"
-ios_button with button="LOCK"
-ios_button with button="SIRI"
-```
+### When to Use Screenshots vs Element Tools
 
-Get accessibility info for the screen:
-
-```
-ios_describe_all
-```
-
-Get accessibility info at a specific point:
-
-```
-ios_describe_point with x=200 y=400
-```
-
-Tap an element by accessibility label:
-
-```
-ios_tap_element with label="Settings"
-```
-
-Tap using partial label match:
-
-```
-ios_tap_element with labelContains="Sign"
-```
-
-When multiple elements match, use index (0-based):
-
-```
-ios_tap_element with labelContains="Button" index=1
-```
+| Use Case | Recommended Tool |
+|----------|------------------|
+| Trigger button taps | `find_element` + `tap` |
+| Wait for screen load | `wait_for_element` |
+| Navigate through flow | `wait_for_element` + `tap` |
+| Debug layout issues | `screenshot` |
+| Verify visual appearance | `screenshot` |
+| Find elements without labels | `screenshot` |
 
 ## Supported React Native Versions
 

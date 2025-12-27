@@ -780,6 +780,343 @@ export async function androidKeyEvent(
     }
 }
 
+// ============================================================================
+// UI Accessibility Functions (Element Finding)
+// ============================================================================
+
+/**
+ * UI Element from accessibility tree
+ */
+export interface AndroidUIElement {
+    text: string;
+    contentDesc: string;
+    resourceId: string;
+    className: string;
+    bounds: {
+        left: number;
+        top: number;
+        right: number;
+        bottom: number;
+        width: number;
+        height: number;
+    };
+    center: { x: number; y: number };
+    clickable: boolean;
+    enabled: boolean;
+    focused: boolean;
+    scrollable: boolean;
+    selected: boolean;
+}
+
+/**
+ * Result of element find operations
+ */
+export interface FindElementResult {
+    success: boolean;
+    found: boolean;
+    element?: AndroidUIElement;
+    allMatches?: AndroidUIElement[];
+    matchCount?: number;
+    error?: string;
+}
+
+/**
+ * Result of wait for element operations
+ */
+export interface WaitForElementResult extends FindElementResult {
+    elapsedMs?: number;
+    timedOut?: boolean;
+}
+
+/**
+ * Options for finding elements
+ */
+export interface FindElementOptions {
+    text?: string;
+    textContains?: string;
+    contentDesc?: string;
+    contentDescContains?: string;
+    resourceId?: string;
+    index?: number;
+}
+
+/**
+ * Parse bounds string like "[0,0][1080,1920]" to AndroidUIElement bounds
+ */
+function parseBoundsForUIElement(boundsStr: string): AndroidUIElement["bounds"] | null {
+    const match = boundsStr.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
+    if (!match) return null;
+
+    const left = parseInt(match[1], 10);
+    const top = parseInt(match[2], 10);
+    const right = parseInt(match[3], 10);
+    const bottom = parseInt(match[4], 10);
+
+    return {
+        left,
+        top,
+        right,
+        bottom,
+        width: right - left,
+        height: bottom - top
+    };
+}
+
+/**
+ * Parse uiautomator XML dump into element array
+ */
+function parseUIAutomatorXML(xml: string): AndroidUIElement[] {
+    const elements: AndroidUIElement[] = [];
+
+    // Match all node elements with their attributes
+    const nodeRegex = /<node\s+([^>]+)\/?>|<node\s+([^>]+)>/g;
+    let match;
+
+    while ((match = nodeRegex.exec(xml)) !== null) {
+        const attrStr = match[1] || match[2];
+        if (!attrStr) continue;
+
+        // Extract attributes
+        const getAttr = (name: string): string => {
+            const attrMatch = attrStr.match(new RegExp(`${name}="([^"]*)"`));
+            return attrMatch ? attrMatch[1] : "";
+        };
+
+        const boundsStr = getAttr("bounds");
+        const bounds = parseBoundsForUIElement(boundsStr);
+        if (!bounds) continue;
+
+        const element: AndroidUIElement = {
+            text: getAttr("text"),
+            contentDesc: getAttr("content-desc"),
+            resourceId: getAttr("resource-id"),
+            className: getAttr("class"),
+            bounds,
+            center: {
+                x: Math.round((bounds.left + bounds.right) / 2),
+                y: Math.round((bounds.top + bounds.bottom) / 2)
+            },
+            clickable: getAttr("clickable") === "true",
+            enabled: getAttr("enabled") === "true",
+            focused: getAttr("focused") === "true",
+            scrollable: getAttr("scrollable") === "true",
+            selected: getAttr("selected") === "true"
+        };
+
+        elements.push(element);
+    }
+
+    return elements;
+}
+
+/**
+ * Match element against find options
+ */
+function matchesElement(element: AndroidUIElement, options: FindElementOptions): boolean {
+    if (options.text !== undefined) {
+        if (element.text !== options.text) return false;
+    }
+    if (options.textContains !== undefined) {
+        if (!element.text.toLowerCase().includes(options.textContains.toLowerCase())) return false;
+    }
+    if (options.contentDesc !== undefined) {
+        if (element.contentDesc !== options.contentDesc) return false;
+    }
+    if (options.contentDescContains !== undefined) {
+        if (!element.contentDesc.toLowerCase().includes(options.contentDescContains.toLowerCase())) return false;
+    }
+    if (options.resourceId !== undefined) {
+        // Support both full "com.app:id/button" and short "button" forms
+        const shortId = element.resourceId.split("/").pop() || "";
+        if (element.resourceId !== options.resourceId && shortId !== options.resourceId) return false;
+    }
+    return true;
+}
+
+/**
+ * Get UI accessibility tree from Android device using uiautomator
+ */
+export async function androidGetUITree(deviceId?: string): Promise<{
+    success: boolean;
+    elements?: AndroidUIElement[];
+    rawXml?: string;
+    error?: string;
+}> {
+    try {
+        const adbAvailable = await isAdbAvailable();
+        if (!adbAvailable) {
+            return {
+                success: false,
+                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+            };
+        }
+
+        const deviceArg = buildDeviceArg(deviceId);
+        const device = deviceId || (await getDefaultAndroidDevice());
+
+        if (!device) {
+            return {
+                success: false,
+                error: "No Android device connected. Connect a device or start an emulator."
+            };
+        }
+
+        // Dump UI hierarchy to device
+        const remotePath = "/sdcard/ui_dump.xml";
+        await execAsync(`adb ${deviceArg} shell uiautomator dump ${remotePath}`, {
+            timeout: ADB_TIMEOUT
+        });
+
+        // Read the XML content
+        const { stdout } = await execAsync(`adb ${deviceArg} shell cat ${remotePath}`, {
+            timeout: ADB_TIMEOUT
+        });
+
+        // Clean up remote file
+        await execAsync(`adb ${deviceArg} shell rm ${remotePath}`, {
+            timeout: ADB_TIMEOUT
+        }).catch(() => {});
+
+        const elements = parseUIAutomatorXML(stdout);
+
+        return {
+            success: true,
+            elements,
+            rawXml: stdout
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to get UI tree: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Find element(s) in the UI tree matching the given criteria
+ */
+export async function androidFindElement(
+    options: FindElementOptions,
+    deviceId?: string
+): Promise<FindElementResult> {
+    try {
+        // Validate that at least one search criteria is provided
+        if (!options.text && !options.textContains && !options.contentDesc &&
+            !options.contentDescContains && !options.resourceId) {
+            return {
+                success: false,
+                found: false,
+                error: "At least one search criteria (text, textContains, contentDesc, contentDescContains, or resourceId) must be provided"
+            };
+        }
+
+        const treeResult = await androidGetUITree(deviceId);
+        if (!treeResult.success || !treeResult.elements) {
+            return {
+                success: false,
+                found: false,
+                error: treeResult.error
+            };
+        }
+
+        // Find matching elements
+        const matches = treeResult.elements.filter(el => matchesElement(el, options));
+
+        if (matches.length === 0) {
+            return {
+                success: true,
+                found: false,
+                matchCount: 0
+            };
+        }
+
+        // Select the element at the specified index (default 0)
+        const index = options.index ?? 0;
+        const selectedElement = matches[index];
+
+        if (!selectedElement) {
+            return {
+                success: true,
+                found: false,
+                matchCount: matches.length,
+                error: `Index ${index} out of bounds. Found ${matches.length} matching element(s).`
+            };
+        }
+
+        return {
+            success: true,
+            found: true,
+            element: selectedElement,
+            allMatches: matches,
+            matchCount: matches.length
+        };
+    } catch (error) {
+        return {
+            success: false,
+            found: false,
+            error: `Failed to find element: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Wait for element to appear on screen with polling
+ */
+export async function androidWaitForElement(
+    options: FindElementOptions & {
+        timeoutMs?: number;
+        pollIntervalMs?: number;
+    },
+    deviceId?: string
+): Promise<WaitForElementResult> {
+    const timeoutMs = options.timeoutMs ?? 10000;
+    const pollIntervalMs = options.pollIntervalMs ?? 500;
+    const startTime = Date.now();
+
+    // Validate that at least one search criteria is provided
+    if (!options.text && !options.textContains && !options.contentDesc &&
+        !options.contentDescContains && !options.resourceId) {
+        return {
+            success: false,
+            found: false,
+            timedOut: false,
+            error: "At least one search criteria (text, textContains, contentDesc, contentDescContains, or resourceId) must be provided"
+        };
+    }
+
+    while (Date.now() - startTime < timeoutMs) {
+        const result = await androidFindElement(options, deviceId);
+
+        if (result.found && result.element) {
+            return {
+                ...result,
+                elapsedMs: Date.now() - startTime,
+                timedOut: false
+            };
+        }
+
+        // If there was an error (not just "not found"), return it
+        if (!result.success) {
+            return {
+                ...result,
+                elapsedMs: Date.now() - startTime,
+                timedOut: false
+            };
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    return {
+        success: true,
+        found: false,
+        elapsedMs: Date.now() - startTime,
+        timedOut: true,
+        error: `Timed out after ${timeoutMs}ms waiting for element`
+    };
+}
+
 /**
  * Get device screen size
  */

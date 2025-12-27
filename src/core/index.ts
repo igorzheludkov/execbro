@@ -61,11 +61,22 @@ export {
     // Accessibility (UI Hierarchy)
     androidDescribeAll,
     androidDescribePoint,
-    androidTapElement
+    androidTapElement,
+    // UI Accessibility (Element Finding)
+    androidGetUITree,
+    androidFindElement,
+    androidWaitForElement
 } from "./android.js";
 
 // Android types
-export type { AndroidAccessibilityElement, AndroidDescribeResult } from "./android.js";
+export type {
+    AndroidAccessibilityElement,
+    AndroidDescribeResult,
+    AndroidUIElement,
+    FindElementResult,
+    WaitForElementResult,
+    FindElementOptions
+} from "./android.js";
 
 // iOS (simctl + IDB)
 export {
@@ -90,11 +101,23 @@ export {
     iosKeySequence,
     iosDescribeAll,
     iosDescribePoint,
-    IOS_BUTTON_TYPES
+    IOS_BUTTON_TYPES,
+    // UI Accessibility (Element Finding) - Requires IDB
+    iosGetUITree,
+    iosFindElement,
+    iosWaitForElement
 } from "./ios.js";
 
 // iOS types
-export type { iOSButtonType, iOSAccessibilityElement, iOSDescribeResult } from "./ios.js";
+export type {
+    iOSButtonType,
+    iOSAccessibilityElement,
+    iOSDescribeResult,
+    IOSUIElement,
+    IOSFindElementResult,
+    IOSWaitForElementResult,
+    IOSFindElementOptions
+} from "./ios.js";
 
 // Bundle (Metro build errors)
 export {

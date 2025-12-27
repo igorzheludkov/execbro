@@ -45,6 +45,9 @@ import {
     androidDescribeAll,
     androidDescribePoint,
     androidTapElement,
+    // Android Element Finding (no screenshots)
+    androidFindElement,
+    androidWaitForElement,
     // iOS
     listIOSSimulators,
     iosScreenshot,
@@ -64,6 +67,9 @@ import {
     iosDescribeAll,
     iosDescribePoint,
     IOS_BUTTON_TYPES,
+    // iOS Element Finding (no screenshots)
+    iosFindElement,
+    iosWaitForElement,
     // Debug HTTP Server
     startDebugHttpServer,
     getDebugServerPort
@@ -1208,6 +1214,181 @@ server.registerTool(
     }
 );
 
+// Tool: Android find element (no screenshot needed)
+server.registerTool(
+    "android_find_element",
+    {
+        description:
+            "Find a UI element on Android screen by text, content description, or resource ID. Returns element details including tap coordinates. Use this to check if an element exists without tapping it. Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
+        inputSchema: {
+            text: z.string().optional().describe("Exact text match for the element"),
+            textContains: z
+                .string()
+                .optional()
+                .describe("Partial text match (case-insensitive)"),
+            contentDesc: z.string().optional().describe("Exact content-description match"),
+            contentDescContains: z
+                .string()
+                .optional()
+                .describe("Partial content-description match (case-insensitive)"),
+            resourceId: z
+                .string()
+                .optional()
+                .describe("Resource ID match (e.g., 'com.app:id/button' or just 'button')"),
+            index: z
+                .number()
+                .optional()
+                .describe("If multiple elements match, select the nth one (0-indexed, default: 0)"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({ text, textContains, contentDesc, contentDescContains, resourceId, index, deviceId }) => {
+        const result = await androidFindElement(
+            { text, textContains, contentDesc, contentDescContains, resourceId, index },
+            deviceId
+        );
+
+        if (!result.success) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true
+            };
+        }
+
+        if (!result.found) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.error || "Element not found"
+                    }
+                ]
+            };
+        }
+
+        const el = result.element!;
+        const info = [
+            `Found element (${result.matchCount} match${result.matchCount! > 1 ? "es" : ""})`,
+            `  Text: "${el.text}"`,
+            `  Content-desc: "${el.contentDesc}"`,
+            `  Resource ID: "${el.resourceId}"`,
+            `  Class: ${el.className}`,
+            `  Bounds: [${el.bounds.left},${el.bounds.top}][${el.bounds.right},${el.bounds.bottom}]`,
+            `  Center (tap coords): (${el.center.x}, ${el.center.y})`,
+            `  Clickable: ${el.clickable}, Enabled: ${el.enabled}`
+        ].join("\n");
+
+        return {
+            content: [{ type: "text", text: info }]
+        };
+    }
+);
+
+// Tool: Android wait for element
+server.registerTool(
+    "android_wait_for_element",
+    {
+        description:
+            "Wait for a UI element to appear on Android screen. Polls the accessibility tree until the element is found or timeout is reached. Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
+        inputSchema: {
+            text: z.string().optional().describe("Exact text match for the element"),
+            textContains: z
+                .string()
+                .optional()
+                .describe("Partial text match (case-insensitive)"),
+            contentDesc: z.string().optional().describe("Exact content-description match"),
+            contentDescContains: z
+                .string()
+                .optional()
+                .describe("Partial content-description match (case-insensitive)"),
+            resourceId: z
+                .string()
+                .optional()
+                .describe("Resource ID match (e.g., 'com.app:id/button' or just 'button')"),
+            index: z
+                .number()
+                .optional()
+                .describe("If multiple elements match, select the nth one (0-indexed, default: 0)"),
+            timeoutMs: z
+                .number()
+                .optional()
+                .default(10000)
+                .describe("Maximum time to wait in milliseconds (default: 10000)"),
+            pollIntervalMs: z
+                .number()
+                .optional()
+                .default(500)
+                .describe("Time between polls in milliseconds (default: 500)"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID. Uses first available device if not specified.")
+        }
+    },
+    async ({
+        text,
+        textContains,
+        contentDesc,
+        contentDescContains,
+        resourceId,
+        index,
+        timeoutMs,
+        pollIntervalMs,
+        deviceId
+    }) => {
+        const result = await androidWaitForElement(
+            {
+                text,
+                textContains,
+                contentDesc,
+                contentDescContains,
+                resourceId,
+                index,
+                timeoutMs,
+                pollIntervalMs
+            },
+            deviceId
+        );
+
+        if (!result.success) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true
+            };
+        }
+
+        if (!result.found) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.timedOut
+                            ? `Timed out after ${result.elapsedMs}ms - element not found`
+                            : result.error || "Element not found"
+                    }
+                ]
+            };
+        }
+
+        const el = result.element!;
+        const info = [
+            `Element found after ${result.elapsedMs}ms`,
+            `  Text: "${el.text}"`,
+            `  Content-desc: "${el.contentDesc}"`,
+            `  Resource ID: "${el.resourceId}"`,
+            `  Center (tap coords): (${el.center.x}, ${el.center.y})`,
+            `  Clickable: ${el.clickable}, Enabled: ${el.enabled}`
+        ].join("\n");
+
+        return {
+            content: [{ type: "text", text: info }]
+        };
+    }
+);
+
 // ============================================================================
 // iOS Simulator Tools
 // ============================================================================
@@ -1743,6 +1924,180 @@ server.registerTool(
                 }
             ],
             isError: !result.success
+        };
+    }
+);
+
+// Tool: iOS find element (no screenshot needed)
+server.registerTool(
+    "ios_find_element",
+    {
+        description:
+            "Find a UI element on iOS simulator by accessibility label or value. Returns element details including tap coordinates. Requires IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
+        inputSchema: {
+            label: z.string().optional().describe("Exact accessibility label match"),
+            labelContains: z
+                .string()
+                .optional()
+                .describe("Partial label match (case-insensitive)"),
+            value: z.string().optional().describe("Exact accessibility value match"),
+            valueContains: z
+                .string()
+                .optional()
+                .describe("Partial value match (case-insensitive)"),
+            type: z
+                .string()
+                .optional()
+                .describe("Element type to match (e.g., 'Button', 'TextField')"),
+            index: z
+                .number()
+                .optional()
+                .describe("If multiple elements match, select the nth one (0-indexed, default: 0)"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({ label, labelContains, value, valueContains, type, index, udid }) => {
+        const result = await iosFindElement(
+            { label, labelContains, value, valueContains, type, index },
+            udid
+        );
+
+        if (!result.success) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true
+            };
+        }
+
+        if (!result.found) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.error || "Element not found"
+                    }
+                ]
+            };
+        }
+
+        const el = result.element!;
+        const info = [
+            `Found element (${result.matchCount} match${result.matchCount! > 1 ? "es" : ""})`,
+            `  Label: "${el.label}"`,
+            `  Value: "${el.value}"`,
+            `  Type: ${el.type}`,
+            `  Frame: {x: ${el.frame.x}, y: ${el.frame.y}, w: ${el.frame.width}, h: ${el.frame.height}}`,
+            `  Center (tap coords): (${el.center.x}, ${el.center.y})`,
+            `  Enabled: ${el.enabled}`
+        ].join("\n");
+
+        return {
+            content: [{ type: "text", text: info }]
+        };
+    }
+);
+
+// Tool: iOS wait for element
+server.registerTool(
+    "ios_wait_for_element",
+    {
+        description:
+            "Wait for a UI element to appear on iOS simulator. Polls until found or timeout. Requires IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
+        inputSchema: {
+            label: z.string().optional().describe("Exact accessibility label match"),
+            labelContains: z
+                .string()
+                .optional()
+                .describe("Partial label match (case-insensitive)"),
+            value: z.string().optional().describe("Exact accessibility value match"),
+            valueContains: z
+                .string()
+                .optional()
+                .describe("Partial value match (case-insensitive)"),
+            type: z
+                .string()
+                .optional()
+                .describe("Element type to match (e.g., 'Button', 'TextField')"),
+            index: z
+                .number()
+                .optional()
+                .describe("If multiple elements match, select the nth one (0-indexed, default: 0)"),
+            timeoutMs: z
+                .number()
+                .optional()
+                .default(10000)
+                .describe("Maximum time to wait in milliseconds (default: 10000)"),
+            pollIntervalMs: z
+                .number()
+                .optional()
+                .default(500)
+                .describe("Time between polls in milliseconds (default: 500)"),
+            udid: z
+                .string()
+                .optional()
+                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+        }
+    },
+    async ({
+        label,
+        labelContains,
+        value,
+        valueContains,
+        type,
+        index,
+        timeoutMs,
+        pollIntervalMs,
+        udid
+    }) => {
+        const result = await iosWaitForElement(
+            {
+                label,
+                labelContains,
+                value,
+                valueContains,
+                type,
+                index,
+                timeoutMs,
+                pollIntervalMs
+            },
+            udid
+        );
+
+        if (!result.success) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true
+            };
+        }
+
+        if (!result.found) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.timedOut
+                            ? `Timed out after ${result.elapsedMs}ms - element not found`
+                            : result.error || "Element not found"
+                    }
+                ]
+            };
+        }
+
+        const el = result.element!;
+        const info = [
+            `Element found after ${result.elapsedMs}ms`,
+            `  Label: "${el.label}"`,
+            `  Value: "${el.value}"`,
+            `  Type: ${el.type}`,
+            `  Center (tap coords): (${el.center.x}, ${el.center.y})`,
+            `  Enabled: ${el.enabled}`
+        ].join("\n");
+
+        return {
+            content: [{ type: "text", text: info }]
         };
     }
 );

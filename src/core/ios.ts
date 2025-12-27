@@ -1145,3 +1145,303 @@ export async function iosTapElement(
         };
     }
 }
+
+// ============================================================================
+// Element Finding Functions (for efficient UI automation without screenshots)
+// ============================================================================
+
+/**
+ * UI Element from iOS accessibility tree (simplified for find_element)
+ */
+export interface IOSUIElement {
+    label: string;
+    value: string;
+    type: string;
+    frame: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+    center: { x: number; y: number };
+    enabled: boolean;
+    traits: string[];
+}
+
+/**
+ * Result of iOS element find operations
+ */
+export interface IOSFindElementResult {
+    success: boolean;
+    found: boolean;
+    element?: IOSUIElement;
+    allMatches?: IOSUIElement[];
+    matchCount?: number;
+    error?: string;
+}
+
+/**
+ * Result of iOS wait for element operations
+ */
+export interface IOSWaitForElementResult extends IOSFindElementResult {
+    elapsedMs?: number;
+    timedOut?: boolean;
+}
+
+/**
+ * Options for finding iOS elements
+ */
+export interface IOSFindElementOptions {
+    label?: string;
+    labelContains?: string;
+    value?: string;
+    valueContains?: string;
+    type?: string;
+    index?: number;
+}
+
+/**
+ * Parse IDB accessibility output into simplified element array
+ */
+function parseIdbAccessibilityForFindElement(output: string): IOSUIElement[] {
+    const elements: IOSUIElement[] = [];
+
+    try {
+        const data = JSON.parse(output);
+
+        const extractElements = (node: Record<string, unknown>): void => {
+            const frame = node.frame as { x: number; y: number; width: number; height: number } | undefined;
+
+            if (frame) {
+                const element: IOSUIElement = {
+                    label: (node.AXLabel as string) || (node.label as string) || "",
+                    value: (node.AXValue as string) || (node.value as string) || "",
+                    type: (node.type as string) || (node.AXType as string) || "",
+                    frame: {
+                        x: frame.x || 0,
+                        y: frame.y || 0,
+                        width: frame.width || 0,
+                        height: frame.height || 0
+                    },
+                    center: {
+                        x: Math.round((frame.x || 0) + (frame.width || 0) / 2),
+                        y: Math.round((frame.y || 0) + (frame.height || 0) / 2)
+                    },
+                    enabled: (node.enabled as boolean) !== false,
+                    traits: (node.traits as string[]) || []
+                };
+
+                if (element.label || element.value || element.type) {
+                    elements.push(element);
+                }
+            }
+
+            const children = node.children as Record<string, unknown>[] | undefined;
+            if (children && Array.isArray(children)) {
+                for (const child of children) {
+                    extractElements(child);
+                }
+            }
+        };
+
+        if (Array.isArray(data)) {
+            for (const item of data) {
+                extractElements(item as Record<string, unknown>);
+            }
+        } else {
+            extractElements(data as Record<string, unknown>);
+        }
+    } catch {
+        // If JSON parsing fails, return empty array
+    }
+
+    return elements;
+}
+
+/**
+ * Match iOS element against find options
+ */
+function matchesIOSFindElement(element: IOSUIElement, options: IOSFindElementOptions): boolean {
+    if (options.label !== undefined) {
+        if (element.label !== options.label) return false;
+    }
+    if (options.labelContains !== undefined) {
+        if (!element.label.toLowerCase().includes(options.labelContains.toLowerCase())) return false;
+    }
+    if (options.value !== undefined) {
+        if (element.value !== options.value) return false;
+    }
+    if (options.valueContains !== undefined) {
+        if (!element.value.toLowerCase().includes(options.valueContains.toLowerCase())) return false;
+    }
+    if (options.type !== undefined) {
+        if (!element.type.toLowerCase().includes(options.type.toLowerCase())) return false;
+    }
+    return true;
+}
+
+/**
+ * Get UI accessibility tree from iOS simulator using IDB (for find_element)
+ */
+export async function iosGetUITree(udid?: string): Promise<{
+    success: boolean;
+    elements?: IOSUIElement[];
+    rawOutput?: string;
+    error?: string;
+}> {
+    try {
+        const idbAvailable = await isIdbAvailable();
+        if (!idbAvailable) {
+            return {
+                success: false,
+                error: "IDB is not installed. Install with: brew install idb-companion"
+            };
+        }
+
+        const targetUdid = udid || (await getBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
+        }
+
+        const connectResult = await ensureIdbConnected(targetUdid);
+        if (!connectResult.success) {
+            return { success: false, error: connectResult.error };
+        }
+
+        const { stdout } = await runIdb("ui", "describe-all", "--udid", targetUdid);
+        const elements = parseIdbAccessibilityForFindElement(stdout);
+
+        return {
+            success: true,
+            elements,
+            rawOutput: stdout
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to get UI tree: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Find element(s) in the iOS UI tree matching the given criteria
+ */
+export async function iosFindElement(
+    options: IOSFindElementOptions,
+    udid?: string
+): Promise<IOSFindElementResult> {
+    try {
+        if (!options.label && !options.labelContains && !options.value &&
+            !options.valueContains && !options.type) {
+            return {
+                success: false,
+                found: false,
+                error: "At least one search criteria (label, labelContains, value, valueContains, or type) must be provided"
+            };
+        }
+
+        const treeResult = await iosGetUITree(udid);
+        if (!treeResult.success || !treeResult.elements) {
+            return {
+                success: false,
+                found: false,
+                error: treeResult.error
+            };
+        }
+
+        const matches = treeResult.elements.filter(el => matchesIOSFindElement(el, options));
+
+        if (matches.length === 0) {
+            return {
+                success: true,
+                found: false,
+                matchCount: 0
+            };
+        }
+
+        const index = options.index ?? 0;
+        const selectedElement = matches[index];
+
+        if (!selectedElement) {
+            return {
+                success: true,
+                found: false,
+                matchCount: matches.length,
+                error: `Index ${index} out of bounds. Found ${matches.length} matching element(s).`
+            };
+        }
+
+        return {
+            success: true,
+            found: true,
+            element: selectedElement,
+            allMatches: matches,
+            matchCount: matches.length
+        };
+    } catch (error) {
+        return {
+            success: false,
+            found: false,
+            error: `Failed to find element: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Wait for element to appear on iOS screen with polling
+ */
+export async function iosWaitForElement(
+    options: IOSFindElementOptions & {
+        timeoutMs?: number;
+        pollIntervalMs?: number;
+    },
+    udid?: string
+): Promise<IOSWaitForElementResult> {
+    const timeoutMs = options.timeoutMs ?? 10000;
+    const pollIntervalMs = options.pollIntervalMs ?? 500;
+    const startTime = Date.now();
+
+    if (!options.label && !options.labelContains && !options.value &&
+        !options.valueContains && !options.type) {
+        return {
+            success: false,
+            found: false,
+            timedOut: false,
+            error: "At least one search criteria (label, labelContains, value, valueContains, or type) must be provided"
+        };
+    }
+
+    while (Date.now() - startTime < timeoutMs) {
+        const result = await iosFindElement(options, udid);
+
+        if (result.found && result.element) {
+            return {
+                ...result,
+                elapsedMs: Date.now() - startTime,
+                timedOut: false
+            };
+        }
+
+        if (!result.success) {
+            return {
+                ...result,
+                elapsedMs: Date.now() - startTime,
+                timedOut: false
+            };
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    return {
+        success: true,
+        found: false,
+        elapsedMs: Date.now() - startTime,
+        timedOut: true,
+        error: `Timed out after ${timeoutMs}ms waiting for element`
+    };
+}
