@@ -4,6 +4,10 @@ import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
 import { getFirstConnectedApp, connectToDevice } from "./connection.js";
 import { fetchDevices, selectMainDevice } from "./metro.js";
 
+// Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
+// In Hermes, globalThis is the standard way to access global scope
+const GLOBAL_POLYFILL = `var global = typeof global !== 'undefined' ? global : globalThis;`;
+
 // Execute JavaScript in the connected React Native app
 export async function executeInApp(
     expression: string,
@@ -22,6 +26,9 @@ export async function executeInApp(
     const TIMEOUT_MS = 10000;
     const currentMessageId = getNextMessageId();
 
+    // Wrap expression with global polyfill for Hermes compatibility
+    const wrappedExpression = `(function() { ${GLOBAL_POLYFILL} return (${expression}); })()`;
+
     return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
             pendingExecutions.delete(currentMessageId);
@@ -35,7 +42,7 @@ export async function executeInApp(
                 id: currentMessageId,
                 method: "Runtime.evaluate",
                 params: {
-                    expression,
+                    expression: wrappedExpression,
                     returnByValue: true,
                     awaitPromise,
                     userGesture: true,

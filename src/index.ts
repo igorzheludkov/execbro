@@ -326,7 +326,7 @@ server.registerTool(
     "execute_in_app",
     {
         description:
-            "Execute JavaScript code in the connected React Native app and return the result. Use this for REPL-style interactions, inspecting app state, or running diagnostic code.",
+            "Execute JavaScript code in the connected React Native app and return the result. Use this for REPL-style interactions, inspecting app state, or running diagnostic code. Hermes compatible: 'global' is automatically polyfilled to 'globalThis', so both global.__REDUX_STORE__ and globalThis.__REDUX_STORE__ work.",
         inputSchema: {
             expression: z.string().describe("JavaScript expression to execute in the app"),
             awaitPromise: z.boolean().optional().default(true).describe("Whether to await promises (default: true)")
