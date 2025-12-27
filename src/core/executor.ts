@@ -91,46 +91,39 @@ export async function inspectGlobal(objectName: string): Promise<ExecutionResult
     return executeInApp(expression, false);
 }
 
-// Reload the React Native app
+// Reload the React Native app using __ReactRefresh (Page.reload is not supported by Hermes)
 export async function reloadApp(): Promise<ExecutionResult> {
-    const app = getFirstConnectedApp();
-
-    if (!app) {
-        return { success: false, error: "No apps connected. Run 'scan_metro' first." };
-    }
-
-    if (app.ws.readyState !== WebSocket.OPEN) {
-        return { success: false, error: "WebSocket connection is not open." };
-    }
-
-    const TIMEOUT_MS = 5000;
-    const currentMessageId = getNextMessageId();
-
-    return new Promise((resolve) => {
-        const timeoutId = setTimeout(() => {
-            pendingExecutions.delete(currentMessageId);
-            // Timeout is actually expected - the app reloads and connection may drop
-            resolve({ success: true, result: "Reload command sent (app is reloading)" });
-        }, TIMEOUT_MS);
-
-        pendingExecutions.set(currentMessageId, {
-            resolve: (result) => {
-                clearTimeout(timeoutId);
-                // Page.reload returns empty result on success, provide a friendly message
-                if (result.success && (!result.result || result.result === "undefined")) {
-                    resolve({ success: true, result: "App reload triggered successfully" });
-                } else {
-                    resolve(result);
+    // Use __ReactRefresh.performFullRefresh() which is available in Metro bundler dev mode
+    // This works with Hermes unlike the CDP Page.reload method
+    const expression = `
+        (function() {
+            try {
+                // Use React Refresh's full refresh - most reliable method
+                if (typeof __ReactRefresh !== 'undefined' && typeof __ReactRefresh.performFullRefresh === 'function') {
+                    __ReactRefresh.performFullRefresh('mcp-reload');
+                    return 'Reload triggered via __ReactRefresh.performFullRefresh';
                 }
-            },
-            timeoutId
-        });
+                // Fallback: Try DevSettings if available on global
+                if (typeof global !== 'undefined' && global.DevSettings && typeof global.DevSettings.reload === 'function') {
+                    global.DevSettings.reload();
+                    return 'Reload triggered via DevSettings';
+                }
+                return 'Reload not available - make sure app is in development mode with Metro bundler';
+            } catch (e) {
+                return 'Reload failed: ' + e.message;
+            }
+        })()
+    `;
 
-        app.ws.send(
-            JSON.stringify({
-                id: currentMessageId,
-                method: "Page.reload"
-            })
-        );
-    });
+    const result = await executeInApp(expression, false);
+
+    // After triggering reload, the connection may drop which is expected
+    if (result.success) {
+        return {
+            success: true,
+            result: result.result || "App reload triggered successfully"
+        };
+    }
+
+    return result;
 }
