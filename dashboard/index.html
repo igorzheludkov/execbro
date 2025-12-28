@@ -104,6 +104,7 @@
             padding: 24px;
             border: 1px solid #334155;
             overflow-x: auto;
+            margin-bottom: 24px;
         }
 
         .table-card h3 {
@@ -169,6 +170,24 @@
             margin-bottom: 24px;
         }
 
+        .tool-tag {
+            display: inline-block;
+            background: #334155;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 2px;
+            color: #e2e8f0;
+        }
+
+        code {
+            background: #334155;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
         .time-filter {
             display: flex;
             gap: 8px;
@@ -217,8 +236,8 @@
     </div>
 
     <div class="time-filter">
-        <button class="active" data-days="1">24 Hours</button>
-        <button data-days="7">7 Days</button>
+        <button data-days="1">24 Hours</button>
+        <button class="active" data-days="7">7 Days</button>
         <button data-days="30">30 Days</button>
         <button class="refresh-btn" onclick="loadData()">Refresh</button>
         <button class="refresh-btn" style="background: #64748b;" onclick="resetKey()">Reset Key</button>
@@ -234,6 +253,16 @@
         <div class="stat-card">
             <div class="label">Unique Installations</div>
             <div class="value" id="unique-installs">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Active Users</div>
+            <div class="value" id="active-users">-</div>
+            <div class="change" id="active-users-detail"></div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Inactive Users</div>
+            <div class="value" id="inactive-users">-</div>
+            <div class="change" id="inactive-users-detail"></div>
         </div>
         <div class="stat-card">
             <div class="label">Success Rate</div>
@@ -258,6 +287,12 @@
                 <canvas id="timelineChart"></canvas>
             </div>
         </div>
+        <div class="chart-card">
+            <h3>User Activity</h3>
+            <div class="chart-container">
+                <canvas id="userActivityChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <div class="table-card">
@@ -277,13 +312,47 @@
         </table>
     </div>
 
+    <div class="table-card">
+        <h3>Users Activity (5+ calls/week = Active)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>User ID</th>
+                    <th>Total Calls</th>
+                    <th>Calls/Week</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="users-activity-table">
+                <tr><td colspan="4" class="loading">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="table-card">
+        <h3>Tools Usage by User</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>User ID</th>
+                    <th>Total Calls</th>
+                    <th>Top Tools</th>
+                </tr>
+            </thead>
+            <tbody id="user-tools-table">
+                <tr><td colspan="3" class="loading">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
     <script>
         // Configuration
         const API_URL = 'https://rn-debugger-telemetry.500griven.workers.dev';
 
         let toolUsageChart = null;
         let timelineChart = null;
-        let selectedDays = 1;
+        let userActivityChart = null;
+        let selectedDays = 7;
         let dashboardKey = localStorage.getItem('dashboardKey') || '';
 
         // Prompt for key if not set
@@ -338,14 +407,32 @@
             document.getElementById('success-rate').textContent = `${(data.successRate || 0).toFixed(1)}%`;
             document.getElementById('avg-duration').textContent = `${(data.avgDuration || 0).toFixed(0)}ms`;
 
+            // Update active/inactive user stats
+            const userActivity = data.userActivity || { activeUsers: 0, inactiveUsers: 0 };
+            document.getElementById('active-users').textContent = userActivity.activeUsers.toLocaleString();
+            document.getElementById('inactive-users').textContent = userActivity.inactiveUsers.toLocaleString();
+            document.getElementById('active-users-detail').textContent = `5+ calls/week`;
+            document.getElementById('active-users-detail').className = 'change positive';
+            document.getElementById('inactive-users-detail').textContent = `<5 calls/week`;
+            document.getElementById('inactive-users-detail').className = 'change negative';
+
             // Update tool usage chart
             updateToolUsageChart(data.toolBreakdown || []);
 
             // Update timeline chart
             updateTimelineChart(data.timeline || []);
 
+            // Update user activity pie chart
+            updateUserActivityChart(userActivity);
+
             // Update tools table
             updateToolsTable(data.toolBreakdown || []);
+
+            // Update users activity table
+            updateUsersActivityTable(userActivity.users || []);
+
+            // Update user tools table
+            updateUserToolsTable(data.userToolsBreakdown || []);
         }
 
         function updateToolUsageChart(toolData) {
@@ -450,6 +537,102 @@
                     <td>${tool.avgDuration.toFixed(0)}ms</td>
                 </tr>
             `).join('');
+        }
+
+        function updateUserActivityChart(activityData) {
+            const ctx = document.getElementById('userActivityChart').getContext('2d');
+
+            if (userActivityChart) {
+                userActivityChart.destroy();
+            }
+
+            const active = activityData.activeUsers || 0;
+            const inactive = activityData.inactiveUsers || 0;
+
+            if (active === 0 && inactive === 0) {
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#94a3b8';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data available', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+
+            userActivityChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Active Users', 'Inactive Users'],
+                    datasets: [{
+                        data: [active, inactive],
+                        backgroundColor: ['#4ade80', '#f87171'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: '#94a3b8' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateUsersActivityTable(users) {
+            const tbody = document.getElementById('users-activity-table');
+
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="loading">No data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td><code>${user.userId}</code></td>
+                    <td>${user.totalCalls.toLocaleString()}</td>
+                    <td>${user.callsPerWeek}</td>
+                    <td>
+                        <span class="status-badge ${user.isActive ? 'success' : 'failure'}">
+                            ${user.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function updateUserToolsTable(userToolsData) {
+            const tbody = document.getElementById('user-tools-table');
+
+            if (userToolsData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="loading">No data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = userToolsData.map(user => {
+                const topTools = user.tools.slice(0, 5).map(t =>
+                    `<span class="tool-tag">${t.tool} (${t.count})</span>`
+                ).join(' ');
+
+                return `
+                    <tr>
+                        <td><code>${user.userId}</code></td>
+                        <td>${user.totalCalls.toLocaleString()}</td>
+                        <td>${topTools}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            try {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } catch {
+                return dateStr;
+            }
         }
 
         function resetKey() {
