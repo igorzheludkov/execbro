@@ -194,21 +194,29 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             LIMIT 1000
         `;
 
-        // Query 5: Active vs inactive users (active = 5+ tool calls per week)
-        // We calculate weekly average based on total calls / weeks in period
-        const userActivityQuery = `
-            SELECT
-                index1 as user_id,
-                SUM(_sample_interval) as total_calls
+        // Query 5: All session_start events (raw rows to get unique users)
+        // Analytics Engine doesn't support GROUP BY or DISTINCT on index columns
+        const allUsersQuery = `
+            SELECT index1
+            FROM rn_debugger_events
+            WHERE
+                blob1 = 'session_start'
+                AND timestamp >= NOW() - INTERVAL '${days}' DAY
+            LIMIT 1000
+        `;
+
+        // Query 6: All tool invocation events (raw rows to count per user)
+        const userToolCountsQuery = `
+            SELECT index1, _sample_interval as weight
             FROM rn_debugger_events
             WHERE
                 blob1 = 'tool_invocation'
                 AND timestamp >= NOW() - INTERVAL '${days}' DAY
-            GROUP BY index1
+            LIMIT 5000
         `;
 
         // Execute queries in parallel
-        const [toolStatsRes, uniqueInstallsRes, timelineRes, userToolsRes, userActivityRes] = await Promise.all([
+        const [toolStatsRes, uniqueInstallsRes, timelineRes, userToolsRes, allUsersRes, userToolCountsRes] = await Promise.all([
             fetch(sqlEndpoint, {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
@@ -232,7 +240,12 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             fetch(sqlEndpoint, {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
-                body: userActivityQuery
+                body: allUsersQuery
+            }),
+            fetch(sqlEndpoint, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
+                body: userToolCountsQuery
             })
         ]);
 
@@ -265,10 +278,13 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             tool: string;
             weight: number;
         }>(userToolsRes, 'userTools');
-        const userActivity = await parseResponse<{
-            user_id: string;
-            total_calls: number;
-        }>(userActivityRes, 'userActivity');
+        const allUsers = await parseResponse<{
+            index1: string;
+        }>(allUsersRes, 'allUsers');
+        const userToolCounts = await parseResponse<{
+            index1: string;
+            weight: number;
+        }>(userToolCountsRes, 'userToolCounts');
 
         // Check for errors
         if (toolStats.errors?.length) {
@@ -343,6 +359,20 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
         const weeksInPeriod = Math.max(days / 7, 1);
         const activeThresholdPerPeriod = 5 * weeksInPeriod;
 
+        // Get unique users from session_start raw rows
+        const uniqueUserIds = new Set<string>();
+        for (const row of allUsers.data || []) {
+            if (row.index1) uniqueUserIds.add(row.index1);
+        }
+
+        // Build a map of user tool counts from raw rows
+        const userToolCountMap = new Map<string, number>();
+        for (const row of userToolCounts.data || []) {
+            const userId = row.index1 || "unknown";
+            const weight = Number(row.weight) || 1;
+            userToolCountMap.set(userId, (userToolCountMap.get(userId) || 0) + weight);
+        }
+
         let activeUsers = 0;
         let inactiveUsers = 0;
         const userActivityList: Array<{
@@ -352,8 +382,9 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             isActive: boolean;
         }> = [];
 
-        for (const row of userActivity.data || []) {
-            const totalUserCalls = Number(row.total_calls) || 0;
+        // Include ALL users from session_start, even those with 0 tool calls
+        for (const userId of uniqueUserIds) {
+            const totalUserCalls = userToolCountMap.get(userId) || 0;
             const callsPerWeek = totalUserCalls / weeksInPeriod;
             const isActive = totalUserCalls >= activeThresholdPerPeriod;
 
@@ -364,7 +395,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             }
 
             userActivityList.push({
-                userId: row.user_id || "unknown",
+                userId,
                 totalCalls: totalUserCalls,
                 callsPerWeek: Math.round(callsPerWeek * 10) / 10,
                 isActive
