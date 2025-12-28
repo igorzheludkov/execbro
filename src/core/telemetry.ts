@@ -1,22 +1,33 @@
 import { randomUUID } from "crypto";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-// TODO: Update these after deploying your Cloudflare Worker
-const TELEMETRY_ENDPOINT = "https://rn-debugger-telemetry.YOUR_SUBDOMAIN.workers.dev";
-const TELEMETRY_API_KEY = "YOUR_API_KEY_HERE";
+const TELEMETRY_ENDPOINT = "https://rn-debugger-telemetry.500griven.workers.dev";
+const TELEMETRY_API_KEY = "6a630181cb391ed5c42a188428cc2d2623dfe9333ec048193bb711ab58afe85e";
 
 const BATCH_SIZE = 10;
 const BATCH_INTERVAL_MS = 30_000; // 30 seconds
 const REQUEST_TIMEOUT_MS = 5_000;
 const CONFIG_DIR = join(homedir(), ".rn-ai-debugger");
 const CONFIG_FILE = join(CONFIG_DIR, "telemetry.json");
-const SERVER_VERSION = "1.0.5";
+
+// Read version from package.json dynamically
+function getServerVersion(): string {
+    try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const pkgPath = join(__dirname, "..", "..", "package.json");
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        return pkg.version || "unknown";
+    } catch {
+        return "unknown";
+    }
+}
 
 // ============================================================================
 // Types
@@ -135,8 +146,8 @@ export function initTelemetry(): void {
         return;
     }
 
-    // Check if endpoint is configured
-    if (TELEMETRY_ENDPOINT.includes("YOUR_SUBDOMAIN") || TELEMETRY_API_KEY === "YOUR_API_KEY_HERE") {
+    // Check if endpoint is configured (placeholder detection)
+    if (TELEMETRY_ENDPOINT.includes("YOUR_SUBDOMAIN") || TELEMETRY_API_KEY.includes("YOUR_API_KEY")) {
         telemetryEnabled = false;
         // Silently disable - endpoint not configured yet
         return;
@@ -182,10 +193,7 @@ export function isTelemetryEnabled(): boolean {
 // Event Tracking
 // ============================================================================
 
-function trackEvent(
-    name: string,
-    properties?: Record<string, string | number | boolean>
-): void {
+function trackEvent(name: string, properties?: Record<string, string | number | boolean>): void {
     if (!telemetryEnabled) return;
 
     const event: TelemetryEvent = {
@@ -203,11 +211,7 @@ function trackEvent(
     }
 }
 
-export function trackToolInvocation(
-    toolName: string,
-    success: boolean,
-    durationMs: number
-): void {
+export function trackToolInvocation(toolName: string, success: boolean, durationMs: number): void {
     if (!telemetryEnabled) return;
 
     const event: TelemetryEvent = {
@@ -268,7 +272,7 @@ function flushSync(): void {
 async function sendEvents(events: TelemetryEvent[]): Promise<void> {
     const payload: TelemetryPayload = {
         installationId: getInstallationId(),
-        serverVersion: SERVER_VERSION,
+        serverVersion: getServerVersion(),
         nodeVersion: process.version,
         platform: process.platform,
         events
