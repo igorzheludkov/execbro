@@ -1,6 +1,6 @@
 {
   "name": "react-native-ai-debugger",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "MCP server for AI-powered React Native debugging - logs, REPL, state inspection",
   "type": "module",
   "main": "build/index.js",
