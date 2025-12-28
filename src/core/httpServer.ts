@@ -1,11 +1,32 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from "http";
 import { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps } from "./state.js";
+import {
+    listAndroidDevices,
+    androidScreenshot,
+    androidGetScreenSize,
+    androidTap
+} from "./android.js";
+import {
+    listIOSSimulators,
+    iosScreenshot,
+    iosTap
+} from "./ios.js";
 
 const DEFAULT_HTTP_PORT = 3456;
 const MAX_PORT_ATTEMPTS = 20;
 
 // Store the active port for querying via MCP tool
 let activeDebugServerPort: number | null = null;
+
+// Store markers added by the agent for tap verification
+interface TapMarker {
+    x: number;
+    y: number;
+    label?: string;
+    color?: string;
+    timestamp: number;
+}
+let tapVerifierMarkers: TapMarker[] = [];
 
 interface DebugServerOptions {
     port?: number;
@@ -186,6 +207,7 @@ function htmlTemplate(title: string, content: string, refreshInterval = 3000): s
         <a href="/logs" ${title === 'Logs' ? 'class="active"' : ''}>Logs</a>
         <a href="/network" ${title === 'Network' ? 'class="active"' : ''}>Network</a>
         <a href="/apps" ${title === 'Apps' ? 'class="active"' : ''}>Apps</a>
+        <a href="/tap-verifier" ${title === 'Tap Verifier' ? 'class="active"' : ''}>Tap Verifier</a>
     </nav>
     <div id="content">${content}</div>
     <script>
@@ -523,11 +545,526 @@ function renderApps(): string {
     `);
 }
 
+function renderTapVerifier(): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Test Page - RN Debugger</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .page-container {
+            position: relative;
+            width: 100%;
+            min-height: 100vh;
+        }
+
+        /* Sample UI Elements for Testing */
+        .header {
+            background: #16213e;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 2px solid #0f3460;
+        }
+        .header h1 { font-size: 24px; margin-bottom: 8px; }
+        .header p { color: #888; font-size: 14px; }
+
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            padding: 20px;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        .test-btn {
+            padding: 20px;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .test-btn:active { transform: scale(0.95); }
+        .btn-red { background: #e94560; color: white; }
+        .btn-blue { background: #0f3460; color: white; }
+        .btn-green { background: #1eb980; color: white; }
+        .btn-yellow { background: #f39c12; color: #333; }
+        .btn-purple { background: #9b59b6; color: white; }
+        .btn-cyan { background: #00cec9; color: #333; }
+
+        /* Grid Overlay */
+        .grid-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 9998;
+            display: none;
+        }
+        .grid-overlay.visible { display: block; }
+        .grid-line-v {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: rgba(255, 255, 0, 0.6);
+        }
+        .grid-line-h {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: rgba(255, 255, 0, 0.6);
+        }
+        .grid-label {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: #ffff00;
+            font-size: 10px;
+            font-family: monospace;
+            padding: 2px 4px;
+            border-radius: 2px;
+        }
+        .grid-toggle {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: #ffff00;
+            color: #000;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 10001;
+            opacity: 0.8;
+        }
+
+        .nav-bar {
+            display: flex;
+            justify-content: space-around;
+            background: #16213e;
+            padding: 16px;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            border-top: 2px solid #0f3460;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #888;
+            font-size: 12px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .nav-item:hover { background: #0f3460; color: #fff; }
+        .nav-icon { font-size: 24px; margin-bottom: 4px; }
+
+        .card {
+            background: #16213e;
+            margin: 20px;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #0f3460;
+        }
+        .card h2 { margin-bottom: 12px; font-size: 18px; }
+        .card p { color: #888; line-height: 1.6; }
+
+        .input-group {
+            margin: 20px;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #888;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #0f3460;
+            border-radius: 8px;
+            background: #16213e;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        /* Canvas Overlay for Markers */
+        #markerCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: auto;
+            z-index: 9999;
+            cursor: crosshair;
+        }
+
+        /* Marker info panel */
+        .marker-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 10000;
+            max-width: 250px;
+        }
+        .marker-panel h3 {
+            color: #ff6b6b;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .marker-info {
+            color: #ccc;
+            margin-bottom: 4px;
+        }
+        .clear-btn {
+            margin-top: 8px;
+            padding: 6px 12px;
+            background: #e94560;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <div class="header">
+            <h1>Tap Test Page</h1>
+            <p>Agent marks coordinates here to verify accuracy</p>
+        </div>
+
+        <div class="button-grid">
+            <button class="test-btn btn-red" onclick="btnClick('Red')">Red</button>
+            <button class="test-btn btn-blue" onclick="btnClick('Blue')">Blue</button>
+            <button class="test-btn btn-green" onclick="btnClick('Green')">Green</button>
+            <button class="test-btn btn-yellow" onclick="btnClick('Yellow')">Yellow</button>
+            <button class="test-btn btn-purple" onclick="btnClick('Purple')">Purple</button>
+            <button class="test-btn btn-cyan" onclick="btnClick('Cyan')">Cyan</button>
+        </div>
+
+        <div class="card">
+            <h2>Test Card</h2>
+            <p>This is a sample card element. The agent can try to tap on this text or the card itself to test coordinate accuracy.</p>
+        </div>
+
+        <div class="input-group">
+            <label>Test Input Field</label>
+            <input type="text" placeholder="Tap here to focus...">
+        </div>
+
+        <div class="card">
+            <h2>Instructions</h2>
+            <p>1. Agent takes screenshot of this page<br>
+               2. Agent identifies element and calculates coordinates<br>
+               3. Agent calls /api/tap-verifier/mark with coordinates<br>
+               4. Marker appears on canvas overlay<br>
+               5. Verify if marker aligns with intended element</p>
+        </div>
+
+        <div class="nav-bar">
+            <div class="nav-item" onclick="navClick('Home')">
+                <span class="nav-icon">🏠</span>
+                Home
+            </div>
+            <div class="nav-item" onclick="navClick('Search')">
+                <span class="nav-icon">🔍</span>
+                Search
+            </div>
+            <div class="nav-item" onclick="navClick('Profile')">
+                <span class="nav-icon">👤</span>
+                Profile
+            </div>
+            <div class="nav-item" onclick="navClick('Settings')">
+                <span class="nav-icon">⚙️</span>
+                Settings
+            </div>
+        </div>
+    </div>
+
+    <!-- Grid overlay for coordinate reference -->
+    <div class="grid-overlay" id="gridOverlay"></div>
+    <button class="grid-toggle" onclick="toggleGrid()">Grid</button>
+
+    <!-- Transparent canvas overlay for markers -->
+    <canvas id="markerCanvas"></canvas>
+
+    <!-- Marker info panel -->
+    <div class="marker-panel" id="markerPanel" style="display: none;">
+        <h3>Agent Markers</h3>
+        <div id="markerList"></div>
+        <button class="clear-btn" onclick="clearMarkers()">Clear All</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('markerCanvas');
+        const ctx = canvas.getContext('2d');
+        const markerPanel = document.getElementById('markerPanel');
+        const markerList = document.getElementById('markerList');
+
+        let markers = [];
+
+        // Resize canvas to match window
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            drawMarkers();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Click on canvas to add marker
+        canvas.addEventListener('click', async (e) => {
+            const x = e.clientX;
+            const y = e.clientY;
+            try {
+                await fetch('/api/tap-verifier/mark', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x, y, label: 'Click', color: '#00ff88' })
+                });
+                pollMarkers();
+            } catch (err) {
+                console.error('Failed to add marker:', err);
+            }
+        });
+
+        // Button click feedback
+        function btnClick(name) {
+            console.log('Button clicked:', name);
+        }
+        function navClick(name) {
+            console.log('Nav clicked:', name);
+        }
+
+        // Draw all markers
+        function drawMarkers() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            markers.forEach((marker, i) => {
+                const color = marker.color || '#ff6b6b';
+                const x = marker.x;
+                const y = marker.y;
+
+                // Draw outer ring (dashed)
+                ctx.beginPath();
+                ctx.arc(x, y, 30, 0, Math.PI * 2);
+                ctx.setLineDash([6, 4]);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Draw inner circle
+                ctx.beginPath();
+                ctx.arc(x, y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+
+                // Draw crosshair
+                ctx.beginPath();
+                ctx.moveTo(x - 20, y);
+                ctx.lineTo(x + 20, y);
+                ctx.moveTo(x, y - 20);
+                ctx.lineTo(x, y + 20);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Draw label
+                const label = marker.label || 'Marker ' + (i + 1);
+                const text = label + ' (' + x + ', ' + y + ')';
+                ctx.font = 'bold 12px monospace';
+                const textWidth = ctx.measureText(text).width;
+
+                ctx.fillStyle = 'rgba(0,0,0,0.8)';
+                ctx.fillRect(x + 35, y - 10, textWidth + 10, 22);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 35, y - 10, textWidth + 10, 22);
+
+                ctx.fillStyle = color;
+                ctx.fillText(text, x + 40, y + 5);
+            });
+
+            updateMarkerPanel();
+        }
+
+        // Update marker panel
+        function updateMarkerPanel() {
+            if (markers.length === 0) {
+                markerPanel.style.display = 'none';
+                return;
+            }
+
+            markerPanel.style.display = 'block';
+            markerList.innerHTML = markers.map((m, i) =>
+                '<div class="marker-info">' + (m.label || 'Marker ' + (i+1)) + ': (' + m.x + ', ' + m.y + ')</div>'
+            ).join('');
+        }
+
+        // Poll for markers from server
+        async function pollMarkers() {
+            try {
+                const res = await fetch('/api/tap-verifier/markers');
+                const data = await res.json();
+                if (data.markers && JSON.stringify(data.markers) !== JSON.stringify(markers)) {
+                    markers = data.markers;
+                    drawMarkers();
+                }
+            } catch (err) {
+                // Ignore
+            }
+        }
+
+        // Clear markers
+        async function clearMarkers() {
+            try {
+                await fetch('/api/tap-verifier/clear-markers', { method: 'POST' });
+                markers = [];
+                drawMarkers();
+            } catch (err) {
+                console.error('Failed to clear:', err);
+            }
+        }
+
+        // Grid overlay functionality
+        const gridOverlay = document.getElementById('gridOverlay');
+        let gridVisible = false;
+
+        function toggleGrid() {
+            gridVisible = !gridVisible;
+            if (gridVisible) {
+                gridOverlay.classList.add('visible');
+                createGrid();
+            } else {
+                gridOverlay.classList.remove('visible');
+            }
+        }
+
+        function createGrid() {
+            gridOverlay.innerHTML = '';
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+
+            // Calculate button grid boundaries
+            // Grid: max-width 400px, centered, padding 20px, gap 16px, 3 columns
+            const gridWidth = Math.min(400, w);
+            const gridLeft = (w - gridWidth) / 2;
+            const gridRight = gridLeft + gridWidth;
+            const padding = 20;
+            const gap = 16;
+            const colWidth = (gridWidth - 2 * padding - 2 * gap) / 3;
+
+            // Column positions (centers)
+            const col1Center = gridLeft + padding + colWidth / 2;
+            const col2Center = gridLeft + padding + colWidth + gap + colWidth / 2;
+            const col3Center = gridLeft + padding + 2 * colWidth + 2 * gap + colWidth / 2;
+
+            // Column boundaries
+            const col1Left = gridLeft + padding;
+            const col1Right = col1Left + colWidth;
+            const col2Left = col1Right + gap;
+            const col2Right = col2Left + colWidth;
+            const col3Left = col2Right + gap;
+            const col3Right = col3Left + colWidth;
+
+            // Draw vertical lines at column boundaries
+            const vLines = [
+                { x: gridLeft, label: Math.round(gridLeft) },
+                { x: col1Left, label: Math.round(col1Left) },
+                { x: col1Center, label: Math.round(col1Center) + ' (C1)', isCenter: true },
+                { x: col1Right, label: Math.round(col1Right) },
+                { x: col2Left, label: Math.round(col2Left) },
+                { x: col2Center, label: Math.round(col2Center) + ' (C2)', isCenter: true },
+                { x: col2Right, label: Math.round(col2Right) },
+                { x: col3Left, label: Math.round(col3Left) },
+                { x: col3Center, label: Math.round(col3Center) + ' (C3)', isCenter: true },
+                { x: col3Right, label: Math.round(col3Right) },
+                { x: gridRight, label: Math.round(gridRight) }
+            ];
+
+            vLines.forEach((line, i) => {
+                const div = document.createElement('div');
+                div.className = 'grid-line-v';
+                div.style.left = line.x + 'px';
+                if (line.isCenter) {
+                    div.style.background = 'rgba(0, 255, 0, 0.8)';
+                    div.style.width = '2px';
+                }
+                gridOverlay.appendChild(div);
+
+                // Label
+                const label = document.createElement('div');
+                label.className = 'grid-label';
+                label.textContent = line.label;
+                label.style.left = (line.x + 3) + 'px';
+                label.style.top = (70 + (i % 3) * 14) + 'px';
+                if (line.isCenter) label.style.color = '#00ff00';
+                gridOverlay.appendChild(label);
+            });
+
+            // Horizontal lines every 50px with labels
+            for (let y = 0; y <= h; y += 50) {
+                const div = document.createElement('div');
+                div.className = 'grid-line-h';
+                div.style.top = y + 'px';
+                if (y % 100 === 0) {
+                    div.style.background = 'rgba(255, 255, 0, 0.8)';
+                }
+                gridOverlay.appendChild(div);
+
+                if (y % 100 === 0) {
+                    const label = document.createElement('div');
+                    label.className = 'grid-label';
+                    label.textContent = 'y=' + y;
+                    label.style.left = '3px';
+                    label.style.top = (y + 2) + 'px';
+                    gridOverlay.appendChild(label);
+                }
+            }
+        }
+
+        // Recreate grid on resize
+        window.addEventListener('resize', () => {
+            if (gridVisible) createGrid();
+        });
+
+        // Start polling
+        setInterval(pollMarkers, 500);
+        pollMarkers();
+    </script>
+</body>
+</html>`;
+}
+
 function createRequestHandler() {
-    return (req: IncomingMessage, res: ServerResponse) => {
+    return async (req: IncomingMessage, res: ServerResponse) => {
         // Set CORS headers for browser access
         res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
         if (req.method === "OPTIONS") {
@@ -536,7 +1073,10 @@ function createRequestHandler() {
             return;
         }
 
-        const url = (req.url ?? "/").split('?')[0]; // Remove query params
+        const fullUrl = req.url ?? "/";
+        const [urlPath, queryString] = fullUrl.split('?');
+        const url = urlPath; // Path without query params
+        const params = new URLSearchParams(queryString || '');
 
         try {
             // HTML endpoints
@@ -558,6 +1098,11 @@ function createRequestHandler() {
             if (url === "/apps") {
                 res.setHeader("Content-Type", "text/html");
                 res.end(renderApps());
+                return;
+            }
+            if (url === "/tap-verifier") {
+                res.setHeader("Content-Type", "text/html");
+                res.end(renderTapVerifier());
                 return;
             }
 
@@ -591,6 +1136,146 @@ function createRequestHandler() {
                     bundleStatus: bundleErrorBuffer.getStatus()
                 };
                 res.end(JSON.stringify(status, null, 2));
+            } else if (url === "/api/tap-verifier/devices") {
+                const platform = params.get('platform') || 'android';
+                try {
+                    if (platform === 'android') {
+                        const result = await listAndroidDevices();
+                        if (result.success && result.devices) {
+                            const devices = result.devices.map(d => ({
+                                id: d.id,
+                                name: `${d.model || d.id} (${d.status})`
+                            }));
+                            res.end(JSON.stringify({ devices }));
+                        } else {
+                            res.end(JSON.stringify({ devices: [], error: result.error }));
+                        }
+                    } else {
+                        const result = await listIOSSimulators();
+                        if (result.success && result.simulators) {
+                            const devices = result.simulators
+                                .filter(s => s.state === 'Booted')
+                                .map(s => ({
+                                    id: s.udid,
+                                    name: `${s.name} (${s.runtime})`
+                                }));
+                            res.end(JSON.stringify({ devices }));
+                        } else {
+                            res.end(JSON.stringify({ devices: [], error: result.error }));
+                        }
+                    }
+                } catch (err) {
+                    res.end(JSON.stringify({ devices: [], error: String(err) }));
+                }
+            } else if (url === "/api/tap-verifier/screen-size") {
+                const platform = params.get('platform') || 'android';
+                const deviceId = params.get('deviceId') || undefined;
+                try {
+                    if (platform === 'android') {
+                        const result = await androidGetScreenSize(deviceId);
+                        if (result.success && result.width && result.height) {
+                            res.end(JSON.stringify({ width: result.width, height: result.height }));
+                        } else {
+                            res.end(JSON.stringify({ error: result.error || 'Failed to get screen size' }));
+                        }
+                    } else {
+                        // iOS doesn't have a direct screen size function, use common sizes
+                        // We'll get the actual size from the screenshot
+                        res.end(JSON.stringify({ width: 390, height: 844, note: 'Default iPhone size. Load screenshot for actual dimensions.' }));
+                    }
+                } catch (err) {
+                    res.end(JSON.stringify({ error: String(err) }));
+                }
+            } else if (url === "/api/tap-verifier/screenshot") {
+                const platform = params.get('platform') || 'android';
+                const deviceId = params.get('deviceId') || undefined;
+                try {
+                    if (platform === 'android') {
+                        const result = await androidScreenshot(deviceId);
+                        if (result.success && result.data) {
+                            const base64 = result.data.toString('base64');
+                            res.end(JSON.stringify({ success: true, image: base64 }));
+                        } else {
+                            res.end(JSON.stringify({ success: false, error: result.error || 'Failed to take screenshot' }));
+                        }
+                    } else {
+                        const result = await iosScreenshot(undefined, deviceId);
+                        if (result.success && result.data) {
+                            const base64 = result.data.toString('base64');
+                            res.end(JSON.stringify({ success: true, image: base64 }));
+                        } else {
+                            res.end(JSON.stringify({ success: false, error: result.error || 'Failed to take screenshot' }));
+                        }
+                    }
+                } catch (err) {
+                    res.end(JSON.stringify({ success: false, error: String(err) }));
+                }
+            } else if (url === "/api/tap-verifier/execute" && req.method === "POST") {
+                // Parse POST body
+                let body = '';
+                req.on('data', chunk => { body += chunk; });
+                req.on('end', async () => {
+                    try {
+                        const data = JSON.parse(body);
+                        const { platform, x, y, deviceId } = data;
+
+                        if (typeof x !== 'number' || typeof y !== 'number') {
+                            res.end(JSON.stringify({ success: false, error: 'x and y must be numbers' }));
+                            return;
+                        }
+
+                        if (platform === 'android') {
+                            const result = await androidTap(x, y, deviceId);
+                            res.end(JSON.stringify({ success: result.success, error: result.error }));
+                        } else {
+                            const result = await iosTap(x, y, { udid: deviceId });
+                            res.end(JSON.stringify({ success: result.success, error: result.error }));
+                        }
+                    } catch (err) {
+                        res.end(JSON.stringify({ success: false, error: String(err) }));
+                    }
+                });
+                return; // Important: return here since we're handling the response asynchronously
+            } else if (url === "/api/tap-verifier/mark" && req.method === "POST") {
+                // Add a marker to the tap verifier (agent can mark calculated coordinates)
+                let body = '';
+                req.on('data', chunk => { body += chunk; });
+                req.on('end', () => {
+                    try {
+                        const data = JSON.parse(body);
+                        const { x, y, label, color } = data;
+
+                        if (typeof x !== 'number' || typeof y !== 'number') {
+                            res.end(JSON.stringify({ success: false, error: 'x and y must be numbers' }));
+                            return;
+                        }
+
+                        const marker: TapMarker = {
+                            x,
+                            y,
+                            label: label || undefined,
+                            color: color || undefined,
+                            timestamp: Date.now()
+                        };
+                        tapVerifierMarkers.push(marker);
+
+                        res.end(JSON.stringify({
+                            success: true,
+                            marker,
+                            totalMarkers: tapVerifierMarkers.length
+                        }));
+                    } catch (err) {
+                        res.end(JSON.stringify({ success: false, error: String(err) }));
+                    }
+                });
+                return;
+            } else if (url === "/api/tap-verifier/markers") {
+                // Get all markers added by the agent
+                res.end(JSON.stringify({ markers: tapVerifierMarkers }));
+            } else if (url === "/api/tap-verifier/clear-markers" && req.method === "POST") {
+                // Clear all agent-added markers
+                tapVerifierMarkers = [];
+                res.end(JSON.stringify({ success: true, message: 'All markers cleared' }));
             } else if (url === "/api" || url === "/api/") {
                 const endpoints = {
                     message: "React Native AI Debugger - Debug HTTP Server",
@@ -598,14 +1283,22 @@ function createRequestHandler() {
                         "/": "Dashboard",
                         "/logs": "Console logs (colored)",
                         "/network": "Network requests",
-                        "/apps": "Connected apps"
+                        "/apps": "Connected apps",
+                        "/tap-verifier": "Tap coordinate verification tool"
                     },
                     api: {
                         "/api/status": "Overall server status and buffer sizes",
                         "/api/logs": "All captured console logs (JSON)",
                         "/api/network": "All captured network requests (JSON)",
                         "/api/bundle-errors": "Metro bundle/compilation errors (JSON)",
-                        "/api/apps": "Connected React Native apps (JSON)"
+                        "/api/apps": "Connected React Native apps (JSON)",
+                        "/api/tap-verifier/devices": "List available devices (query: platform=android|ios)",
+                        "/api/tap-verifier/screen-size": "Get device screen size (query: platform, deviceId)",
+                        "/api/tap-verifier/screenshot": "Get device screenshot as base64 (query: platform, deviceId)",
+                        "/api/tap-verifier/execute": "Execute tap at coordinates (POST: platform, x, y, deviceId)",
+                        "/api/tap-verifier/mark": "Add a marker to visualize agent-calculated coordinates (POST: x, y, label?, color?)",
+                        "/api/tap-verifier/markers": "Get all agent-added markers (GET)",
+                        "/api/tap-verifier/clear-markers": "Clear all agent-added markers (POST)"
                     }
                 };
                 res.end(JSON.stringify(endpoints, null, 2));

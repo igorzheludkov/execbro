@@ -58,6 +58,8 @@ export {
     androidInputText,
     androidKeyEvent,
     androidGetScreenSize,
+    androidGetDensity,
+    androidGetStatusBarHeight,
     // Accessibility (UI Hierarchy)
     androidDescribeAll,
     androidDescribePoint,

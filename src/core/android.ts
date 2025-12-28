@@ -33,6 +33,8 @@ export interface AdbResult {
     scaleFactor?: number;
     originalWidth?: number;
     originalHeight?: number;
+    // For listAndroidDevices: structured device list
+    devices?: AndroidDevice[];
 }
 
 /**
@@ -103,7 +105,8 @@ export async function listAndroidDevices(): Promise<AdbResult> {
 
         return {
             success: true,
-            result: `Connected Android devices:\n${formatted}`
+            result: `Connected Android devices:\n${formatted}`,
+            devices
         };
     } catch (error) {
         return {
@@ -1167,6 +1170,124 @@ export async function androidGetScreenSize(deviceId?: string): Promise<{
         return {
             success: false,
             error: `Failed to get screen size: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Get device display density (dpi)
+ */
+export async function androidGetDensity(deviceId?: string): Promise<{
+    success: boolean;
+    density?: number;
+    error?: string;
+}> {
+    try {
+        const adbAvailable = await isAdbAvailable();
+        if (!adbAvailable) {
+            return {
+                success: false,
+                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+            };
+        }
+
+        const deviceArg = buildDeviceArg(deviceId);
+        const device = deviceId || (await getDefaultAndroidDevice());
+
+        if (!device) {
+            return {
+                success: false,
+                error: "No Android device connected. Connect a device or start an emulator."
+            };
+        }
+
+        const { stdout } = await execAsync(`adb ${deviceArg} shell wm density`, {
+            timeout: ADB_TIMEOUT
+        });
+
+        // Parse output like "Physical density: 440" or "Override density: 440"
+        const match = stdout.match(/density:\s*(\d+)/i);
+        if (match) {
+            return {
+                success: true,
+                density: parseInt(match[1], 10)
+            };
+        }
+
+        return {
+            success: false,
+            error: `Could not parse density from: ${stdout.trim()}`
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to get density: ${error instanceof Error ? error.message : String(error)}`
+        };
+    }
+}
+
+/**
+ * Get status bar height in pixels
+ * Android status bar is typically 24dp, but can vary by device/OS version
+ */
+export async function androidGetStatusBarHeight(deviceId?: string): Promise<{
+    success: boolean;
+    heightPixels?: number;
+    heightDp?: number;
+    error?: string;
+}> {
+    try {
+        // Get density first
+        const densityResult = await androidGetDensity(deviceId);
+        if (!densityResult.success || !densityResult.density) {
+            // Fallback to common estimate
+            return {
+                success: true,
+                heightPixels: 63, // Common for 420dpi devices (24dp * 2.625)
+                heightDp: 24
+            };
+        }
+
+        const density = densityResult.density;
+        const densityScale = density / 160; // Android baseline is 160dpi
+
+        // Try to get actual status bar height from resources
+        const deviceArg = buildDeviceArg(deviceId);
+
+        try {
+            const { stdout } = await execAsync(
+                `adb ${deviceArg} shell "dumpsys window | grep -E 'statusBars|mStatusBarLayer|InsetsSource.*statusBars'"`,
+                { timeout: ADB_TIMEOUT }
+            );
+
+            // Try to parse status bar height from dumpsys output
+            // Look for patterns like "statusBars frame=[0,0][1080,63]"
+            const frameMatch = stdout.match(/statusBars.*frame=\[[\d,]+\]\[(\d+),(\d+)\]/);
+            if (frameMatch) {
+                const heightPixels = parseInt(frameMatch[2], 10);
+                return {
+                    success: true,
+                    heightPixels,
+                    heightDp: Math.round(heightPixels / densityScale)
+                };
+            }
+        } catch {
+            // Fallback to standard calculation
+        }
+
+        // Standard status bar height is 24dp on most devices
+        const statusBarDp = 24;
+        const statusBarPixels = Math.round(statusBarDp * densityScale);
+
+        return {
+            success: true,
+            heightPixels: statusBarPixels,
+            heightDp: statusBarDp
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to get status bar height: ${error instanceof Error ? error.message : String(error)}`
         };
     }
 }

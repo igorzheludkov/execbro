@@ -41,6 +41,8 @@ import {
     androidInputText,
     androidKeyEvent,
     androidGetScreenSize,
+    androidGetDensity,
+    androidGetStatusBarHeight,
     // Android Accessibility (UI Hierarchy)
     androidDescribeAll,
     androidDescribePoint,
@@ -751,12 +753,40 @@ server.registerTool(
 
         // Include image data if available
         if (result.data) {
-            // Build info text with scale factor for coordinate conversion
-            let infoText = `Screenshot captured (${result.originalWidth}x${result.originalHeight})`;
+            // Build info text with coordinate conversion guidance
+            const pixelWidth = result.originalWidth || 0;
+            const pixelHeight = result.originalHeight || 0;
+            let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+
+            // Get status bar height for coordinate guidance
+            let statusBarPixels = 63; // Default fallback
+            let statusBarDp = 24;
+            let densityDpi = 440; // Common default
+            try {
+                const statusBarResult = await androidGetStatusBarHeight(deviceId);
+                if (statusBarResult.success && statusBarResult.heightPixels) {
+                    statusBarPixels = statusBarResult.heightPixels;
+                    statusBarDp = statusBarResult.heightDp || 24;
+                }
+                const densityResult = await androidGetDensity(deviceId);
+                if (densityResult.success && densityResult.density) {
+                    densityDpi = densityResult.density;
+                }
+            } catch {
+                // Use defaults
+            }
+
+            infoText += `\n📱 Android uses PIXELS for tap coordinates (same as screenshot)`;
+
             if (result.scaleFactor && result.scaleFactor > 1) {
                 infoText += `\n⚠️ Image was scaled down to fit API limits. Scale factor: ${result.scaleFactor.toFixed(3)}`;
-                infoText += `\nTo tap/swipe: multiply image coordinates by ${result.scaleFactor.toFixed(3)} to get device coordinates.`;
+                infoText += `\n📐 To convert image coords to tap coords: multiply by ${result.scaleFactor.toFixed(3)}`;
+            } else {
+                infoText += `\n📐 Screenshot coords = tap coords (no conversion needed)`;
             }
+
+            infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
+            infoText += `\n📊 Display density: ${densityDpi}dpi`;
 
             return {
                 content: [
@@ -1456,18 +1486,64 @@ server.registerTool(
         // Include image data if available
         if (result.data) {
             // Build info text with coordinate guidance for iOS
-            // iOS simulators use points, not pixels. Retina displays are typically 2x or 3x.
             const pixelWidth = result.originalWidth || 0;
             const pixelHeight = result.originalHeight || 0;
-            // Assume 2x Retina scale for most iOS simulators
-            const pointWidth = Math.round(pixelWidth / 2);
-            const pointHeight = Math.round(pixelHeight / 2);
+
+            // Try to get actual screen dimensions and safe area from accessibility tree
+            let pointWidth = 0;
+            let pointHeight = 0;
+            let scaleFactor = 3; // Default to 3x for modern iPhones
+            let safeAreaTop = 59; // Default safe area offset
+            try {
+                const describeResult = await iosDescribeAll(udid);
+                if (describeResult.success && describeResult.elements && describeResult.elements.length > 0) {
+                    // First element is typically the Application with full screen frame
+                    const rootElement = describeResult.elements[0];
+                    // Try parsed frame first, then parse AXFrame string
+                    if (rootElement.frame) {
+                        pointWidth = Math.round(rootElement.frame.width);
+                        pointHeight = Math.round(rootElement.frame.height);
+                        // The frame.y of the root element indicates where content starts (after status bar)
+                        if (rootElement.frame.y > 0) {
+                            safeAreaTop = Math.round(rootElement.frame.y);
+                        }
+                    } else if (rootElement.AXFrame) {
+                        // Parse format: "{{x, y}, {width, height}}"
+                        const match = rootElement.AXFrame.match(/\{\{([\d.]+),\s*([\d.]+)\},\s*\{([\d.]+),\s*([\d.]+)\}\}/);
+                        if (match) {
+                            const frameY = parseFloat(match[2]);
+                            pointWidth = Math.round(parseFloat(match[3]));
+                            pointHeight = Math.round(parseFloat(match[4]));
+                            if (frameY > 0) {
+                                safeAreaTop = Math.round(frameY);
+                            }
+                        }
+                    }
+                    // Calculate actual scale factor
+                    if (pointWidth > 0) {
+                        scaleFactor = Math.round(pixelWidth / pointWidth);
+                    }
+                }
+            } catch {
+                // Fallback: use 3x scale for modern devices
+            }
+
+            // Fallback if we couldn't get dimensions
+            if (pointWidth === 0) {
+                pointWidth = Math.round(pixelWidth / scaleFactor);
+                pointHeight = Math.round(pixelHeight / scaleFactor);
+            }
+
+            const safeAreaOffsetPixels = safeAreaTop * scaleFactor;
 
             let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
-            infoText += `\n📱 iOS IDB coordinates use POINTS: ${pointWidth}x${pointHeight}`;
-            infoText += `\nTo convert image coords to IDB points: divide pixel coordinates by 2`;
+            infoText += `\n📱 iOS tap coordinates use POINTS: ${pointWidth}x${pointHeight}`;
+            infoText += `\n📐 To convert screenshot coords to tap points:`;
+            infoText += `\n   tap_x = pixel_x / ${scaleFactor}`;
+            infoText += `\n   tap_y = pixel_y / ${scaleFactor}`;
+            infoText += `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
             if (result.scaleFactor && result.scaleFactor > 1) {
-                infoText += `\n⚠️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
+                infoText += `\n🖼️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
             }
             infoText += `\n💡 Use ios_describe_all to get exact element coordinates`;
 

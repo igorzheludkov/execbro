@@ -104,6 +104,8 @@ export interface iOSResult {
     scaleFactor?: number;
     originalWidth?: number;
     originalHeight?: number;
+    // For listIOSSimulators: structured simulator list
+    simulators?: iOSSimulator[];
 }
 
 // Accessibility element from IDB describe commands
@@ -189,7 +191,8 @@ export async function listIOSSimulators(onlyBooted: boolean = false): Promise<iO
                 success: true,
                 result: onlyBooted
                     ? "No booted iOS simulators. Start a simulator first."
-                    : "No available iOS simulators found."
+                    : "No available iOS simulators found.",
+                simulators: []
             };
         }
 
@@ -209,7 +212,8 @@ export async function listIOSSimulators(onlyBooted: boolean = false): Promise<iO
 
         return {
             success: true,
-            result: `iOS Simulators:\n\n${formatted}`
+            result: `iOS Simulators:\n\n${formatted}`,
+            simulators
         };
     } catch (error) {
         return {
