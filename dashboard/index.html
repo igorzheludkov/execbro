@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RN Debugger Telemetry Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .header {
+            margin-bottom: 32px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #f8fafc;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #f8fafc;
+        }
+
+        .stat-card .change {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        .stat-card .change.positive { color: #4ade80; }
+        .stat-card .change.negative { color: #f87171; }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .chart-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #334155;
+        }
+
+        .chart-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #f8fafc;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        .table-card {
+            background: #1e293b;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #334155;
+            overflow-x: auto;
+        }
+
+        .table-card h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #f8fafc;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid #334155;
+        }
+
+        th {
+            color: #94a3b8;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+        }
+
+        td {
+            font-size: 14px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge.success {
+            background: rgba(74, 222, 128, 0.1);
+            color: #4ade80;
+        }
+
+        .status-badge.failure {
+            background: rgba(248, 113, 113, 0.1);
+            color: #f87171;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #94a3b8;
+        }
+
+        .error {
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid #f87171;
+            border-radius: 8px;
+            padding: 16px;
+            color: #f87171;
+            margin-bottom: 24px;
+        }
+
+        .time-filter {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .time-filter button {
+            background: #334155;
+            border: none;
+            color: #e2e8f0;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .time-filter button:hover {
+            background: #475569;
+        }
+
+        .time-filter button.active {
+            background: #3b82f6;
+        }
+
+        .refresh-btn {
+            background: #3b82f6;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: auto;
+        }
+
+        .refresh-btn:hover {
+            background: #2563eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>RN Debugger Telemetry</h1>
+        <p>Usage analytics for React Native AI Debugger MCP Server</p>
+    </div>
+
+    <div class="time-filter">
+        <button class="active" data-days="1">24 Hours</button>
+        <button data-days="7">7 Days</button>
+        <button data-days="30">30 Days</button>
+        <button class="refresh-btn" onclick="loadData()">Refresh</button>
+        <button class="refresh-btn" style="background: #64748b;" onclick="resetKey()">Reset Key</button>
+    </div>
+
+    <div id="error-container"></div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="label">Total Tool Calls</div>
+            <div class="value" id="total-calls">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Unique Installations</div>
+            <div class="value" id="unique-installs">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Success Rate</div>
+            <div class="value" id="success-rate">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Avg Duration</div>
+            <div class="value" id="avg-duration">-</div>
+        </div>
+    </div>
+
+    <div class="charts-grid">
+        <div class="chart-card">
+            <h3>Tool Usage</h3>
+            <div class="chart-container">
+                <canvas id="toolUsageChart"></canvas>
+            </div>
+        </div>
+        <div class="chart-card">
+            <h3>Calls Over Time</h3>
+            <div class="chart-container">
+                <canvas id="timelineChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-card">
+        <h3>Top Tools by Usage</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Tool Name</th>
+                    <th>Calls</th>
+                    <th>Success Rate</th>
+                    <th>Avg Duration</th>
+                </tr>
+            </thead>
+            <tbody id="tools-table">
+                <tr><td colspan="4" class="loading">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Configuration
+        const API_URL = 'https://rn-debugger-telemetry.500griven.workers.dev';
+
+        let toolUsageChart = null;
+        let timelineChart = null;
+        let selectedDays = 1;
+        let dashboardKey = localStorage.getItem('dashboardKey') || '';
+
+        // Prompt for key if not set
+        if (!dashboardKey) {
+            dashboardKey = prompt('Enter your Dashboard Key:');
+            if (dashboardKey) {
+                localStorage.setItem('dashboardKey', dashboardKey);
+            }
+        }
+
+        // Time filter buttons
+        document.querySelectorAll('.time-filter button[data-days]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.time-filter button[data-days]').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedDays = parseInt(btn.dataset.days);
+                loadData();
+            });
+        });
+
+        async function loadData() {
+            if (!dashboardKey) {
+                document.getElementById('error-container').innerHTML = `
+                    <div class="error">No dashboard key provided. Refresh the page to enter your key.</div>
+                `;
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/api/stats?days=${selectedDays}&key=${encodeURIComponent(dashboardKey)}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                }
+                const data = await response.json();
+                updateDashboard(data);
+                document.getElementById('error-container').innerHTML = '';
+            } catch (error) {
+                console.error('Failed to load data:', error);
+                document.getElementById('error-container').innerHTML = `
+                    <div class="error">
+                        Failed to load data: ${error.message}<br>
+                        <small>Make sure the worker has the /api/stats endpoint deployed.</small>
+                    </div>
+                `;
+            }
+        }
+
+        function updateDashboard(data) {
+            // Update stat cards
+            document.getElementById('total-calls').textContent = (data.totalCalls || 0).toLocaleString();
+            document.getElementById('unique-installs').textContent = (data.uniqueInstalls || 0).toLocaleString();
+            document.getElementById('success-rate').textContent = `${(data.successRate || 0).toFixed(1)}%`;
+            document.getElementById('avg-duration').textContent = `${(data.avgDuration || 0).toFixed(0)}ms`;
+
+            // Update tool usage chart
+            updateToolUsageChart(data.toolBreakdown || []);
+
+            // Update timeline chart
+            updateTimelineChart(data.timeline || []);
+
+            // Update tools table
+            updateToolsTable(data.toolBreakdown || []);
+        }
+
+        function updateToolUsageChart(toolData) {
+            const ctx = document.getElementById('toolUsageChart').getContext('2d');
+
+            const labels = toolData.slice(0, 10).map(t => t.tool);
+            const values = toolData.slice(0, 10).map(t => t.count);
+
+            if (toolUsageChart) {
+                toolUsageChart.destroy();
+            }
+
+            toolUsageChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: '#3b82f6',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#334155' }
+                        },
+                        y: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#334155' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateTimelineChart(timelineData) {
+            const ctx = document.getElementById('timelineChart').getContext('2d');
+
+            const labels = timelineData.map(t => t.date);
+            const values = timelineData.map(t => t.count);
+
+            if (timelineChart) {
+                timelineChart.destroy();
+            }
+
+            timelineChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#334155' }
+                        },
+                        y: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#334155' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateToolsTable(toolData) {
+            const tbody = document.getElementById('tools-table');
+
+            if (toolData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="loading">No data available</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = toolData.map(tool => `
+                <tr>
+                    <td>${tool.tool}</td>
+                    <td>${tool.count.toLocaleString()}</td>
+                    <td>
+                        <span class="status-badge ${tool.successRate >= 90 ? 'success' : 'failure'}">
+                            ${tool.successRate.toFixed(1)}%
+                        </span>
+                    </td>
+                    <td>${tool.avgDuration.toFixed(0)}ms</td>
+                </tr>
+            `).join('');
+        }
+
+        function resetKey() {
+            localStorage.removeItem('dashboardKey');
+            dashboardKey = prompt('Enter your Dashboard Key:');
+            if (dashboardKey) {
+                localStorage.setItem('dashboardKey', dashboardKey);
+                loadData();
+            }
+        }
+
+        // Initial load
+        loadData();
+    </script>
+</body>
+</html>
