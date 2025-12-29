@@ -1,7 +1,8 @@
 import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest } from "./types.js";
-import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer } from "./state.js";
+import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer, setActiveSimulatorUdid, clearActiveSimulatorIfSource } from "./state.js";
 import { mapConsoleType } from "./logs.js";
+import { findSimulatorByName } from "./ios.js";
 
 // Format CDP RemoteObject to readable string
 export function formatRemoteObject(result: RemoteObject): string {
@@ -254,7 +255,7 @@ export async function connectToDevice(device: DeviceInfo, port: number): Promise
         try {
             const ws = new WebSocket(device.webSocketDebuggerUrl);
 
-            ws.on("open", () => {
+            ws.on("open", async () => {
                 connectedApps.set(appKey, { ws, deviceInfo: device, port });
                 console.error(`[rn-ai-debugger] Connected to ${device.title}`);
 
@@ -282,6 +283,16 @@ export async function connectToDevice(device: DeviceInfo, port: number): Promise
                     })
                 );
 
+                // Try to resolve iOS simulator UDID from device name
+                // This enables automatic device scoping for iOS tools
+                if (device.deviceName) {
+                    const simulatorUdid = await findSimulatorByName(device.deviceName);
+                    if (simulatorUdid) {
+                        setActiveSimulatorUdid(simulatorUdid, appKey);
+                        console.error(`[rn-ai-debugger] Linked to iOS simulator: ${simulatorUdid}`);
+                    }
+                }
+
                 resolve(`Connected to ${device.title} (${device.deviceName})`);
             });
 
@@ -296,11 +307,15 @@ export async function connectToDevice(device: DeviceInfo, port: number): Promise
 
             ws.on("close", () => {
                 connectedApps.delete(appKey);
+                // Clear active simulator UDID if this connection set it
+                clearActiveSimulatorIfSource(appKey);
                 console.error(`[rn-ai-debugger] Disconnected from ${device.title}`);
             });
 
             ws.on("error", (error: Error) => {
                 connectedApps.delete(appKey);
+                // Clear active simulator UDID if this connection set it
+                clearActiveSimulatorIfSource(appKey);
                 reject(`Failed to connect to ${device.title}: ${error.message}`);
             });
 

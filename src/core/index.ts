@@ -2,7 +2,7 @@
 export * from "./types.js";
 
 // State
-export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId } from "./state.js";
+export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid } from "./state.js";
 
 // Logs
 export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs } from "./logs.js";
@@ -86,6 +86,8 @@ export {
     isSimctlAvailable,
     listIOSSimulators,
     getBootedSimulatorUdid,
+    findSimulatorByName,
+    getActiveOrBootedSimulatorUdid,
     iosScreenshot,
     iosInstallApp,
     iosLaunchApp,

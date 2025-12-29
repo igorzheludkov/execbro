@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
+import { getActiveSimulatorUdid } from "./state.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -251,6 +252,61 @@ export async function getBootedSimulatorUdid(): Promise<string | null> {
 }
 
 /**
+ * Find a booted simulator's UDID by its device name
+ * Matches Metro's deviceName against simulator names from simctl
+ */
+export async function findSimulatorByName(deviceName: string): Promise<string | null> {
+    try {
+        const { stdout } = await execAsync("xcrun simctl list devices booted -j", {
+            timeout: SIMCTL_TIMEOUT
+        });
+
+        const data = JSON.parse(stdout);
+        const normalizedDeviceName = deviceName.toLowerCase().trim();
+
+        for (const devices of Object.values(data.devices)) {
+            if (!Array.isArray(devices)) continue;
+
+            for (const device of devices as Array<{ udid: string; name: string; state: string }>) {
+                if (device.state !== "Booted") continue;
+
+                const normalizedSimName = device.name.toLowerCase().trim();
+
+                // Exact match
+                if (normalizedSimName === normalizedDeviceName) {
+                    return device.udid;
+                }
+
+                // Partial match (deviceName contains simulator name or vice versa)
+                if (normalizedSimName.includes(normalizedDeviceName) ||
+                    normalizedDeviceName.includes(normalizedSimName)) {
+                    return device.udid;
+                }
+            }
+        }
+
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Get the active simulator UDID (Metro-connected) or fall back to first booted simulator
+ * This enables automatic device scoping based on Metro connection
+ */
+export async function getActiveOrBootedSimulatorUdid(): Promise<string | null> {
+    // First, check if there's an active Metro-connected simulator
+    const activeUdid = getActiveSimulatorUdid();
+    if (activeUdid) {
+        return activeUdid;
+    }
+
+    // Fall back to first booted simulator
+    return getBootedSimulatorUdid();
+}
+
+/**
  * Build device selector for simctl command
  */
 function buildDeviceArg(udid?: string): string {
@@ -270,17 +326,13 @@ export async function iosScreenshot(outputPath?: string, udid?: string): Promise
             };
         }
 
-        const deviceArg = buildDeviceArg(udid);
-
-        // Check if a simulator is booted
-        if (!udid) {
-            const bootedUdid = await getBootedSimulatorUdid();
-            if (!bootedUdid) {
-                return {
-                    success: false,
-                    error: "No iOS simulator is currently running. Start a simulator first."
-                };
-            }
+        // Resolve target UDID (prefer Metro-connected simulator)
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
         }
 
         // Generate output path if not provided
@@ -288,7 +340,7 @@ export async function iosScreenshot(outputPath?: string, udid?: string): Promise
         const finalOutputPath =
             outputPath || path.join(os.tmpdir(), `ios-screenshot-${timestamp}.png`);
 
-        await execAsync(`xcrun simctl io ${deviceArg} screenshot "${finalOutputPath}"`, {
+        await execAsync(`xcrun simctl io ${targetUdid} screenshot "${finalOutputPath}"`, {
             timeout: SIMCTL_TIMEOUT
         });
 
@@ -357,20 +409,16 @@ export async function iosInstallApp(appPath: string, udid?: string): Promise<iOS
             };
         }
 
-        const deviceArg = buildDeviceArg(udid);
-
-        // Check if a simulator is booted
-        if (!udid) {
-            const bootedUdid = await getBootedSimulatorUdid();
-            if (!bootedUdid) {
-                return {
-                    success: false,
-                    error: "No iOS simulator is currently running. Start a simulator first."
-                };
-            }
+        // Resolve target UDID (prefer Metro-connected simulator)
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
         }
 
-        await execAsync(`xcrun simctl install ${deviceArg} "${appPath}"`, {
+        await execAsync(`xcrun simctl install ${targetUdid} "${appPath}"`, {
             timeout: 120000 // 2 minute timeout for install
         });
 
@@ -399,20 +447,16 @@ export async function iosLaunchApp(bundleId: string, udid?: string): Promise<iOS
             };
         }
 
-        const deviceArg = buildDeviceArg(udid);
-
-        // Check if a simulator is booted
-        if (!udid) {
-            const bootedUdid = await getBootedSimulatorUdid();
-            if (!bootedUdid) {
-                return {
-                    success: false,
-                    error: "No iOS simulator is currently running. Start a simulator first."
-                };
-            }
+        // Resolve target UDID (prefer Metro-connected simulator)
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
         }
 
-        await execAsync(`xcrun simctl launch ${deviceArg} ${bundleId}`, {
+        await execAsync(`xcrun simctl launch ${targetUdid} ${bundleId}`, {
             timeout: SIMCTL_TIMEOUT
         });
 
@@ -441,20 +485,16 @@ export async function iosOpenUrl(url: string, udid?: string): Promise<iOSResult>
             };
         }
 
-        const deviceArg = buildDeviceArg(udid);
-
-        // Check if a simulator is booted
-        if (!udid) {
-            const bootedUdid = await getBootedSimulatorUdid();
-            if (!bootedUdid) {
-                return {
-                    success: false,
-                    error: "No iOS simulator is currently running. Start a simulator first."
-                };
-            }
+        // Resolve target UDID (prefer Metro-connected simulator)
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
         }
 
-        await execAsync(`xcrun simctl openurl ${deviceArg} "${url}"`, {
+        await execAsync(`xcrun simctl openurl ${targetUdid} "${url}"`, {
             timeout: SIMCTL_TIMEOUT
         });
 
@@ -483,20 +523,16 @@ export async function iosTerminateApp(bundleId: string, udid?: string): Promise<
             };
         }
 
-        const deviceArg = buildDeviceArg(udid);
-
-        // Check if a simulator is booted
-        if (!udid) {
-            const bootedUdid = await getBootedSimulatorUdid();
-            if (!bootedUdid) {
-                return {
-                    success: false,
-                    error: "No iOS simulator is currently running. Start a simulator first."
-                };
-            }
+        // Resolve target UDID (prefer Metro-connected simulator)
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+        if (!targetUdid) {
+            return {
+                success: false,
+                error: "No iOS simulator is currently running. Start a simulator first."
+            };
         }
 
-        await execAsync(`xcrun simctl terminate ${deviceArg} ${bundleId}`, {
+        await execAsync(`xcrun simctl terminate ${targetUdid} ${bundleId}`, {
             timeout: SIMCTL_TIMEOUT
         });
 
@@ -579,8 +615,8 @@ export async function iosTap(
             };
         }
 
-        // Get simulator UDID (use provided or find booted one)
-        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        // Get simulator UDID (prefer Metro-connected, then fall back to booted)
+        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -638,7 +674,7 @@ export async function iosSwipe(
             };
         }
 
-        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -695,7 +731,7 @@ export async function iosInputText(text: string, udid?: string): Promise<iOSResu
             };
         }
 
-        const targetUdid = udid || (await getBootedSimulatorUdid());
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -749,7 +785,7 @@ export async function iosButton(
             };
         }
 
-        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -801,7 +837,7 @@ export async function iosKeyEvent(
             };
         }
 
-        const targetUdid = options?.udid || (await getBootedSimulatorUdid());
+        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -857,7 +893,7 @@ export async function iosKeySequence(keycodes: number[], udid?: string): Promise
             };
         }
 
-        const targetUdid = udid || (await getBootedSimulatorUdid());
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -934,7 +970,7 @@ export async function iosDescribeAll(udid?: string): Promise<iOSDescribeResult> 
             };
         }
 
-        const targetUdid = udid || (await getBootedSimulatorUdid());
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -984,7 +1020,7 @@ export async function iosDescribePoint(x: number, y: number, udid?: string): Pro
             };
         }
 
-        const targetUdid = udid || (await getBootedSimulatorUdid());
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,
@@ -1302,7 +1338,7 @@ export async function iosGetUITree(udid?: string): Promise<{
             };
         }
 
-        const targetUdid = udid || (await getBootedSimulatorUdid());
+        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
         if (!targetUdid) {
             return {
                 success: false,

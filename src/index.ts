@@ -8,6 +8,7 @@ import {
     logBuffer,
     networkBuffer,
     bundleErrorBuffer,
+    getActiveSimulatorUdid,
     scanMetroPorts,
     fetchDevices,
     selectMainDevice,
@@ -209,11 +210,17 @@ registerToolWithTelemetry(
             return `${app.deviceInfo.title} (${app.deviceInfo.deviceName}): ${state}`;
         });
 
+        // Include active iOS simulator info if available
+        const activeSimulatorUdid = getActiveSimulatorUdid();
+        const simulatorInfo = activeSimulatorUdid
+            ? `\nActive iOS Simulator (auto-scoped): ${activeSimulatorUdid}`
+            : "\nNo iOS simulator linked (iOS tools will use first booted simulator)";
+
         return {
             content: [
                 {
                     type: "text",
-                    text: `Connected apps:\n${status.join("\n")}\n\nTotal logs in buffer: ${logBuffer.size}`
+                    text: `Connected apps:\n${status.join("\n")}${simulatorInfo}\n\nTotal logs in buffer: ${logBuffer.size}`
                 }
             ]
         };
