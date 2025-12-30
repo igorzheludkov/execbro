@@ -100,3 +100,42 @@ export interface NetworkRequest {
     error?: string;
     completed: boolean;
 }
+
+// Connection state tracking for auto-reconnection
+export interface ConnectionState {
+    status: "connected" | "disconnected" | "reconnecting";
+    lastConnectedTime: Date | null;
+    lastDisconnectTime: Date | null;
+    reconnectionAttempts: number;
+    connectionGaps: ConnectionGap[];
+}
+
+// Record of a connection gap (when we were disconnected)
+export interface ConnectionGap {
+    disconnectedAt: Date;
+    reconnectedAt: Date | null;
+    durationMs: number | null;
+    reason: string;
+}
+
+// Metadata stored for reconnection attempts
+export interface ConnectionMetadata {
+    port: number;
+    deviceInfo: DeviceInfo;
+    webSocketUrl: string;
+}
+
+// Configuration for reconnection behavior
+export interface ReconnectionConfig {
+    enabled: boolean;
+    maxAttempts: number;
+    initialDelayMs: number;
+    maxDelayMs: number;
+    backoffMultiplier: number;
+}
+
+// Options for connectToDevice
+export interface ConnectOptions {
+    isReconnection?: boolean;
+    reconnectionConfig?: ReconnectionConfig;
+}

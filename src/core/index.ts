@@ -1,6 +1,30 @@
 // Types
 export * from "./types.js";
 
+// Connection State Management
+export {
+    DEFAULT_RECONNECTION_CONFIG,
+    initConnectionState,
+    updateConnectionState,
+    getConnectionState,
+    getAllConnectionStates,
+    recordConnectionGap,
+    closeConnectionGap,
+    getRecentGaps,
+    hasRecentDisconnect,
+    saveConnectionMetadata,
+    getConnectionMetadata,
+    clearConnectionMetadata,
+    getAllConnectionMetadata,
+    saveReconnectionTimer,
+    getAndClearReconnectionTimer,
+    cancelReconnectionTimer,
+    cancelAllReconnectionTimers,
+    clearAllConnectionState,
+    calculateBackoffDelay,
+    formatDuration
+} from "./connectionState.js";
+
 // State
 export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid } from "./state.js";
 

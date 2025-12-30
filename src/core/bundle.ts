@@ -186,9 +186,50 @@ export function formatBundleErrors(errors: BundleError[]): string {
 let metroEventWs: WebSocket | null = null;
 let bundleErrorBuffer: BundleErrorBuffer | null = null;
 
+// Metro build events reconnection state
+let metroBuildEventPort: number | null = null;
+let metroBuildEventReconnecting = false;
+let metroBuildEventAttempts = 0;
+const MAX_BUILD_EVENT_RECONNECT_ATTEMPTS = 5;
+const BUILD_EVENT_BACKOFF_BASE_MS = 500;
+
 // Initialize bundle error buffer (called from state.ts)
 export function initBundleErrorBuffer(buffer: BundleErrorBuffer): void {
     bundleErrorBuffer = buffer;
+}
+
+/**
+ * Schedule reconnection for Metro build events with exponential backoff
+ */
+function scheduleBuildEventReconnection(port: number): void {
+    if (metroBuildEventReconnecting) return;
+    if (metroBuildEventAttempts >= MAX_BUILD_EVENT_RECONNECT_ATTEMPTS) {
+        console.error(`[rn-ai-debugger] Max reconnection attempts for Metro build events reached`);
+        metroBuildEventReconnecting = false;
+        return;
+    }
+
+    metroBuildEventReconnecting = true;
+    const delay = Math.min(BUILD_EVENT_BACKOFF_BASE_MS * Math.pow(2, metroBuildEventAttempts), 8000);
+
+    console.error(`[rn-ai-debugger] Scheduling Metro build events reconnection in ${delay}ms (attempt ${metroBuildEventAttempts + 1}/${MAX_BUILD_EVENT_RECONNECT_ATTEMPTS})`);
+
+    setTimeout(async () => {
+        metroBuildEventAttempts++;
+        try {
+            await connectMetroBuildEvents(port);
+            // Reset on successful connection
+            metroBuildEventAttempts = 0;
+            metroBuildEventReconnecting = false;
+        } catch {
+            metroBuildEventReconnecting = false;
+            if (metroBuildEventAttempts < MAX_BUILD_EVENT_RECONNECT_ATTEMPTS) {
+                scheduleBuildEventReconnection(port);
+            } else {
+                console.error("[rn-ai-debugger] Failed to reconnect to Metro build events");
+            }
+        }
+    }, delay);
 }
 
 // Connect to Metro's WebSocket for build events
@@ -205,6 +246,10 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
 
             ws.on("open", () => {
                 metroEventWs = ws;
+                metroBuildEventPort = port;
+                // Reset reconnection state on successful connection
+                metroBuildEventAttempts = 0;
+                metroBuildEventReconnecting = false;
                 console.error(`[rn-ai-debugger] Connected to Metro build events on port ${port}`);
                 resolve(`Connected to Metro build events on port ${port}`);
             });
@@ -227,11 +272,19 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
             ws.on("close", () => {
                 metroEventWs = null;
                 console.error("[rn-ai-debugger] Disconnected from Metro build events");
+
+                // Trigger auto-reconnection
+                if (metroBuildEventPort && !metroBuildEventReconnecting) {
+                    scheduleBuildEventReconnection(metroBuildEventPort);
+                }
             });
 
             ws.on("error", (error: Error) => {
                 metroEventWs = null;
-                reject(`Failed to connect to Metro build events: ${error.message}`);
+                // Only reject if not a reconnection attempt
+                if (!metroBuildEventReconnecting) {
+                    reject(`Failed to connect to Metro build events: ${error.message}`);
+                }
             });
 
             setTimeout(() => {

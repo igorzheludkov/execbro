@@ -24,6 +24,13 @@ import {
     searchNetworkRequests,
     getNetworkStats,
     formatRequestDetails,
+    // Connection state
+    getAllConnectionStates,
+    getConnectionState,
+    getAllConnectionMetadata,
+    getRecentGaps,
+    formatDuration,
+    ConnectionGap,
     // Bundle (Metro build errors)
     connectMetroBuildEvents,
     getBundleErrors,
@@ -227,6 +234,87 @@ registerToolWithTelemetry(
     }
 );
 
+// Tool: Get connection status (detailed health and gap tracking)
+registerToolWithTelemetry(
+    "get_connection_status",
+    {
+        description:
+            "Get detailed connection health status including uptime, recent disconnects/reconnects, and connection gaps that may indicate missing data.",
+        inputSchema: {}
+    },
+    async () => {
+        const connections = getConnectedApps();
+        const states = getAllConnectionStates();
+        const metadata = getAllConnectionMetadata();
+
+        const lines: string[] = [];
+        lines.push("=== Connection Status ===\n");
+
+        if (connections.length === 0 && states.size === 0) {
+            lines.push("No connections established. Run scan_metro to connect.");
+            return {
+                content: [{ type: "text", text: lines.join("\n") }]
+            };
+        }
+
+        // Show active connections
+        for (const { key, app, isConnected } of connections) {
+            const state = states.get(key);
+            lines.push(`--- ${app.deviceInfo.title} (Port ${app.port}) ---`);
+            lines.push(`  Status: ${isConnected ? "CONNECTED" : "DISCONNECTED"}`);
+
+            if (state) {
+                if (state.lastConnectedTime) {
+                    const uptime = Date.now() - state.lastConnectedTime.getTime();
+                    lines.push(`  Connected since: ${state.lastConnectedTime.toLocaleTimeString()}`);
+                    lines.push(`  Uptime: ${formatDuration(uptime)}`);
+                }
+
+                if (state.status === "reconnecting") {
+                    lines.push(`  Reconnecting: Attempt ${state.reconnectionAttempts}`);
+                }
+
+                // Show recent gaps (last 5 minutes)
+                if (state.connectionGaps.length > 0) {
+                    const recentGaps = state.connectionGaps.filter(
+                        (g: ConnectionGap) => Date.now() - g.disconnectedAt.getTime() < 300000
+                    );
+                    if (recentGaps.length > 0) {
+                        lines.push(`  Recent gaps: ${recentGaps.length}`);
+                        for (const gap of recentGaps.slice(-3)) {
+                            const duration = gap.durationMs ? formatDuration(gap.durationMs) : "ongoing";
+                            lines.push(
+                                `    - ${gap.disconnectedAt.toLocaleTimeString()} (${duration}): ${gap.reason}`
+                            );
+                        }
+                    }
+                }
+            }
+            lines.push("");
+        }
+
+        // Show disconnected/reconnecting states without active connections
+        for (const [key, state] of states.entries()) {
+            if (!connections.find((c) => c.key === key)) {
+                const meta = metadata.get(key);
+                lines.push(`--- ${meta?.deviceInfo.title || key} (Disconnected) ---`);
+                lines.push(`  Status: ${state.status.toUpperCase()}`);
+                if (state.lastDisconnectTime) {
+                    lines.push(`  Disconnected at: ${state.lastDisconnectTime.toLocaleTimeString()}`);
+                }
+                if (state.reconnectionAttempts > 0) {
+                    lines.push(`  Reconnection attempts: ${state.reconnectionAttempts}`);
+                }
+                lines.push("");
+            }
+        }
+
+        return {
+            content: [{ type: "text", text: lines.join("\n") }]
+        };
+    }
+);
+
 // Tool: Get console logs
 registerToolWithTelemetry(
     "get_logs",
@@ -245,12 +333,29 @@ registerToolWithTelemetry(
     async ({ maxLogs, level, startFromText }) => {
         const { logs, formatted } = getLogs(logBuffer, { maxLogs, level, startFromText });
 
+        // Check for recent connection gaps
+        const warningThresholdMs = 30000; // 30 seconds
+        const recentGaps = getRecentGaps(warningThresholdMs);
+        let warning = "";
+
+        if (recentGaps.length > 0) {
+            const latestGap = recentGaps[recentGaps.length - 1];
+            const gapDuration = latestGap.durationMs || (Date.now() - latestGap.disconnectedAt.getTime());
+
+            if (latestGap.reconnectedAt) {
+                const secAgo = Math.round((Date.now() - latestGap.reconnectedAt.getTime()) / 1000);
+                warning = `\n\n[WARNING] Connection was restored ${secAgo}s ago. Some logs may have been missed during the ${formatDuration(gapDuration)} gap.`;
+            } else {
+                warning = `\n\n[WARNING] Connection is currently disconnected. Logs may be incomplete.`;
+            }
+        }
+
         const startNote = startFromText ? ` (starting from "${startFromText}")` : "";
         return {
             content: [
                 {
                     type: "text",
-                    text: `React Native Console Logs (${logs.length} entries)${startNote}:\n\n${formatted}`
+                    text: `React Native Console Logs (${logs.length} entries)${startNote}:\n\n${formatted}${warning}`
                 }
             ]
         };
@@ -508,11 +613,28 @@ registerToolWithTelemetry(
             status
         });
 
+        // Check for recent connection gaps
+        const warningThresholdMs = 30000; // 30 seconds
+        const recentGaps = getRecentGaps(warningThresholdMs);
+        let warning = "";
+
+        if (recentGaps.length > 0) {
+            const latestGap = recentGaps[recentGaps.length - 1];
+            const gapDuration = latestGap.durationMs || (Date.now() - latestGap.disconnectedAt.getTime());
+
+            if (latestGap.reconnectedAt) {
+                const secAgo = Math.round((Date.now() - latestGap.reconnectedAt.getTime()) / 1000);
+                warning = `\n\n[WARNING] Connection was restored ${secAgo}s ago. Some requests may have been missed during the ${formatDuration(gapDuration)} gap.`;
+            } else {
+                warning = `\n\n[WARNING] Connection is currently disconnected. Network data may be incomplete.`;
+            }
+        }
+
         return {
             content: [
                 {
                     type: "text",
-                    text: `Network Requests (${requests.length} entries):\n\n${formatted}`
+                    text: `Network Requests (${requests.length} entries):\n\n${formatted}${warning}`
                 }
             ]
         };

@@ -1,8 +1,22 @@
 import WebSocket from "ws";
-import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest } from "./types.js";
+import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig } from "./types.js";
 import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer, setActiveSimulatorUdid, clearActiveSimulatorIfSource } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 import { findSimulatorByName } from "./ios.js";
+import { fetchDevices, selectMainDevice } from "./metro.js";
+import {
+    DEFAULT_RECONNECTION_CONFIG,
+    initConnectionState,
+    updateConnectionState,
+    getConnectionState,
+    recordConnectionGap,
+    closeConnectionGap,
+    saveConnectionMetadata,
+    getConnectionMetadata,
+    saveReconnectionTimer,
+    cancelReconnectionTimer,
+    calculateBackoffDelay
+} from "./connectionState.js";
 
 // Format CDP RemoteObject to readable string
 export function formatRemoteObject(result: RemoteObject): string {
@@ -243,7 +257,13 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
 }
 
 // Connect to a device via CDP WebSocket
-export async function connectToDevice(device: DeviceInfo, port: number): Promise<string> {
+export async function connectToDevice(
+    device: DeviceInfo,
+    port: number,
+    options: ConnectOptions = {}
+): Promise<string> {
+    const { isReconnection = false, reconnectionConfig = DEFAULT_RECONNECTION_CONFIG } = options;
+
     return new Promise((resolve, reject) => {
         const appKey = `${port}-${device.id}`;
 
@@ -252,12 +272,35 @@ export async function connectToDevice(device: DeviceInfo, port: number): Promise
             return;
         }
 
+        // Cancel any pending reconnection timer for this appKey
+        cancelReconnectionTimer(appKey);
+
+        // Save connection metadata for potential reconnection
+        saveConnectionMetadata(appKey, {
+            port,
+            deviceInfo: device,
+            webSocketUrl: device.webSocketDebuggerUrl
+        });
+
         try {
             const ws = new WebSocket(device.webSocketDebuggerUrl);
 
             ws.on("open", async () => {
                 connectedApps.set(appKey, { ws, deviceInfo: device, port });
-                console.error(`[rn-ai-debugger] Connected to ${device.title}`);
+
+                // Initialize or update connection state
+                if (isReconnection) {
+                    closeConnectionGap(appKey);
+                    updateConnectionState(appKey, {
+                        status: "connected",
+                        lastConnectedTime: new Date(),
+                        reconnectionAttempts: 0
+                    });
+                    console.error(`[rn-ai-debugger] Reconnected to ${device.title}`);
+                } else {
+                    initConnectionState(appKey);
+                    console.error(`[rn-ai-debugger] Connected to ${device.title}`);
+                }
 
                 // Enable Runtime domain to receive console messages
                 ws.send(
@@ -309,27 +352,120 @@ export async function connectToDevice(device: DeviceInfo, port: number): Promise
                 connectedApps.delete(appKey);
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
+
+                // Record the gap and trigger reconnection
+                recordConnectionGap(appKey, "Connection closed");
+                updateConnectionState(appKey, {
+                    status: "disconnected",
+                    lastDisconnectTime: new Date()
+                });
+
                 console.error(`[rn-ai-debugger] Disconnected from ${device.title}`);
+
+                // Schedule auto-reconnection if enabled
+                if (reconnectionConfig.enabled) {
+                    scheduleReconnection(appKey, reconnectionConfig);
+                }
             });
 
             ws.on("error", (error: Error) => {
                 connectedApps.delete(appKey);
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
-                reject(`Failed to connect to ${device.title}: ${error.message}`);
+
+                // Only reject if this is initial connection, not reconnection attempt
+                if (!isReconnection) {
+                    reject(`Failed to connect to ${device.title}: ${error.message}`);
+                } else {
+                    console.error(`[rn-ai-debugger] Reconnection error: ${error.message}`);
+                }
             });
 
             // Timeout after 5 seconds
             setTimeout(() => {
                 if (ws.readyState !== WebSocket.OPEN) {
                     ws.terminate();
-                    reject(`Connection to ${device.title} timed out`);
+                    if (!isReconnection) {
+                        reject(`Connection to ${device.title} timed out`);
+                    }
                 }
             }, 5000);
         } catch (error) {
-            reject(`Failed to create WebSocket connection: ${error}`);
+            if (!isReconnection) {
+                reject(`Failed to create WebSocket connection: ${error}`);
+            }
         }
     });
+}
+
+/**
+ * Schedule a reconnection attempt with exponential backoff
+ */
+function scheduleReconnection(
+    appKey: string,
+    config: ReconnectionConfig = DEFAULT_RECONNECTION_CONFIG
+): void {
+    const state = getConnectionState(appKey);
+    if (!state) return;
+
+    const attempts = state.reconnectionAttempts;
+    if (attempts >= config.maxAttempts) {
+        console.error(`[rn-ai-debugger] Max reconnection attempts (${config.maxAttempts}) reached for ${appKey}`);
+        updateConnectionState(appKey, { status: "disconnected" });
+        return;
+    }
+
+    const delay = calculateBackoffDelay(attempts, config);
+    console.error(`[rn-ai-debugger] Scheduling reconnection attempt ${attempts + 1}/${config.maxAttempts} in ${delay}ms`);
+
+    updateConnectionState(appKey, {
+        status: "reconnecting",
+        reconnectionAttempts: attempts + 1
+    });
+
+    const timer = setTimeout(() => {
+        attemptReconnection(appKey, config);
+    }, delay);
+
+    saveReconnectionTimer(appKey, timer);
+}
+
+/**
+ * Attempt to reconnect to a previously connected device
+ */
+async function attemptReconnection(
+    appKey: string,
+    config: ReconnectionConfig = DEFAULT_RECONNECTION_CONFIG
+): Promise<boolean> {
+    const metadata = getConnectionMetadata(appKey);
+    if (!metadata) {
+        console.error(`[rn-ai-debugger] No metadata for reconnection: ${appKey}`);
+        return false;
+    }
+
+    try {
+        // Re-fetch devices to get fresh WebSocket URL (may have changed)
+        const devices = await fetchDevices(metadata.port);
+
+        // Try to find the same device first, otherwise select main device
+        const device = devices.find(d => d.id === metadata.deviceInfo.id)
+            || selectMainDevice(devices);
+
+        if (!device) {
+            console.error(`[rn-ai-debugger] Device no longer available for ${appKey}`);
+            // Schedule next attempt
+            scheduleReconnection(appKey, config);
+            return false;
+        }
+
+        await connectToDevice(device, metadata.port, { isReconnection: true, reconnectionConfig: config });
+        return true;
+    } catch (error) {
+        console.error(`[rn-ai-debugger] Reconnection failed: ${error}`);
+        // Schedule next attempt
+        scheduleReconnection(appKey, config);
+        return false;
+    }
 }
 
 // Get list of connected apps

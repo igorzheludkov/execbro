@@ -8,6 +8,8 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 -   **Network request tracking** - capture HTTP requests/responses with headers, timing, and status
 -   **Debug Web Dashboard** - browser-based UI to view logs and network requests in real-time
 -   Supports both **Expo SDK 54+** (React Native Bridgeless) and **RN 0.70+** (Hermes)
+-   **Auto-connect on startup** - automatically scans and connects to Metro when the server starts
+-   **Auto-reconnection** - automatically reconnects when connection is lost (e.g., app restart)
 -   Auto-discovers running Metro servers on common ports
 -   Filters logs by level (log, warn, error, info, debug)
 -   Circular buffer stores last 1000 log entries and 500 network requests
@@ -102,14 +104,15 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ### Connection & Logs
 
-| Tool            | Description                                                        |
-| --------------- | ------------------------------------------------------------------ |
-| `scan_metro`    | Scan for running Metro servers and auto-connect                    |
-| `connect_metro` | Connect to a specific Metro port                                   |
-| `get_apps`      | List connected React Native apps                                   |
-| `get_logs`      | Retrieve console logs (with optional filtering and start position) |
-| `search_logs`   | Search logs for specific text (case-insensitive)                   |
-| `clear_logs`    | Clear the log buffer                                               |
+| Tool                    | Description                                                        |
+| ----------------------- | ------------------------------------------------------------------ |
+| `scan_metro`            | Scan for running Metro servers and auto-connect                    |
+| `connect_metro`         | Connect to a specific Metro port                                   |
+| `get_apps`              | List connected React Native apps                                   |
+| `get_connection_status` | Get detailed connection health, uptime, and recent disconnects     |
+| `get_logs`              | Retrieve console logs (with optional filtering and start position) |
+| `search_logs`           | Search logs for specific text (case-insensitive)                   |
+| `clear_logs`            | Clear the log buffer                                               |
 
 ### Network Tracking
 
@@ -565,6 +568,46 @@ android_tap with x=540 y=1200                   # Step 3: Tap (use returned coor
 3. Enables `Runtime.enable` to receive `Runtime.consoleAPICalled` events
 4. Enables `Network.enable` to receive network request/response events
 5. Stores logs and network requests in circular buffers for retrieval
+
+## Auto-Reconnection
+
+The server automatically handles connection interruptions:
+
+### Auto-Connect on Startup
+
+When the MCP server starts, it automatically scans common Metro ports (8081, 8082, 19000-19002) and connects to any running Metro bundlers. No need to manually call `scan_metro` if Metro is already running.
+
+### Reconnection on Disconnect
+
+When the connection to Metro is lost (e.g., app restart, Metro restart, or network issues):
+
+1. The server automatically attempts to reconnect
+2. Uses exponential backoff: immediate, 500ms, 1s, 2s, 4s, 8s (up to 8 attempts)
+3. Re-fetches device list to handle new WebSocket URLs
+4. Preserves existing log and network buffers
+
+### Connection Gap Warnings
+
+If there was a recent disconnect, `get_logs` and `get_network_requests` will include a warning:
+
+```
+[WARNING] Connection was restored 5s ago. Some logs may have been missed during the 3s gap.
+```
+
+### Monitor Connection Health
+
+Use `get_connection_status` to see detailed connection information:
+
+```
+=== Connection Status ===
+
+--- React Native (Port 8081) ---
+  Status: CONNECTED
+  Connected since: 2:45:30 PM
+  Uptime: 5m 23s
+  Recent gaps: 1
+    - 2:43:15 PM (2s): Connection closed
+```
 
 ## Troubleshooting
 
