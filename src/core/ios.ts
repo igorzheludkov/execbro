@@ -364,11 +364,11 @@ export async function iosScreenshot(outputPath?: string, udid?: string): Promise
                     fit: "inside",
                     withoutEnlargement: true
                 })
-                .png({ compressionLevel: 9 })
+                .jpeg({ quality: 85 })
                 .toBuffer();
         } else {
             imageData = await image
-                .png({ compressionLevel: 9 })
+                .jpeg({ quality: 85 })
                 .toBuffer();
         }
 

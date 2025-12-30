@@ -11,6 +11,7 @@ import {
     iosScreenshot,
     iosTap
 } from "./ios.js";
+import { recognizeText, inferIOSDevicePixelRatio } from "./ocr.js";
 
 const DEFAULT_HTTP_PORT = 3456;
 const MAX_PORT_ATTEMPTS = 20;
@@ -1276,6 +1277,65 @@ function createRequestHandler() {
                 // Clear all agent-added markers
                 tapVerifierMarkers = [];
                 res.end(JSON.stringify({ success: true, message: 'All markers cleared' }));
+            } else if (url === "/api/ocr") {
+                // OCR endpoint - takes screenshot and runs OCR
+                const platform = params.get('platform') || 'ios';
+                const deviceId = params.get('deviceId') || undefined;
+                const engine = params.get('engine') || 'auto';
+                console.log(`[OCR] Request: platform=${platform}, engine=${engine}, deviceId=${deviceId || 'auto'}`);
+                try {
+                    // Take screenshot
+                    let screenshotResult;
+                    if (platform === 'android') {
+                        screenshotResult = await androidScreenshot(deviceId);
+                    } else {
+                        screenshotResult = await iosScreenshot(undefined, deviceId);
+                    }
+
+                    if (!screenshotResult.success || !screenshotResult.data) {
+                        console.log(`[OCR] Screenshot failed: ${screenshotResult.error || 'No image data'}`);
+                        res.end(JSON.stringify({
+                            success: false,
+                            error: `Screenshot failed: ${screenshotResult.error || 'No image data'}`
+                        }));
+                        return;
+                    }
+                    // Infer device pixel ratio from screenshot dimensions (iOS only)
+                    const devicePixelRatio = platform === 'ios' && screenshotResult.originalWidth && screenshotResult.originalHeight
+                        ? inferIOSDevicePixelRatio(screenshotResult.originalWidth, screenshotResult.originalHeight)
+                        : 1; // Android uses raw pixels
+
+                    console.log(`[OCR] Screenshot captured, size=${screenshotResult.data.length} bytes, scaleFactor=${screenshotResult.scaleFactor}, devicePixelRatio=${devicePixelRatio}`);
+
+                    // Run OCR with scale factor, platform, device pixel ratio, and engine selection
+                    const scaleFactor = screenshotResult.scaleFactor || 1;
+                    const ocrResult = await recognizeText(screenshotResult.data, {
+                        scaleFactor,
+                        platform: platform as "ios" | "android",
+                        engine: engine as "auto" | "easyocr" | "tesseract",
+                        devicePixelRatio
+                    });
+
+                    console.log(`[OCR] Complete: engine=${ocrResult.engine}, words=${ocrResult.words.length}, time=${ocrResult.processingTimeMs}ms`);
+
+                    res.end(JSON.stringify({
+                        success: ocrResult.success,
+                        platform,
+                        engine: ocrResult.engine || "unknown",
+                        processingTimeMs: ocrResult.processingTimeMs,
+                        fullText: ocrResult.fullText,
+                        confidence: ocrResult.confidence,
+                        wordsCount: ocrResult.words.length,
+                        linesCount: ocrResult.lines.length,
+                        words: ocrResult.words,
+                        lines: ocrResult.lines,
+                        imageScaleFactor: scaleFactor,
+                        devicePixelRatio
+                    }, null, 2));
+                } catch (err) {
+                    console.log(`[OCR] Error: ${err}`);
+                    res.end(JSON.stringify({ success: false, error: String(err) }));
+                }
             } else if (url === "/api" || url === "/api/") {
                 const endpoints = {
                     message: "React Native AI Debugger - Debug HTTP Server",
@@ -1298,7 +1358,8 @@ function createRequestHandler() {
                         "/api/tap-verifier/execute": "Execute tap at coordinates (POST: platform, x, y, deviceId)",
                         "/api/tap-verifier/mark": "Add a marker to visualize agent-calculated coordinates (POST: x, y, label?, color?)",
                         "/api/tap-verifier/markers": "Get all agent-added markers (GET)",
-                        "/api/tap-verifier/clear-markers": "Clear all agent-added markers (POST)"
+                        "/api/tap-verifier/clear-markers": "Clear all agent-added markers (POST)",
+                        "/api/ocr": "Take screenshot and run OCR to extract text with coordinates (query: platform=ios|android, engine=auto|easyocr|tesseract, deviceId?)"
                     }
                 };
                 res.end(JSON.stringify(endpoints, null, 2));

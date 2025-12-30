@@ -20,12 +20,14 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 -   **iOS simulator control** - screenshots, app management, URL handling via simctl
 -   **iOS UI automation** - tap, swipe, text input, button presses via IDB (optional)
 -   **Element-based UI automation** - find and wait for elements by text/label without screenshots (faster, cheaper)
+-   **OCR-based text extraction** - extract visible text with tap-ready coordinates using OCR (works on any visible text)
 
 ## Requirements
 
 -   Node.js 18+
 -   React Native app running with Metro bundler
 -   **Optional for iOS UI automation**: [Facebook IDB](https://fbidb.io/) - `brew install idb-companion`
+-   **Optional for enhanced OCR**: Python 3.10+ with EasyOCR (see [OCR Setup](#ocr-text-extraction))
 
 ## Claude Code Setup
 
@@ -165,6 +167,12 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `ios_boot_simulator`    | Boot a simulator by UDID                                        |
 | `ios_find_element`      | Find element by label/value (requires IDB, no screenshot)       |
 | `ios_wait_for_element`  | Wait for element to appear (requires IDB)                       |
+
+### OCR (Cross-Platform)
+
+| Tool             | Description                                                              |
+| ---------------- | ------------------------------------------------------------------------ |
+| `ocr_screenshot` | Extract all visible text with tap-ready coordinates (works on iOS/Android) |
 
 ## Usage
 
@@ -552,6 +560,112 @@ android_tap with x=540 y=1200                   # Step 3: Tap (use returned coor
 | Debug layout issues | `screenshot` |
 | Verify visual appearance | `screenshot` |
 | Find elements without labels | `screenshot` |
+
+## OCR Text Extraction
+
+The `ocr_screenshot` tool extracts all visible text from a screenshot with tap-ready coordinates. This is useful when accessibility labels are missing or when you need to find text that isn't exposed in the accessibility tree.
+
+### Why OCR?
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Accessibility tree (`find_element`) | Fast, reliable, low token usage | Only finds elements with accessibility labels |
+| Screenshot + Vision | Visual layout understanding | High token usage, slow |
+| **OCR** | Works on ANY visible text, returns tap coordinates | Requires text to be visible, may miss small text |
+
+### Usage
+
+```
+ocr_screenshot with platform="ios"
+```
+
+Returns all visible text with tap-ready coordinates:
+
+```json
+{
+  "platform": "ios",
+  "engine": "easyocr",
+  "processingTimeMs": 850,
+  "elementCount": 24,
+  "elements": [
+    { "text": "Settings", "confidence": 98, "tapX": 195, "tapY": 52 },
+    { "text": "Login", "confidence": 95, "tapX": 187, "tapY": 420 }
+  ]
+}
+```
+
+Then tap the element:
+
+```
+ios_tap with x=187 y=420
+```
+
+### OCR Engines
+
+The tool uses two OCR engines with automatic fallback:
+
+| Engine | Description | Requirements |
+|--------|-------------|--------------|
+| **EasyOCR** (preferred) | Python-based, better accuracy on colored backgrounds | Python 3.10+, ~100MB for models |
+| **Tesseract.js** (fallback) | JavaScript-based, no Python needed | None (included in npm package) |
+
+### Installing EasyOCR (Optional)
+
+For better OCR accuracy, especially on colored backgrounds and stylized text:
+
+```bash
+# Install Python 3.10+ if not already installed
+brew install python@3.11
+
+# Install EasyOCR
+pip3 install easyocr
+```
+
+First run will download models (~100MB for English). Additional language models are downloaded automatically when configured. If EasyOCR is not available, the tool automatically falls back to Tesseract.js.
+
+### OCR Language Configuration
+
+By default, OCR recognizes English text. To add more languages, set the `EASYOCR_LANGUAGES` environment variable. English is always included as a fallback.
+
+```bash
+# Add Spanish and French (English always included)
+EASYOCR_LANGUAGES=es,fr
+```
+
+Add to your MCP configuration:
+
+```json
+{
+    "mcpServers": {
+        "rn-debugger": {
+            "command": "npx",
+            "args": ["react-native-ai-debugger"],
+            "env": {
+                "EASYOCR_LANGUAGES": "es,fr"
+            }
+        }
+    }
+}
+```
+
+See [EasyOCR supported languages](https://www.jaided.ai/easyocr/) for the full list of language codes.
+
+### Recommended Workflow
+
+1. **Try accessibility first** - Use `find_element` / `wait_for_element` (faster, cheaper)
+2. **Fall back to OCR** - When element isn't in accessibility tree
+3. **Use screenshot** - For visual debugging or layout verification
+
+```
+# Step 1: Try accessibility-based approach
+android_find_element with text="Submit"
+
+# Step 2: If not found, use OCR
+ocr_screenshot with platform="android"
+
+# Step 3: Tap using coordinates from OCR result
+android_tap with x=540 y=1200
+```
 
 ## Supported React Native Versions
 

@@ -214,11 +214,11 @@ export async function androidScreenshot(
                     fit: "inside",
                     withoutEnlargement: true
                 })
-                .png({ compressionLevel: 9 })
+                .jpeg({ quality: 85 })
                 .toBuffer();
         } else {
             imageData = await image
-                .png({ compressionLevel: 9 })
+                .jpeg({ quality: 85 })
                 .toBuffer();
         }
 

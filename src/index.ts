@@ -80,9 +80,13 @@ import {
     // iOS Element Finding (no screenshots)
     iosFindElement,
     iosWaitForElement,
-    // Debug HTTP Server
+    // Debug HTTP Server (in-process, for fallback)
     startDebugHttpServer,
     getDebugServerPort,
+    // HTTP Server Process (child process, for hot-reload)
+    startHttpServerProcess,
+    restartHttpServerProcess,
+    getHttpServerProcessPort,
     // Telemetry
     initTelemetry,
     trackToolInvocation
@@ -961,7 +965,7 @@ registerToolWithTelemetry(
                     {
                         type: "image" as const,
                         data: result.data.toString("base64"),
-                        mimeType: "image/png"
+                        mimeType: "image/jpeg"
                     }
                 ]
             };
@@ -1087,7 +1091,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_tap",
     {
-        description: "Tap at specific coordinates on an Android device/emulator screen. NOTE: Prefer using android_tap_element instead, which finds elements by text/content-desc and is more reliable.",
+        description: "Tap at specific coordinates on an Android device/emulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values.",
         inputSchema: {
             x: z.number().describe("X coordinate in pixels"),
             y: z.number().describe("Y coordinate in pixels"),
@@ -1353,7 +1357,7 @@ server.registerTool(
     "android_tap_element",
     {
         description:
-            "PREFERRED: Tap an element by its text, content-description, or resource-id. More reliable than coordinate-based tapping. Automatically finds the element using uiautomator and taps its center.",
+            "Tap an element by its text, content-description, or resource-id using uiautomator. TIP: Consider using ocr_screenshot first - it returns ready-to-use tap coordinates for all visible text and works more reliably across different apps.",
         inputSchema: {
             text: z
                 .string()
@@ -1720,7 +1724,7 @@ registerToolWithTelemetry(
                     {
                         type: "image" as const,
                         data: result.data.toString("base64"),
-                        mimeType: "image/png"
+                        mimeType: "image/jpeg"
                     }
                 ]
             };
@@ -1734,6 +1738,100 @@ registerToolWithTelemetry(
                 }
             ]
         };
+    }
+);
+
+// Tool: OCR Screenshot - Extract text with coordinates from screenshot
+registerToolWithTelemetry(
+    "ocr_screenshot",
+    {
+        description:
+            "RECOMMENDED: Use this tool FIRST when you need to find and tap UI elements. Takes a screenshot and extracts all visible text with tap-ready coordinates using OCR. " +
+            "ADVANTAGES over accessibility trees: (1) Works on ANY visible text regardless of accessibility labels, (2) Returns ready-to-use tapX/tapY coordinates - no conversion needed, (3) Faster than parsing accessibility hierarchies, (4) Works consistently across iOS and Android. " +
+            "USE THIS FOR: Finding buttons, labels, menu items, tab bars, or any text you need to tap. Simply find the text in the results and use its tapX/tapY with the tap command.",
+        inputSchema: {
+            platform: z.enum(["ios", "android"]).describe("Platform to capture screenshot from"),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID (Android) or UDID (iOS). Uses first available device if not specified.")
+        }
+    },
+    async ({ platform, deviceId }) => {
+        // Call the HTTP endpoint for OCR (allows hot-reload without session restart)
+        // Prefer child process port, fall back to in-process port
+        const port = getHttpServerProcessPort() || getDebugServerPort();
+        if (!port) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: "Debug HTTP server not running"
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        try {
+            const params = new URLSearchParams({ platform, engine: "auto" });
+            if (deviceId) params.set("deviceId", deviceId);
+
+            const response = await fetch(`http://localhost:${port}/api/ocr?${params}`);
+            const ocrResult = await response.json();
+
+            if (!ocrResult.success) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: `OCR failed: ${ocrResult.error || "Unknown error"}`
+                        }
+                    ],
+                    isError: true
+                };
+            }
+
+            // Format results for MCP tool output
+            const elements = ocrResult.words
+                .filter((w: { confidence: number; text: string }) => w.confidence > 50 && w.text.trim().length > 0)
+                .map((w: { text: string; confidence: number; tapCenter: { x: number; y: number } }) => ({
+                    text: w.text,
+                    confidence: Math.round(w.confidence),
+                    tapX: w.tapCenter.x,
+                    tapY: w.tapCenter.y
+                }));
+
+            const result = {
+                platform,
+                engine: ocrResult.engine || "unknown",
+                processingTimeMs: ocrResult.processingTimeMs,
+                fullText: ocrResult.fullText?.trim() || "",
+                confidence: Math.round(ocrResult.confidence || 0),
+                elementCount: elements.length,
+                elements,
+                note: "tapX/tapY are ready to use with tap commands (already converted for platform)"
+            };
+
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: JSON.stringify(result, null, 2)
+                    }
+                ]
+            };
+        } catch (error) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `OCR request failed: ${error instanceof Error ? error.message : String(error)}`
+                    }
+                ],
+                isError: true
+            };
+        }
     }
 );
 
@@ -1883,7 +1981,7 @@ server.registerTool(
     "ios_tap",
     {
         description:
-            "Tap at specific coordinates on an iOS simulator screen. NOTE: Prefer using ios_tap_element instead, which finds elements by accessibility label and is more reliable. Requires IDB (brew install idb-companion).",
+            "Tap at specific coordinates on an iOS simulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values. Requires IDB (brew install idb-companion).",
         inputSchema: {
             x: z.number().describe("X coordinate in pixels"),
             y: z.number().describe("Y coordinate in pixels"),
@@ -1917,7 +2015,7 @@ server.registerTool(
     "ios_tap_element",
     {
         description:
-            "PREFERRED: Tap an element by its accessibility label. More reliable than coordinate-based tapping. Automatically finds the element and taps its center. Requires IDB (brew install idb-companion).",
+            "Tap an element by its accessibility label. Requires IDB (brew install idb-companion). TIP: Consider using ocr_screenshot first - it returns ready-to-use tap coordinates for all visible text and works without requiring accessibility labels.",
         inputSchema: {
             label: z
                 .string()
@@ -2351,7 +2449,7 @@ registerToolWithTelemetry(
         inputSchema: {}
     },
     async () => {
-        const port = getDebugServerPort();
+        const port = getHttpServerProcessPort() || getDebugServerPort();
 
         if (!port) {
             return {
@@ -2387,17 +2485,105 @@ registerToolWithTelemetry(
     }
 );
 
+// Tool: Restart HTTP server (hot-reload)
+registerToolWithTelemetry(
+    "restart_http_server",
+    {
+        description:
+            "Restart the debug HTTP server to apply code changes (hot-reload). Use this after running 'npm run build' to load new server code without restarting the MCP session.",
+        inputSchema: {}
+    },
+    async () => {
+        try {
+            const newPort = await restartHttpServerProcess();
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `HTTP server restarted successfully on port ${newPort}. New code is now active.`
+                    }
+                ]
+            };
+        } catch (err) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Failed to restart HTTP server: ${err instanceof Error ? err.message : String(err)}`
+                    }
+                ],
+                isError: true
+            };
+        }
+    }
+);
+
+/**
+ * Auto-connect to Metro bundler on startup
+ * Scans common ports and connects to any running Metro servers
+ */
+async function autoConnectToMetro(): Promise<void> {
+    console.error("[rn-ai-debugger] Auto-scanning for Metro servers...");
+
+    try {
+        const openPorts = await scanMetroPorts();
+
+        if (openPorts.length === 0) {
+            console.error("[rn-ai-debugger] No Metro servers found on startup. Use scan_metro to connect later.");
+            return;
+        }
+
+        for (const port of openPorts) {
+            try {
+                const devices = await fetchDevices(port);
+                const mainDevice = selectMainDevice(devices);
+
+                if (mainDevice) {
+                    await connectToDevice(mainDevice, port);
+                    console.error(`[rn-ai-debugger] Auto-connected to ${mainDevice.title} on port ${port}`);
+
+                    // Also connect to Metro build events
+                    try {
+                        await connectMetroBuildEvents(port);
+                    } catch {
+                        // Build events connection is optional
+                    }
+                }
+            } catch (error) {
+                console.error(`[rn-ai-debugger] Failed to auto-connect on port ${port}: ${error}`);
+            }
+        }
+    } catch (error) {
+        console.error(`[rn-ai-debugger] Auto-connect error: ${error}`);
+    }
+}
+
 // Main function
 async function main() {
     // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
     initTelemetry();
 
-    // Start debug HTTP server for buffer inspection (finds available port automatically)
-    await startDebugHttpServer();
+    // Start debug HTTP server as child process (enables hot-reload)
+    // Falls back to in-process if child process fails
+    try {
+        await startHttpServerProcess();
+        console.error("[rn-ai-debugger] HTTP server started as child process (hot-reload enabled)");
+    } catch (err) {
+        console.error("[rn-ai-debugger] Child process failed, falling back to in-process server:", err);
+        await startDebugHttpServer();
+    }
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("[rn-ai-debugger] Server started on stdio");
+
+    // Auto-connect to Metro in background (non-blocking)
+    // Use setImmediate to ensure MCP server is fully ready first
+    setImmediate(() => {
+        autoConnectToMetro().catch((err) => {
+            console.error("[rn-ai-debugger] Auto-connect failed:", err);
+        });
+    });
 }
 
 main().catch((error) => {

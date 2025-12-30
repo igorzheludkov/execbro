@@ -164,5 +164,18 @@ export {
 // Debug HTTP Server
 export { startDebugHttpServer, getDebugServerPort } from "./httpServer.js";
 
+// HTTP Server Process (for hot-reload)
+export {
+    startHttpServerProcess,
+    stopHttpServerProcess,
+    restartHttpServerProcess,
+    getHttpServerProcessPort,
+    isHttpServerProcessRunning
+} from "./httpServerProcess.js";
+
 // Telemetry
 export { initTelemetry, isTelemetryEnabled, trackToolInvocation } from "./telemetry.js";
+
+// OCR
+export { recognizeText, terminateOCRWorker, inferIOSDevicePixelRatio } from "./ocr.js";
+export type { OCRResult, OCRWord, OCRLine, OCROptions } from "./ocr.js";
