@@ -128,6 +128,8 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
     }
 
     const days = parseInt(url.searchParams.get("days") || "7");
+    const excludeDev = url.searchParams.get("excludeDev") === "1";
+    const devUserFilter = excludeDev ? "AND index1 NOT LIKE 'e9bc7021%'" : "";
 
     // Check if API credentials are configured
     if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
@@ -153,17 +155,21 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                ${devUserFilter}
             GROUP BY blob2, blob3
             ORDER BY count DESC
         `;
 
-        // Query 2: Unique installations
-        const uniqueInstallsQuery = `
-            SELECT COUNT(DISTINCT index1) as unique_installs
+        // Query 2: Session stats (unique installs + total sessions in one query)
+        const sessionStatsQuery = `
+            SELECT
+                COUNT(DISTINCT index1) as unique_installs,
+                SUM(_sample_interval) as total_sessions
             FROM rn_debugger_events
             WHERE
                 blob1 = 'session_start'
                 AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                ${devUserFilter}
         `;
 
         // Query 3: Timeline (daily counts)
@@ -175,6 +181,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                ${devUserFilter}
             GROUP BY date
             ORDER BY date ASC
         `;
@@ -191,6 +198,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                ${devUserFilter}
             LIMIT 1000
         `;
 
@@ -202,6 +210,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'session_start'
                 AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                ${devUserFilter}
             LIMIT 1000
         `;
 
@@ -212,11 +221,12 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                ${devUserFilter}
             LIMIT 5000
         `;
 
-        // Execute queries in parallel
-        const [toolStatsRes, uniqueInstallsRes, timelineRes, userToolsRes, allUsersRes, userToolCountsRes] = await Promise.all([
+        // Execute queries in parallel (max 6 to avoid connection limit)
+        const [toolStatsRes, sessionStatsRes, timelineRes, userToolsRes, allUsersRes, userToolCountsRes] = await Promise.all([
             fetch(sqlEndpoint, {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
@@ -225,7 +235,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             fetch(sqlEndpoint, {
                 method: "POST",
                 headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
-                body: uniqueInstallsQuery
+                body: sessionStatsQuery
             }),
             fetch(sqlEndpoint, {
                 method: "POST",
@@ -271,7 +281,10 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             count: number;
             total_duration: number;
         }>(toolStatsRes, 'toolStats');
-        const uniqueInstalls = await parseResponse<{ unique_installs: number }>(uniqueInstallsRes, 'uniqueInstalls');
+        const sessionStats = await parseResponse<{
+            unique_installs: number;
+            total_sessions: number;
+        }>(sessionStatsRes, 'sessionStats');
         const timeline = await parseResponse<{ date: string; count: number }>(timelineRes, 'timeline');
         const userTools = await parseResponse<{
             index1: string;
@@ -407,7 +420,8 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
 
         return new Response(JSON.stringify({
             totalCalls,
-            uniqueInstalls: Number(uniqueInstalls.data?.[0]?.unique_installs) || 0,
+            totalSessions: Number(sessionStats.data?.[0]?.total_sessions) || 0,
+            uniqueInstalls: Number(sessionStats.data?.[0]?.unique_installs) || 0,
             successRate,
             avgDuration,
             toolBreakdown,
