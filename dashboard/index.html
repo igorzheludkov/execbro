@@ -227,6 +227,24 @@
         .refresh-btn:hover {
             background: #2563eb;
         }
+
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #e2e8f0;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 8px 12px;
+            background: #334155;
+            border-radius: 6px;
+        }
+
+        .toggle-label input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -239,6 +257,10 @@
         <button data-days="1">24 Hours</button>
         <button class="active" data-days="7">7 Days</button>
         <button data-days="30">30 Days</button>
+        <label class="toggle-label">
+            <input type="checkbox" id="exclude-dev" checked onchange="loadData()">
+            <span>Exclude dev user</span>
+        </label>
         <button class="refresh-btn" onclick="loadData()">Refresh</button>
         <button class="refresh-btn" style="background: #64748b;" onclick="resetKey()">Reset Key</button>
     </div>
@@ -247,12 +269,17 @@
 
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="label">Total Tool Calls</div>
-            <div class="value" id="total-calls">-</div>
+            <div class="label">Sessions Started</div>
+            <div class="value" id="total-sessions">-</div>
+            <div class="change" id="sessions-detail"></div>
         </div>
         <div class="stat-card">
             <div class="label">Unique Installations</div>
             <div class="value" id="unique-installs">-</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">Total Tool Calls</div>
+            <div class="value" id="total-calls">-</div>
         </div>
         <div class="stat-card">
             <div class="label">Active Users</div>
@@ -382,7 +409,8 @@
             }
 
             try {
-                const response = await fetch(`${API_URL}/api/stats?days=${selectedDays}&key=${encodeURIComponent(dashboardKey)}`);
+                const excludeDev = document.getElementById('exclude-dev').checked;
+                const response = await fetch(`${API_URL}/api/stats?days=${selectedDays}&key=${encodeURIComponent(dashboardKey)}${excludeDev ? '&excludeDev=1' : ''}`);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${await response.text()}`);
                 }
@@ -402,10 +430,20 @@
 
         function updateDashboard(data) {
             // Update stat cards
+            const totalSessions = data.totalSessions || 0;
+            const uniqueInstalls = data.uniqueInstalls || 0;
+            document.getElementById('total-sessions').textContent = totalSessions.toLocaleString();
+            document.getElementById('unique-installs').textContent = uniqueInstalls.toLocaleString();
             document.getElementById('total-calls').textContent = (data.totalCalls || 0).toLocaleString();
-            document.getElementById('unique-installs').textContent = (data.uniqueInstalls || 0).toLocaleString();
             document.getElementById('success-rate').textContent = `${(data.successRate || 0).toFixed(1)}%`;
             document.getElementById('avg-duration').textContent = `${(data.avgDuration || 0).toFixed(0)}ms`;
+
+            // Calculate sessions per user
+            if (uniqueInstalls > 0) {
+                const sessionsPerUser = (totalSessions / uniqueInstalls).toFixed(1);
+                document.getElementById('sessions-detail').textContent = `${sessionsPerUser} per user`;
+                document.getElementById('sessions-detail').className = 'change';
+            }
 
             // Update active/inactive user stats
             const userActivity = data.userActivity || { activeUsers: 0, inactiveUsers: 0 };
