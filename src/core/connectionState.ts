@@ -9,10 +9,14 @@ import {
 export const DEFAULT_RECONNECTION_CONFIG: ReconnectionConfig = {
     enabled: true,
     maxAttempts: 8, // ~30 seconds total with backoff
-    initialDelayMs: 0, // Immediate first retry
+    initialDelayMs: 500, // Small delay to prevent tight loops (was 0)
     maxDelayMs: 8000, // Cap at 8 seconds
-    backoffMultiplier: 2, // Double each time: 0, 500, 1000, 2000, 4000, 8000
+    backoffMultiplier: 2, // Double each time: 500, 1000, 2000, 4000, 8000
 };
+
+// Minimum time a connection must be stable before resetting reconnection attempts
+// This prevents tight loops when connections succeed briefly then fail
+export const MIN_STABLE_CONNECTION_MS = 5000;
 
 // Store connection metadata for reconnection attempts
 const connectionMetadata: Map<string, ConnectionMetadata> = new Map();

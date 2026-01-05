@@ -6,6 +6,7 @@ import { findSimulatorByName } from "./ios.js";
 import { fetchDevices, selectMainDevice } from "./metro.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
+    MIN_STABLE_CONNECTION_MS,
     initConnectionState,
     updateConnectionState,
     getConnectionState,
@@ -17,6 +18,9 @@ import {
     cancelReconnectionTimer,
     calculateBackoffDelay
 } from "./connectionState.js";
+
+// Connection locks to prevent concurrent connection attempts to the same device
+const connectionLocks: Set<string> = new Set();
 
 // Format CDP RemoteObject to readable string
 export function formatRemoteObject(result: RemoteObject): string {
@@ -272,6 +276,13 @@ export async function connectToDevice(
             return;
         }
 
+        // Prevent concurrent connection attempts to the same device
+        if (connectionLocks.has(appKey)) {
+            resolve(`Connection already in progress for ${device.title}`);
+            return;
+        }
+        connectionLocks.add(appKey);
+
         // Cancel any pending reconnection timer for this appKey
         cancelReconnectionTimer(appKey);
 
@@ -286,15 +297,20 @@ export async function connectToDevice(
             const ws = new WebSocket(device.webSocketDebuggerUrl);
 
             ws.on("open", async () => {
+                // Release connection lock
+                connectionLocks.delete(appKey);
+
                 connectedApps.set(appKey, { ws, deviceInfo: device, port });
 
                 // Initialize or update connection state
+                // Note: We do NOT reset reconnectionAttempts here - that happens
+                // only when connection has been stable for MIN_STABLE_CONNECTION_MS
                 if (isReconnection) {
                     closeConnectionGap(appKey);
                     updateConnectionState(appKey, {
                         status: "connected",
-                        lastConnectedTime: new Date(),
-                        reconnectionAttempts: 0
+                        lastConnectedTime: new Date()
+                        // reconnectionAttempts NOT reset here - see ws.on("close") for stable connection check
                     });
                     console.error(`[rn-ai-debugger] Reconnected to ${device.title}`);
                 } else {
@@ -349,9 +365,25 @@ export async function connectToDevice(
             });
 
             ws.on("close", () => {
+                // Release connection lock if still held
+                connectionLocks.delete(appKey);
+
                 connectedApps.delete(appKey);
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
+
+                // Check if connection was stable before resetting attempts
+                const state = getConnectionState(appKey);
+                let wasStable = false;
+                if (state?.lastConnectedTime) {
+                    const connectionDuration = Date.now() - state.lastConnectedTime.getTime();
+                    wasStable = connectionDuration >= MIN_STABLE_CONNECTION_MS;
+                    if (wasStable) {
+                        // Connection was stable - reset attempts for fresh start
+                        updateConnectionState(appKey, { reconnectionAttempts: 0 });
+                        console.error(`[rn-ai-debugger] Connection was stable for ${Math.round(connectionDuration / 1000)}s, resetting reconnection attempts`);
+                    }
+                }
 
                 // Record the gap and trigger reconnection
                 recordConnectionGap(appKey, "Connection closed");
@@ -369,6 +401,12 @@ export async function connectToDevice(
             });
 
             ws.on("error", (error: Error) => {
+                // Release connection lock
+                connectionLocks.delete(appKey);
+
+                // Cancel any pending reconnection timer to prevent orphaned loops
+                cancelReconnectionTimer(appKey);
+
                 connectedApps.delete(appKey);
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
@@ -384,6 +422,8 @@ export async function connectToDevice(
             // Timeout after 5 seconds
             setTimeout(() => {
                 if (ws.readyState !== WebSocket.OPEN) {
+                    // Release connection lock on timeout
+                    connectionLocks.delete(appKey);
                     ws.terminate();
                     if (!isReconnection) {
                         reject(`Connection to ${device.title} timed out`);
@@ -391,6 +431,8 @@ export async function connectToDevice(
                 }
             }, 5000);
         } catch (error) {
+            // Release connection lock on exception
+            connectionLocks.delete(appKey);
             if (!isReconnection) {
                 reject(`Failed to create WebSocket connection: ${error}`);
             }

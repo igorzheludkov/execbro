@@ -3,6 +3,7 @@ import { ExecutionResult } from "./types.js";
 import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
 import { getFirstConnectedApp, connectToDevice } from "./connection.js";
 import { fetchDevices, selectMainDevice } from "./metro.js";
+import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
@@ -142,9 +143,12 @@ export async function reloadApp(): Promise<ExecutionResult> {
         // Wait for app to reload (give it time to restart JS context)
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Close existing connections to this port
+        // Close existing connections to this port and cancel any pending auto-reconnections
+        // This prevents the dual-reconnection bug where both auto-reconnect and manual reconnect compete
         for (const [key, connectedApp] of connectedApps.entries()) {
             if (connectedApp.port === port) {
+                // Cancel any pending reconnection timer BEFORE closing
+                cancelReconnectionTimer(key);
                 try {
                     connectedApp.ws.close();
                 } catch {
@@ -157,12 +161,17 @@ export async function reloadApp(): Promise<ExecutionResult> {
         // Small delay to ensure cleanup
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Reconnect to Metro on the same port
+        // Reconnect to Metro on the same port with auto-reconnection DISABLED
+        // We're doing a manual reconnection here, so we don't want the auto-reconnect
+        // system to also try reconnecting and compete with us
         const devices = await fetchDevices(port);
         const mainDevice = selectMainDevice(devices);
 
         if (mainDevice) {
-            await connectToDevice(mainDevice, port);
+            await connectToDevice(mainDevice, port, {
+                isReconnection: false,
+                reconnectionConfig: { ...DEFAULT_RECONNECTION_CONFIG, enabled: false }
+            });
             return {
                 success: true,
                 result: `App reloaded and reconnected to ${mainDevice.title}`
