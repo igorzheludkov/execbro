@@ -127,9 +127,15 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
         });
     }
 
-    const days = parseInt(url.searchParams.get("days") || "7");
+    const daysParam = parseInt(url.searchParams.get("days") || "7");
+    const isToday = daysParam === 0;
     const excludeDev = url.searchParams.get("excludeDev") === "1";
     const devUserFilter = excludeDev ? "AND index1 NOT LIKE 'e9bc7021%'" : "";
+
+    // Generate SQL time filter: "today" uses midnight UTC, otherwise rolling interval
+    const timeFilter = isToday
+        ? "timestamp >= toStartOfDay(now())"
+        : `timestamp >= NOW() - INTERVAL '${daysParam}' DAY`;
 
     // Check if API credentials are configured
     if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
@@ -154,7 +160,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             FROM rn_debugger_events
             WHERE
                 blob1 = 'tool_invocation'
-                AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                AND ${timeFilter}
                 ${devUserFilter}
             GROUP BY blob2, blob3
             ORDER BY count DESC
@@ -168,7 +174,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             FROM rn_debugger_events
             WHERE
                 blob1 = 'session_start'
-                AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                AND ${timeFilter}
                 ${devUserFilter}
         `;
 
@@ -180,7 +186,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             FROM rn_debugger_events
             WHERE
                 blob1 = 'tool_invocation'
-                AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                AND ${timeFilter}
                 ${devUserFilter}
             GROUP BY date
             ORDER BY date ASC
@@ -197,7 +203,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             FROM rn_debugger_events
             WHERE
                 blob1 = 'tool_invocation'
-                AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                AND ${timeFilter}
                 ${devUserFilter}
             LIMIT 1000
         `;
@@ -209,7 +215,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             FROM rn_debugger_events
             WHERE
                 blob1 = 'session_start'
-                AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                AND ${timeFilter}
                 ${devUserFilter}
             LIMIT 1000
         `;
@@ -220,7 +226,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             FROM rn_debugger_events
             WHERE
                 blob1 = 'tool_invocation'
-                AND timestamp >= NOW() - INTERVAL '${days}' DAY
+                AND ${timeFilter}
                 ${devUserFilter}
             LIMIT 5000
         `;
@@ -369,13 +375,15 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
 
         // Process active vs inactive users
         // Active = 5+ tool calls per week (normalized to the selected period)
-        const weeksInPeriod = Math.max(days / 7, 1);
-        const activeThresholdPerPeriod = 5 * weeksInPeriod;
+        // For "today" (days=0), use 1 day; otherwise use the provided days value
+        const effectiveDays = isToday ? 1 : daysParam;
+        const weeksInPeriod = Math.max(effectiveDays / 7, 1 / 7); // Minimum is 1/7 week (1 day)
+        const activeThresholdPerPeriod = Math.max(1, Math.ceil(5 * weeksInPeriod));
 
         // Get unique users from session_start raw rows
-        const uniqueUserIds = new Set<string>();
+        const uniqueUserIdsFromSessions = new Set<string>();
         for (const row of allUsers.data || []) {
-            if (row.index1) uniqueUserIds.add(row.index1);
+            if (row.index1) uniqueUserIdsFromSessions.add(row.index1);
         }
 
         // Build a map of user tool counts from raw rows
@@ -386,6 +394,14 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             userToolCountMap.set(userId, (userToolCountMap.get(userId) || 0) + weight);
         }
 
+        // Combine users from both session_start and tool_invocation events
+        // This ensures users who started sessions before the period but used tools
+        // during the period are still counted
+        const allUniqueUserIds = new Set<string>([
+            ...uniqueUserIdsFromSessions,
+            ...userToolCountMap.keys()
+        ]);
+
         let activeUsers = 0;
         let inactiveUsers = 0;
         const userActivityList: Array<{
@@ -395,8 +411,8 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             isActive: boolean;
         }> = [];
 
-        // Include ALL users from session_start, even those with 0 tool calls
-        for (const userId of uniqueUserIds) {
+        // Include users from both session_start and tool_invocation events
+        for (const userId of allUniqueUserIds) {
             const totalUserCalls = userToolCountMap.get(userId) || 0;
             const callsPerWeek = totalUserCalls / weeksInPeriod;
             const isActive = totalUserCalls >= activeThresholdPerPeriod;
@@ -431,8 +447,9 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             userActivity: {
                 activeUsers,
                 inactiveUsers,
-                activeThreshold: 5,
-                periodDays: days,
+                activeThreshold: activeThresholdPerPeriod,
+                periodDays: effectiveDays,
+                periodType: isToday ? 'today' : 'days',
                 users: userActivityList
             }
         }), {

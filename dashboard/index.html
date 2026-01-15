@@ -254,7 +254,7 @@
     </div>
 
     <div class="time-filter">
-        <button data-days="1">24 Hours</button>
+        <button data-days="0">Today</button>
         <button class="active" data-days="7">7 Days</button>
         <button data-days="30">30 Days</button>
         <label class="toggle-label">
@@ -340,13 +340,13 @@
     </div>
 
     <div class="table-card">
-        <h3>Users Activity (5+ calls/week = Active)</h3>
+        <h3 id="users-activity-header">Users Activity (5+ calls/week = Active)</h3>
         <table>
             <thead>
                 <tr>
                     <th>User ID</th>
                     <th>Total Calls</th>
-                    <th>Calls/Week</th>
+                    <th id="calls-period-header">Calls/Week</th>
                     <th>Status</th>
                 </tr>
             </thead>
@@ -449,10 +449,19 @@
             const userActivity = data.userActivity || { activeUsers: 0, inactiveUsers: 0 };
             document.getElementById('active-users').textContent = userActivity.activeUsers.toLocaleString();
             document.getElementById('inactive-users').textContent = userActivity.inactiveUsers.toLocaleString();
-            document.getElementById('active-users-detail').textContent = `5+ calls/week`;
+
+            // Dynamic threshold labels based on selected period
+            const threshold = userActivity.activeThreshold || 5;
+            const periodLabel = userActivity.periodType === 'today' ? '/today' : (userActivity.periodDays < 7 ? `/${userActivity.periodDays}d` : '/week');
+            document.getElementById('active-users-detail').textContent = `${threshold}+ calls${periodLabel}`;
             document.getElementById('active-users-detail').className = 'change positive';
-            document.getElementById('inactive-users-detail').textContent = `<5 calls/week`;
+            document.getElementById('inactive-users-detail').textContent = `<${threshold} calls${periodLabel}`;
             document.getElementById('inactive-users-detail').className = 'change negative';
+
+            // Update table headers for the selected period
+            const periodName = userActivity.periodType === 'today' ? 'Today' : (userActivity.periodDays < 7 ? `${userActivity.periodDays}d` : 'Week');
+            document.getElementById('users-activity-header').textContent = `Users Activity (${threshold}+ calls${periodLabel} = Active)`;
+            document.getElementById('calls-period-header').textContent = `Calls/${periodName}`;
 
             // Update tool usage chart
             updateToolUsageChart(data.toolBreakdown || []);
