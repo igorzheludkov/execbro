@@ -8,6 +8,7 @@ import {
     logBuffer,
     networkBuffer,
     bundleErrorBuffer,
+    connectedApps,
     getActiveSimulatorUdid,
     scanMetroPorts,
     fetchDevices,
@@ -35,6 +36,13 @@ import {
     connectMetroBuildEvents,
     getBundleErrors,
     getBundleStatusWithErrors,
+    checkMetroState,
+    // Error screen parsing (OCR fallback)
+    parseErrorScreenText,
+    formatParsedError,
+    // OCR
+    recognizeText,
+    inferIOSDevicePixelRatio,
     // Android
     listAndroidDevices,
     androidScreenshot,
@@ -817,26 +825,149 @@ registerToolWithTelemetry(
     "get_bundle_errors",
     {
         description:
-            "Retrieve captured Metro bundling/compilation errors. These are errors that occur during the bundle build process (import resolution, syntax errors, transform errors) that prevent the app from loading.",
+            "Retrieve captured Metro bundling/compilation errors. These are errors that occur during the bundle build process (import resolution, syntax errors, transform errors) that prevent the app from loading. If no errors are captured but Metro is running without connected apps, automatically falls back to screenshot+OCR to capture the error from the device screen.",
         inputSchema: {
             maxErrors: z
                 .number()
                 .optional()
                 .default(10)
-                .describe("Maximum number of errors to return (default: 10)")
+                .describe("Maximum number of errors to return (default: 10)"),
+            platform: z
+                .enum(["ios", "android"])
+                .optional()
+                .describe("Platform for screenshot fallback when no errors are captured via CDP. Required to enable fallback."),
+            deviceId: z
+                .string()
+                .optional()
+                .describe("Optional device ID for screenshot fallback. Uses first available device if not specified.")
         }
     },
-    async ({ maxErrors }) => {
+    async ({ maxErrors, platform, deviceId }) => {
+        // First, try to get errors from the buffer (captured via CDP/Metro WebSocket)
         const { errors, formatted } = getBundleErrors(bundleErrorBuffer, { maxErrors });
 
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: `Bundle Errors (${errors.length} captured):\n\n${formatted}`
-                }
-            ]
-        };
+        if (errors.length > 0) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Bundle Errors (${errors.length} captured):\n\n${formatted}`
+                    }
+                ]
+            };
+        }
+
+        // No errors in buffer - check if we should try fallback
+        if (!platform) {
+            // No platform specified, return empty result with hint
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Bundle Errors (0 captured):\n\nNo bundle errors captured.\n\nTip: If the app failed to load and you see a red error screen on the device, use the 'platform' parameter (ios/android) to enable screenshot+OCR fallback for error capture.`
+                    }
+                ]
+            };
+        }
+
+        // Check Metro state to see if fallback is warranted
+        const metroState = await checkMetroState(connectedApps.size);
+
+        if (!metroState.needsFallback) {
+            // Metro not running or apps are connected - fallback not needed
+            const statusMsg = metroState.metroRunning
+                ? "Metro is running and apps are connected."
+                : "Metro is not running.";
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Bundle Errors (0 captured):\n\nNo bundle errors captured. ${statusMsg}`
+                    }
+                ]
+            };
+        }
+
+        // Metro is running but no apps connected - try screenshot fallback
+        try {
+            let screenshotResult: { success: boolean; error?: string; data?: Buffer; scaleFactor?: number; originalWidth?: number; originalHeight?: number };
+
+            if (platform === "android") {
+                screenshotResult = await androidScreenshot(undefined, deviceId);
+            } else {
+                screenshotResult = await iosScreenshot(undefined, deviceId);
+            }
+
+            if (!screenshotResult.success || !screenshotResult.data) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Bundle Errors (0 captured):\n\nNo bundle errors captured via CDP.\n\nMetro is running on port(s) ${metroState.metroPorts.join(", ")} but no apps are connected (possible bundle error).\n\nScreenshot fallback failed: ${screenshotResult.error || "No image data"}`
+                        }
+                    ]
+                };
+            }
+
+            // Calculate device pixel ratio for iOS
+            const devicePixelRatio = platform === "ios" && screenshotResult.originalWidth && screenshotResult.originalHeight
+                ? inferIOSDevicePixelRatio(screenshotResult.originalWidth, screenshotResult.originalHeight)
+                : 1;
+
+            // Run OCR on the screenshot
+            const ocrResult = await recognizeText(screenshotResult.data, {
+                scaleFactor: screenshotResult.scaleFactor || 1,
+                platform,
+                devicePixelRatio
+            });
+
+            if (!ocrResult.success || !ocrResult.fullText) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Bundle Errors (0 captured):\n\nNo bundle errors captured via CDP.\n\nMetro is running on port(s) ${metroState.metroPorts.join(", ")} but no apps are connected.\n\nScreenshot captured but OCR found no text. The screen may not show an error message.`
+                        }
+                    ]
+                };
+            }
+
+            // Parse the OCR text for error information
+            const parsedError = parseErrorScreenText(ocrResult.fullText);
+
+            if (!parsedError.found || !parsedError.error) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Bundle Errors (0 captured):\n\nNo bundle errors captured via CDP.\n\nMetro is running on port(s) ${metroState.metroPorts.join(", ")} but no apps are connected.\n\nScreenshot OCR text:\n${ocrResult.fullText.substring(0, 1000)}${ocrResult.fullText.length > 1000 ? "..." : ""}\n\n(No error pattern detected in text)`
+                        }
+                    ]
+                };
+            }
+
+            // Add the parsed error to the buffer for future reference
+            bundleErrorBuffer.add(parsedError.error);
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Bundle Errors (1 captured via screenshot fallback):\n\n${formatParsedError(parsedError)}`
+                    }
+                ]
+            };
+        } catch (fallbackError) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Bundle Errors (0 captured):\n\nNo bundle errors captured via CDP.\n\nMetro is running on port(s) ${metroState.metroPorts.join(", ")} but no apps are connected.\n\nScreenshot fallback error: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`
+                    }
+                ]
+            };
+        }
     }
 );
 

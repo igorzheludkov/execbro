@@ -49,8 +49,11 @@ export {
     scanMetroPorts,
     fetchDevices,
     selectMainDevice,
-    discoverMetroDevices
+    discoverMetroDevices,
+    checkMetroState
 } from "./metro.js";
+
+export type { MetroState } from "./metro.js";
 
 // Connection
 export {
@@ -179,3 +182,7 @@ export { initTelemetry, isTelemetryEnabled, trackToolInvocation } from "./teleme
 // OCR
 export { recognizeText, terminateOCRWorker, inferIOSDevicePixelRatio } from "./ocr.js";
 export type { OCRResult, OCRWord, OCRLine, OCROptions } from "./ocr.js";
+
+// Error Screen Parser (OCR-based bundle error fallback)
+export { parseErrorScreenText, formatParsedError } from "./errorScreenParser.js";
+export type { ParsedErrorScreen } from "./errorScreenParser.js";

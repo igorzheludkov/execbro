@@ -103,3 +103,38 @@ export async function discoverMetroDevices(
 
     return result;
 }
+
+/**
+ * Metro state for fallback detection
+ */
+export interface MetroState {
+    metroRunning: boolean;
+    metroPorts: number[];
+    hasConnectedApps: boolean;
+    /** True when Metro is running but no apps are connected (likely bundle error) */
+    needsFallback: boolean;
+}
+
+/**
+ * Check if Metro is running but no devices/apps are connected
+ * This state indicates a possible bundle error preventing the app from loading
+ */
+export async function checkMetroState(
+    connectedAppsCount: number,
+    startPort: number = 8081,
+    endPort: number = 19002
+): Promise<MetroState> {
+    const openPorts = await scanMetroPorts(startPort, endPort);
+    const metroRunning = openPorts.length > 0;
+    const hasConnectedApps = connectedAppsCount > 0;
+
+    // Metro is running but we have no connected apps - possible bundle error
+    const needsFallback = metroRunning && !hasConnectedApps;
+
+    return {
+        metroRunning,
+        metroPorts: openPorts,
+        hasConnectedApps,
+        needsFallback
+    };
+}
