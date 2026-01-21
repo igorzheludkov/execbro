@@ -22,6 +22,17 @@ import {
 // Connection locks to prevent concurrent connection attempts to the same device
 const connectionLocks: Set<string> = new Set();
 
+// Helper to convert WebSocket readyState to readable name
+function getWebSocketStateName(state: number): string {
+    switch (state) {
+        case WebSocket.CONNECTING: return "CONNECTING";
+        case WebSocket.OPEN: return "OPEN";
+        case WebSocket.CLOSING: return "CLOSING";
+        case WebSocket.CLOSED: return "CLOSED";
+        default: return `UNKNOWN(${state})`;
+    }
+}
+
 // Format CDP RemoteObject to readable string
 export function formatRemoteObject(result: RemoteObject): string {
     if (result.type === "undefined") {
@@ -271,9 +282,16 @@ export async function connectToDevice(
     return new Promise((resolve, reject) => {
         const appKey = `${port}-${device.id}`;
 
-        if (connectedApps.has(appKey)) {
-            resolve(`Already connected to ${device.title}`);
-            return;
+        // Check if already connected with a valid WebSocket
+        const existingApp = connectedApps.get(appKey);
+        if (existingApp) {
+            if (existingApp.ws.readyState === WebSocket.OPEN) {
+                resolve(`Already connected to ${device.title}`);
+                return;
+            }
+            // WebSocket exists but not OPEN - clean up stale entry
+            console.error(`[rn-ai-debugger] Cleaning up stale connection for ${device.title} (state: ${getWebSocketStateName(existingApp.ws.readyState)})`);
+            connectedApps.delete(appKey);
         }
 
         // Prevent concurrent connection attempts to the same device
@@ -523,16 +541,26 @@ export function getConnectedApps(): Array<{
     }));
 }
 
-// Get first connected app (or null if none)
+// Get first connected app with an OPEN WebSocket (or null if none)
 export function getFirstConnectedApp(): ConnectedApp | null {
-    const apps = Array.from(connectedApps.values());
-    if (apps.length === 0) {
-        return null;
+    // Find first app with OPEN WebSocket, cleaning up stale entries
+    for (const [key, app] of connectedApps.entries()) {
+        if (app.ws.readyState === WebSocket.OPEN) {
+            return app;
+        }
+        // Clean up stale entry
+        console.error(`[rn-ai-debugger] Cleaning up stale connection in getFirstConnectedApp: ${key} (state: ${getWebSocketStateName(app.ws.readyState)})`);
+        connectedApps.delete(key);
     }
-    return apps[0];
+    return null;
 }
 
-// Check if any app is connected
+// Check if any app is connected with an OPEN WebSocket
 export function hasConnectedApp(): boolean {
-    return connectedApps.size > 0;
+    for (const [, app] of connectedApps.entries()) {
+        if (app.ws.readyState === WebSocket.OPEN) {
+            return true;
+        }
+    }
+    return false;
 }
