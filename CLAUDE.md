@@ -50,6 +50,18 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
 - `reload_app`: Reload the React Native app (triggers JS bundle reload)
 
+## Agent Usage Guidelines
+
+When debugging React Native apps through this MCP server:
+
+- **Hot Reloading**: React Native has Fast Refresh enabled by default. After editing JavaScript/TypeScript code, changes are automatically applied to the running app within 1-2 seconds. Do NOT use `reload_app` after every code change.
+- **When to Reload**: Only use `reload_app` when:
+  - Logs or app behavior don't reflect recent code changes after waiting a few seconds
+  - The app is in a broken/error state
+  - You need to completely reset the app state (e.g., clear navigation stack, reset context)
+  - You made changes to native code or configuration files
+- **Verify Changes**: After code edits, use `get_logs` to check if the app picked up changes (look for fresh log entries or changed behavior) before deciding to reload.
+
 ## Telemetry System
 
 Anonymous usage telemetry is collected to understand how the MCP server is used. Located in `src/core/telemetry.ts`.

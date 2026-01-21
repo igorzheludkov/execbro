@@ -765,7 +765,7 @@ registerToolWithTelemetry(
     "reload_app",
     {
         description:
-            "Reload the connected React Native app. Triggers a JavaScript bundle reload (like pressing 'r' in Metro or shaking the device).",
+            "Reload the connected React Native app. Triggers a JavaScript bundle reload (like pressing 'r' in Metro or shaking the device). IMPORTANT: React Native has Fast Refresh (hot reloading) enabled by default - code changes are automatically applied without needing a full reload. Only use this tool when: (1) logs/behavior don't reflect recent code changes after waiting a few seconds, (2) the app is in a broken state, or (3) you need to reset app state completely. Avoid reloading after every code edit.",
         inputSchema: {}
     },
     async () => {
