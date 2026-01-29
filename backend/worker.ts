@@ -129,13 +129,16 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
 
     const daysParam = parseInt(url.searchParams.get("days") || "7");
     const isToday = daysParam === 0;
+    const isAll = daysParam === -1;
     const excludeDev = url.searchParams.get("excludeDev") === "1";
     const devUserFilter = excludeDev ? "AND index1 NOT LIKE 'e9bc7021%'" : "";
 
-    // Generate SQL time filter: "today" uses midnight UTC, otherwise rolling interval
-    const timeFilter = isToday
-        ? "timestamp >= toStartOfDay(now())"
-        : `timestamp >= NOW() - INTERVAL '${daysParam}' DAY`;
+    // Generate SQL time filter: "today" uses midnight UTC, "all" has no restriction, otherwise rolling interval
+    const timeFilter = isAll
+        ? "1=1"
+        : isToday
+            ? "timestamp >= toStartOfDay(now())"
+            : `timestamp >= NOW() - INTERVAL '${daysParam}' DAY`;
 
     // Check if API credentials are configured
     if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
@@ -375,8 +378,8 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
 
         // Process active vs inactive users
         // Active = 5+ tool calls per week (normalized to the selected period)
-        // For "today" (days=0), use 1 day; otherwise use the provided days value
-        const effectiveDays = isToday ? 1 : daysParam;
+        // For "today" (days=0), use 1 day; for "all" use 90 days as baseline; otherwise use the provided days value
+        const effectiveDays = isAll ? 90 : (isToday ? 1 : daysParam);
         const weeksInPeriod = Math.max(effectiveDays / 7, 1 / 7); // Minimum is 1/7 week (1 day)
         const activeThresholdPerPeriod = Math.max(1, Math.ceil(5 * weeksInPeriod));
 
@@ -449,7 +452,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 inactiveUsers,
                 activeThreshold: activeThresholdPerPeriod,
                 periodDays: effectiveDays,
-                periodType: isToday ? 'today' : 'days',
+                periodType: isAll ? 'all' : (isToday ? 'today' : 'days'),
                 users: userActivityList
             }
         }), {

@@ -1,18 +1,68 @@
 import WebSocket from "ws";
-import { ExecutionResult } from "./types.js";
+import { ExecutionResult, ExecuteOptions } from "./types.js";
 import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
 import { getFirstConnectedApp, connectToDevice } from "./connection.js";
-import { fetchDevices, selectMainDevice } from "./metro.js";
+import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
 const GLOBAL_POLYFILL = `var global = typeof global !== 'undefined' ? global : globalThis;`;
 
-// Execute JavaScript in the connected React Native app
-export async function executeInApp(
+// Error patterns that indicate a stale/destroyed context
+const CONTEXT_ERROR_PATTERNS = [
+    "cannot find context",
+    "execution context was destroyed",
+    "target closed",
+    "inspected target navigated",
+    "session closed",
+    "context with specified id",
+    "no execution context",
+];
+
+/**
+ * Check if an error indicates a stale page context
+ */
+function isContextError(error: string | undefined): boolean {
+    if (!error) return false;
+    const lowerError = error.toLowerCase();
+    return CONTEXT_ERROR_PATTERNS.some((pattern) => lowerError.includes(pattern));
+}
+
+/**
+ * Simple delay helper
+ */
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Attempt quick reconnection to Metro
+ */
+async function attemptQuickReconnect(preferredPort?: number): Promise<boolean> {
+    try {
+        const ports = await scanMetroPorts();
+        const targetPort = preferredPort && ports.includes(preferredPort) ? preferredPort : ports[0];
+
+        if (!targetPort) return false;
+
+        const devices = await fetchDevices(targetPort);
+        const mainDevice = selectMainDevice(devices);
+        if (!mainDevice) return false;
+
+        await connectToDevice(mainDevice, targetPort);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Execute expression on a connected app (core implementation without retry)
+ */
+async function executeExpressionCore(
     expression: string,
-    awaitPromise: boolean = true
+    awaitPromise: boolean
 ): Promise<ExecutionResult> {
     const app = getFirstConnectedApp();
 
@@ -38,20 +88,120 @@ export async function executeInApp(
 
         pendingExecutions.set(currentMessageId, { resolve, timeoutId });
 
-        app.ws.send(
-            JSON.stringify({
-                id: currentMessageId,
-                method: "Runtime.evaluate",
-                params: {
-                    expression: wrappedExpression,
-                    returnByValue: true,
-                    awaitPromise,
-                    userGesture: true,
-                    generatePreview: true
-                }
-            })
-        );
+        try {
+            app.ws.send(
+                JSON.stringify({
+                    id: currentMessageId,
+                    method: "Runtime.evaluate",
+                    params: {
+                        expression: wrappedExpression,
+                        returnByValue: true,
+                        awaitPromise,
+                        userGesture: true,
+                        generatePreview: true,
+                    },
+                })
+            );
+        } catch (error) {
+            clearTimeout(timeoutId);
+            pendingExecutions.delete(currentMessageId);
+            resolve({
+                success: false,
+                error: `Failed to send: ${error instanceof Error ? error.message : String(error)}`,
+            });
+        }
     });
+}
+
+// Execute JavaScript in the connected React Native app with retry logic
+export async function executeInApp(
+    expression: string,
+    awaitPromise: boolean = true,
+    options: ExecuteOptions = {}
+): Promise<ExecutionResult> {
+    const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true } = options;
+
+    let lastError: string | undefined;
+    let preferredPort: number | undefined;
+
+    // Get preferred port from current connection if available
+    const currentApp = getFirstConnectedApp();
+    if (currentApp) {
+        preferredPort = currentApp.port;
+    }
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const app = getFirstConnectedApp();
+
+        // No connection - try to reconnect if enabled
+        if (!app) {
+            if (autoReconnect && attempt < maxRetries) {
+                console.error(`[rn-ai-debugger] No connection, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`);
+                const reconnected = await attemptQuickReconnect(preferredPort);
+                if (reconnected) {
+                    await delay(retryDelayMs);
+                    continue;
+                }
+            }
+            return { success: false, error: "No apps connected. Run 'scan_metro' first." };
+        }
+
+        // WebSocket not open - try to reconnect
+        if (app.ws.readyState !== WebSocket.OPEN) {
+            if (autoReconnect && attempt < maxRetries) {
+                console.error(`[rn-ai-debugger] WebSocket not open, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`);
+                // Close stale connection
+                const appKey = `${app.port}-${app.deviceInfo.id}`;
+                cancelReconnectionTimer(appKey);
+                try { app.ws.close(); } catch { /* ignore */ }
+                connectedApps.delete(appKey);
+
+                const reconnected = await attemptQuickReconnect(app.port);
+                if (reconnected) {
+                    await delay(retryDelayMs);
+                    continue;
+                }
+            }
+            return { success: false, error: "WebSocket connection is not open." };
+        }
+
+        // Execute the expression
+        const result = await executeExpressionCore(expression, awaitPromise);
+
+        // Success - return result
+        if (result.success) {
+            return result;
+        }
+
+        lastError = result.error;
+
+        // Check if this is a context error that might be recoverable
+        if (isContextError(result.error)) {
+            if (autoReconnect && attempt < maxRetries) {
+                console.error(`[rn-ai-debugger] Context error detected, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`);
+
+                // Close and reconnect
+                const appKey = `${app.port}-${app.deviceInfo.id}`;
+                cancelReconnectionTimer(appKey);
+                try { app.ws.close(); } catch { /* ignore */ }
+                connectedApps.delete(appKey);
+
+                const reconnected = await attemptQuickReconnect(app.port);
+                if (reconnected) {
+                    await delay(retryDelayMs);
+                    continue;
+                }
+            }
+        }
+
+        // Non-context error or no more retries - return error
+        return result;
+    }
+
+    return {
+        success: false,
+        error: lastError ?? "Execution failed after all retries. Connection may be stale.",
+    };
 }
 
 // List globally available debugging objects in the app

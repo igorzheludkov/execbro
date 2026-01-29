@@ -22,7 +22,15 @@ export {
     cancelAllReconnectionTimers,
     clearAllConnectionState,
     calculateBackoffDelay,
-    formatDuration
+    formatDuration,
+    // Context health tracking
+    initContextHealth,
+    getContextHealth,
+    updateContextHealth,
+    markContextStale,
+    markContextHealthy,
+    clearContextHealth,
+    getAllContextHealth,
 } from "./connectionState.js";
 
 // State
@@ -62,7 +70,9 @@ export {
     connectToDevice,
     getConnectedApps,
     getFirstConnectedApp,
-    hasConnectedApp
+    hasConnectedApp,
+    runQuickHealthCheck,
+    ensureConnection,
 } from "./connection.js";
 
 // Executor

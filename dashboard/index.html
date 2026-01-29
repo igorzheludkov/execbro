@@ -257,11 +257,12 @@
         <button data-days="0">Today</button>
         <button class="active" data-days="7">7 Days</button>
         <button data-days="30">30 Days</button>
+        <button data-days="-1">All</button>
         <label class="toggle-label">
-            <input type="checkbox" id="exclude-dev" checked onchange="loadData()">
+            <input type="checkbox" id="exclude-dev" checked onchange="handleExcludeDevChange()">
             <span>Exclude dev user</span>
         </label>
-        <button class="refresh-btn" onclick="loadData()">Refresh</button>
+        <button class="refresh-btn" onclick="forceRefresh()">Refresh</button>
         <button class="refresh-btn" style="background: #64748b;" onclick="resetKey()">Reset Key</button>
     </div>
 
@@ -382,6 +383,29 @@
         let selectedDays = 7;
         let dashboardKey = localStorage.getItem('dashboardKey') || '';
 
+        // In-memory cache for fetched data
+        // Key format: "{days}_{excludeDev}" (e.g., "7_true", "-1_false")
+        const dataCache = new Map();
+
+        function getCacheKey() {
+            const excludeDev = document.getElementById('exclude-dev').checked;
+            return `${selectedDays}_${excludeDev}`;
+        }
+
+        function getCachedData() {
+            const key = getCacheKey();
+            return dataCache.get(key);
+        }
+
+        function setCachedData(data) {
+            const key = getCacheKey();
+            dataCache.set(key, data);
+        }
+
+        function clearCache() {
+            dataCache.clear();
+        }
+
         // Prompt for key if not set
         if (!dashboardKey) {
             dashboardKey = prompt('Enter your Dashboard Key:');
@@ -396,16 +420,36 @@
                 document.querySelectorAll('.time-filter button[data-days]').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 selectedDays = parseInt(btn.dataset.days);
-                loadData();
+                loadData(false); // Use cache if available
             });
         });
 
-        async function loadData() {
+        function forceRefresh() {
+            clearCache();
+            loadData(true);
+        }
+
+        function handleExcludeDevChange() {
+            loadData(false); // Use cache if available for this combination
+        }
+
+        async function loadData(forceRefresh = false) {
             if (!dashboardKey) {
                 document.getElementById('error-container').innerHTML = `
                     <div class="error">No dashboard key provided. Refresh the page to enter your key.</div>
                 `;
                 return;
+            }
+
+            // Check cache first unless forceRefresh is true
+            if (!forceRefresh) {
+                const cachedData = getCachedData();
+                if (cachedData) {
+                    console.log('Using cached data for:', getCacheKey());
+                    updateDashboard(cachedData);
+                    document.getElementById('error-container').innerHTML = '';
+                    return;
+                }
             }
 
             try {
@@ -415,6 +459,7 @@
                     throw new Error(`HTTP ${response.status}: ${await response.text()}`);
                 }
                 const data = await response.json();
+                setCachedData(data); // Store in cache
                 updateDashboard(data);
                 document.getElementById('error-container').innerHTML = '';
             } catch (error) {
@@ -452,14 +497,18 @@
 
             // Dynamic threshold labels based on selected period
             const threshold = userActivity.activeThreshold || 5;
-            const periodLabel = userActivity.periodType === 'today' ? '/today' : (userActivity.periodDays < 7 ? `/${userActivity.periodDays}d` : '/week');
+            const periodLabel = userActivity.periodType === 'all'
+                ? '/90d avg'
+                : (userActivity.periodType === 'today' ? '/today' : (userActivity.periodDays < 7 ? `/${userActivity.periodDays}d` : '/week'));
             document.getElementById('active-users-detail').textContent = `${threshold}+ calls${periodLabel}`;
             document.getElementById('active-users-detail').className = 'change positive';
             document.getElementById('inactive-users-detail').textContent = `<${threshold} calls${periodLabel}`;
             document.getElementById('inactive-users-detail').className = 'change negative';
 
             // Update table headers for the selected period
-            const periodName = userActivity.periodType === 'today' ? 'Today' : (userActivity.periodDays < 7 ? `${userActivity.periodDays}d` : 'Week');
+            const periodName = userActivity.periodType === 'all'
+                ? '90d avg'
+                : (userActivity.periodType === 'today' ? 'Today' : (userActivity.periodDays < 7 ? `${userActivity.periodDays}d` : 'Week'));
             document.getElementById('users-activity-header').textContent = `Users Activity (${threshold}+ calls${periodLabel} = Active)`;
             document.getElementById('calls-period-header').textContent = `Calls/${periodName}`;
 

@@ -139,3 +139,34 @@ export interface ConnectOptions {
     isReconnection?: boolean;
     reconnectionConfig?: ReconnectionConfig;
 }
+
+// Context health tracking for page-level connection health
+export interface ContextHealth {
+    contextId: number | null;
+    lastContextCreated: Date | null;
+    lastContextDestroyed: Date | null;
+    isStale: boolean;
+    lastHealthCheck: Date | null;
+    lastHealthCheckSuccess: boolean;
+}
+
+// Options for execute_in_app retry behavior
+export interface ExecuteOptions {
+    maxRetries?: number;      // Default: 2
+    retryDelayMs?: number;    // Default: 1000
+    autoReconnect?: boolean;  // Default: true
+}
+
+// Result of ensure_connection
+export interface EnsureConnectionResult {
+    connected: boolean;
+    wasReconnected: boolean;
+    healthCheckPassed: boolean;
+    connectionInfo: {
+        deviceTitle: string;
+        port: number;
+        uptime: string;
+        contextId: number | null;
+    } | null;
+    error?: string;
+}

@@ -27,11 +27,14 @@ import {
     formatRequestDetails,
     // Connection state
     getAllConnectionStates,
-    getConnectionState,
     getAllConnectionMetadata,
     getRecentGaps,
     formatDuration,
     ConnectionGap,
+    // Context health tracking
+    getContextHealth,
+    // Connection resilience
+    ensureConnection,
     // Bundle (Metro build errors)
     connectMetroBuildEvents,
     getBundleErrors,
@@ -272,6 +275,8 @@ registerToolWithTelemetry(
         // Show active connections
         for (const { key, app, isConnected } of connections) {
             const state = states.get(key);
+            const contextHealth = getContextHealth(key);
+
             lines.push(`--- ${app.deviceInfo.title} (Port ${app.port}) ---`);
             lines.push(`  Status: ${isConnected ? "CONNECTED" : "DISCONNECTED"}`);
 
@@ -302,6 +307,23 @@ registerToolWithTelemetry(
                     }
                 }
             }
+
+            // Show context health
+            if (contextHealth) {
+                lines.push(`  Context Health:`);
+                lines.push(`    Context ID: ${contextHealth.contextId ?? "unknown"}`);
+                lines.push(`    Status: ${contextHealth.isStale ? "STALE" : "HEALTHY"}`);
+                if (contextHealth.lastHealthCheck) {
+                    const healthResult = contextHealth.lastHealthCheckSuccess ? "PASS" : "FAIL";
+                    lines.push(`    Last Check: ${contextHealth.lastHealthCheck.toLocaleTimeString()} (${healthResult})`);
+                }
+                if (contextHealth.lastContextCreated) {
+                    lines.push(`    Context Created: ${contextHealth.lastContextCreated.toLocaleTimeString()}`);
+                }
+                if (contextHealth.lastContextDestroyed) {
+                    lines.push(`    Context Destroyed: ${contextHealth.lastContextDestroyed.toLocaleTimeString()}`);
+                }
+            }
             lines.push("");
         }
 
@@ -319,6 +341,69 @@ registerToolWithTelemetry(
                 }
                 lines.push("");
             }
+        }
+
+        return {
+            content: [{ type: "text", text: lines.join("\n") }]
+        };
+    }
+);
+
+// Tool: Ensure connection health
+registerToolWithTelemetry(
+    "ensure_connection",
+    {
+        description:
+            "Verify or establish a healthy connection to a React Native app. Use before running commands if connection may be stale, or after navigation/reload. This tool runs a health check and will auto-reconnect if needed.",
+        inputSchema: {
+            port: z.number().optional().describe("Metro port (default: auto-detect)"),
+            healthCheck: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Run health check to verify page context is responsive (default: true)"),
+            forceRefresh: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Force close existing connection and reconnect (default: false)")
+        }
+    },
+    async ({ port, healthCheck, forceRefresh }) => {
+        const result = await ensureConnection({ port, healthCheck, forceRefresh });
+
+        if (!result.connected) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Connection failed: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        const lines: string[] = [];
+        lines.push("=== Connection Ensured ===\n");
+
+        if (result.connectionInfo) {
+            lines.push(`Device: ${result.connectionInfo.deviceTitle}`);
+            lines.push(`Port: ${result.connectionInfo.port}`);
+            lines.push(`Uptime: ${result.connectionInfo.uptime}`);
+            if (result.connectionInfo.contextId !== null) {
+                lines.push(`Context ID: ${result.connectionInfo.contextId}`);
+            }
+        }
+
+        lines.push("");
+        lines.push(`Reconnected: ${result.wasReconnected ? "Yes" : "No"}`);
+        lines.push(`Health Check: ${result.healthCheckPassed ? "PASSED" : "FAILED"}`);
+
+        if (!result.healthCheckPassed) {
+            lines.push("");
+            lines.push("Warning: Health check failed. The page context may be stale.");
+            lines.push("Consider using forceRefresh=true or reload_app to get a fresh context.");
         }
 
         return {

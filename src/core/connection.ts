@@ -1,9 +1,9 @@
 import WebSocket from "ws";
-import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig } from "./types.js";
+import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult } from "./types.js";
 import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer, setActiveSimulatorUdid, clearActiveSimulatorIfSource } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 import { findSimulatorByName } from "./ios.js";
-import { fetchDevices, selectMainDevice } from "./metro.js";
+import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -16,11 +16,27 @@ import {
     getConnectionMetadata,
     saveReconnectionTimer,
     cancelReconnectionTimer,
-    calculateBackoffDelay
+    calculateBackoffDelay,
+    initContextHealth,
+    markContextHealthy,
+    markContextStale,
+    getContextHealth,
+    updateContextHealth,
+    formatDuration,
 } from "./connectionState.js";
 
 // Connection locks to prevent concurrent connection attempts to the same device
 const connectionLocks: Set<string> = new Set();
+
+// Helper to find appKey from device info by searching connectedApps
+function findAppKeyForDevice(device: DeviceInfo): string | null {
+    for (const [key, app] of connectedApps.entries()) {
+        if (app.deviceInfo.id === device.id) {
+            return key;
+        }
+    }
+    return null;
+}
 
 // Helper to convert WebSocket readyState to readable name
 function getWebSocketStateName(state: number): string {
@@ -269,6 +285,29 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             networkBuffer.set(params.requestId, existing);
         }
     }
+
+    // Handle Runtime context lifecycle events for health tracking
+    const appKey = findAppKeyForDevice(_device);
+    if (appKey) {
+        // Handle Runtime.executionContextCreated
+        if (method === "Runtime.executionContextCreated") {
+            const params = message.params as { context: { id: number; name?: string } };
+            markContextHealthy(appKey, params.context.id);
+            console.error(`[rn-ai-debugger] Context created: ${params.context.id}`);
+        }
+
+        // Handle Runtime.executionContextDestroyed
+        if (method === "Runtime.executionContextDestroyed") {
+            markContextStale(appKey);
+            console.error(`[rn-ai-debugger] Context destroyed`);
+        }
+
+        // Handle Runtime.executionContextsCleared
+        if (method === "Runtime.executionContextsCleared") {
+            markContextStale(appKey);
+            console.error(`[rn-ai-debugger] All contexts cleared`);
+        }
+    }
 }
 
 // Connect to a device via CDP WebSocket
@@ -330,9 +369,12 @@ export async function connectToDevice(
                         lastConnectedTime: new Date()
                         // reconnectionAttempts NOT reset here - see ws.on("close") for stable connection check
                     });
+                    // Reset context health for reconnection
+                    initContextHealth(appKey);
                     console.error(`[rn-ai-debugger] Reconnected to ${device.title}`);
                 } else {
                     initConnectionState(appKey);
+                    initContextHealth(appKey);
                     console.error(`[rn-ai-debugger] Connected to ${device.title}`);
                 }
 
@@ -563,4 +605,204 @@ export function hasConnectedApp(): boolean {
         }
     }
     return false;
+}
+
+/**
+ * Run a quick health check to verify the page context is responsive
+ * Returns true if the context can execute code, false otherwise
+ */
+export async function runQuickHealthCheck(app: ConnectedApp): Promise<boolean> {
+    const HEALTH_CHECK_TIMEOUT = 2000;
+    const messageId = getNextMessageId();
+
+    return new Promise((resolve) => {
+        const timeoutId = setTimeout(() => {
+            pendingExecutions.delete(messageId);
+            resolve(false);
+        }, HEALTH_CHECK_TIMEOUT);
+
+        pendingExecutions.set(messageId, {
+            resolve: (result: ExecutionResult) => {
+                clearTimeout(timeoutId);
+                pendingExecutions.delete(messageId);
+
+                // Update context health tracking
+                const appKey = findAppKeyForDevice(app.deviceInfo);
+                if (appKey) {
+                    updateContextHealth(appKey, {
+                        lastHealthCheck: new Date(),
+                        lastHealthCheckSuccess: result.success,
+                        isStale: !result.success,
+                    });
+                }
+
+                resolve(result.success);
+            },
+            timeoutId,
+        });
+
+        try {
+            app.ws.send(
+                JSON.stringify({
+                    id: messageId,
+                    method: "Runtime.evaluate",
+                    params: { expression: "1+1", returnByValue: true },
+                })
+            );
+        } catch {
+            clearTimeout(timeoutId);
+            pendingExecutions.delete(messageId);
+            resolve(false);
+        }
+    });
+}
+
+/**
+ * Find the first available Metro port
+ */
+async function findFirstMetroPort(): Promise<number | null> {
+    const ports = await scanMetroPorts();
+    return ports.length > 0 ? ports[0] : null;
+}
+
+/**
+ * Ensure a healthy connection to a React Native app
+ * This will verify or establish a connection, optionally running a health check
+ */
+export async function ensureConnection(options: {
+    port?: number;
+    healthCheck?: boolean;
+    forceRefresh?: boolean;
+} = {}): Promise<EnsureConnectionResult> {
+    const { port, healthCheck = true, forceRefresh = false } = options;
+
+    let app = getFirstConnectedApp();
+    let wasReconnected = false;
+
+    // Force refresh if requested - close existing connection
+    if (forceRefresh && app) {
+        const appKey = `${app.port}-${app.deviceInfo.id}`;
+        cancelReconnectionTimer(appKey);
+        try {
+            app.ws.close();
+        } catch {
+            // Ignore close errors
+        }
+        connectedApps.delete(appKey);
+        app = null;
+    }
+
+    // Attempt connection if not connected
+    if (!app) {
+        const targetPort = port ?? await findFirstMetroPort();
+        if (!targetPort) {
+            return {
+                connected: false,
+                wasReconnected: false,
+                healthCheckPassed: false,
+                connectionInfo: null,
+                error: "No Metro server found. Make sure Metro bundler is running.",
+            };
+        }
+
+        const devices = await fetchDevices(targetPort);
+        const mainDevice = selectMainDevice(devices);
+        if (!mainDevice) {
+            return {
+                connected: false,
+                wasReconnected: false,
+                healthCheckPassed: false,
+                connectionInfo: null,
+                error: `No debuggable devices found on port ${targetPort}. Make sure the app is running.`,
+            };
+        }
+
+        try {
+            await connectToDevice(mainDevice, targetPort);
+            app = getFirstConnectedApp();
+            wasReconnected = true;
+        } catch (error) {
+            return {
+                connected: false,
+                wasReconnected: false,
+                healthCheckPassed: false,
+                connectionInfo: null,
+                error: `Connection failed: ${error instanceof Error ? error.message : String(error)}`,
+            };
+        }
+    }
+
+    if (!app) {
+        return {
+            connected: false,
+            wasReconnected: false,
+            healthCheckPassed: false,
+            connectionInfo: null,
+            error: "Connection succeeded but app is not available",
+        };
+    }
+
+    // Run health check if requested
+    let healthCheckPassed = true;
+    if (healthCheck) {
+        healthCheckPassed = await runQuickHealthCheck(app);
+
+        // If health check failed and we haven't just reconnected, try reconnecting
+        if (!healthCheckPassed && !wasReconnected) {
+            console.error(`[rn-ai-debugger] Health check failed, attempting reconnection...`);
+
+            // Close and reconnect
+            const appKey = `${app.port}-${app.deviceInfo.id}`;
+            const targetPort = app.port;
+            cancelReconnectionTimer(appKey);
+            try {
+                app.ws.close();
+            } catch {
+                // Ignore
+            }
+            connectedApps.delete(appKey);
+
+            // Re-fetch devices and reconnect
+            const devices = await fetchDevices(targetPort);
+            const mainDevice = selectMainDevice(devices);
+            if (mainDevice) {
+                try {
+                    await connectToDevice(mainDevice, targetPort);
+                    app = getFirstConnectedApp();
+                    wasReconnected = true;
+
+                    // Re-run health check after reconnection
+                    if (app) {
+                        healthCheckPassed = await runQuickHealthCheck(app);
+                    }
+                } catch {
+                    // Failed to reconnect
+                    healthCheckPassed = false;
+                }
+            }
+        }
+    }
+
+    // Build connection info
+    const appKey = app ? `${app.port}-${app.deviceInfo.id}` : null;
+    const connectionState = appKey ? getConnectionState(appKey) : null;
+    const contextHealth = appKey ? getContextHealth(appKey) : null;
+
+    let uptime = "unknown";
+    if (connectionState?.lastConnectedTime) {
+        const uptimeMs = Date.now() - connectionState.lastConnectedTime.getTime();
+        uptime = formatDuration(uptimeMs);
+    }
+
+    return {
+        connected: app !== null && app.ws.readyState === WebSocket.OPEN,
+        wasReconnected,
+        healthCheckPassed,
+        connectionInfo: app ? {
+            deviceTitle: app.deviceInfo.title,
+            port: app.port,
+            uptime,
+            contextId: contextHealth?.contextId ?? null,
+        } : null,
+    };
 }

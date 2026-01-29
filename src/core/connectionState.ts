@@ -3,6 +3,7 @@ import {
     ConnectionGap,
     ConnectionMetadata,
     ReconnectionConfig,
+    ContextHealth,
 } from "./types.js";
 
 // Default reconnection configuration
@@ -250,4 +251,94 @@ export function formatDuration(ms: number): string {
     const minutes = Math.floor(ms / 60000);
     const seconds = Math.round((ms % 60000) / 1000);
     return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+// ========== Context Health Tracking ==========
+
+// Store context health per connection
+const contextHealthStates: Map<string, ContextHealth> = new Map();
+
+/**
+ * Initialize context health for a new connection
+ */
+export function initContextHealth(appKey: string): ContextHealth {
+    const health: ContextHealth = {
+        contextId: null,
+        lastContextCreated: null,
+        lastContextDestroyed: null,
+        isStale: false,
+        lastHealthCheck: null,
+        lastHealthCheckSuccess: false,
+    };
+    contextHealthStates.set(appKey, health);
+    return health;
+}
+
+/**
+ * Get context health for an appKey
+ */
+export function getContextHealth(appKey: string): ContextHealth | null {
+    return contextHealthStates.get(appKey) || null;
+}
+
+/**
+ * Update context health with partial updates
+ */
+export function updateContextHealth(
+    appKey: string,
+    updates: Partial<ContextHealth>
+): void {
+    const current = contextHealthStates.get(appKey);
+    if (current) {
+        contextHealthStates.set(appKey, { ...current, ...updates });
+    }
+}
+
+/**
+ * Mark context as stale (e.g., after context destruction)
+ */
+export function markContextStale(appKey: string): void {
+    const current = contextHealthStates.get(appKey);
+    if (current) {
+        contextHealthStates.set(appKey, {
+            ...current,
+            isStale: true,
+            lastContextDestroyed: new Date(),
+        });
+    }
+}
+
+/**
+ * Mark context as healthy (e.g., after context creation)
+ */
+export function markContextHealthy(appKey: string, contextId: number): void {
+    const current = contextHealthStates.get(appKey);
+    if (current) {
+        contextHealthStates.set(appKey, {
+            ...current,
+            contextId,
+            isStale: false,
+            lastContextCreated: new Date(),
+        });
+    } else {
+        // Initialize if not exists
+        const health = initContextHealth(appKey);
+        health.contextId = contextId;
+        health.lastContextCreated = new Date();
+        contextHealthStates.set(appKey, health);
+    }
+}
+
+/**
+ * Clear context health for an appKey
+ */
+export function clearContextHealth(appKey: string): void {
+    contextHealthStates.delete(appKey);
+}
+
+/**
+ * Get all context health states
+ */
+export function getAllContextHealth(): Map<string, ContextHealth> {
+    return new Map(contextHealthStates);
 }
