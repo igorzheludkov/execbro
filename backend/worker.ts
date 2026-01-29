@@ -208,7 +208,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 blob1 = 'tool_invocation'
                 AND ${timeFilter}
                 ${devUserFilter}
-            LIMIT 1000
+            LIMIT 50000
         `;
 
         // Query 5: All session_start events (raw rows to get unique users)
@@ -220,7 +220,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 blob1 = 'session_start'
                 AND ${timeFilter}
                 ${devUserFilter}
-            LIMIT 1000
+            LIMIT 10000
         `;
 
         // Query 6: All tool invocation events (raw rows to count per user)
@@ -231,7 +231,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 blob1 = 'tool_invocation'
                 AND ${timeFilter}
                 ${devUserFilter}
-            LIMIT 5000
+            LIMIT 200000
         `;
 
         // Execute queries in parallel (max 6 to avoid connection limit)

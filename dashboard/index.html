@@ -254,8 +254,8 @@
     </div>
 
     <div class="time-filter">
-        <button data-days="0">Today</button>
-        <button class="active" data-days="7">7 Days</button>
+        <button class="active" data-days="0">Today</button>
+        <button data-days="7">7 Days</button>
         <button data-days="30">30 Days</button>
         <button data-days="-1">All</button>
         <label class="toggle-label">
@@ -380,7 +380,7 @@
         let toolUsageChart = null;
         let timelineChart = null;
         let userActivityChart = null;
-        let selectedDays = 7;
+        let selectedDays = 0;
         let dashboardKey = localStorage.getItem('dashboardKey') || '';
 
         // In-memory cache for fetched data
