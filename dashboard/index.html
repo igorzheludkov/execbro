@@ -525,7 +525,7 @@
             updateToolsTable(data.toolBreakdown || []);
 
             // Update users activity table
-            updateUsersActivityTable(userActivity.users || []);
+            updateUsersActivityTable(userActivity);
 
             // Update user tools table
             updateUserToolsTable(data.userToolsBreakdown || []);
@@ -676,8 +676,10 @@
             });
         }
 
-        function updateUsersActivityTable(users) {
+        function updateUsersActivityTable(userActivity) {
             const tbody = document.getElementById('users-activity-table');
+            const users = userActivity.users || [];
+            const isToday = userActivity.periodType === 'today';
 
             if (users.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="4" class="loading">No data available</td></tr>';
@@ -688,7 +690,7 @@
                 <tr>
                     <td><code>${user.userId}</code></td>
                     <td>${user.totalCalls.toLocaleString()}</td>
-                    <td>${user.callsPerWeek}</td>
+                    <td>${isToday ? user.totalCalls.toLocaleString() : user.callsPerWeek}</td>
                     <td>
                         <span class="status-badge ${user.isActive ? 'success' : 'failure'}">
                             ${user.isActive ? 'Active' : 'Inactive'}
