@@ -245,6 +245,71 @@
             height: 16px;
             cursor: pointer;
         }
+
+        .filter-section {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .filter-input {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 300px;
+        }
+
+        .filter-input::placeholder {
+            color: #64748b;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .filter-label {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+
+        .excluded-users {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .excluded-user-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: #7c3aed20;
+            border: 1px solid #7c3aed;
+            color: #a78bfa;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: monospace;
+        }
+
+        .excluded-user-tag button {
+            background: none;
+            border: none;
+            color: #a78bfa;
+            cursor: pointer;
+            padding: 0 2px;
+            font-size: 14px;
+            line-height: 1;
+        }
+
+        .excluded-user-tag button:hover {
+            color: #f87171;
+        }
     </style>
 </head>
 <body>
@@ -258,12 +323,16 @@
         <button data-days="7">7 Days</button>
         <button data-days="30">30 Days</button>
         <button data-days="-1">All</button>
-        <label class="toggle-label">
-            <input type="checkbox" id="exclude-dev" checked onchange="handleExcludeDevChange()">
-            <span>Exclude dev user</span>
-        </label>
         <button class="refresh-btn" onclick="forceRefresh()">Refresh</button>
         <button class="refresh-btn" style="background: #64748b;" onclick="resetKey()">Reset Key</button>
+    </div>
+
+    <div class="filter-section">
+        <span class="filter-label">Exclude users:</span>
+        <input type="text" id="exclude-users-input" class="filter-input"
+            placeholder="Enter user ID and press Enter (e.g., 674b31e5)"
+            onkeydown="handleExcludeInputKeydown(event)">
+        <div id="excluded-users-list" class="excluded-users"></div>
     </div>
 
     <div id="error-container"></div>
@@ -383,13 +452,16 @@
         let selectedDays = 0;
         let dashboardKey = localStorage.getItem('dashboardKey') || '';
 
+        // Excluded users - stored in localStorage
+        let excludedUsers = JSON.parse(localStorage.getItem('excludedUsers') || '[]');
+
         // In-memory cache for fetched data
-        // Key format: "{days}_{excludeDev}" (e.g., "7_true", "-1_false")
+        // Key format: "{days}_{excludedUsers}" (e.g., "7_674b31e5,abc123")
         const dataCache = new Map();
 
         function getCacheKey() {
-            const excludeDev = document.getElementById('exclude-dev').checked;
-            return `${selectedDays}_${excludeDev}`;
+            const excludedStr = excludedUsers.sort().join(',');
+            return `${selectedDays}_${excludedStr}`;
         }
 
         function getCachedData() {
@@ -429,8 +501,39 @@
             loadData(true);
         }
 
-        function handleExcludeDevChange() {
-            loadData(false); // Use cache if available for this combination
+        function handleExcludeInputKeydown(event) {
+            if (event.key === 'Enter') {
+                const input = document.getElementById('exclude-users-input');
+                const userId = input.value.trim().toLowerCase();
+                if (userId && !excludedUsers.includes(userId)) {
+                    excludedUsers.push(userId);
+                    localStorage.setItem('excludedUsers', JSON.stringify(excludedUsers));
+                    renderExcludedUsers();
+                    loadData(false);
+                }
+                input.value = '';
+            }
+        }
+
+        function removeExcludedUser(userId) {
+            excludedUsers = excludedUsers.filter(u => u !== userId);
+            localStorage.setItem('excludedUsers', JSON.stringify(excludedUsers));
+            renderExcludedUsers();
+            loadData(false);
+        }
+
+        function renderExcludedUsers() {
+            const container = document.getElementById('excluded-users-list');
+            if (excludedUsers.length === 0) {
+                container.innerHTML = '<span style="color: #64748b; font-size: 12px;">No users excluded</span>';
+                return;
+            }
+            container.innerHTML = excludedUsers.map(userId => `
+                <span class="excluded-user-tag">
+                    ${userId}
+                    <button onclick="removeExcludedUser('${userId}')" title="Remove">&times;</button>
+                </span>
+            `).join('');
         }
 
         async function loadData(forceRefresh = false) {
@@ -453,8 +556,8 @@
             }
 
             try {
-                const excludeDev = document.getElementById('exclude-dev').checked;
-                const response = await fetch(`${API_URL}/api/stats?days=${selectedDays}&key=${encodeURIComponent(dashboardKey)}${excludeDev ? '&excludeDev=1' : ''}`);
+                const excludeParam = excludedUsers.length > 0 ? `&excludeUsers=${encodeURIComponent(excludedUsers.join(','))}` : '';
+                const response = await fetch(`${API_URL}/api/stats?days=${selectedDays}&key=${encodeURIComponent(dashboardKey)}${excludeParam}`);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${await response.text()}`);
                 }
@@ -743,6 +846,7 @@
         }
 
         // Initial load
+        renderExcludedUsers();
         loadData();
     </script>
 </body>

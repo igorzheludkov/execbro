@@ -130,8 +130,20 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
     const daysParam = parseInt(url.searchParams.get("days") || "7");
     const isToday = daysParam === 0;
     const isAll = daysParam === -1;
-    const excludeDev = url.searchParams.get("excludeDev") === "1";
-    const devUserFilter = excludeDev ? "AND index1 NOT LIKE 'e9bc7021%'" : "";
+
+    // Parse excluded users from comma-separated list
+    const excludeUsersParam = url.searchParams.get("excludeUsers") || "";
+    const excludedUsers = excludeUsersParam
+        .split(",")
+        .map(u => u.trim().toLowerCase())
+        .filter(u => u.length > 0 && u.length <= 8); // Only valid user ID prefixes
+
+    // Build the exclusion filter for SQL
+    let userExclusionFilter = "";
+    if (excludedUsers.length > 0) {
+        const exclusions = excludedUsers.map(u => `index1 NOT LIKE '${u}%'`).join(" AND ");
+        userExclusionFilter = `AND ${exclusions}`;
+    }
 
     // Generate SQL time filter: "today" uses midnight UTC, "all" has no restriction, otherwise rolling interval
     const timeFilter = isAll
@@ -164,7 +176,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND ${timeFilter}
-                ${devUserFilter}
+                ${userExclusionFilter}
             GROUP BY blob2, blob3
             ORDER BY count DESC
         `;
@@ -178,7 +190,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'session_start'
                 AND ${timeFilter}
-                ${devUserFilter}
+                ${userExclusionFilter}
         `;
 
         // Query 3: Timeline (daily counts)
@@ -190,7 +202,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND ${timeFilter}
-                ${devUserFilter}
+                ${userExclusionFilter}
             GROUP BY date
             ORDER BY date ASC
         `;
@@ -207,7 +219,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND ${timeFilter}
-                ${devUserFilter}
+                ${userExclusionFilter}
             LIMIT 50000
         `;
 
@@ -219,7 +231,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'session_start'
                 AND ${timeFilter}
-                ${devUserFilter}
+                ${userExclusionFilter}
             LIMIT 10000
         `;
 
@@ -230,7 +242,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             WHERE
                 blob1 = 'tool_invocation'
                 AND ${timeFilter}
-                ${devUserFilter}
+                ${userExclusionFilter}
             LIMIT 200000
         `;
 
