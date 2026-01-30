@@ -392,6 +392,21 @@
         </div>
     </div>
 
+    <!-- User Retention Chart -->
+    <div class="chart-card" style="margin-bottom: 32px;">
+        <h3>
+            User Retention
+            <span style="color: #64748b; font-size: 12px; cursor: help; margin-left: 8px;"
+                  title="Percentage of users who returned at least once within N days of first use">&#9432;</span>
+        </h3>
+        <div class="chart-container">
+            <canvas id="retentionChart"></canvas>
+        </div>
+        <div id="retention-footer" style="text-align: center; color: #64748b; font-size: 12px; margin-top: 12px;">
+            Loading...
+        </div>
+    </div>
+
     <div class="table-card">
         <h3>Top Tools by Usage</h3>
         <table>
@@ -449,6 +464,7 @@
         let toolUsageChart = null;
         let timelineChart = null;
         let userActivityChart = null;
+        let retentionChart = null;
         let selectedDays = 0;
         let dashboardKey = localStorage.getItem('dashboardKey') || '';
 
@@ -624,6 +640,9 @@
             // Update user activity pie chart
             updateUserActivityChart(userActivity);
 
+            // Update retention chart
+            updateRetentionChart(data.retention);
+
             // Update tools table
             updateToolsTable(data.toolBreakdown || []);
 
@@ -777,6 +796,62 @@
                     }
                 }
             });
+        }
+
+        function updateRetentionChart(retentionData) {
+            const ctx = document.getElementById('retentionChart').getContext('2d');
+
+            if (retentionChart) retentionChart.destroy();
+
+            if (!retentionData?.data?.length) {
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#94a3b8';
+                ctx.textAlign = 'center';
+                ctx.fillText('No retention data', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                document.getElementById('retention-footer').textContent = 'Insufficient data';
+                return;
+            }
+
+            retentionChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: retentionData.data.map(d => `Day ${d.day}`),
+                    datasets: [{
+                        data: retentionData.data.map(d => d.rate),
+                        borderColor: '#8b5cf6',
+                        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const d = retentionData.data[ctx.dataIndex];
+                                    return [`${d.rate.toFixed(1)}%`, `${d.returnedUsers}/${d.cohortSize} users`];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                        y: {
+                            min: 0, max: 100,
+                            ticks: { color: '#94a3b8', callback: v => v + '%' },
+                            grid: { color: '#334155' }
+                        }
+                    }
+                }
+            });
+
+            document.getElementById('retention-footer').textContent =
+                `Based on ${retentionData.totalUsers} users (last 90 days)`;
         }
 
         function updateUsersActivityTable(userActivity) {

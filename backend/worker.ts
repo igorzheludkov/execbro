@@ -115,6 +115,59 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
     }
 }
 
+function calculateRetention(rows: Array<{ index1: string; activity_date: string }>) {
+    // Build user activity map: userId -> { firstDate, activeDates }
+    const userActivity = new Map<string, { firstDate: Date; activeDates: Set<string> }>();
+
+    for (const row of rows) {
+        const date = new Date(row.activity_date);
+        if (!userActivity.has(row.index1)) {
+            userActivity.set(row.index1, { firstDate: date, activeDates: new Set([row.activity_date]) });
+        } else {
+            const user = userActivity.get(row.index1)!;
+            user.activeDates.add(row.activity_date);
+            if (date < user.firstDate) user.firstDate = date;
+        }
+    }
+
+    // Calculate cumulative retention for specific days
+    // "Day N retention" = % of users who returned at least once within N days of first use
+    const retentionDays = [1, 2, 7, 14, 30];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const data = retentionDays.map(targetDay => {
+        let cohortSize = 0;
+        let returnedUsers = 0;
+
+        for (const [, userData] of userActivity) {
+            const daysSinceFirst = Math.floor((today.getTime() - userData.firstDate.getTime()) / 86400000);
+            if (daysSinceFirst >= targetDay) {
+                cohortSize++;
+                // Check if user returned on ANY day from day 1 to day N (after first use)
+                let hasReturned = false;
+                for (let d = 1; d <= targetDay && !hasReturned; d++) {
+                    const checkDate = new Date(userData.firstDate);
+                    checkDate.setDate(checkDate.getDate() + d);
+                    if (userData.activeDates.has(checkDate.toISOString().split('T')[0])) {
+                        hasReturned = true;
+                    }
+                }
+                if (hasReturned) returnedUsers++;
+            }
+        }
+
+        return {
+            day: targetDay,
+            rate: cohortSize > 0 ? (returnedUsers / cohortSize) * 100 : 0,
+            cohortSize,
+            returnedUsers
+        };
+    });
+
+    return { data, totalUsers: userActivity.size };
+}
+
 async function handleStats(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -246,6 +299,19 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             LIMIT 200000
         `;
 
+        // Query 7: User activity data for retention calculation
+        const retentionQuery = `
+            SELECT
+                index1,
+                toDate(timestamp) as activity_date
+            FROM rn_debugger_events
+            WHERE
+                (blob1 = 'session_start' OR blob1 = 'tool_invocation')
+                AND timestamp >= NOW() - INTERVAL '90' DAY
+                ${userExclusionFilter}
+            LIMIT 100000
+        `;
+
         // Execute queries in parallel (max 6 to avoid connection limit)
         const [toolStatsRes, sessionStatsRes, timelineRes, userToolsRes, allUsersRes, userToolCountsRes] = await Promise.all([
             fetch(sqlEndpoint, {
@@ -296,6 +362,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             }
         }
 
+        // Parse first batch of responses (must consume before opening new connections)
         const toolStats = await parseResponse<{
             tool: string;
             status: string;
@@ -319,6 +386,17 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             index1: string;
             weight: number;
         }>(userToolCountsRes, 'userToolCounts');
+
+        // Query 7 runs after first batch is consumed to avoid connection limit
+        const retentionRes = await fetch(sqlEndpoint, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
+            body: retentionQuery
+        });
+        const retentionRaw = await parseResponse<{
+            index1: string;
+            activity_date: string;
+        }>(retentionRes, 'retention');
 
         // Check for errors
         if (toolStats.errors?.length) {
@@ -449,6 +527,9 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
         // Sort by activity level
         userActivityList.sort((a, b) => b.totalCalls - a.totalCalls);
 
+        // Calculate user retention
+        const retention = calculateRetention(retentionRaw.data || []);
+
         return new Response(JSON.stringify({
             totalCalls,
             totalSessions: Number(sessionStats.data?.[0]?.total_sessions) || 0,
@@ -466,7 +547,8 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 periodDays: effectiveDays,
                 periodType: isAll ? 'all' : (isToday ? 'today' : 'days'),
                 users: userActivityList
-            }
+            },
+            retention
         }), {
             status: 200,
             headers: { "Content-Type": "application/json", ...CORS_HEADERS }
