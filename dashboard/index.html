@@ -331,6 +331,16 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+
+        .stat-card-chart {
+            min-width: 180px;
+        }
+
+        .mini-chart-container {
+            position: relative;
+            height: 80px;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -390,6 +400,12 @@
             <div class="label">Avg Duration</div>
             <div class="value" id="avg-duration">-</div>
         </div>
+        <div class="stat-card stat-card-chart">
+            <div class="label">User Activity</div>
+            <div class="mini-chart-container">
+                <canvas id="userActivityChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <div class="charts-grid">
@@ -403,12 +419,6 @@
             <h3>Calls Over Time</h3>
             <div class="chart-container">
                 <canvas id="timelineChart"></canvas>
-            </div>
-        </div>
-        <div class="chart-card">
-            <h3>User Activity</h3>
-            <div class="chart-container">
-                <canvas id="userActivityChart"></canvas>
             </div>
         </div>
     </div>
@@ -837,7 +847,7 @@
             userActivityChart = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Active Users', 'Inactive Users'],
+                    labels: ['Active', 'Inactive'],
                     datasets: [{
                         data: [active, inactive],
                         backgroundColor: ['#4ade80', '#f87171'],
@@ -847,10 +857,13 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    cutout: '60%',
                     plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { color: '#94a3b8' }
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${ctx.raw}`
+                            }
                         }
                     }
                 }
