@@ -310,6 +310,27 @@
         .excluded-user-tag button:hover {
             color: #f87171;
         }
+
+        .error-category {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .error-category.network { background: #dc262620; color: #f87171; }
+        .error-category.timeout { background: #ea580c20; color: #fb923c; }
+        .error-category.validation { background: #ca8a0420; color: #fbbf24; }
+        .error-category.execution { background: #7c3aed20; color: #a78bfa; }
+        .error-category.connection { background: #05966920; color: #34d399; }
+        .error-category.unknown { background: #64748b20; color: #94a3b8; }
+
+        .error-message {
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
@@ -419,6 +440,23 @@
                 </tr>
             </thead>
             <tbody id="tools-table">
+                <tr><td colspan="4" class="loading">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="table-card">
+        <h3>Recent Errors</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Tool</th>
+                    <th>Category</th>
+                    <th>Error Message</th>
+                    <th>Count</th>
+                </tr>
+            </thead>
+            <tbody id="errors-table">
                 <tr><td colspan="4" class="loading">Loading...</td></tr>
             </tbody>
         </table>
@@ -646,6 +684,9 @@
             // Update tools table
             updateToolsTable(data.toolBreakdown || []);
 
+            // Update errors table
+            updateErrorsTable(data.errorBreakdown);
+
             // Update users activity table
             updateUsersActivityTable(userActivity);
 
@@ -753,6 +794,24 @@
                         </span>
                     </td>
                     <td>${tool.avgDuration.toFixed(0)}ms</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateErrorsTable(errorBreakdown) {
+            const tbody = document.getElementById('errors-table');
+
+            if (!errorBreakdown?.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="loading">No errors recorded</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = errorBreakdown.slice(0, 20).map(err => `
+                <tr>
+                    <td>${err.tool}</td>
+                    <td><span class="error-category ${err.category}">${err.category}</span></td>
+                    <td class="error-message" title="${(err.message || '-').replace(/"/g, '&quot;')}">${err.message || '-'}</td>
+                    <td>${err.count}</td>
                 </tr>
             `).join('');
         }

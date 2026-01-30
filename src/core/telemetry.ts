@@ -33,6 +33,8 @@ function getServerVersion(): string {
 // Types
 // ============================================================================
 
+type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'unknown';
+
 interface TelemetryEvent {
     name: string;
     timestamp: number;
@@ -40,7 +42,33 @@ interface TelemetryEvent {
     success?: boolean;
     duration?: number;
     isFirstRun?: boolean;
+    errorCategory?: ErrorCategory;
+    errorMessage?: string;
     properties?: Record<string, string | number | boolean>;
+}
+
+// ============================================================================
+// Error Categorization
+// ============================================================================
+
+function categorizeError(errorMessage: string): ErrorCategory {
+    const lower = errorMessage.toLowerCase();
+    if (lower.includes('websocket') || lower.includes('econnrefused') || lower.includes('socket') || lower.includes('fetch')) {
+        return 'network';
+    }
+    if (lower.includes('timeout') || lower.includes('timed out')) {
+        return 'timeout';
+    }
+    if (lower.includes('invalid') || lower.includes('required') || lower.includes('missing')) {
+        return 'validation';
+    }
+    if (lower.includes('no apps connected') || lower.includes('scan_metro') || lower.includes('not connected')) {
+        return 'connection';
+    }
+    if (lower.includes('evaluate') || lower.includes('execution') || lower.includes('runtime')) {
+        return 'execution';
+    }
+    return 'unknown';
 }
 
 interface TelemetryConfig {
@@ -211,7 +239,12 @@ function trackEvent(name: string, properties?: Record<string, string | number | 
     }
 }
 
-export function trackToolInvocation(toolName: string, success: boolean, durationMs: number): void {
+export function trackToolInvocation(
+    toolName: string,
+    success: boolean,
+    durationMs: number,
+    errorMessage?: string
+): void {
     if (!telemetryEnabled) return;
 
     const event: TelemetryEvent = {
@@ -222,6 +255,11 @@ export function trackToolInvocation(toolName: string, success: boolean, duration
         duration: durationMs,
         isFirstRun: isFirstRun()
     };
+
+    if (!success && errorMessage) {
+        event.errorCategory = categorizeError(errorMessage);
+        event.errorMessage = errorMessage.substring(0, 200);
+    }
 
     eventQueue.push(event);
 

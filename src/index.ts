@@ -122,20 +122,23 @@ function registerToolWithTelemetry(
     server.registerTool(toolName, config, async (args: any) => {
         const startTime = Date.now();
         let success = true;
+        let errorMessage: string | undefined;
 
         try {
             const result = await handler(args);
             // Check if result indicates an error
             if (result?.isError) {
                 success = false;
+                errorMessage = result.content?.[0]?.text || 'Unknown error';
             }
             return result;
         } catch (error) {
             success = false;
+            errorMessage = error instanceof Error ? error.message : String(error);
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration);
+            trackToolInvocation(toolName, success, duration, errorMessage);
         }
     });
 }

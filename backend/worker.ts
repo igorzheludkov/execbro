@@ -21,6 +21,8 @@ interface TelemetryEvent {
     success?: boolean;
     duration?: number;
     isFirstRun?: boolean;
+    errorCategory?: string;
+    errorMessage?: string;
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -94,7 +96,9 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
                     event.toolName || "",
                     event.success !== undefined ? (event.success ? "success" : "failure") : "",
                     payload.platform,
-                    payload.serverVersion
+                    payload.serverVersion,
+                    event.errorCategory || "",
+                    (event.errorMessage || "").slice(0, 200)
                 ],
                 doubles: [
                     event.duration || 0,
@@ -398,6 +402,36 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             activity_date: string;
         }>(retentionRes, 'retention');
 
+        // Query 8: Error breakdown (runs after retention to avoid connection limit)
+        const errorBreakdownQuery = `
+            SELECT
+                blob2 as tool,
+                blob6 as error_category,
+                blob7 as error_message,
+                SUM(_sample_interval) as count
+            FROM rn_debugger_events
+            WHERE
+                blob1 = 'tool_invocation'
+                AND blob3 = 'failure'
+                AND blob6 != ''
+                AND ${timeFilter}
+                ${userExclusionFilter}
+            GROUP BY blob2, blob6, blob7
+            ORDER BY count DESC
+            LIMIT 50
+        `;
+        const errorBreakdownRes = await fetch(sqlEndpoint, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
+            body: errorBreakdownQuery
+        });
+        const errorBreakdown = await parseResponse<{
+            tool: string;
+            error_category: string;
+            error_message: string;
+            count: number;
+        }>(errorBreakdownRes, 'errorBreakdown');
+
         // Check for errors
         if (toolStats.errors?.length) {
             return new Response(JSON.stringify({ error: toolStats.errors[0].message }), {
@@ -548,7 +582,13 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 periodType: isAll ? 'all' : (isToday ? 'today' : 'days'),
                 users: userActivityList
             },
-            retention
+            retention,
+            errorBreakdown: (errorBreakdown.data || []).map(row => ({
+                tool: row.tool,
+                category: row.error_category,
+                message: row.error_message,
+                count: Number(row.count)
+            }))
         }), {
             status: 200,
             headers: { "Content-Type": "application/json", ...CORS_HEADERS }
