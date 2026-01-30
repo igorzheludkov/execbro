@@ -147,8 +147,8 @@ registerToolWithTelemetry(
     {
         description: "Scan for running Metro bundler servers on common ports",
         inputSchema: {
-            startPort: z.number().optional().default(8081).describe("Start port for scanning (default: 8081)"),
-            endPort: z.number().optional().default(19002).describe("End port for scanning (default: 19002)")
+            startPort: z.coerce.number().optional().default(8081).describe("Start port for scanning (default: 8081)"),
+            endPort: z.coerce.number().optional().default(19002).describe("End port for scanning (default: 19002)")
         }
     },
     async ({ startPort, endPort }) => {
@@ -356,7 +356,7 @@ registerToolWithTelemetry(
         description:
             "Verify or establish a healthy connection to a React Native app. Use before running commands if connection may be stale, or after navigation/reload. This tool runs a health check and will auto-reconnect if needed.",
         inputSchema: {
-            port: z.number().optional().describe("Metro port (default: auto-detect)"),
+            port: z.coerce.number().optional().describe("Metro port (default: auto-detect)"),
             healthCheck: z
                 .boolean()
                 .optional()
@@ -418,7 +418,7 @@ registerToolWithTelemetry(
     {
         description: "Retrieve console logs from connected React Native app",
         inputSchema: {
-            maxLogs: z.number().optional().default(50).describe("Maximum number of logs to return (default: 50)"),
+            maxLogs: z.coerce.number().optional().default(50).describe("Maximum number of logs to return (default: 50)"),
             level: z
                 .enum(["all", "log", "warn", "error", "info", "debug"])
                 .optional()
@@ -466,7 +466,7 @@ registerToolWithTelemetry(
         description: "Search console logs for text (case-insensitive)",
         inputSchema: {
             text: z.string().describe("Text to search for in log messages"),
-            maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)")
+            maxResults: z.coerce.number().optional().default(50).describe("Maximum number of results to return (default: 50)")
         }
     },
     async ({ text, maxResults }) => {
@@ -510,7 +510,7 @@ registerToolWithTelemetry(
     {
         description: "Connect to a specific Metro server port",
         inputSchema: {
-            port: z.number().default(8081).describe("Metro server port (default: 8081)")
+            port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")
         }
     },
     async ({ port }) => {
@@ -575,7 +575,7 @@ registerToolWithTelemetry(
             "Execute JavaScript code in the connected React Native app and return the result. Use this for REPL-style interactions, inspecting app state, or running diagnostic code. Hermes compatible: 'global' is automatically polyfilled to 'globalThis', so both global.__REDUX_STORE__ and globalThis.__REDUX_STORE__ work.",
         inputSchema: {
             expression: z.string().describe("JavaScript expression to execute in the app"),
-            awaitPromise: z.boolean().optional().default(true).describe("Whether to await promises (default: true)")
+            awaitPromise: z.coerce.boolean().optional().default(true).describe("Whether to await promises (default: true)")
         }
     },
     async ({ expression, awaitPromise }) => {
@@ -1309,8 +1309,8 @@ registerToolWithTelemetry(
     {
         description: "Tap at specific coordinates on an Android device/emulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values.",
         inputSchema: {
-            x: z.number().describe("X coordinate in pixels"),
-            y: z.number().describe("Y coordinate in pixels"),
+            x: z.coerce.number().describe("X coordinate in pixels"),
+            y: z.coerce.number().describe("Y coordinate in pixels"),
             deviceId: z
                 .string()
                 .optional()
@@ -1338,8 +1338,8 @@ registerToolWithTelemetry(
     {
         description: "Long press at specific coordinates on an Android device/emulator screen",
         inputSchema: {
-            x: z.number().describe("X coordinate in pixels"),
-            y: z.number().describe("Y coordinate in pixels"),
+            x: z.coerce.number().describe("X coordinate in pixels"),
+            y: z.coerce.number().describe("Y coordinate in pixels"),
             durationMs: z
                 .number()
                 .optional()
@@ -1372,10 +1372,10 @@ registerToolWithTelemetry(
     {
         description: "Swipe from one point to another on an Android device/emulator screen",
         inputSchema: {
-            startX: z.number().describe("Starting X coordinate in pixels"),
-            startY: z.number().describe("Starting Y coordinate in pixels"),
-            endX: z.number().describe("Ending X coordinate in pixels"),
-            endY: z.number().describe("Ending Y coordinate in pixels"),
+            startX: z.coerce.number().describe("Starting X coordinate in pixels"),
+            startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
+            endX: z.coerce.number().describe("Ending X coordinate in pixels"),
+            endY: z.coerce.number().describe("Ending Y coordinate in pixels"),
             durationMs: z
                 .number()
                 .optional()
@@ -1545,8 +1545,8 @@ server.registerTool(
         description:
             "Get UI element info at specific coordinates on an Android device. Returns the element's text, content-description, resource-id, bounds, and state flags.",
         inputSchema: {
-            x: z.number().describe("X coordinate in pixels"),
-            y: z.number().describe("Y coordinate in pixels"),
+            x: z.coerce.number().describe("X coordinate in pixels"),
+            y: z.coerce.number().describe("Y coordinate in pixels"),
             deviceId: z
                 .string()
                 .optional()
@@ -2199,8 +2199,8 @@ server.registerTool(
         description:
             "Tap at specific coordinates on an iOS simulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values. Requires IDB (brew install idb-companion).",
         inputSchema: {
-            x: z.number().describe("X coordinate in pixels"),
-            y: z.number().describe("Y coordinate in pixels"),
+            x: z.coerce.number().describe("X coordinate in pixels"),
+            y: z.coerce.number().describe("Y coordinate in pixels"),
             duration: z
                 .number()
                 .optional()
@@ -2277,12 +2277,12 @@ server.registerTool(
         description:
             "Swipe gesture on an iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
         inputSchema: {
-            startX: z.number().describe("Starting X coordinate in pixels"),
-            startY: z.number().describe("Starting Y coordinate in pixels"),
-            endX: z.number().describe("Ending X coordinate in pixels"),
-            endY: z.number().describe("Ending Y coordinate in pixels"),
-            duration: z.number().optional().describe("Optional swipe duration in seconds"),
-            delta: z.number().optional().describe("Optional delta between touch events (step size)"),
+            startX: z.coerce.number().describe("Starting X coordinate in pixels"),
+            startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
+            endX: z.coerce.number().describe("Ending X coordinate in pixels"),
+            endY: z.coerce.number().describe("Ending Y coordinate in pixels"),
+            duration: z.coerce.number().optional().describe("Optional swipe duration in seconds"),
+            delta: z.coerce.number().optional().describe("Optional delta between touch events (step size)"),
             udid: z
                 .string()
                 .optional()
@@ -2343,7 +2343,7 @@ server.registerTool(
             button: z
                 .enum(IOS_BUTTON_TYPES)
                 .describe("Hardware button to press: HOME, LOCK, SIDE_BUTTON, SIRI, or APPLE_PAY"),
-            duration: z.number().optional().describe("Optional button press duration in seconds"),
+            duration: z.coerce.number().optional().describe("Optional button press duration in seconds"),
             udid: z
                 .string()
                 .optional()
@@ -2372,8 +2372,8 @@ server.registerTool(
         description:
             "Send a key event to an iOS simulator by keycode. Requires IDB to be installed (brew install idb-companion).",
         inputSchema: {
-            keycode: z.number().describe("iOS keycode to send"),
-            duration: z.number().optional().describe("Optional key press duration in seconds"),
+            keycode: z.coerce.number().describe("iOS keycode to send"),
+            duration: z.coerce.number().optional().describe("Optional key press duration in seconds"),
             udid: z
                 .string()
                 .optional()
@@ -2402,7 +2402,7 @@ server.registerTool(
         description:
             "Send a sequence of key events to an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
         inputSchema: {
-            keycodes: z.array(z.number()).describe("Array of iOS keycodes to send in sequence"),
+            keycodes: z.array(z.coerce.number()).describe("Array of iOS keycodes to send in sequence"),
             udid: z
                 .string()
                 .optional()
@@ -2459,8 +2459,8 @@ server.registerTool(
         description:
             "Get accessibility information for the UI element at a specific point on the iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
         inputSchema: {
-            x: z.number().describe("X coordinate in pixels"),
-            y: z.number().describe("Y coordinate in pixels"),
+            x: z.coerce.number().describe("X coordinate in pixels"),
+            y: z.coerce.number().describe("Y coordinate in pixels"),
             udid: z
                 .string()
                 .optional()
