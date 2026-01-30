@@ -403,6 +403,14 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
         }>(retentionRes, 'retention');
 
         // Query 8: Error breakdown (runs after retention to avoid connection limit)
+        // Exclude test error messages from development/testing
+        const testErrorFilter = `
+            AND blob7 NOT LIKE '%invalid-request-id%'
+            AND blob7 NOT LIKE '%fake-request-id%'
+            AND blob7 NOT LIKE '%NONEXISTENT_OBJECT%'
+            AND blob7 NOT LIKE '%invalid-device-id%'
+            AND blob7 NOT LIKE '%test-error-tracking%'
+        `;
         const errorBreakdownQuery = `
             SELECT
                 blob2 as tool,
@@ -416,6 +424,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 AND blob6 != ''
                 AND ${timeFilter}
                 ${userExclusionFilter}
+                ${testErrorFilter}
             GROUP BY blob2, blob6, blob7
             ORDER BY count DESC
             LIMIT 50
