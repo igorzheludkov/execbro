@@ -44,6 +44,7 @@ interface TelemetryEvent {
     isFirstRun?: boolean;
     errorCategory?: ErrorCategory;
     errorMessage?: string;
+    errorContext?: string; // Additional context like the expression that caused the error
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -59,11 +60,17 @@ function categorizeError(errorMessage: string): ErrorCategory {
     if (lower.includes('timeout') || lower.includes('timed out')) {
         return 'timeout';
     }
-    if (lower.includes('invalid') || lower.includes('required') || lower.includes('missing')) {
+    // Check connection errors before validation (since "no debuggable devices found" contains "no")
+    if (lower.includes('no apps connected') || lower.includes('scan_metro') || lower.includes('not connected') ||
+        lower.includes('no debuggable devices') || lower.includes('no metro server') || lower.includes('connection failed')) {
+        return 'connection';
+    }
+    // Syntax/compilation errors in JS code
+    if (lower.includes('compiling js failed') || lower.includes('syntaxerror')) {
         return 'validation';
     }
-    if (lower.includes('no apps connected') || lower.includes('scan_metro') || lower.includes('not connected')) {
-        return 'connection';
+    if (lower.includes('invalid') || lower.includes('required') || lower.includes('missing')) {
+        return 'validation';
     }
     if (lower.includes('evaluate') || lower.includes('execution') || lower.includes('runtime')) {
         return 'execution';
@@ -243,7 +250,8 @@ export function trackToolInvocation(
     toolName: string,
     success: boolean,
     durationMs: number,
-    errorMessage?: string
+    errorMessage?: string,
+    errorContext?: string
 ): void {
     if (!telemetryEnabled) return;
 
@@ -259,6 +267,10 @@ export function trackToolInvocation(
     if (!success && errorMessage) {
         event.errorCategory = categorizeError(errorMessage);
         event.errorMessage = errorMessage.substring(0, 200);
+        // Store truncated context (e.g., the expression that caused a syntax error)
+        if (errorContext) {
+            event.errorContext = errorContext.substring(0, 150);
+        }
     }
 
     eventQueue.push(event);

@@ -326,10 +326,26 @@
         .error-category.unknown { background: #64748b20; color: #94a3b8; }
 
         .error-message {
-            max-width: 400px;
+            max-width: 300px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .error-context-cell {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .error-context {
+            font-family: 'Fira Code', 'Monaco', monospace;
+            font-size: 11px;
+            background: #1e293b;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #fbbf24;
         }
 
         .stat-card-chart {
@@ -463,11 +479,12 @@
                     <th>Tool</th>
                     <th>Category</th>
                     <th>Error Message</th>
+                    <th>Context</th>
                     <th>Count</th>
                 </tr>
             </thead>
             <tbody id="errors-table">
-                <tr><td colspan="4" class="loading">Loading...</td></tr>
+                <tr><td colspan="5" class="loading">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -812,18 +829,29 @@
             const tbody = document.getElementById('errors-table');
 
             if (!errorBreakdown?.length) {
-                tbody.innerHTML = '<tr><td colspan="4" class="loading">No errors recorded</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="loading">No errors recorded</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = errorBreakdown.slice(0, 20).map(err => `
+            tbody.innerHTML = errorBreakdown.slice(0, 20).map(err => {
+                const contextDisplay = err.context
+                    ? `<code class="error-context" title="${err.context.replace(/"/g, '&quot;')}">${escapeHtml(err.context)}</code>`
+                    : '-';
+                return `
                 <tr>
                     <td>${err.tool}</td>
                     <td><span class="error-category ${err.category}">${err.category}</span></td>
                     <td class="error-message" title="${(err.message || '-').replace(/"/g, '&quot;')}">${err.message || '-'}</td>
+                    <td class="error-context-cell">${contextDisplay}</td>
                     <td>${err.count}</td>
                 </tr>
-            `).join('');
+            `}).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         function updateUserActivityChart(activityData) {

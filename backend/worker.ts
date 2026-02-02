@@ -23,6 +23,7 @@ interface TelemetryEvent {
     isFirstRun?: boolean;
     errorCategory?: string;
     errorMessage?: string;
+    errorContext?: string; // Additional context like the expression that caused the error
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -92,13 +93,14 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
         for (const event of payload.events) {
             env.TELEMETRY.writeDataPoint({
                 blobs: [
-                    event.name,
-                    event.toolName || "",
-                    event.success !== undefined ? (event.success ? "success" : "failure") : "",
-                    payload.platform,
-                    payload.serverVersion,
-                    event.errorCategory || "",
-                    (event.errorMessage || "").slice(0, 200)
+                    event.name,                                                    // blob1
+                    event.toolName || "",                                          // blob2
+                    event.success !== undefined ? (event.success ? "success" : "failure") : "", // blob3
+                    payload.platform,                                              // blob4
+                    payload.serverVersion,                                         // blob5
+                    event.errorCategory || "",                                     // blob6
+                    (event.errorMessage || "").slice(0, 200),                      // blob7
+                    (event.errorContext || "").slice(0, 150)                       // blob8 - additional error context
                 ],
                 doubles: [
                     event.duration || 0,
@@ -416,6 +418,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 blob2 as tool,
                 blob6 as error_category,
                 blob7 as error_message,
+                blob8 as error_context,
                 SUM(_sample_interval) as count
             FROM rn_debugger_events
             WHERE
@@ -425,7 +428,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 AND ${timeFilter}
                 ${userExclusionFilter}
                 ${testErrorFilter}
-            GROUP BY blob2, blob6, blob7
+            GROUP BY blob2, blob6, blob7, blob8
             ORDER BY count DESC
             LIMIT 50
         `;
@@ -438,6 +441,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             tool: string;
             error_category: string;
             error_message: string;
+            error_context: string;
             count: number;
         }>(errorBreakdownRes, 'errorBreakdown');
 
@@ -596,6 +600,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 tool: row.tool,
                 category: row.error_category,
                 message: row.error_message,
+                context: row.error_context || null,
                 count: Number(row.count)
             }))
         }), {

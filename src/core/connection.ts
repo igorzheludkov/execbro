@@ -91,8 +91,14 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
 
             // Check for error
             if (message.error) {
-                const error = message.error as { message: string };
-                pending.resolve({ success: false, error: error.message });
+                const error = message.error as { message?: string; code?: number; data?: string };
+                // Build comprehensive error message including code and data if available
+                const parts: string[] = [];
+                if (error.message) parts.push(error.message);
+                if (error.code !== undefined) parts.push(`code: ${error.code}`);
+                if (error.data) parts.push(`data: ${error.data}`);
+                const errorMessage = parts.length > 0 ? parts.join(', ') : 'Unknown CDP error';
+                pending.resolve({ success: false, error: errorMessage });
                 return;
             }
 
@@ -494,7 +500,8 @@ export async function connectToDevice(
             // Release connection lock on exception
             connectionLocks.delete(appKey);
             if (!isReconnection) {
-                reject(`Failed to create WebSocket connection: ${error}`);
+                const errorMessage = error instanceof Error ? error.message : (error ? String(error) : "Unknown error");
+                reject(`Failed to create WebSocket connection: ${errorMessage}`);
             }
         }
     });
@@ -722,12 +729,21 @@ export async function ensureConnection(options: {
             app = getFirstConnectedApp();
             wasReconnected = true;
         } catch (error) {
+            // Ensure we always have a meaningful error message
+            let errorMessage: string;
+            if (error instanceof Error) {
+                errorMessage = error.message;
+            } else if (error !== undefined && error !== null) {
+                errorMessage = String(error);
+            } else {
+                errorMessage = "WebSocket connection failed with no error details";
+            }
             return {
                 connected: false,
                 wasReconnected: false,
                 healthCheckPassed: false,
                 connectionInfo: null,
-                error: `Connection failed: ${error instanceof Error ? error.message : String(error)}`,
+                error: `Connection failed: ${errorMessage}`,
             };
         }
     }

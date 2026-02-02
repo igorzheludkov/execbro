@@ -123,6 +123,7 @@ function registerToolWithTelemetry(
         const startTime = Date.now();
         let success = true;
         let errorMessage: string | undefined;
+        let errorContext: string | undefined;
 
         try {
             const result = await handler(args);
@@ -130,6 +131,8 @@ function registerToolWithTelemetry(
             if (result?.isError) {
                 success = false;
                 errorMessage = result.content?.[0]?.text || 'Unknown error';
+                // Extract error context if provided (e.g., the expression that caused a syntax error)
+                errorContext = result._errorContext;
             }
             return result;
         } catch (error) {
@@ -138,7 +141,7 @@ function registerToolWithTelemetry(
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext);
         }
     });
 }
@@ -380,7 +383,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text",
-                        text: `Connection failed: ${result.error}`
+                        text: result.error || "Connection failed: Unknown error"
                     }
                 ],
                 isError: true
@@ -592,7 +595,9 @@ registerToolWithTelemetry(
                         text: `Error: ${result.error}`
                     }
                 ],
-                isError: true
+                isError: true,
+                // Include expression as context for telemetry (helps debug syntax errors)
+                _errorContext: expression
             };
         }
 
