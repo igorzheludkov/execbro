@@ -1060,7 +1060,11 @@ registerToolWithTelemetry(
         inputSchema: {}
     },
     async () => {
-        const { formatted } = await getBundleStatusWithErrors(bundleErrorBuffer);
+        // Get port from first connected app if available
+        const apps = Array.from(connectedApps.values());
+        const metroPort = apps.length > 0 ? apps[0].port : undefined;
+
+        const { formatted } = await getBundleStatusWithErrors(bundleErrorBuffer, metroPort);
 
         return {
             content: [

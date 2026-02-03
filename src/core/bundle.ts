@@ -1,5 +1,4 @@
 import WebSocket from "ws";
-import { connectedApps } from "./state.js";
 
 // Bundle error entry
 export interface BundleError {
@@ -396,16 +395,15 @@ export function getBundleErrors(
 
 // Get current bundle status with any recent errors
 export async function getBundleStatusWithErrors(
-    buffer: BundleErrorBuffer
+    buffer: BundleErrorBuffer,
+    metroPort?: number
 ): Promise<{ status: BundleStatus; latestError: BundleError | null; formatted: string }> {
     // Try to get status from any connected Metro port
     let status = buffer.getStatus();
 
-    // Check connected apps for Metro port
-    const apps = Array.from(connectedApps.values());
-    if (apps.length > 0) {
-        const port = apps[0].port;
-        const liveStatus = await fetchBundleStatus(port);
+    // Check Metro port status if available
+    if (metroPort) {
+        const liveStatus = await fetchBundleStatus(metroPort);
         status = {
             ...status,
             isBuilding: liveStatus.isBuilding
