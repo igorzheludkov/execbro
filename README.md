@@ -108,9 +108,9 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 | Tool                    | Description                                                        |
 | ----------------------- | ------------------------------------------------------------------ |
-| `scan_metro`            | Scan for running Metro servers and auto-connect                    |
-| `connect_metro`         | Connect to a specific Metro port                                   |
-| `get_apps`              | List connected React Native apps                                   |
+| `scan_metro`            | Scan for Metro servers and auto-connect. **Call this first** to start debugging |
+| `connect_metro`         | Connect to a specific Metro port (use when you know the exact port) |
+| `get_apps`              | List connected apps. Run `scan_metro` first if none connected      |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects     |
 | `get_logs`              | Retrieve console logs (filtering, truncation, summary, TONL format) |
 | `search_logs`           | Search logs for specific text (truncation, TONL format)            |
@@ -133,7 +133,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `execute_in_app`     | Execute JavaScript code in the connected app and return the result  |
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.) |
 | `inspect_global`     | Inspect a global object to see its properties and callable methods  |
-| `reload_app`         | Reload the app (like pressing 'r' in Metro or shaking the device)   |
+| `reload_app`         | Reload the app (auto-connects if needed). Use sparingly - Fast Refresh handles most changes |
 | `get_debug_server`   | Get the debug HTTP server URL for browser-based viewing             |
 
 ### Android (ADB)
@@ -195,6 +195,42 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
     Use get_logs to see recent console output
     ```
 
+### `get_logs` Tool Reference
+
+The `get_logs` tool has multiple parameters for controlling output size and format. Here's the complete reference:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `maxLogs` | number | 50 | Maximum number of logs to return |
+| `level` | string | "all" | Filter by level: `all`, `log`, `warn`, `error`, `info`, `debug` |
+| `startFromText` | string | - | Start from the last log containing this text |
+| `maxMessageLength` | number | 500 | Max chars per message (0 = unlimited) |
+| `verbose` | boolean | false | Disable all truncation, return full messages |
+| `format` | string | "text" | Output format: `text` or `tonl` (30-50% smaller) |
+| `summary` | boolean | false | Return counts + last 5 messages only |
+
+#### Recommended Usage Patterns
+
+```
+# Quick overview (always start here)
+get_logs with summary=true
+
+# Recent errors only
+get_logs with level="error" maxLogs=20
+
+# Logs since last app reload
+get_logs with startFromText="Running app" maxLogs=100
+
+# Full messages for debugging specific issues
+get_logs with maxLogs=10 verbose=true
+
+# Token-efficient format for large outputs
+get_logs with format="tonl" maxLogs=100
+
+# Compact overview with shorter messages
+get_logs with maxMessageLength=200 maxLogs=50
+```
+
 ### Filtering Logs
 
 ```
@@ -221,17 +257,22 @@ Case-insensitive search across all log messages.
 
 ### Token-Optimized Output
 
-The tools include several options to reduce token usage when working with AI assistants:
+The tools include several options to reduce token usage when working with AI assistants.
 
 #### Summary Mode (Recommended First Step)
 
-Get a quick overview before fetching full logs:
+**Always start with `summary=true`** - it gives you the full picture in ~10-20 tokens instead of potentially thousands:
 
 ```
 get_logs with summary=true
 ```
 
-Returns count by level + last 5 messages:
+Returns:
+- **Total count** - How many logs are in the buffer
+- **Breakdown by level** - See if there are errors/warnings at a glance
+- **Last 5 messages** - Most recent activity (truncated to 100 chars each)
+
+Example output:
 
 ```
 Total: 847 logs
@@ -246,6 +287,21 @@ Last 5 messages:
   14:32:46 [WARN] Slow query detected...
   14:32:47 [ERROR] Network request failed...
 ```
+
+#### Why Summary First?
+
+| Approach | Tokens | Use Case |
+|----------|--------|----------|
+| `summary=true` | ~20-50 | Quick health check, see if errors exist |
+| `level="error"` | ~100-500 | Investigate specific errors |
+| `maxLogs=50` (default) | ~500-2000 | General debugging |
+| `verbose=true` | ~2000-10000+ | Deep dive into specific data |
+
+**Recommended workflow:**
+1. `summary=true` → See the big picture
+2. `level="error"` or `level="warn"` → Focus on problems
+3. `startFromText="..."` → Get logs since specific event
+4. `verbose=true` with low `maxLogs` → Full details when needed
 
 #### Message Truncation
 
