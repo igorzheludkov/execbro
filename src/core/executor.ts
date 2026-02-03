@@ -360,9 +360,44 @@ export async function inspectGlobal(objectName: string): Promise<ExecutionResult
 // Reload the React Native app using __ReactRefresh (Page.reload is not supported by Hermes)
 export async function reloadApp(): Promise<ExecutionResult> {
     // Get current connection info before reload
-    const app = getFirstConnectedApp();
+    let app = getFirstConnectedApp();
+
+    // Auto-connect if no connection exists
     if (!app) {
-        return { success: false, error: "No apps connected. Run 'scan_metro' first." };
+        console.error("[rn-ai-debugger] No connection for reload, attempting auto-connect...");
+
+        // Try to find and connect to a Metro server
+        const ports = await scanMetroPorts();
+        if (ports.length === 0) {
+            return {
+                success: false,
+                error: "No apps connected and no Metro server found. Make sure Metro bundler is running (npm start or expo start), then try again."
+            };
+        }
+
+        // Try to connect to the first available Metro server
+        for (const port of ports) {
+            const devices = await fetchDevices(port);
+            const mainDevice = selectMainDevice(devices);
+            if (mainDevice) {
+                try {
+                    await connectToDevice(mainDevice, port);
+                    console.error(`[rn-ai-debugger] Auto-connected to ${mainDevice.title} on port ${port}`);
+                    app = getFirstConnectedApp();
+                    break;
+                } catch (error) {
+                    console.error(`[rn-ai-debugger] Failed to connect to port ${port}: ${error}`);
+                }
+            }
+        }
+
+        // Check if auto-connect succeeded
+        if (!app) {
+            return {
+                success: false,
+                error: "No apps connected. Found Metro server but could not connect to any device. Make sure the React Native app is running."
+            };
+        }
     }
 
     const port = app.port;

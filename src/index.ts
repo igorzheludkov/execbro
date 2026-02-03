@@ -155,7 +155,7 @@ function registerToolWithTelemetry(
 registerToolWithTelemetry(
     "scan_metro",
     {
-        description: "Scan for running Metro bundler servers on common ports",
+        description: "Scan for running Metro bundler servers and automatically connect to any found React Native apps. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, execute_in_app, and reload_app.",
         inputSchema: {
             startPort: z.coerce.number().optional().default(8081).describe("Start port for scanning (default: 8081)"),
             endPort: z.coerce.number().optional().default(19002).describe("End port for scanning (default: 19002)")
@@ -220,7 +220,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "get_apps",
     {
-        description: "List connected React Native apps and Metro server status",
+        description: "List currently connected React Native apps and their connection status. If no apps are connected, run scan_metro first to establish a connection.",
         inputSchema: {}
     },
     async () => {
@@ -593,7 +593,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "connect_metro",
     {
-        description: "Connect to a specific Metro server port",
+        description: "Connect to a Metro server on a specific port. Use this when you know the exact port, otherwise use scan_metro which auto-detects. Establishes the WebSocket connection needed for debugging tools.",
         inputSchema: {
             port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")
         }
@@ -1018,7 +1018,7 @@ registerToolWithTelemetry(
     "reload_app",
     {
         description:
-            "Reload the connected React Native app. Triggers a JavaScript bundle reload (like pressing 'r' in Metro or shaking the device). IMPORTANT: React Native has Fast Refresh (hot reloading) enabled by default - code changes are automatically applied without needing a full reload. Only use this tool when: (1) logs/behavior don't reflect recent code changes after waiting a few seconds, (2) the app is in a broken state, or (3) you need to reset app state completely. Avoid reloading after every code edit.",
+            "Reload the React Native app (triggers JavaScript bundle reload like pressing 'r' in Metro). Will auto-connect to Metro if no connection exists. IMPORTANT: React Native has Fast Refresh enabled by default - code changes are automatically applied without needing reload. Only use when: (1) logs/behavior don't reflect code changes after a few seconds, (2) app is in broken/error state, or (3) need to reset app state completely (navigation stack, context, etc.).",
         inputSchema: {}
     },
     async () => {
