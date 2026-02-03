@@ -195,6 +195,42 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
     Use get_logs to see recent console output
     ```
 
+### `get_logs` Tool Reference
+
+The `get_logs` tool has multiple parameters for controlling output size and format. Here's the complete reference:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `maxLogs` | number | 50 | Maximum number of logs to return |
+| `level` | string | "all" | Filter by level: `all`, `log`, `warn`, `error`, `info`, `debug` |
+| `startFromText` | string | - | Start from the last log containing this text |
+| `maxMessageLength` | number | 500 | Max chars per message (0 = unlimited) |
+| `verbose` | boolean | false | Disable all truncation, return full messages |
+| `format` | string | "text" | Output format: `text` or `tonl` (30-50% smaller) |
+| `summary` | boolean | false | Return counts + last 5 messages only |
+
+#### Recommended Usage Patterns
+
+```
+# Quick overview (always start here)
+get_logs with summary=true
+
+# Recent errors only
+get_logs with level="error" maxLogs=20
+
+# Logs since last app reload
+get_logs with startFromText="Running app" maxLogs=100
+
+# Full messages for debugging specific issues
+get_logs with maxLogs=10 verbose=true
+
+# Token-efficient format for large outputs
+get_logs with format="tonl" maxLogs=100
+
+# Compact overview with shorter messages
+get_logs with maxMessageLength=200 maxLogs=50
+```
+
 ### Filtering Logs
 
 ```
