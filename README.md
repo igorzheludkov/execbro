@@ -257,17 +257,22 @@ Case-insensitive search across all log messages.
 
 ### Token-Optimized Output
 
-The tools include several options to reduce token usage when working with AI assistants:
+The tools include several options to reduce token usage when working with AI assistants.
 
 #### Summary Mode (Recommended First Step)
 
-Get a quick overview before fetching full logs:
+**Always start with `summary=true`** - it gives you the full picture in ~10-20 tokens instead of potentially thousands:
 
 ```
 get_logs with summary=true
 ```
 
-Returns count by level + last 5 messages:
+Returns:
+- **Total count** - How many logs are in the buffer
+- **Breakdown by level** - See if there are errors/warnings at a glance
+- **Last 5 messages** - Most recent activity (truncated to 100 chars each)
+
+Example output:
 
 ```
 Total: 847 logs
@@ -282,6 +287,21 @@ Last 5 messages:
   14:32:46 [WARN] Slow query detected...
   14:32:47 [ERROR] Network request failed...
 ```
+
+#### Why Summary First?
+
+| Approach | Tokens | Use Case |
+|----------|--------|----------|
+| `summary=true` | ~20-50 | Quick health check, see if errors exist |
+| `level="error"` | ~100-500 | Investigate specific errors |
+| `maxLogs=50` (default) | ~500-2000 | General debugging |
+| `verbose=true` | ~2000-10000+ | Deep dive into specific data |
+
+**Recommended workflow:**
+1. `summary=true` → See the big picture
+2. `level="error"` or `level="warn"` → Focus on problems
+3. `startFromText="..."` → Get logs since specific event
+4. `verbose=true` with low `maxLogs` → Full details when needed
 
 #### Message Truncation
 
