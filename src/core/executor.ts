@@ -9,6 +9,106 @@ import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connecti
 // In Hermes, globalThis is the standard way to access global scope
 const GLOBAL_POLYFILL = `var global = typeof global !== 'undefined' ? global : globalThis;`;
 
+// ============================================================================
+// Expression Preprocessing & Validation
+// ============================================================================
+
+interface ExpressionValidation {
+    valid: boolean;
+    expression: string;
+    error?: string;
+}
+
+/**
+ * Check if a string contains emoji or other problematic Unicode characters
+ * Hermes has issues with certain UTF-16 surrogate pairs (like emoji)
+ */
+function containsProblematicUnicode(str: string): boolean {
+    // Detect UTF-16 surrogate pairs (emoji and other characters outside BMP)
+    // These cause "Invalid UTF-8 code point" errors in Hermes
+    // eslint-disable-next-line no-control-regex
+    return /[\uD800-\uDFFF]/.test(str);
+}
+
+/**
+ * Strip leading comments from an expression
+ * Users often start with // comments which break the (return expr) wrapping
+ */
+function stripLeadingComments(expression: string): string {
+    let result = expression;
+
+    // Strip leading whitespace first
+    result = result.trimStart();
+
+    // Repeatedly strip leading single-line comments (// ...)
+    while (result.startsWith('//')) {
+        const newlineIndex = result.indexOf('\n');
+        if (newlineIndex === -1) {
+            // Entire expression is a comment
+            return '';
+        }
+        result = result.slice(newlineIndex + 1).trimStart();
+    }
+
+    // Strip leading multi-line comments (/* ... */)
+    while (result.startsWith('/*')) {
+        const endIndex = result.indexOf('*/');
+        if (endIndex === -1) {
+            // Unclosed comment
+            return result;
+        }
+        result = result.slice(endIndex + 2).trimStart();
+    }
+
+    return result;
+}
+
+/**
+ * Validate and preprocess an expression before execution
+ * Returns cleaned expression or error with helpful message
+ */
+function validateAndPreprocessExpression(expression: string): ExpressionValidation {
+    // Check for emoji/problematic Unicode before any processing
+    if (containsProblematicUnicode(expression)) {
+        return {
+            valid: false,
+            expression,
+            error: "Expression contains emoji or special Unicode characters that Hermes cannot compile. " +
+                   "Please remove emoji and use ASCII characters only."
+        };
+    }
+
+    // Strip leading comments that would break the expression wrapper
+    const cleaned = stripLeadingComments(expression);
+
+    if (!cleaned.trim()) {
+        return {
+            valid: false,
+            expression,
+            error: "Expression is empty or contains only comments."
+        };
+    }
+
+    // Check for top-level async that Hermes doesn't support in Runtime.evaluate
+    // Pattern: starts with (async or async keyword at expression level
+    const trimmed = cleaned.trim();
+    if (trimmed.startsWith('(async') || trimmed.startsWith('async ') || trimmed.startsWith('async(')) {
+        return {
+            valid: false,
+            expression: cleaned,
+            error: "Hermes does not support top-level async functions in Runtime.evaluate. " +
+                   "Instead of `(async () => { ... })()`, use a synchronous approach or " +
+                   "execute the async code and access the result via a global variable: " +
+                   "`global.__result = null; myAsyncFn().then(r => global.__result = r)`"
+        };
+    }
+
+    return {
+        valid: true,
+        expression: cleaned
+    };
+}
+
 // Error patterns that indicate a stale/destroyed context
 const CONTEXT_ERROR_PATTERNS = [
     "cannot find context",
@@ -74,11 +174,18 @@ async function executeExpressionCore(
         return { success: false, error: "WebSocket connection is not open." };
     }
 
+    // Validate and preprocess the expression
+    const validation = validateAndPreprocessExpression(expression);
+    if (!validation.valid) {
+        return { success: false, error: validation.error };
+    }
+
+    const cleanedExpression = validation.expression;
     const TIMEOUT_MS = 10000;
     const currentMessageId = getNextMessageId();
 
     // Wrap expression with global polyfill for Hermes compatibility
-    const wrappedExpression = `(function() { ${GLOBAL_POLYFILL} return (${expression}); })()`;
+    const wrappedExpression = `(function() { ${GLOBAL_POLYFILL} return (${cleanedExpression}); })()`;
 
     return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {

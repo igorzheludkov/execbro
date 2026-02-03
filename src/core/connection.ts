@@ -80,6 +80,73 @@ export function formatRemoteObject(result: RemoteObject): string {
     return `[${result.type}${result.subtype ? ` ${result.subtype}` : ""}]`;
 }
 
+/**
+ * Extract a clean, informative error message from CDP exception details
+ * Handles various error formats from Hermes and other JS engines
+ */
+function extractExceptionMessage(exceptionDetails: ExceptionDetails): string {
+    const parts: string[] = [];
+
+    // Get the exception object if available
+    const exc = exceptionDetails.exception;
+
+    if (exc) {
+        // For error objects, className tells us the error type (ReferenceError, TypeError, etc.)
+        const errorType = exc.className || (exc.subtype === 'error' ? 'Error' : '');
+
+        // The description usually contains "ErrorType: message" or full stack trace
+        // We want to extract just the first line (the actual error message)
+        if (exc.description) {
+            const firstLine = exc.description.split('\n')[0].trim();
+
+            // If description already includes the error type, use it directly
+            if (firstLine.includes(':')) {
+                parts.push(firstLine);
+            } else if (errorType) {
+                // Combine error type with description
+                parts.push(`${errorType}: ${firstLine}`);
+            } else {
+                parts.push(firstLine);
+            }
+        } else if (exc.value !== undefined) {
+            // For primitive exceptions (throw "string" or throw 123)
+            const valueStr = typeof exc.value === 'string' ? exc.value : JSON.stringify(exc.value);
+            if (errorType) {
+                parts.push(`${errorType}: ${valueStr}`);
+            } else {
+                parts.push(valueStr);
+            }
+        } else if (errorType) {
+            // Just the error type, no message
+            parts.push(errorType);
+        }
+    }
+
+    // Fall back to exceptionDetails.text if we couldn't extract from exception object
+    // But avoid just "Uncaught" which is not helpful
+    if (parts.length === 0) {
+        const text = exceptionDetails.text;
+        if (text && text.toLowerCase() !== 'uncaught') {
+            parts.push(text);
+        }
+    }
+
+    // Add location info for syntax/compilation errors (helps identify the problem)
+    if (exceptionDetails.lineNumber !== undefined && exceptionDetails.columnNumber !== undefined) {
+        // Only add location if it's meaningful (not 0:0 which is often just wrapper)
+        if (exceptionDetails.lineNumber > 0 || exceptionDetails.columnNumber > 0) {
+            parts.push(`at line ${exceptionDetails.lineNumber}:${exceptionDetails.columnNumber}`);
+        }
+    }
+
+    // If we still have nothing, provide a generic message
+    if (parts.length === 0) {
+        return 'JavaScript execution failed (no error details available)';
+    }
+
+    return parts.join(' ');
+}
+
 // Handle CDP messages
 export function handleCDPMessage(message: Record<string, unknown>, _device: DeviceInfo): void {
     // Handle responses to our requests (e.g., Runtime.evaluate)
@@ -89,20 +156,20 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             clearTimeout(pending.timeoutId);
             pendingExecutions.delete(message.id);
 
-            // Check for error
+            // Check for CDP-level error (protocol error, not JS exception)
             if (message.error) {
                 const error = message.error as { message?: string; code?: number; data?: string };
                 // Build comprehensive error message including code and data if available
                 const parts: string[] = [];
                 if (error.message) parts.push(error.message);
-                if (error.code !== undefined) parts.push(`code: ${error.code}`);
-                if (error.data) parts.push(`data: ${error.data}`);
-                const errorMessage = parts.length > 0 ? parts.join(', ') : 'Unknown CDP error';
+                if (error.code !== undefined) parts.push(`(code: ${error.code})`);
+                if (error.data) parts.push(`- ${error.data}`);
+                const errorMessage = parts.length > 0 ? parts.join(' ') : 'Unknown CDP protocol error';
                 pending.resolve({ success: false, error: errorMessage });
                 return;
             }
 
-            // Check for exception in result
+            // Check for JavaScript exception in result
             const result = message.result as
                 | {
                       result?: RemoteObject;
@@ -111,8 +178,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
                 | undefined;
 
             if (result?.exceptionDetails) {
-                const exception = result.exceptionDetails;
-                const errorMessage = exception.exception?.description || exception.text;
+                const errorMessage = extractExceptionMessage(result.exceptionDetails);
                 pending.resolve({ success: false, error: errorMessage });
                 return;
             }
@@ -477,11 +543,14 @@ export async function connectToDevice(
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
 
+                // Extract error message safely - some WebSocket errors may not have a message
+                const errorMsg = error?.message || error?.toString() || 'Unknown WebSocket error';
+
                 // Only reject if this is initial connection, not reconnection attempt
                 if (!isReconnection) {
-                    reject(`Failed to connect to ${device.title}: ${error.message}`);
+                    reject(`Failed to connect to ${device.title}: ${errorMsg}`);
                 } else {
-                    console.error(`[rn-ai-debugger] Reconnection error: ${error.message}`);
+                    console.error(`[rn-ai-debugger] Reconnection error: ${errorMsg}`);
                 }
             });
 
