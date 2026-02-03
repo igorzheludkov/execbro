@@ -108,9 +108,9 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 | Tool                    | Description                                                        |
 | ----------------------- | ------------------------------------------------------------------ |
-| `scan_metro`            | Scan for running Metro servers and auto-connect                    |
-| `connect_metro`         | Connect to a specific Metro port                                   |
-| `get_apps`              | List connected React Native apps                                   |
+| `scan_metro`            | Scan for Metro servers and auto-connect. **Call this first** to start debugging |
+| `connect_metro`         | Connect to a specific Metro port (use when you know the exact port) |
+| `get_apps`              | List connected apps. Run `scan_metro` first if none connected      |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects     |
 | `get_logs`              | Retrieve console logs (filtering, truncation, summary, TONL format) |
 | `search_logs`           | Search logs for specific text (truncation, TONL format)            |
@@ -133,7 +133,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `execute_in_app`     | Execute JavaScript code in the connected app and return the result  |
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.) |
 | `inspect_global`     | Inspect a global object to see its properties and callable methods  |
-| `reload_app`         | Reload the app (like pressing 'r' in Metro or shaking the device)   |
+| `reload_app`         | Reload the app (auto-connects if needed). Use sparingly - Fast Refresh handles most changes |
 | `get_debug_server`   | Get the debug HTTP server URL for browser-based viewing             |
 
 ### Android (ADB)
