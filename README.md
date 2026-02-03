@@ -112,17 +112,17 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `connect_metro`         | Connect to a specific Metro port                                   |
 | `get_apps`              | List connected React Native apps                                   |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects     |
-| `get_logs`              | Retrieve console logs (with optional filtering and start position) |
-| `search_logs`           | Search logs for specific text (case-insensitive)                   |
+| `get_logs`              | Retrieve console logs (filtering, truncation, summary, TONL format) |
+| `search_logs`           | Search logs for specific text (truncation, TONL format)            |
 | `clear_logs`            | Clear the log buffer                                               |
 
 ### Network Tracking
 
 | Tool                   | Description                                                |
 | ---------------------- | ---------------------------------------------------------- |
-| `get_network_requests` | Retrieve captured network requests with optional filtering |
-| `search_network`       | Search requests by URL pattern (case-insensitive)          |
-| `get_request_details`  | Get full details of a request (headers, body, timing)      |
+| `get_network_requests` | Retrieve network requests (filtering, summary, TONL format) |
+| `search_network`       | Search requests by URL pattern (TONL format)               |
+| `get_request_details`  | Get full details of a request (headers, body with truncation) |
 | `get_network_stats`    | Get statistics: counts by method, status code, domain      |
 | `clear_network`        | Clear the network request buffer                           |
 
@@ -219,6 +219,66 @@ search_logs with text="error" and maxResults=20
 
 Case-insensitive search across all log messages.
 
+### Token-Optimized Output
+
+The tools include several options to reduce token usage when working with AI assistants:
+
+#### Summary Mode (Recommended First Step)
+
+Get a quick overview before fetching full logs:
+
+```
+get_logs with summary=true
+```
+
+Returns count by level + last 5 messages:
+
+```
+Total: 847 logs
+
+By Level:
+  LOG: 612
+  WARN: 180
+  ERROR: 55
+
+Last 5 messages:
+  14:32:45 [LOG] User clicked button...
+  14:32:46 [WARN] Slow query detected...
+  14:32:47 [ERROR] Network request failed...
+```
+
+#### Message Truncation
+
+Long log messages are truncated by default (500 chars). Adjust as needed:
+
+```
+# Shorter for overview
+get_logs with maxMessageLength=200
+
+# Full messages (use with lower maxLogs)
+get_logs with maxLogs=10 verbose=true
+
+# Unlimited
+get_logs with maxMessageLength=0
+```
+
+#### TONL Format
+
+Use TONL (Token-Optimized Notation Language) for ~30-50% smaller output:
+
+```
+get_logs with format="tonl"
+```
+
+Output:
+
+```
+[Format: TONL - compact token-optimized format. Fields in header, values in rows.]
+{logs:[{time:"14:32:45",level:"LOG",msg:"App started"},{time:"14:32:46",level:"WARN",msg:"Slow query"}]}
+```
+
+TONL is also available for `search_logs`, `get_network_requests`, and `search_network`.
+
 ## Network Tracking
 
 ### View Recent Requests
@@ -256,6 +316,30 @@ get_request_details with requestId="123.45"
 ```
 
 Shows full headers, request body, response headers, and timing.
+
+Request body is truncated by default (500 chars). For full body:
+
+```
+get_request_details with requestId="123.45" verbose=true
+```
+
+### Summary Mode (Recommended First Step)
+
+Get statistics overview before fetching full requests:
+
+```
+get_network_requests with summary=true
+```
+
+This returns the same output as `get_network_stats` - counts by method, status, and domain.
+
+### TONL Format
+
+Use TONL for ~30-50% smaller output:
+
+```
+get_network_requests with format="tonl"
+```
 
 ### View Statistics
 

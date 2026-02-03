@@ -117,8 +117,18 @@ export function formatRequests(requests: NetworkRequest[]): string {
     return requests.map(formatRequest).join("\n");
 }
 
+// Options for formatting request details
+export interface FormatRequestDetailsOptions {
+    maxBodyLength?: number;  // Default: 500, set to 0 for unlimited
+    verbose?: boolean;       // Disable all truncation
+}
+
 // Format request details (full info)
-export function formatRequestDetails(request: NetworkRequest): string {
+export function formatRequestDetails(
+    request: NetworkRequest,
+    options: FormatRequestDetailsOptions = {}
+): string {
+    const { maxBodyLength = 500, verbose = false } = options;
     const lines: string[] = [];
 
     lines.push(`=== ${request.method} ${request.url} ===`);
@@ -150,10 +160,14 @@ export function formatRequestDetails(request: NetworkRequest): string {
         }
     }
 
-    // Post data
+    // Post data (with optional truncation)
     if (request.postData) {
         lines.push("\n--- Request Body ---");
-        lines.push(request.postData);
+        let body = request.postData;
+        if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
+            body = body.slice(0, maxBodyLength) + `... [truncated: ${request.postData.length} chars]`;
+        }
+        lines.push(body);
     }
 
     // Response headers
@@ -176,7 +190,7 @@ export function getNetworkRequests(
         urlPattern?: string;
         status?: number;
     } = {}
-): { requests: NetworkRequest[]; formatted: string } {
+): { requests: NetworkRequest[]; count: number; formatted: string } {
     const { maxRequests = 50, method, urlPattern, status } = options;
     const requests = networkBuffer.getAll({
         count: maxRequests,
@@ -188,6 +202,7 @@ export function getNetworkRequests(
 
     return {
         requests,
+        count: requests.length,
         formatted: formatRequests(requests)
     };
 }
@@ -197,10 +212,11 @@ export function searchNetworkRequests(
     networkBuffer: NetworkBuffer,
     urlPattern: string,
     maxResults: number = 50
-): { requests: NetworkRequest[]; formatted: string } {
+): { requests: NetworkRequest[]; count: number; formatted: string } {
     const requests = networkBuffer.search(urlPattern, maxResults);
     return {
         requests,
+        count: requests.length,
         formatted: formatRequests(requests)
     };
 }

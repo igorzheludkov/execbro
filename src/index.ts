@@ -21,6 +21,7 @@ import {
     reloadApp,
     getLogs,
     searchLogs,
+    getLogSummary,
     getNetworkRequests,
     searchNetworkRequests,
     getNetworkStats,
@@ -100,7 +101,10 @@ import {
     getHttpServerProcessPort,
     // Telemetry
     initTelemetry,
-    trackToolInvocation
+    trackToolInvocation,
+    // Format utilities (TONL)
+    formatLogsAsTonl,
+    formatNetworkAsTonl
 } from "./core/index.js";
 
 // Create MCP server
@@ -422,7 +426,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "get_logs",
     {
-        description: "Retrieve console logs from connected React Native app",
+        description: "Retrieve console logs from connected React Native app. Tip: Use summary=true first for a quick overview (counts by level + last 5 messages), then fetch specific logs as needed.",
         inputSchema: {
             maxLogs: z.coerce.number().optional().default(50).describe("Maximum number of logs to return (default: 50)"),
             level: z
@@ -430,11 +434,44 @@ registerToolWithTelemetry(
                 .optional()
                 .default("all")
                 .describe("Filter by log level (default: all)"),
-            startFromText: z.string().optional().describe("Start from the first log line containing this text")
+            startFromText: z.string().optional().describe("Start from the first log line containing this text"),
+            maxMessageLength: z
+                .coerce.number()
+                .optional()
+                .default(500)
+                .describe("Max characters per message (default: 500, set to 0 for unlimited). Tip: Use lower values for overview, higher when debugging specific data structures."),
+            verbose: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Disable all truncation and return full messages. Tip: Use with lower maxLogs (e.g., 10) to avoid token overload when inspecting large objects."),
+            format: z
+                .enum(["text", "tonl"])
+                .optional()
+                .default("text")
+                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format, ~30-50% smaller)"),
+            summary: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return summary statistics instead of full logs (count by level + last 5 messages). Use for quick overview.")
         }
     },
-    async ({ maxLogs, level, startFromText }) => {
-        const { logs, formatted } = getLogs(logBuffer, { maxLogs, level, startFromText });
+    async ({ maxLogs, level, startFromText, maxMessageLength, verbose, format, summary }) => {
+        // Return summary if requested
+        if (summary) {
+            const summaryText = getLogSummary(logBuffer, { lastN: 5, maxMessageLength: 100 });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Log Summary:\n\n${summaryText}`
+                    }
+                ]
+            };
+        }
+
+        const { logs, count, formatted } = getLogs(logBuffer, { maxLogs, level, startFromText, maxMessageLength, verbose });
 
         // Check for recent connection gaps
         const warningThresholdMs = 30000; // 30 seconds
@@ -454,11 +491,25 @@ registerToolWithTelemetry(
         }
 
         const startNote = startFromText ? ` (starting from "${startFromText}")` : "";
+
+        // Use TONL format if requested
+        if (format === "tonl") {
+            const tonlOutput = formatLogsAsTonl(logs, { maxMessageLength: verbose ? 0 : maxMessageLength });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `React Native Console Logs (${count} entries)${startNote}:\n\n${tonlOutput}${warning}`
+                    }
+                ]
+            };
+        }
+
         return {
             content: [
                 {
                     type: "text",
-                    text: `React Native Console Logs (${logs.length} entries)${startNote}:\n\n${formatted}${warning}`
+                    text: `React Native Console Logs (${count} entries)${startNote}:\n\n${formatted}${warning}`
                 }
             ]
         };
@@ -472,17 +523,45 @@ registerToolWithTelemetry(
         description: "Search console logs for text (case-insensitive)",
         inputSchema: {
             text: z.string().describe("Text to search for in log messages"),
-            maxResults: z.coerce.number().optional().default(50).describe("Maximum number of results to return (default: 50)")
+            maxResults: z.coerce.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
+            maxMessageLength: z
+                .coerce.number()
+                .optional()
+                .default(500)
+                .describe("Max characters per message (default: 500, set to 0 for unlimited)"),
+            verbose: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Disable all truncation and return full messages"),
+            format: z
+                .enum(["text", "tonl"])
+                .optional()
+                .default("text")
+                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format)")
         }
     },
-    async ({ text, maxResults }) => {
-        const { logs, formatted } = searchLogs(logBuffer, text, maxResults);
+    async ({ text, maxResults, maxMessageLength, verbose, format }) => {
+        const { logs, count, formatted } = searchLogs(logBuffer, text, { maxResults, maxMessageLength, verbose });
+
+        // Use TONL format if requested
+        if (format === "tonl") {
+            const tonlOutput = formatLogsAsTonl(logs, { maxMessageLength: verbose ? 0 : maxMessageLength });
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Search results for "${text}" (${count} matches):\n\n${tonlOutput}`
+                    }
+                ]
+            };
+        }
 
         return {
             content: [
                 {
                     type: "text",
-                    text: `Search results for "${text}" (${logs.length} matches):\n\n${formatted}`
+                    text: `Search results for "${text}" (${count} matches):\n\n${formatted}`
                 }
             ]
         };
@@ -581,10 +660,20 @@ registerToolWithTelemetry(
             "Execute JavaScript code in the connected React Native app and return the result. Use this for REPL-style interactions, inspecting app state, or running diagnostic code. Hermes compatible: 'global' is automatically polyfilled to 'globalThis', so both global.__REDUX_STORE__ and globalThis.__REDUX_STORE__ work.",
         inputSchema: {
             expression: z.string().describe("JavaScript expression to execute in the app"),
-            awaitPromise: z.coerce.boolean().optional().default(true).describe("Whether to await promises (default: true)")
+            awaitPromise: z.coerce.boolean().optional().default(true).describe("Whether to await promises (default: true)"),
+            maxResultLength: z
+                .coerce.number()
+                .optional()
+                .default(2000)
+                .describe("Max characters in result (default: 2000, set to 0 for unlimited). Tip: For large objects like Redux stores, use inspect_global instead or set higher limit."),
+            verbose: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Disable result truncation. Tip: Be cautious - Redux stores or large state can return 10KB+.")
         }
     },
-    async ({ expression, awaitPromise }) => {
+    async ({ expression, awaitPromise, maxResultLength, verbose }) => {
         const result = await executeInApp(expression, awaitPromise);
 
         if (!result.success) {
@@ -601,11 +690,18 @@ registerToolWithTelemetry(
             };
         }
 
+        let resultText = result.result ?? "undefined";
+
+        // Apply truncation unless verbose or unlimited
+        if (!verbose && maxResultLength > 0 && resultText.length > maxResultLength) {
+            resultText = resultText.slice(0, maxResultLength) + `... [truncated: ${result.result?.length ?? 0} chars total]`;
+        }
+
         return {
             content: [
                 {
                     type: "text",
-                    text: result.result ?? "undefined"
+                    text: resultText
                 }
             ]
         };
@@ -689,7 +785,7 @@ registerToolWithTelemetry(
     "get_network_requests",
     {
         description:
-            "Retrieve captured network requests from connected React Native app. Shows URL, method, status, and timing.",
+            "Retrieve captured network requests from connected React Native app. Shows URL, method, status, and timing. Tip: Use summary=true first for stats overview (counts by method, status, domain), then fetch specific requests as needed.",
         inputSchema: {
             maxRequests: z
                 .number()
@@ -707,11 +803,34 @@ registerToolWithTelemetry(
             status: z
                 .number()
                 .optional()
-                .describe("Filter by HTTP status code (e.g., 200, 401, 500)")
+                .describe("Filter by HTTP status code (e.g., 200, 401, 500)"),
+            format: z
+                .enum(["text", "tonl"])
+                .optional()
+                .default("text")
+                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format, ~30-50% smaller)"),
+            summary: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return statistics only (count, methods, domains, status codes). Use for quick overview.")
         }
     },
-    async ({ maxRequests, method, urlPattern, status }) => {
-        const { requests, formatted } = getNetworkRequests(networkBuffer, {
+    async ({ maxRequests, method, urlPattern, status, format, summary }) => {
+        // Return summary if requested
+        if (summary) {
+            const stats = getNetworkStats(networkBuffer);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Network Summary:\n\n${stats}`
+                    }
+                ]
+            };
+        }
+
+        const { requests, count, formatted } = getNetworkRequests(networkBuffer, {
             maxRequests,
             method,
             urlPattern,
@@ -735,11 +854,24 @@ registerToolWithTelemetry(
             }
         }
 
+        // Use TONL format if requested
+        if (format === "tonl") {
+            const tonlOutput = formatNetworkAsTonl(requests);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Network Requests (${count} entries):\n\n${tonlOutput}${warning}`
+                    }
+                ]
+            };
+        }
+
         return {
             content: [
                 {
                     type: "text",
-                    text: `Network Requests (${requests.length} entries):\n\n${formatted}${warning}`
+                    text: `Network Requests (${count} entries):\n\n${formatted}${warning}`
                 }
             ]
         };
@@ -757,17 +889,35 @@ registerToolWithTelemetry(
                 .number()
                 .optional()
                 .default(50)
-                .describe("Maximum number of results to return (default: 50)")
+                .describe("Maximum number of results to return (default: 50)"),
+            format: z
+                .enum(["text", "tonl"])
+                .optional()
+                .default("text")
+                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format)")
         }
     },
-    async ({ urlPattern, maxResults }) => {
-        const { requests, formatted } = searchNetworkRequests(networkBuffer, urlPattern, maxResults);
+    async ({ urlPattern, maxResults, format }) => {
+        const { requests, count, formatted } = searchNetworkRequests(networkBuffer, urlPattern, maxResults);
+
+        // Use TONL format if requested
+        if (format === "tonl") {
+            const tonlOutput = formatNetworkAsTonl(requests);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Network search results for "${urlPattern}" (${count} matches):\n\n${tonlOutput}`
+                    }
+                ]
+            };
+        }
 
         return {
             content: [
                 {
                     type: "text",
-                    text: `Network search results for "${urlPattern}" (${requests.length} matches):\n\n${formatted}`
+                    text: `Network search results for "${urlPattern}" (${count} matches):\n\n${formatted}`
                 }
             ]
         };
@@ -781,10 +931,20 @@ registerToolWithTelemetry(
         description:
             "Get full details of a specific network request including headers, body, and timing. Use get_network_requests first to find the request ID.",
         inputSchema: {
-            requestId: z.string().describe("The request ID to get details for")
+            requestId: z.string().describe("The request ID to get details for"),
+            maxBodyLength: z
+                .coerce.number()
+                .optional()
+                .default(500)
+                .describe("Max characters for request body (default: 500, set to 0 for unlimited). Tip: Large POST bodies (file uploads, base64) can be 10KB+."),
+            verbose: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Disable body truncation. Tip: Use when you need to inspect full JSON payloads.")
         }
     },
-    async ({ requestId }) => {
+    async ({ requestId, maxBodyLength, verbose }) => {
         const request = networkBuffer.get(requestId);
 
         if (!request) {
@@ -803,7 +963,7 @@ registerToolWithTelemetry(
             content: [
                 {
                     type: "text",
-                    text: formatRequestDetails(request)
+                    text: formatRequestDetails(request, { maxBodyLength, verbose })
                 }
             ]
         };

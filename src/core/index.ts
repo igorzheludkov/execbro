@@ -37,7 +37,7 @@ export {
 export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid } from "./state.js";
 
 // Logs
-export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs } from "./logs.js";
+export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs, getLogSummary } from "./logs.js";
 
 // Network
 export {
@@ -196,3 +196,7 @@ export type { OCRResult, OCRWord, OCRLine, OCROptions } from "./ocr.js";
 // Error Screen Parser (OCR-based bundle error fallback)
 export { parseErrorScreenText, formatParsedError } from "./errorScreenParser.js";
 export type { ParsedErrorScreen } from "./errorScreenParser.js";
+
+// Format utilities (TONL)
+export { formatLogsAsTonl, formatNetworkAsTonl } from "./format.js";
+export type { OutputFormat } from "./format.js";
