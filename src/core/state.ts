@@ -4,10 +4,10 @@ import { NetworkBuffer } from "./network.js";
 import { BundleErrorBuffer, initBundleErrorBuffer } from "./bundle.js";
 
 // Global log buffer
-export const logBuffer = new LogBuffer(1000);
+export const logBuffer = new LogBuffer(500);
 
 // Global network buffer
-export const networkBuffer = new NetworkBuffer(500);
+export const networkBuffer = new NetworkBuffer(200);
 
 // Global bundle error buffer
 export const bundleErrorBuffer = new BundleErrorBuffer(100);

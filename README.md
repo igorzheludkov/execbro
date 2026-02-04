@@ -28,7 +28,7 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 -   **Auto-Discovery** - Scans Metro on ports 8081, 8082, 19000-19002 automatically
 -   **Smart Device Selection** - Prioritizes Bridgeless > Hermes > standard React Native targets
 -   **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
--   **Efficient Buffering** - Circular buffers: 1000 logs, 500 network requests
+-   **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
 -   **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
 
 ## Requirements

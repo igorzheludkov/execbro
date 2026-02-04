@@ -34,8 +34,8 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 ### Key Components
 
-- `LogBuffer`: Circular buffer (1000 entries) storing captured logs with level filtering and text search
-- `NetworkBuffer`: Circular buffer (500 entries) storing captured network requests with filtering by method, URL, and status
+- `LogBuffer`: Circular buffer (500 entries) storing captured logs with level filtering and text search
+- `NetworkBuffer`: Circular buffer (200 entries) storing captured network requests with filtering by method, URL, and status
 - `connectedApps`: Map tracking active WebSocket connections to devices
 - `pendingExecutions`: Map for tracking async `Runtime.evaluate` responses with timeout handling
 - MCP tools registered via `server.registerTool()` from `@modelcontextprotocol/sdk`
