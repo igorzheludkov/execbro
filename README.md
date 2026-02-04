@@ -6,6 +6,7 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 
 -   Captures `console.log`, `console.warn`, `console.error` from React Native apps
 -   **Network request tracking** - capture HTTP requests/responses with headers, timing, and status
+-   **React component inspection** - inspect component tree, props, state/hooks, and layout styles at runtime
 -   **Debug Web Dashboard** - browser-based UI to view logs and network requests in real-time
 -   Supports both **Expo SDK 54+** (React Native Bridgeless) and **RN 0.70+** (Hermes)
 -   **Auto-connect on startup** - automatically scans and connects to Metro when the server starts
@@ -135,6 +136,15 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `inspect_global`     | Inspect a global object to see its properties and callable methods  |
 | `reload_app`         | Reload the app (auto-connects if needed). Use sparingly - Fast Refresh handles most changes |
 | `get_debug_server`   | Get the debug HTTP server URL for browser-based viewing             |
+
+### React Component Inspection
+
+| Tool                 | Description                                                         |
+| -------------------- | ------------------------------------------------------------------- |
+| `get_component_tree` | Get React component hierarchy from the running app (TONL format by default) |
+| `get_screen_layout`  | Get all components with layout styles (padding, margin, flex, etc.) |
+| `inspect_component`  | Inspect a specific component's props, state/hooks, and children     |
+| `find_components`    | Find components matching a regex pattern with paths and layout info |
 
 ### Android (ADB)
 
@@ -539,6 +549,162 @@ execute_in_app with expression="AsyncStorage.getItem('userToken')"
 ```
 
 Set `awaitPromise=false` for synchronous execution only.
+
+## React Component Inspection
+
+Inspect React components at runtime via the React DevTools hook. These tools let you debug component state, verify layouts, and understand app structure without adding console.logs.
+
+### Get Component Tree
+
+View the React component hierarchy:
+
+```
+get_component_tree
+```
+
+Output (TONL format by default, ~50% smaller than JSON):
+
+```
+App
+  ErrorBoundary
+    SafeAreaProvider
+      Provider
+        HomeScreen
+          Header
+          FlatList
+          Footer
+```
+
+Options:
+- `hideInternals=false` - Show internal RN components (RCTView, RNS*, etc.)
+- `includeProps=true` - Include component props
+- `format="json"` - Get structured JSON instead of TONL
+
+### Find Components by Pattern
+
+Search for components matching a regex:
+
+```
+find_components with pattern="Screen$"
+```
+
+Output:
+
+```
+pattern: Screen$
+found: 5
+#found{component,path,depth,key,layout}
+HomeScreen|... > Navigator > HomeScreen|45||
+SettingsScreen|... > Navigator > SettingsScreen|45||
+ProfileScreen|... > Navigator > ProfileScreen|45||
+```
+
+Options:
+- `summary=true` - Get counts only (e.g., "HomeScreen: 1, SettingsScreen: 1")
+- `includeLayout=true` - Include flex, padding, margin values
+- `maxResults=10` - Limit number of results
+
+### Inspect Component State
+
+Debug a specific component's props and hooks:
+
+```
+inspect_component with componentName="HomeScreen"
+```
+
+Output:
+
+```json
+{
+  "component": "HomeScreen",
+  "path": "... > Navigator > HomeScreen",
+  "props": {
+    "navigation": "[Object]",
+    "route": { "name": "Home", "key": "home-xyz" }
+  },
+  "hooks": [
+    { "hookIndex": 0, "value": false },
+    { "hookIndex": 1, "value": { "current": null } },
+    { "hookIndex": 3, "value": 42 }
+  ]
+}
+```
+
+Options:
+- `includeChildren=true` - List direct children component names
+- `includeState=false` - Skip hooks/state (faster)
+- `index=1` - Inspect 2nd instance if multiple exist
+
+### Get Screen Layout
+
+View all components with their layout styles:
+
+```
+get_screen_layout with summary=true
+```
+
+Output:
+
+```
+#summary total=320
+View:83
+RCTView:65
+TouchableOpacity:12
+Text:8
+HomeScreen:1
+```
+
+Full layout mode (`summary=false`):
+
+```
+#elements{component,path,depth,layout,id}
+View|... > HomeScreen > View|46|flex:1|
+Header|... > View > Header|47|height:60;padding:16|header
+```
+
+### Use Cases
+
+**Debug Navigation Issues**
+```
+# Find which screen is currently mounted
+find_components with pattern="Screen$"
+
+# Check if a screen rendered multiple times (memory leak)
+find_components with pattern="HomeScreen" summary=true
+```
+
+**Debug State Without console.log**
+```
+# Check current hook values
+inspect_component with componentName="LoginForm"
+# → hookIndex 2: false (isLoading)
+# → hookIndex 3: "" (errorMessage)
+
+# After user action, check if state changed
+inspect_component with componentName="LoginForm"
+# → hookIndex 2: true (isLoading changed!)
+```
+
+**Verify Layout Styles**
+```
+# Check if padding was applied correctly
+get_screen_layout with componentsOnly=true
+
+# Find components with specific layout issues
+find_components with pattern="Card" includeLayout=true
+```
+
+**Understand Unfamiliar Codebase**
+```
+# Get app structure overview
+get_component_tree with maxDepth=10
+
+# Find all button variants
+find_components with pattern="Button"
+
+# Find all context providers
+find_components with pattern="Provider$"
+```
 
 ## Device Interaction
 
