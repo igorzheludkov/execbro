@@ -589,7 +589,7 @@ export async function getComponentTree(options: {
     hideInternals?: boolean;
     format?: 'json' | 'tonl';
 } = {}): Promise<ExecutionResult> {
-    const { maxDepth = 50, includeProps = false, includeStyles = false, hideInternals = true, format = 'json' } = options;
+    const { maxDepth = 50, includeProps = false, includeStyles = false, hideInternals = true, format = 'tonl' } = options;
 
     const expression = `
         (function() {
@@ -749,7 +749,7 @@ export async function getScreenLayout(options: {
     summary?: boolean;
     format?: 'json' | 'tonl';
 } = {}): Promise<ExecutionResult> {
-    const { maxDepth = 60, componentsOnly = false, shortPath = true, summary = false, format = 'json' } = options;
+    const { maxDepth = 60, componentsOnly = false, shortPath = true, summary = false, format = 'tonl' } = options;
 
     const expression = `
         (function() {
@@ -1147,7 +1147,7 @@ export async function findComponents(pattern: string, options: {
     summary?: boolean;
     format?: 'json' | 'tonl';
 } = {}): Promise<ExecutionResult> {
-    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = 'json' } = options;
+    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = 'tonl' } = options;
     const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
     const expression = `

@@ -453,8 +453,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format, ~30-50% smaller)"),
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format, ~30-50% smaller)"),
             summary: z
                 .boolean()
                 .optional()
@@ -542,8 +542,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format)")
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)")
         }
     },
     async ({ text, maxResults, maxMessageLength, verbose, format }) => {
@@ -819,8 +819,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["json", "tonl"])
                 .optional()
-                .default("json")
-                .describe("Output format: 'json' (default) or 'tonl' (compact indented tree, ~50% smaller)")
+                .default("tonl")
+                .describe("Output format: 'json' or 'tonl' (default, compact indented tree, ~50% smaller)")
         }
     },
     async ({ maxDepth, includeProps, includeStyles, hideInternals, format }) => {
@@ -879,8 +879,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["json", "tonl"])
                 .optional()
-                .default("json")
-                .describe("Output format: 'json' (default) or 'tonl' (pipe-delimited rows, ~40% smaller)")
+                .default("tonl")
+                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)")
         }
     },
     async ({ maxDepth, componentsOnly, shortPath, summary, format }) => {
@@ -1005,8 +1005,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["json", "tonl"])
                 .optional()
-                .default("json")
-                .describe("Output format: 'json' (default) or 'tonl' (pipe-delimited rows, ~40% smaller)")
+                .default("tonl")
+                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)")
         }
     },
     async ({ pattern, maxResults, includeLayout, shortPath, summary, format }) => {
@@ -1062,8 +1062,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format, ~30-50% smaller)"),
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format, ~30-50% smaller)"),
             summary: z
                 .boolean()
                 .optional()
@@ -1148,8 +1148,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format)")
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)")
         }
     },
     async ({ urlPattern, maxResults, format }) => {
