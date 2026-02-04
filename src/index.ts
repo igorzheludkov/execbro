@@ -794,23 +794,32 @@ registerToolWithTelemetry(
     "get_component_tree",
     {
         description:
-            "Get the React component tree from the running app. Shows the hierarchy of React components with their names. Useful for understanding app structure and finding component names for inspection. This accesses React's internal fiber tree via the DevTools hook.",
+            "Get the React component tree from the running app. **RECOMMENDED**: Use focusedOnly=true with structureOnly=true for a token-efficient overview of just the active screen (~1-2KB). This skips navigation wrappers and global overlays, showing only what's actually visible.",
         inputSchema: {
+            focusedOnly: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return only the focused/active screen subtree, skipping navigation wrappers and overlays. Dramatically reduces output size. (Recommended: true)"),
+            structureOnly: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return ultra-compact structure with just component names (no props, styles, or paths). Use this first for overview, then drill down with inspect_component."),
             maxDepth: z
                 .number()
                 .optional()
-                .default(50)
-                .describe("Maximum tree depth to traverse (default: 50)"),
+                .describe("Maximum tree depth (default: 25 for focusedOnly+structureOnly, 40 for structureOnly, 100 for full mode)"),
             includeProps: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Include component props (excluding children and style)"),
+                .describe("Include component props (excluding children and style). Ignored if structureOnly=true."),
             includeStyles: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Include layout styles (padding, margin, flex, etc.)"),
+                .describe("Include layout styles (padding, margin, flex, etc.). Ignored if structureOnly=true."),
             hideInternals: z
                 .boolean()
                 .optional()
@@ -820,11 +829,11 @@ registerToolWithTelemetry(
                 .enum(["json", "tonl"])
                 .optional()
                 .default("tonl")
-                .describe("Output format: 'json' or 'tonl' (default, compact indented tree, ~50% smaller)")
+                .describe("Output format: 'json' or 'tonl' (default, compact indented tree). Ignored if structureOnly=true.")
         }
     },
-    async ({ maxDepth, includeProps, includeStyles, hideInternals, format }) => {
-        const result = await getComponentTree({ maxDepth, includeProps, includeStyles, hideInternals, format });
+    async ({ focusedOnly, structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format }) => {
+        const result = await getComponentTree({ focusedOnly, structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format });
 
         if (!result.success) {
             return {
@@ -854,13 +863,13 @@ registerToolWithTelemetry(
     "get_screen_layout",
     {
         description:
-            "Get layout information for all components on the current screen. Returns component names, paths, and layout styles (padding, margin, flex, dimensions, etc.). Ideal for verifying layout without screenshots. Shows testID/accessibilityLabel when available for element identification.",
+            "Get layout information for all components on screen. **USE AFTER get_component_tree**: First use get_component_tree(structureOnly=true) to understand structure, then use this tool OR find_components with includeLayout=true to get layout details for specific areas. This tool returns full layout data which can be large for complex screens.",
         inputSchema: {
             maxDepth: z
                 .number()
                 .optional()
-                .default(60)
-                .describe("Maximum tree depth to traverse (default: 60)"),
+                .default(65)
+                .describe("Maximum tree depth to traverse (default: 65, balanced for most screens)"),
             componentsOnly: z
                 .boolean()
                 .optional()
@@ -914,7 +923,7 @@ registerToolWithTelemetry(
     "inspect_component",
     {
         description:
-            "Inspect a specific React component by name. Returns its props, style, and state (hooks). Use get_component_tree first to find component names. If multiple instances exist, use index to select which one.",
+            "Inspect a specific React component by name. **DRILL-DOWN TOOL**: Use after get_component_tree(structureOnly=true) to inspect specific components. Returns props, style, state (hooks), and optionally children tree. Use childrenDepth to control how deep nested children go.",
         inputSchema: {
             componentName: z
                 .string()
@@ -933,7 +942,12 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Include direct children component names"),
+                .describe("Include children component tree"),
+            childrenDepth: z
+                .number()
+                .optional()
+                .default(1)
+                .describe("How many levels deep to show children (default: 1 = direct children only, 2+ = nested tree)"),
             shortPath: z
                 .boolean()
                 .optional()
@@ -946,8 +960,8 @@ registerToolWithTelemetry(
                 .describe("Simplify hooks output by hiding effects and reducing depth (default: true)")
         }
     },
-    async ({ componentName, index, includeState, includeChildren, shortPath, simplifyHooks }) => {
-        const result = await inspectComponent(componentName, { index, includeState, includeChildren, shortPath, simplifyHooks });
+    async ({ componentName, index, includeState, includeChildren, childrenDepth, shortPath, simplifyHooks }) => {
+        const result = await inspectComponent(componentName, { index, includeState, includeChildren, childrenDepth, shortPath, simplifyHooks });
 
         if (!result.success) {
             return {
@@ -977,7 +991,7 @@ registerToolWithTelemetry(
     "find_components",
     {
         description:
-            "Find all components matching a name pattern (regex). Returns matching components with their paths and optional layout info. Useful for finding all instances of a component type or searching for components by partial name.",
+            "Find components matching a name pattern. **TARGETED SEARCH**: Use after get_component_tree(structureOnly=true) to find specific components by pattern and get their layout info. More efficient than get_screen_layout for targeted queries. Use includeLayout=true to get padding/margin/flex styles.",
         inputSchema: {
             pattern: z
                 .string()
@@ -991,7 +1005,7 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Include layout styles for each matched component"),
+                .describe("Include layout styles (padding, margin, flex) for each matched component"),
             shortPath: z
                 .boolean()
                 .optional()

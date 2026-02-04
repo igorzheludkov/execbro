@@ -528,6 +528,20 @@ function formatTreeToTonl(node: ComponentTreeNode, indent = 0): string {
     return result;
 }
 
+// Ultra-compact structure-only tree format (just component names, indented)
+function formatTreeStructureOnly(node: ComponentTreeNode, indent = 0): string {
+    const prefix = '  '.repeat(indent);
+    let result = `${prefix}${node.component}\n`;
+
+    if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+            result += formatTreeStructureOnly(child, indent + 1);
+        }
+    }
+
+    return result;
+}
+
 interface ScreenElement {
     component: string;
     path: string;
@@ -588,8 +602,14 @@ export async function getComponentTree(options: {
     includeStyles?: boolean;
     hideInternals?: boolean;
     format?: 'json' | 'tonl';
+    structureOnly?: boolean;
+    focusedOnly?: boolean;
 } = {}): Promise<ExecutionResult> {
-    const { maxDepth = 50, includeProps = false, includeStyles = false, hideInternals = true, format = 'tonl' } = options;
+    const { includeProps = false, includeStyles = false, hideInternals = true, format = 'tonl', structureOnly = false, focusedOnly = false } = options;
+    // Use lower default depth for structureOnly to keep output compact (~2-5KB)
+    // Full mode uses higher depth since TONL format handles it better
+    // focusedOnly mode uses moderate depth since we're already filtering to active screen
+    const maxDepth = options.maxDepth ?? (structureOnly ? (focusedOnly ? 25 : 40) : 100);
 
     const expression = `
         (function() {
@@ -617,9 +637,27 @@ export async function getComponentTree(options: {
             const includeProps = ${includeProps};
             const includeStyles = ${includeStyles};
             const hideInternals = ${hideInternals};
+            const focusedOnly = ${focusedOnly};
 
             // Internal RN components to hide
             const internalPatterns = /^(RCT|RNS|Animated\\(|AnimatedComponent|VirtualizedList|CellRenderer|ScrollViewContext|PerformanceLoggerContext|RootTagContext|HeaderShownContext|HeaderHeightContext|HeaderBackContext|SafeAreaFrameContext|SafeAreaInsetsContext|VirtualizedListContext|VirtualizedListCellContextProvider|StaticContainer|DelayedFreeze|Freeze|Suspender|DebugContainer|MaybeNestedStack|SceneView|NavigationContent|PreventRemoveProvider|EnsureSingleNavigator)/;
+
+            // Screen component patterns - user's actual screens (strict matching)
+            // Only match *Screen and *Page to avoid false positives like BottomTabView
+            const screenPatterns = /^[A-Z][a-zA-Z0-9]*(Screen|Page)$/;
+
+            // Navigation/internal screen patterns to SKIP (these look like screens but are framework components)
+            const internalScreenPatterns = /^(MaybeScreen|Screen$|ScreenContainer|ScreenStack|SceneView|Background$)/;
+
+            // Provider/wrapper patterns to skip when finding focused screen
+            const wrapperPatterns = /^(App|AppContainer|Provider|Context|SafeArea|Gesture|Theme|Redux|Root|Navigator|Stack|Tab|Drawer|Navigation|Container|Wrapper|Layout|ErrorBoundary|Suspense|PersistGate|LinkingContext|AppState|View|Fragment|NativeStack|BottomTab|Screen$)/i;
+
+            // Global overlay patterns - stop traversing into these subtrees
+            // Be specific to avoid blocking BottomSheetDrawer, PortalProvider, etc.
+            const overlayPatterns = /^(BottomSheet$|BottomSheetGlobal|Modal$|Toast$|Snackbar$|Dialog$|Overlay$|Popup$|MyToast$|PaywallModal$|FullScreenBannerModal$)/i;
+
+            // Navigation container patterns - skip traversing into these (screens inside are nav screens, not focused content)
+            const navContainerPatterns = /^(RootNavigation|NativeStackNavigator|BottomTabNavigator|DrawerNavigator|TabNavigator|StackNavigator)/;
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
@@ -715,20 +753,77 @@ export async function getComponentTree(options: {
                 return node;
             }
 
-            const tree = walkFiber(roots[0].current, 0);
+            // Find focused screen if requested
+            function findFocusedScreen(fiber, depth = 0) {
+                if (!fiber || depth > 50) return null;
+
+                const name = getComponentName(fiber);
+
+                // Skip overlays (BottomSheet, Modal, Toast, etc.) - don't traverse into them
+                if (name && overlayPatterns.test(name)) {
+                    return null;
+                }
+
+                // Skip navigation containers - screens inside are nav screens, not focused content
+                if (name && navContainerPatterns.test(name)) {
+                    return null;
+                }
+
+                // Check if this is a user's screen component (not framework internals)
+                if (name && screenPatterns.test(name) && !wrapperPatterns.test(name) && !internalScreenPatterns.test(name)) {
+                    return fiber;
+                }
+
+                // Search children
+                let child = fiber.child;
+                while (child) {
+                    const found = findFocusedScreen(child, depth + 1);
+                    if (found) return found;
+                    child = child.sibling;
+                }
+
+                return null;
+            }
+
+            let startFiber = roots[0].current;
+            let focusedScreenName = null;
+
+            if (focusedOnly) {
+                const focused = findFocusedScreen(roots[0].current);
+                if (focused) {
+                    startFiber = focused;
+                    focusedScreenName = getComponentName(focused);
+                }
+            }
+
+            const tree = walkFiber(startFiber, 0);
+
+            if (focusedOnly && focusedScreenName) {
+                return { focusedScreen: focusedScreenName, tree };
+            }
             return { tree };
         })()
     `;
 
     const result = await executeInApp(expression, false);
 
-    // Apply TONL formatting if requested
-    if (format === 'tonl' && result.success && result.result) {
+    // Apply formatting if requested
+    if (result.success && result.result) {
         try {
             const parsed = JSON.parse(result.result);
             if (parsed.tree) {
-                const tonl = formatTreeToTonl(parsed.tree);
-                return { success: true, result: tonl };
+                const prefix = parsed.focusedScreen ? `Focused: ${parsed.focusedScreen}\n\n` : '';
+
+                // Structure-only mode: ultra-compact format with just component names
+                if (structureOnly) {
+                    const structure = formatTreeStructureOnly(parsed.tree);
+                    return { success: true, result: prefix + structure };
+                }
+                // TONL format: compact with props/layout
+                if (format === 'tonl') {
+                    const tonl = formatTreeToTonl(parsed.tree);
+                    return { success: true, result: prefix + tonl };
+                }
             }
         } catch {
             // If parsing fails, return original result
@@ -749,7 +844,7 @@ export async function getScreenLayout(options: {
     summary?: boolean;
     format?: 'json' | 'tonl';
 } = {}): Promise<ExecutionResult> {
-    const { maxDepth = 60, componentsOnly = false, shortPath = true, summary = false, format = 'tonl' } = options;
+    const { maxDepth = 65, componentsOnly = false, shortPath = true, summary = false, format = 'tonl' } = options;
 
     const expression = `
         (function() {
@@ -934,10 +1029,11 @@ export async function inspectComponent(componentName: string, options: {
     index?: number;
     includeState?: boolean;
     includeChildren?: boolean;
+    childrenDepth?: number;
     shortPath?: boolean;
     simplifyHooks?: boolean;
 } = {}): Promise<ExecutionResult> {
-    const { index = 0, includeState = true, includeChildren = false, shortPath = true, simplifyHooks = true } = options;
+    const { index = 0, includeState = true, includeChildren = false, childrenDepth = 1, shortPath = true, simplifyHooks = true } = options;
     const escapedName = componentName.replace(/'/g, "\\'");
 
     const expression = `
@@ -961,6 +1057,7 @@ export async function inspectComponent(componentName: string, options: {
             const targetIndex = ${index};
             const includeState = ${includeState};
             const includeChildren = ${includeChildren};
+            const childrenDepth = ${childrenDepth};
             const shortPath = ${shortPath};
             const simplifyHooks = ${simplifyHooks};
             const pathSegments = 3;
@@ -1006,15 +1103,25 @@ export async function inspectComponent(componentName: string, options: {
                 return result;
             }
 
-            function getChildNames(fiber) {
-                const names = [];
+            function getChildTree(fiber, depth) {
+                if (!fiber || depth <= 0) return null;
+                const children = [];
                 let child = fiber?.child;
-                while (child && names.length < 20) {
+                while (child && children.length < 30) {
                     const name = getComponentName(child);
-                    if (name) names.push(name);
+                    if (name) {
+                        if (depth === 1) {
+                            // Just names for depth 1
+                            children.push(name);
+                        } else {
+                            // Tree structure for depth > 1
+                            const nestedChildren = getChildTree(child, depth - 1);
+                            children.push(nestedChildren ? { component: name, children: nestedChildren } : name);
+                        }
+                    }
                     child = child.sibling;
                 }
-                return names;
+                return children.length > 0 ? children : null;
             }
 
             const matches = [];
@@ -1125,9 +1232,9 @@ export async function inspectComponent(componentName: string, options: {
                 }
             }
 
-            // Direct children names
+            // Children tree (depth controlled by childrenDepth)
             if (includeChildren) {
-                result.children = getChildNames(fiber);
+                result.children = getChildTree(fiber, childrenDepth);
             }
 
             return result;

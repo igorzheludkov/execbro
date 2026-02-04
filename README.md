@@ -139,12 +139,14 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ### React Component Inspection
 
+**Recommended Workflow**: Use `get_component_tree(focusedOnly=true, structureOnly=true)` for a token-efficient overview of just the active screen (~1-3KB), then drill down with `inspect_component` or `find_components`.
+
 | Tool                 | Description                                                         |
 | -------------------- | ------------------------------------------------------------------- |
-| `get_component_tree` | Get React component hierarchy from the running app (TONL format by default) |
-| `get_screen_layout`  | Get all components with layout styles (padding, margin, flex, etc.) |
-| `inspect_component`  | Inspect a specific component's props, state/hooks, and children     |
-| `find_components`    | Find components matching a regex pattern with paths and layout info |
+| `get_component_tree` | **Start here** with `focusedOnly=true, structureOnly=true` for active screen overview |
+| `inspect_component`  | **Drill-down tool**: Inspect specific component's props, state/hooks, children |
+| `find_components`    | **Targeted search**: Find components by pattern with optional layout info |
+| `get_screen_layout`  | Full layout data - use sparingly, can be large for complex screens  |
 
 ### Android (ADB)
 
@@ -554,59 +556,109 @@ Set `awaitPromise=false` for synchronous execution only.
 
 Inspect React components at runtime via the React DevTools hook. These tools let you debug component state, verify layouts, and understand app structure without adding console.logs.
 
-### Get Component Tree
+### Recommended Workflow (Token-Efficient)
 
-View the React component hierarchy:
+**Always use the 2-step approach:**
+
+1. **Step 1: Get focused screen overview** (~1-3KB)
+   ```
+   get_component_tree with focusedOnly=true structureOnly=true
+   ```
+
+2. **Step 2: Drill down** into specific components as needed
+   ```
+   inspect_component with componentName="HomeScreen"
+   # or
+   find_components with pattern="Button" includeLayout=true
+   ```
+
+This approach uses **~10-20x fewer tokens** than getting full details upfront.
+
+### Token Consumption Comparison
+
+| Approach | Tokens | Use Case |
+|----------|--------|----------|
+| `focusedOnly=true, structureOnly=true` | ~1-3KB | **Recommended** - active screen structure only |
+| `structureOnly=true` | ~15-25KB | Full tree structure (includes navigation, overlays) |
+| `inspect_component` | ~1-2KB | Deep dive into specific component |
+| `find_components` | ~2-5KB | Targeted search with layout |
+| `get_screen_layout` | ~20-50KB+ | Full layout (use sparingly) |
+
+### Focused Screen Mode (`focusedOnly`)
+
+The `focusedOnly` parameter dramatically reduces output by returning only the active screen subtree:
+
+- **Skips navigation wrappers** - Providers, NavigationContainers, SafeAreaProviders
+- **Skips global overlays** - BottomSheet, Modal, Toast, Snackbar components
+- **Returns just the focused screen** - Components matching `*Screen` or `*Page` pattern
 
 ```
-get_component_tree
-```
-
-Output (TONL format by default, ~50% smaller than JSON):
-
-```
-App
-  ErrorBoundary
-    SafeAreaProvider
-      Provider
-        HomeScreen
-          Header
-          FlatList
-          Footer
-```
-
-Options:
-- `hideInternals=false` - Show internal RN components (RCTView, RNS*, etc.)
-- `includeProps=true` - Include component props
-- `format="json"` - Get structured JSON instead of TONL
-
-### Find Components by Pattern
-
-Search for components matching a regex:
-
-```
-find_components with pattern="Screen$"
+get_component_tree with focusedOnly=true structureOnly=true
 ```
 
 Output:
 
 ```
-pattern: Screen$
-found: 5
-#found{component,path,depth,key,layout}
-HomeScreen|... > Navigator > HomeScreen|45||
-SettingsScreen|... > Navigator > SettingsScreen|45||
-ProfileScreen|... > Navigator > ProfileScreen|45||
+Focused: HomeScreen
+
+HomeScreen
+  Header
+    Logo
+    SearchBar
+  FlatList
+    ListItem (×12)
+  Footer
 ```
 
-Options:
-- `summary=true` - Get counts only (e.g., "HomeScreen: 1, SettingsScreen: 1")
-- `includeLayout=true` - Include flex, padding, margin values
-- `maxResults=10` - Limit number of results
+**When to skip `focusedOnly`:**
+- Debugging navigation structure itself
+- Investigating which screens are mounted
+- Checking global overlay state
 
-### Inspect Component State
+### Inspecting Overlays (BottomSheet, Modal, Toast)
 
-Debug a specific component's props and hooks:
+Since `focusedOnly` skips global overlays by design, use this workflow to debug them:
+
+1. **Find the overlay component:**
+   ```
+   find_components with pattern="BottomSheet|Modal|Toast"
+   ```
+
+2. **Inspect its state/props:**
+   ```
+   inspect_component with componentName="MyBottomSheet"
+   ```
+
+This targeted approach uses ~2-4KB vs ~20KB+ for the full tree.
+
+### Step 1: Get Component Tree
+
+View the React component hierarchy with minimal data:
+
+```
+# Focused screen only (recommended)
+get_component_tree with focusedOnly=true structureOnly=true
+
+# Full tree structure
+get_component_tree with structureOnly=true
+```
+
+Output (ultra-compact):
+
+```
+Focused: HomeScreen
+
+HomeScreen
+  Header
+  FlatList
+  Footer
+```
+
+This gives you the focused screen structure in just 1-3KB.
+
+### Step 2a: Inspect Specific Component
+
+After identifying a component in the structure, drill down:
 
 ```
 inspect_component with componentName="HomeScreen"
@@ -624,80 +676,99 @@ Output:
   },
   "hooks": [
     { "hookIndex": 0, "value": false },
-    { "hookIndex": 1, "value": { "current": null } },
     { "hookIndex": 3, "value": 42 }
   ]
 }
 ```
 
 Options:
-- `includeChildren=true` - List direct children component names
+- `includeChildren=true` - Include children tree
+- `childrenDepth=2` - How deep to show children (1=direct only, 2+=nested tree)
 - `includeState=false` - Skip hooks/state (faster)
 - `index=1` - Inspect 2nd instance if multiple exist
 
-### Get Screen Layout
+### Step 2b: Find Components by Pattern
 
-View all components with their layout styles:
+Search for components and optionally get their layout:
 
 ```
-get_screen_layout with summary=true
+find_components with pattern="Screen$" includeLayout=true
 ```
 
 Output:
 
 ```
-#summary total=320
-View:83
-RCTView:65
-TouchableOpacity:12
-Text:8
-HomeScreen:1
+pattern: Screen$
+found: 5
+#found{component,path,depth,key,layout}
+HomeScreen|... > Navigator > HomeScreen|45|paddingHorizontal:16|
+SettingsScreen|... > Navigator > SettingsScreen|45|flex:1|
 ```
 
-Full layout mode (`summary=false`):
+Options:
+- `includeLayout=true` - Include flex, padding, margin values
+- `summary=true` - Get counts only (e.g., "HomeScreen: 1")
+- `maxResults=10` - Limit number of results
+
+### Full Layout (Use Sparingly)
+
+For detailed layout of all visible components:
 
 ```
-#elements{component,path,depth,layout,id}
-View|... > HomeScreen > View|46|flex:1|
-Header|... > View > Header|47|height:60;padding:16|header
+get_screen_layout
 ```
+
+**Warning**: This returns ~20-50KB for complex screens. Use `find_components` with `includeLayout=true` instead for targeted queries.
 
 ### Use Cases
 
+**Figma Alignment / Layout Verification**
+```
+# Step 1: See focused screen structure
+get_component_tree with focusedOnly=true structureOnly=true
+
+# Step 2: Get layout for specific components
+find_components with pattern="Header|Footer|Button" includeLayout=true
+```
+
+**Debug State Changes**
+```
+# Check hook values before action
+inspect_component with componentName="LoginForm"
+# → hookIndex 2: false (isLoading)
+
+# After user action, check again
+inspect_component with componentName="LoginForm"
+# → hookIndex 2: true (isLoading changed!)
+```
+
 **Debug Navigation Issues**
 ```
-# Find which screen is currently mounted
+# Find which screen is currently mounted (use full tree)
+get_component_tree with structureOnly=true
+# or
 find_components with pattern="Screen$"
 
 # Check if a screen rendered multiple times (memory leak)
 find_components with pattern="HomeScreen" summary=true
 ```
 
-**Debug State Without console.log**
+**Debug Overlays (BottomSheet, Modal, Toast)**
 ```
-# Check current hook values
-inspect_component with componentName="LoginForm"
-# → hookIndex 2: false (isLoading)
-# → hookIndex 3: "" (errorMessage)
+# Find and inspect overlay components
+find_components with pattern="BottomSheet|Modal"
 
-# After user action, check if state changed
-inspect_component with componentName="LoginForm"
-# → hookIndex 2: true (isLoading changed!)
-```
-
-**Verify Layout Styles**
-```
-# Check if padding was applied correctly
-get_screen_layout with componentsOnly=true
-
-# Find components with specific layout issues
-find_components with pattern="Card" includeLayout=true
+# Get overlay props/state
+inspect_component with componentName="PaywallModal"
 ```
 
 **Understand Unfamiliar Codebase**
 ```
-# Get app structure overview
-get_component_tree with maxDepth=10
+# Quick focused screen overview
+get_component_tree with focusedOnly=true structureOnly=true
+
+# Full app structure (navigation, providers)
+get_component_tree with structureOnly=true
 
 # Find all button variants
 find_components with pattern="Button"
