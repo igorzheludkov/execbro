@@ -12,6 +12,16 @@ import {
     iosTap
 } from "./ios.js";
 import { recognizeText, inferIOSDevicePixelRatio } from "./ocr.js";
+import {
+    getAllConnectionStates,
+    getContextHealth
+} from "./connectionState.js";
+import {
+    executeInApp,
+    getComponentTree,
+    listDebugGlobals,
+    inspectGlobal
+} from "./executor.js";
 
 const DEFAULT_HTTP_PORT = 3456;
 const MAX_PORT_ATTEMPTS = 20;
@@ -207,7 +217,11 @@ function htmlTemplate(title: string, content: string, refreshInterval = 3000): s
         <a href="/" ${title === 'Dashboard' ? 'class="active"' : ''}>Dashboard</a>
         <a href="/logs" ${title === 'Logs' ? 'class="active"' : ''}>Logs</a>
         <a href="/network" ${title === 'Network' ? 'class="active"' : ''}>Network</a>
+        <a href="/bundle-errors" ${title === 'Bundle Errors' ? 'class="active"' : ''}>Errors</a>
         <a href="/apps" ${title === 'Apps' ? 'class="active"' : ''}>Apps</a>
+        <a href="/repl" ${title === 'REPL' ? 'class="active"' : ''}>REPL</a>
+        <a href="/component-tree" ${title === 'Component Tree' ? 'class="active"' : ''}>Components</a>
+        <a href="/globals" ${title === 'Globals' ? 'class="active"' : ''}>Globals</a>
         <a href="/tap-verifier" ${title === 'Tap Verifier' ? 'class="active"' : ''}>Tap Verifier</a>
     </nav>
     <div id="content">${content}</div>
@@ -528,22 +542,1008 @@ function renderApps(): string {
         return htmlTemplate('Apps', '<div class="empty">No apps connected. Use scan_metro to connect to a running Metro server.</div>');
     }
 
-    const appsHtml = apps.map(app => `
-        <div class="app-card">
-            <h3>${escapeHtml(app.deviceInfo.title)}</h3>
-            <span class="app-status ${app.connected ? 'connected' : 'disconnected'}">
-                ${app.connected ? 'Connected' : 'Disconnected'}
-            </span>
-            <div class="app-detail">Device: ${escapeHtml(app.deviceInfo.deviceName)}</div>
-            <div class="app-detail">Metro Port: ${app.port}</div>
-            <div class="app-detail">ID: ${escapeHtml(app.id)}</div>
-        </div>
-    `).join('');
+    const connectionStates = getAllConnectionStates();
+
+    const appsHtml = apps.map(app => {
+        const state = connectionStates.get(app.id);
+        const health = getContextHealth(app.id);
+
+        let uptimeStr = '-';
+        if (state?.lastConnectedTime) {
+            const uptimeMs = Date.now() - state.lastConnectedTime.getTime();
+            const uptimeSec = Math.floor(uptimeMs / 1000);
+            if (uptimeSec < 60) uptimeStr = `${uptimeSec}s`;
+            else if (uptimeSec < 3600) uptimeStr = `${Math.floor(uptimeSec / 60)}m ${uptimeSec % 60}s`;
+            else uptimeStr = `${Math.floor(uptimeSec / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`;
+        }
+
+        const healthStatus = health?.isStale ? 'stale' : 'healthy';
+        const healthClass = health?.isStale ? 'health-stale' : 'health-ok';
+
+        // Get gaps for this specific app
+        const appGaps = state?.connectionGaps || [];
+        const recentAppGaps = appGaps.slice(-3);
+
+        const gapsHtml = recentAppGaps.length > 0 ? `
+            <div class="app-detail" style="margin-top: 8px;">
+                <strong>Recent Gaps:</strong>
+                ${recentAppGaps.map(gap => {
+                    const duration = gap.durationMs ? `${Math.round(gap.durationMs / 1000)}s` : 'ongoing';
+                    return `<div style="color: #d29922; font-size: 12px; margin-left: 8px;">• ${escapeHtml(gap.reason)} (${duration})</div>`;
+                }).join('')}
+            </div>
+        ` : '';
+
+        return `
+            <div class="app-card">
+                <h3>${escapeHtml(app.deviceInfo.title)}</h3>
+                <span class="app-status ${app.connected ? 'connected' : 'disconnected'}">
+                    ${app.connected ? 'Connected' : 'Disconnected'}
+                </span>
+                <span class="app-status ${healthClass}" style="margin-left: 8px;">
+                    Context: ${healthStatus}
+                </span>
+                <div class="app-detail">Device: ${escapeHtml(app.deviceInfo.deviceName)}</div>
+                <div class="app-detail">Metro Port: ${app.port}</div>
+                <div class="app-detail">Uptime: ${uptimeStr}</div>
+                <div class="app-detail">ID: ${escapeHtml(app.id)}</div>
+                ${gapsHtml}
+            </div>
+        `;
+    }).join('');
 
     return htmlTemplate('Apps', `
+        <style>
+            .health-ok { background: #238636; color: white; }
+            .health-stale { background: #d29922; color: #333; }
+        </style>
         <h1>Connected Apps</h1>
         ${appsHtml}
     `);
+}
+
+function renderBundleErrors(): string {
+    const errors = bundleErrorBuffer.get();
+    const status = bundleErrorBuffer.getStatus();
+
+    const statusText = status.hasError ? 'Build Failed' : 'Build OK';
+
+    let content = `
+        <h1>Bundle Errors</h1>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value" style="color: ${status.hasError ? '#f85149' : '#3fb950'};">${statusText}</div>
+                <div class="stat-label">Build Status</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">${errors.length}</div>
+                <div class="stat-label">Errors</div>
+            </div>
+            ${status.lastBuildTimestamp ? `
+            <div class="stat">
+                <div class="stat-value">${formatTime(status.lastBuildTimestamp)}</div>
+                <div class="stat-label">Last Build</div>
+            </div>
+            ` : ''}
+        </div>
+    `;
+
+    if (errors.length === 0) {
+        content += '<div class="empty" style="margin-top: 20px;">No bundle errors. Your app is building successfully!</div>';
+    } else {
+        const errorsHtml = errors.map((error, index) => {
+            const location = error.line ? `Line ${error.line}${error.column ? `:${error.column}` : ''}` : '';
+            return `
+                <div class="error-card" style="background: #161b22; border: 1px solid #f85149; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                        <strong style="color: #f85149;">Error ${index + 1}</strong>
+                        ${location ? `<span style="color: #8b949e; font-size: 12px;">${location}</span>` : ''}
+                    </div>
+                    ${error.file ? `<div style="color: #58a6ff; font-size: 13px; margin-bottom: 8px; font-family: monospace;">${escapeHtml(error.file)}</div>` : ''}
+                    <pre style="margin: 0; padding: 12px; background: #0d1117; border-radius: 4px; overflow-x: auto; white-space: pre-wrap;"><code style="color: #f85149;">${escapeHtml(error.message)}</code></pre>
+                    ${error.codeFrame ? `
+                        <div style="margin-top: 12px;">
+                            <div style="color: #8b949e; font-size: 11px; margin-bottom: 4px;">Code Frame:</div>
+                            <pre style="margin: 0; padding: 12px; background: #0d1117; border-radius: 4px; overflow-x: auto;"><code class="language-javascript">${escapeHtml(error.codeFrame)}</code></pre>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+
+        content += `<div style="margin-top: 20px;">${errorsHtml}</div>`;
+    }
+
+    return htmlTemplate('Bundle Errors', content);
+}
+
+function renderRepl(): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REPL - RN Debugger</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        nav {
+            background: #161b22;
+            padding: 12px 20px;
+            margin: -20px -20px 20px -20px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        nav a {
+            color: #58a6ff;
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        nav a:hover { background: #21262d; }
+        nav a.active { background: #388bfd; color: white; }
+        .logo { font-weight: 600; color: #f0f6fc; margin-right: auto; }
+        h1 { margin-bottom: 16px; font-size: 1.5em; }
+        .repl-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            height: calc(100vh - 140px);
+        }
+        .input-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .input-section label {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        #codeInput {
+            width: 100%;
+            height: 150px;
+            padding: 12px;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 14px;
+            background: #161b22;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            resize: vertical;
+        }
+        #codeInput:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: #238636;
+            color: white;
+        }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-primary:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
+        .btn-secondary {
+            background: #21262d;
+            color: #c9d1d9;
+        }
+        .btn-secondary:hover { background: #30363d; }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .output-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-height: 0;
+        }
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .output-header label {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        #output {
+            flex: 1;
+            padding: 12px;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 13px;
+            background: #161b22;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .output-success { color: #3fb950; }
+        .output-error { color: #f85149; }
+        .history-section {
+            margin-top: 16px;
+        }
+        .history-section h3 {
+            color: #8b949e;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+        .history-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .history-item {
+            padding: 4px 10px;
+            background: #21262d;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+            cursor: pointer;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .history-item:hover { background: #30363d; }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="logo">RN Debugger</span>
+        <a href="/">Dashboard</a>
+        <a href="/logs">Logs</a>
+        <a href="/network">Network</a>
+        <a href="/bundle-errors">Errors</a>
+        <a href="/apps">Apps</a>
+        <a href="/repl" class="active">REPL</a>
+        <a href="/component-tree">Components</a>
+        <a href="/globals">Globals</a>
+        <a href="/tap-verifier">Tap Verifier</a>
+    </nav>
+    <h1>JavaScript REPL</h1>
+    <div class="repl-container">
+        <div class="input-section">
+            <label>Enter JavaScript expression to execute in the app:</label>
+            <textarea id="codeInput" placeholder="// Example: get current navigation state
+global.__REACT_NAVIGATION__?.current?.getRootState()
+
+// Or inspect React DevTools hook
+Object.keys(globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__ || {})"></textarea>
+            <div class="controls">
+                <button class="btn btn-primary" id="executeBtn" onclick="executeCode()">Execute</button>
+                <button class="btn btn-secondary" onclick="clearOutput()">Clear Output</button>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="awaitPromise" checked>
+                    Await Promises
+                </label>
+            </div>
+        </div>
+        <div class="output-section">
+            <div class="output-header">
+                <label>Output:</label>
+                <span id="execTime" style="color: #6e7681; font-size: 12px;"></span>
+            </div>
+            <div id="output"><span style="color: #6e7681;">Output will appear here...</span></div>
+        </div>
+        <div class="history-section">
+            <h3>History</h3>
+            <div class="history-list" id="historyList"></div>
+        </div>
+    </div>
+    <script>
+        const MAX_HISTORY = 10;
+        let history = JSON.parse(localStorage.getItem('repl-history') || '[]');
+
+        function updateHistoryUI() {
+            const list = document.getElementById('historyList');
+            list.innerHTML = history.map((item, i) =>
+                '<div class="history-item" onclick="loadHistory(' + i + ')" title="' + item.replace(/"/g, '&quot;') + '">' + item.slice(0, 50) + (item.length > 50 ? '...' : '') + '</div>'
+            ).join('');
+        }
+
+        function loadHistory(index) {
+            document.getElementById('codeInput').value = history[index];
+        }
+
+        function addToHistory(code) {
+            // Remove if already exists
+            history = history.filter(h => h !== code);
+            // Add to front
+            history.unshift(code);
+            // Limit size
+            history = history.slice(0, MAX_HISTORY);
+            localStorage.setItem('repl-history', JSON.stringify(history));
+            updateHistoryUI();
+        }
+
+        async function executeCode() {
+            const code = document.getElementById('codeInput').value.trim();
+            if (!code) return;
+
+            const output = document.getElementById('output');
+            const execTime = document.getElementById('execTime');
+            const btn = document.getElementById('executeBtn');
+            const awaitPromise = document.getElementById('awaitPromise').checked;
+
+            btn.disabled = true;
+            btn.textContent = 'Executing...';
+            output.innerHTML = '<span style="color: #8b949e;">Executing...</span>';
+            execTime.textContent = '';
+
+            const startTime = Date.now();
+
+            try {
+                const res = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ expression: code, awaitPromise })
+                });
+                const data = await res.json();
+                const elapsed = Date.now() - startTime;
+                execTime.textContent = elapsed + 'ms';
+
+                if (data.success) {
+                    output.innerHTML = '<span class="output-success">' + formatOutput(data.result) + '</span>';
+                    addToHistory(code);
+                } else {
+                    output.innerHTML = '<span class="output-error">Error: ' + escapeHtml(data.error || 'Unknown error') + '</span>';
+                }
+            } catch (err) {
+                output.innerHTML = '<span class="output-error">Request failed: ' + escapeHtml(err.message) + '</span>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Execute';
+            }
+        }
+
+        function formatOutput(result) {
+            if (result === undefined || result === 'undefined') return 'undefined';
+            if (result === null || result === 'null') return 'null';
+            try {
+                const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+                return escapeHtml(JSON.stringify(parsed, null, 2));
+            } catch {
+                return escapeHtml(String(result));
+            }
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '<span style="color: #6e7681;">Output will appear here...</span>';
+            document.getElementById('execTime').textContent = '';
+        }
+
+        // Keyboard shortcut: Ctrl/Cmd + Enter to execute
+        document.getElementById('codeInput').addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                executeCode();
+            }
+        });
+
+        // Init history
+        updateHistoryUI();
+    </script>
+</body>
+</html>`;
+}
+
+function renderComponentTree(): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Component Tree - RN Debugger</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        nav {
+            background: #161b22;
+            padding: 12px 20px;
+            margin: -20px -20px 20px -20px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        nav a {
+            color: #58a6ff;
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        nav a:hover { background: #21262d; }
+        nav a.active { background: #388bfd; color: white; }
+        .logo { font-weight: 600; color: #f0f6fc; margin-right: auto; }
+        h1 { margin-bottom: 16px; font-size: 1.5em; }
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: #238636;
+            color: white;
+        }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-primary:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
+        .btn-secondary {
+            background: #21262d;
+            color: #c9d1d9;
+        }
+        .btn-secondary:hover { background: #30363d; }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #8b949e;
+            font-size: 13px;
+        }
+        #searchInput {
+            padding: 8px 12px;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            background: #161b22;
+            color: #c9d1d9;
+            font-size: 14px;
+            width: 200px;
+        }
+        #searchInput:focus {
+            outline: none;
+            border-color: #58a6ff;
+        }
+        .tree-container {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 16px;
+            overflow: auto;
+            max-height: calc(100vh - 220px);
+        }
+        .tree-content {
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 13px;
+            white-space: pre;
+            line-height: 1.6;
+        }
+        .tree-content .component { color: #7ee787; }
+        .tree-content .props { color: #d2a8ff; }
+        .tree-content .layout { color: #79c0ff; }
+        .loading { color: #8b949e; text-align: center; padding: 40px; }
+        .error { color: #f85149; padding: 20px; }
+        .focused-screen {
+            background: #388bfd33;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .focused-screen strong { color: #58a6ff; }
+        .stats {
+            color: #8b949e;
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="logo">RN Debugger</span>
+        <a href="/">Dashboard</a>
+        <a href="/logs">Logs</a>
+        <a href="/network">Network</a>
+        <a href="/bundle-errors">Errors</a>
+        <a href="/apps">Apps</a>
+        <a href="/repl">REPL</a>
+        <a href="/component-tree" class="active">Components</a>
+        <a href="/globals">Globals</a>
+        <a href="/tap-verifier">Tap Verifier</a>
+    </nav>
+    <h1>React Component Tree</h1>
+    <div class="controls">
+        <button class="btn btn-primary" id="refreshBtn" onclick="loadTree()">Refresh</button>
+        <input type="text" id="searchInput" placeholder="Filter components..." oninput="filterTree()">
+        <label class="checkbox-label">
+            <input type="checkbox" id="focusedOnly" checked onchange="loadTree()">
+            Focused Screen Only
+        </label>
+        <label class="checkbox-label">
+            <input type="checkbox" id="structureOnly" checked onchange="loadTree()">
+            Structure Only (Compact)
+        </label>
+        <label class="checkbox-label">
+            <input type="checkbox" id="includeProps" onchange="loadTree()">
+            Include Props
+        </label>
+    </div>
+    <div id="focusedInfo"></div>
+    <div id="stats" class="stats"></div>
+    <div class="tree-container">
+        <div class="tree-content" id="treeContent">
+            <div class="loading">Click "Refresh" to load the component tree...</div>
+        </div>
+    </div>
+    <script>
+        let fullTree = '';
+
+        async function loadTree() {
+            const content = document.getElementById('treeContent');
+            const focusedInfo = document.getElementById('focusedInfo');
+            const stats = document.getElementById('stats');
+            const btn = document.getElementById('refreshBtn');
+
+            const focusedOnly = document.getElementById('focusedOnly').checked;
+            const structureOnly = document.getElementById('structureOnly').checked;
+            const includeProps = document.getElementById('includeProps').checked;
+
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            content.innerHTML = '<div class="loading">Loading component tree...</div>';
+            focusedInfo.innerHTML = '';
+            stats.textContent = '';
+
+            try {
+                const params = new URLSearchParams({
+                    focusedOnly: focusedOnly.toString(),
+                    structureOnly: structureOnly.toString(),
+                    includeProps: includeProps.toString(),
+                    maxDepth: structureOnly ? '50' : '100'
+                });
+
+                const res = await fetch('/api/component-tree?' + params);
+                const data = await res.json();
+
+                if (data.success) {
+                    fullTree = data.result || '';
+
+                    // Check for focused screen info
+                    const lines = fullTree.split('\\n');
+                    if (lines[0] && lines[0].startsWith('Focused:')) {
+                        focusedInfo.innerHTML = '<div class="focused-screen"><strong>' + escapeHtml(lines[0]) + '</strong></div>';
+                        fullTree = lines.slice(2).join('\\n');
+                    }
+
+                    // Count components
+                    const lineCount = fullTree.split('\\n').filter(l => l.trim()).length;
+                    stats.textContent = lineCount + ' components';
+
+                    displayTree(fullTree);
+                } else {
+                    content.innerHTML = '<div class="error">Error: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+                }
+            } catch (err) {
+                content.innerHTML = '<div class="error">Request failed: ' + escapeHtml(err.message) + '</div>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Refresh';
+            }
+        }
+
+        function displayTree(tree) {
+            const content = document.getElementById('treeContent');
+            // Syntax highlight the tree
+            const highlighted = tree
+                .split('\\n')
+                .map(line => {
+                    // Component names (at start of line after indentation)
+                    let result = line.replace(/^(\\s*)(\\S+)/, '$1<span class="component">$2</span>');
+                    // Props in parentheses
+                    result = result.replace(/\\(([^)]+)\\)/g, '<span class="props">($1)</span>');
+                    // Layout in brackets
+                    result = result.replace(/\\[([^\\]]+)\\]/g, '<span class="layout">[$1]</span>');
+                    return result;
+                })
+                .join('\\n');
+            content.innerHTML = highlighted || '<div class="loading">No components found</div>';
+        }
+
+        function filterTree() {
+            const filter = document.getElementById('searchInput').value.toLowerCase();
+            if (!filter) {
+                displayTree(fullTree);
+                return;
+            }
+
+            const filtered = fullTree
+                .split('\\n')
+                .filter(line => line.toLowerCase().includes(filter))
+                .join('\\n');
+
+            displayTree(filtered || 'No matching components');
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+    </script>
+</body>
+</html>`;
+}
+
+function renderGlobals(): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Globals - RN Debugger</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        nav {
+            background: #161b22;
+            padding: 12px 20px;
+            margin: -20px -20px 20px -20px;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        nav a {
+            color: #58a6ff;
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        nav a:hover { background: #21262d; }
+        nav a.active { background: #388bfd; color: white; }
+        .logo { font-weight: 600; color: #f0f6fc; margin-right: auto; }
+        h1 { margin-bottom: 16px; font-size: 1.5em; }
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: #238636;
+            color: white;
+        }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-primary:disabled { background: #21262d; color: #6e7681; cursor: not-allowed; }
+        .category {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+        .category-header {
+            padding: 12px 16px;
+            background: #21262d;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .category-header:hover { background: #30363d; }
+        .category-title {
+            font-weight: 600;
+            color: #58a6ff;
+        }
+        .category-count {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .category-content {
+            padding: 12px 16px;
+            display: none;
+        }
+        .category.expanded .category-content { display: block; }
+        .global-item {
+            padding: 8px 12px;
+            margin: 4px 0;
+            background: #0d1117;
+            border-radius: 4px;
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .global-item:hover { background: #21262d; }
+        .global-name { color: #7ee787; }
+        .inspect-btn {
+            padding: 4px 8px;
+            background: #388bfd;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .inspect-btn:hover { background: #58a6ff; }
+        .loading { color: #8b949e; text-align: center; padding: 40px; }
+        .error { color: #f85149; padding: 20px; }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            padding: 40px;
+            overflow: auto;
+        }
+        .modal.visible { display: block; }
+        .modal-content {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .modal-header {
+            padding: 12px 16px;
+            background: #21262d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-title {
+            font-weight: 600;
+            color: #58a6ff;
+            font-family: monospace;
+        }
+        .close-btn {
+            background: none;
+            border: none;
+            color: #8b949e;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        .close-btn:hover { color: #f85149; }
+        .modal-body {
+            padding: 16px;
+            max-height: 70vh;
+            overflow: auto;
+        }
+        .modal-body pre {
+            margin: 0;
+            padding: 12px;
+            background: #0d1117;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .prop-item {
+            padding: 8px;
+            border-bottom: 1px solid #21262d;
+        }
+        .prop-item:last-child { border-bottom: none; }
+        .prop-name { color: #d2a8ff; }
+        .prop-type { color: #8b949e; font-size: 11px; margin-left: 8px; }
+        .prop-value { color: #79c0ff; font-family: monospace; font-size: 12px; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="logo">RN Debugger</span>
+        <a href="/">Dashboard</a>
+        <a href="/logs">Logs</a>
+        <a href="/network">Network</a>
+        <a href="/bundle-errors">Errors</a>
+        <a href="/apps">Apps</a>
+        <a href="/repl">REPL</a>
+        <a href="/component-tree">Components</a>
+        <a href="/globals" class="active">Globals</a>
+        <a href="/tap-verifier">Tap Verifier</a>
+    </nav>
+    <h1>Debug Globals Explorer</h1>
+    <div class="controls">
+        <button class="btn btn-primary" id="refreshBtn" onclick="loadGlobals()">Refresh</button>
+    </div>
+    <div id="content">
+        <div class="loading">Click "Refresh" to discover debug globals...</div>
+    </div>
+
+    <div class="modal" id="inspectModal" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span class="modal-title" id="modalTitle">Global</span>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                Loading...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let globalsData = null;
+
+        async function loadGlobals() {
+            const content = document.getElementById('content');
+            const btn = document.getElementById('refreshBtn');
+
+            btn.disabled = true;
+            btn.textContent = 'Loading...';
+            content.innerHTML = '<div class="loading">Scanning for debug globals...</div>';
+
+            try {
+                const res = await fetch('/api/globals');
+                const data = await res.json();
+
+                if (data.success && data.result) {
+                    globalsData = typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+                    renderGlobals(globalsData);
+                } else {
+                    content.innerHTML = '<div class="error">Error: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+                }
+            } catch (err) {
+                content.innerHTML = '<div class="error">Request failed: ' + escapeHtml(err.message) + '</div>';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Refresh';
+            }
+        }
+
+        function renderGlobals(categories) {
+            const content = document.getElementById('content');
+            const html = Object.entries(categories)
+                .filter(([_, items]) => items && items.length > 0)
+                .map(([category, items]) => {
+                    const itemsHtml = items.map(name =>
+                        '<div class="global-item">' +
+                            '<span class="global-name">' + escapeHtml(name) + '</span>' +
+                            '<button class="inspect-btn" onclick="inspectGlobal(\\'' + escapeHtml(name).replace(/'/g, "\\\\'") + '\\')">Inspect</button>' +
+                        '</div>'
+                    ).join('');
+                    return '<div class="category" onclick="toggleCategory(this)">' +
+                        '<div class="category-header">' +
+                            '<span class="category-title">' + escapeHtml(category) + '</span>' +
+                            '<span class="category-count">' + items.length + ' items</span>' +
+                        '</div>' +
+                        '<div class="category-content" onclick="event.stopPropagation()">' + itemsHtml + '</div>' +
+                    '</div>';
+                }).join('');
+
+            if (!html) {
+                content.innerHTML = '<div class="loading">No debug globals found. Make sure your app has debugging tools enabled (e.g., React DevTools, Apollo Client, Redux).</div>';
+            } else {
+                content.innerHTML = html;
+            }
+        }
+
+        function toggleCategory(el) {
+            el.classList.toggle('expanded');
+        }
+
+        async function inspectGlobal(name) {
+            const modal = document.getElementById('inspectModal');
+            const title = document.getElementById('modalTitle');
+            const body = document.getElementById('modalBody');
+
+            title.textContent = name;
+            body.innerHTML = '<div class="loading">Loading...</div>';
+            modal.classList.add('visible');
+
+            try {
+                const res = await fetch('/api/globals/' + encodeURIComponent(name));
+                const data = await res.json();
+
+                if (data.success && data.result) {
+                    const result = typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+                    if (result.error) {
+                        body.innerHTML = '<div class="error">' + escapeHtml(result.error) + '</div>';
+                    } else {
+                        const propsHtml = Object.entries(result).map(([key, info]) => {
+                            const typeInfo = typeof info === 'object' && info !== null ? info : { type: typeof info, value: info };
+                            return '<div class="prop-item">' +
+                                '<span class="prop-name">' + escapeHtml(key) + '</span>' +
+                                '<span class="prop-type">' + escapeHtml(typeInfo.type || 'unknown') + (typeInfo.callable ? ' (callable)' : '') + '</span>' +
+                                (typeInfo.preview || typeInfo.value !== undefined ?
+                                    '<div class="prop-value">' + escapeHtml(String(typeInfo.preview || typeInfo.value)).slice(0, 200) + '</div>' : '') +
+                            '</div>';
+                        }).join('');
+                        body.innerHTML = propsHtml || '<div class="loading">Empty object</div>';
+                    }
+                } else {
+                    body.innerHTML = '<div class="error">Error: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+                }
+            } catch (err) {
+                body.innerHTML = '<div class="error">Request failed: ' + escapeHtml(err.message) + '</div>';
+            }
+        }
+
+        function closeModal(event) {
+            if (!event || event.target === document.getElementById('inspectModal')) {
+                document.getElementById('inspectModal').classList.remove('visible');
+            }
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+    </script>
+</body>
+</html>`;
 }
 
 function renderTapVerifier(): string {
@@ -1106,6 +2106,26 @@ function createRequestHandler() {
                 res.end(renderTapVerifier());
                 return;
             }
+            if (url === "/bundle-errors") {
+                res.setHeader("Content-Type", "text/html");
+                res.end(renderBundleErrors());
+                return;
+            }
+            if (url === "/repl") {
+                res.setHeader("Content-Type", "text/html");
+                res.end(renderRepl());
+                return;
+            }
+            if (url === "/component-tree") {
+                res.setHeader("Content-Type", "text/html");
+                res.end(renderComponentTree());
+                return;
+            }
+            if (url === "/globals") {
+                res.setHeader("Content-Type", "text/html");
+                res.end(renderGlobals());
+                return;
+            }
 
             // JSON API endpoints
             res.setHeader("Content-Type", "application/json");
@@ -1137,6 +2157,74 @@ function createRequestHandler() {
                     bundleStatus: bundleErrorBuffer.getStatus()
                 };
                 res.end(JSON.stringify(status, null, 2));
+            } else if (url === "/api/connection-status") {
+                // Connection health API endpoint
+                const states: Record<string, unknown> = {};
+                const health: Record<string, unknown> = {};
+                for (const [appKey] of connectedApps.entries()) {
+                    const state = getAllConnectionStates().get(appKey);
+                    const contextHealth = getContextHealth(appKey);
+                    if (state) states[appKey] = state;
+                    if (contextHealth) health[appKey] = contextHealth;
+                }
+                res.end(JSON.stringify({ states, health }, null, 2));
+            } else if (url === "/api/execute" && req.method === "POST") {
+                // REPL execute API endpoint
+                let body = '';
+                req.on('data', chunk => { body += chunk; });
+                req.on('end', async () => {
+                    try {
+                        const data = JSON.parse(body);
+                        const { expression, awaitPromise = true } = data;
+                        if (!expression || typeof expression !== 'string') {
+                            res.end(JSON.stringify({ success: false, error: 'expression is required' }));
+                            return;
+                        }
+                        const result = await executeInApp(expression, awaitPromise);
+                        res.end(JSON.stringify(result, null, 2));
+                    } catch (err) {
+                        res.end(JSON.stringify({ success: false, error: String(err) }));
+                    }
+                });
+                return;
+            } else if (url === "/api/component-tree") {
+                // Component tree API endpoint
+                const maxDepth = parseInt(params.get('maxDepth') || '50', 10);
+                const focusedOnly = params.get('focusedOnly') === 'true';
+                const structureOnly = params.get('structureOnly') === 'true';
+                const includeProps = params.get('includeProps') === 'true';
+                try {
+                    const result = await getComponentTree({
+                        maxDepth,
+                        focusedOnly,
+                        structureOnly,
+                        includeProps
+                    });
+                    res.end(JSON.stringify(result, null, 2));
+                } catch (err) {
+                    res.end(JSON.stringify({ success: false, error: String(err) }));
+                }
+            } else if (url === "/api/globals") {
+                // Debug globals list API endpoint
+                try {
+                    const result = await listDebugGlobals();
+                    res.end(JSON.stringify(result, null, 2));
+                } catch (err) {
+                    res.end(JSON.stringify({ success: false, error: String(err) }));
+                }
+            } else if (url.startsWith("/api/globals/")) {
+                // Inspect specific global API endpoint
+                const globalName = decodeURIComponent(url.replace("/api/globals/", ""));
+                if (!globalName) {
+                    res.end(JSON.stringify({ success: false, error: 'Global name required' }));
+                } else {
+                    try {
+                        const result = await inspectGlobal(globalName);
+                        res.end(JSON.stringify(result, null, 2));
+                    } catch (err) {
+                        res.end(JSON.stringify({ success: false, error: String(err) }));
+                    }
+                }
             } else if (url === "/api/tap-verifier/devices") {
                 const platform = params.get('platform') || 'android';
                 try {
@@ -1343,7 +2431,11 @@ function createRequestHandler() {
                         "/": "Dashboard",
                         "/logs": "Console logs (colored)",
                         "/network": "Network requests",
-                        "/apps": "Connected apps",
+                        "/bundle-errors": "Bundle/compilation errors",
+                        "/apps": "Connected apps with connection health",
+                        "/repl": "JavaScript REPL for code execution",
+                        "/component-tree": "React component tree viewer",
+                        "/globals": "Debug globals explorer",
                         "/tap-verifier": "Tap coordinate verification tool"
                     },
                     api: {
@@ -1352,6 +2444,11 @@ function createRequestHandler() {
                         "/api/network": "All captured network requests (JSON)",
                         "/api/bundle-errors": "Metro bundle/compilation errors (JSON)",
                         "/api/apps": "Connected React Native apps (JSON)",
+                        "/api/connection-status": "Connection states and context health for all apps",
+                        "/api/execute": "Execute JavaScript in the app (POST: expression, awaitPromise?)",
+                        "/api/component-tree": "Get React component tree (query: maxDepth, focusedOnly, structureOnly, includeProps)",
+                        "/api/globals": "List available debug globals",
+                        "/api/globals/:name": "Inspect a specific global object",
                         "/api/tap-verifier/devices": "List available devices (query: platform=android|ios)",
                         "/api/tap-verifier/screen-size": "Get device screen size (query: platform, deviceId)",
                         "/api/tap-verifier/screenshot": "Get device screenshot as base64 (query: platform, deviceId)",

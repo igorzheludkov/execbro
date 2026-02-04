@@ -102,13 +102,9 @@ import {
     // iOS Element Finding (no screenshots)
     iosFindElement,
     iosWaitForElement,
-    // Debug HTTP Server (in-process, for fallback)
+    // Debug HTTP Server
     startDebugHttpServer,
     getDebugServerPort,
-    // HTTP Server Process (child process, for hot-reload)
-    startHttpServerProcess,
-    restartHttpServerProcess,
-    getHttpServerProcessPort,
     // Telemetry
     initTelemetry,
     trackToolInvocation,
@@ -2656,7 +2652,7 @@ registerToolWithTelemetry(
     async ({ platform, deviceId }) => {
         // Call the HTTP endpoint for OCR (allows hot-reload without session restart)
         // Prefer child process port, fall back to in-process port
-        const port = getHttpServerProcessPort() || getDebugServerPort();
+        const port = getDebugServerPort();
         if (!port) {
             return {
                 content: [
@@ -3345,7 +3341,7 @@ registerToolWithTelemetry(
         inputSchema: {}
     },
     async () => {
-        const port = getHttpServerProcessPort() || getDebugServerPort();
+        const port = getDebugServerPort();
 
         if (!port) {
             return {
@@ -3386,31 +3382,19 @@ registerToolWithTelemetry(
     "restart_http_server",
     {
         description:
-            "Restart the debug HTTP server to apply code changes (hot-reload). Use this after running 'npm run build' to load new server code without restarting the MCP session.",
+            "Note: HTTP server now runs in-process to share state. To apply code changes, restart the MCP session.",
         inputSchema: {}
     },
     async () => {
-        try {
-            const newPort = await restartHttpServerProcess();
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `HTTP server restarted successfully on port ${newPort}. New code is now active.`
-                    }
-                ]
-            };
-        } catch (err) {
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `Failed to restart HTTP server: ${err instanceof Error ? err.message : String(err)}`
-                    }
-                ],
-                isError: true
-            };
-        }
+        const port = getDebugServerPort();
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `HTTP server is running in-process on port ${port}. To apply code changes, rebuild with 'npm run build' and restart the MCP session. The in-process mode is required for the dashboard to show logs, network requests, and connected apps.`
+                }
+            ]
+        };
     }
 );
 
@@ -3459,15 +3443,10 @@ async function main() {
     // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
     initTelemetry();
 
-    // Start debug HTTP server as child process (enables hot-reload)
-    // Falls back to in-process if child process fails
-    try {
-        await startHttpServerProcess();
-        console.error("[rn-ai-debugger] HTTP server started as child process (hot-reload enabled)");
-    } catch (err) {
-        console.error("[rn-ai-debugger] Child process failed, falling back to in-process server:", err);
-        await startDebugHttpServer();
-    }
+    // Start debug HTTP server in-process (shares state with MCP server)
+    // Note: Child process mode doesn't work because state (logs, network, apps) isn't shared
+    await startDebugHttpServer();
+    console.error("[rn-ai-debugger] HTTP server started in-process");
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
