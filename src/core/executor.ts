@@ -755,7 +755,7 @@ export async function getComponentTree(options: {
 
             // Find focused screen if requested
             function findFocusedScreen(fiber, depth = 0) {
-                if (!fiber || depth > 50) return null;
+                if (!fiber || depth > 200) return null;
 
                 const name = getComponentName(fiber);
 
