@@ -4,24 +4,32 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 
 ## Features
 
--   Captures `console.log`, `console.warn`, `console.error` from React Native apps
--   **Network request tracking** - capture HTTP requests/responses with headers, timing, and status
--   **React component inspection** - inspect component tree, props, state/hooks, and layout styles at runtime
--   **Debug Web Dashboard** - browser-based UI to view logs and network requests in real-time
--   Supports both **Expo SDK 54+** (React Native Bridgeless) and **RN 0.70+** (Hermes)
--   **Auto-connect on startup** - automatically scans and connects to Metro when the server starts
--   **Auto-reconnection** - automatically reconnects when connection is lost (e.g., app restart)
--   Auto-discovers running Metro servers on common ports
--   Filters logs by level (log, warn, error, info, debug)
--   Circular buffer stores last 1000 log entries and 500 network requests
--   **Execute JavaScript** directly in the running app (REPL-style)
--   **Inspect global objects** like Apollo Client, Redux store, Expo Router
--   **Discover debug globals** available in the app
--   **Android device control** - screenshots, tap, swipe, text input, key events via ADB
--   **iOS simulator control** - screenshots, app management, URL handling via simctl
--   **iOS UI automation** - tap, swipe, text input, button presses via IDB (optional)
--   **Element-based UI automation** - find and wait for elements by text/label without screenshots (faster, cheaper)
--   **OCR-based text extraction** - extract visible text with tap-ready coordinates using OCR (works on any visible text)
+### Runtime Interaction
+
+-   **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search
+-   **React Component Inspection** - Inspect component tree, props, state/hooks, and layout styles at runtime
+-   **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content
+-   **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
+-   **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals
+-   **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
+-   **Debug Web Dashboard** - Browser-based UI for real-time log and network monitoring
+
+### Device Control
+
+-   **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
+-   **Android Devices** - Screenshots, app install/launch, package management (via ADB)
+-   **UI Automation** - Tap, swipe, long press, text input, and key events on both platforms
+-   **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
+-   **Element-Based Interaction** - Tap/wait for elements by text without screenshots (faster, cheaper)
+-   **OCR Text Extraction** - Extract visible text with tap-ready coordinates (works on any screen content)
+
+### Under the Hood
+
+-   **Auto-Discovery** - Scans Metro on ports 8081, 8082, 19000-19002 automatically
+-   **Smart Device Selection** - Prioritizes Bridgeless > Hermes > standard React Native targets
+-   **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
+-   **Efficient Buffering** - Circular buffers: 1000 logs, 500 network requests
+-   **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
 
 ## Requirements
 
@@ -113,6 +121,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `connect_metro`         | Connect to a specific Metro port (use when you know the exact port) |
 | `get_apps`              | List connected apps. Run `scan_metro` first if none connected      |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects     |
+| `ensure_connection`     | Verify/establish connection with health checks                     |
 | `get_logs`              | Retrieve console logs (filtering, truncation, summary, TONL format) |
 | `search_logs`           | Search logs for specific text (truncation, TONL format)            |
 | `clear_logs`            | Clear the log buffer                                               |
@@ -136,6 +145,15 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `inspect_global`     | Inspect a global object to see its properties and callable methods  |
 | `reload_app`         | Reload the app (auto-connects if needed). Use sparingly - Fast Refresh handles most changes |
 | `get_debug_server`   | Get the debug HTTP server URL for browser-based viewing             |
+| `restart_http_server` | Restart the debug HTTP server                                      |
+
+### Bundle Tools
+
+| Tool                 | Description                                                         |
+| -------------------- | ------------------------------------------------------------------- |
+| `get_bundle_status`  | Get Metro bundler status and build state                            |
+| `get_bundle_errors`  | Get compilation errors with file locations                          |
+| `clear_bundle_errors` | Clear the bundle error buffer                                      |
 
 ### React Component Inspection
 
@@ -156,6 +174,7 @@ Inspect React components at specific screen coordinates - like React Native's bu
 | -------------------------- | ------------------------------------------------------------------------------ |
 | `get_inspector_selection`  | **Main tool**: Get React component at coordinates. Auto-enables inspector and taps if x/y provided |
 | `toggle_element_inspector` | Manually toggle the Element Inspector overlay on/off                           |
+| `inspect_at_point`         | Inspect React component at (x,y) coordinates                                   |
 
 **Quick Inspection (Recommended)**:
 ```
@@ -203,6 +222,9 @@ toggle_element_inspector()
 | `android_input_text`        | Type text at current focus point                              |
 | `android_key_event`         | Send key events (HOME, BACK, ENTER, etc.)                     |
 | `android_get_screen_size`   | Get device screen resolution                                  |
+| `android_describe_all`      | Get full UI accessibility tree via uiautomator                |
+| `android_describe_point`    | Get UI element info at specific coordinates                   |
+| `android_tap_element`       | Tap element by text/contentDesc/resourceId                    |
 | `android_find_element`      | Find element by text/contentDesc/resourceId (no screenshot)   |
 | `android_wait_for_element`  | Wait for element to appear (useful for screen transitions)    |
 
@@ -217,6 +239,15 @@ toggle_element_inspector()
 | `ios_open_url`          | Open a URL (deep links or web URLs)                             |
 | `ios_terminate_app`     | Terminate a running app                                         |
 | `ios_boot_simulator`    | Boot a simulator by UDID                                        |
+| `ios_tap`               | Tap at coordinates (requires IDB)                               |
+| `ios_tap_element`       | Tap element by accessibility label (requires IDB)               |
+| `ios_swipe`             | Swipe gesture (requires IDB)                                    |
+| `ios_input_text`        | Type text into active field (requires IDB)                      |
+| `ios_button`            | Press hardware button: HOME, LOCK, SIRI (requires IDB)          |
+| `ios_key_event`         | Send key event by keycode (requires IDB)                        |
+| `ios_key_sequence`      | Send sequence of key events (requires IDB)                      |
+| `ios_describe_all`      | Get full accessibility tree (requires IDB)                      |
+| `ios_describe_point`    | Get element at point (requires IDB)                             |
 | `ios_find_element`      | Find element by label/value (requires IDB, no screenshot)       |
 | `ios_wait_for_element`  | Wait for element to appear (requires IDB)                       |
 
