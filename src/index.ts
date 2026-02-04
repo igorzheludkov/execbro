@@ -19,6 +19,11 @@ import {
     listDebugGlobals,
     inspectGlobal,
     reloadApp,
+    // React Component Inspection
+    getComponentTree,
+    getScreenLayout,
+    inspectComponent,
+    findComponents,
     getLogs,
     searchLogs,
     getLogSummary,
@@ -448,8 +453,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format, ~30-50% smaller)"),
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format, ~30-50% smaller)"),
             summary: z
                 .boolean()
                 .optional()
@@ -537,8 +542,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format)")
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)")
         }
     },
     async ({ text, maxResults, maxMessageLength, verbose, format }) => {
@@ -780,6 +785,256 @@ registerToolWithTelemetry(
     }
 );
 
+// ============================================================================
+// React Component Inspection Tools
+// ============================================================================
+
+// Tool: Get the React component tree
+registerToolWithTelemetry(
+    "get_component_tree",
+    {
+        description:
+            "Get the React component tree from the running app. Shows the hierarchy of React components with their names. Useful for understanding app structure and finding component names for inspection. This accesses React's internal fiber tree via the DevTools hook.",
+        inputSchema: {
+            maxDepth: z
+                .number()
+                .optional()
+                .default(50)
+                .describe("Maximum tree depth to traverse (default: 50)"),
+            includeProps: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Include component props (excluding children and style)"),
+            includeStyles: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Include layout styles (padding, margin, flex, etc.)"),
+            hideInternals: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Hide internal RN components (RCTView, RNS*, Animated, etc.) for cleaner output (default: true)"),
+            format: z
+                .enum(["json", "tonl"])
+                .optional()
+                .default("tonl")
+                .describe("Output format: 'json' or 'tonl' (default, compact indented tree, ~50% smaller)")
+        }
+    },
+    async ({ maxDepth, includeProps, includeStyles, hideInternals, format }) => {
+        const result = await getComponentTree({ maxDepth, includeProps, includeStyles, hideInternals, format });
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `React Component Tree:\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Get full screen layout (all components with layout styles)
+registerToolWithTelemetry(
+    "get_screen_layout",
+    {
+        description:
+            "Get layout information for all components on the current screen. Returns component names, paths, and layout styles (padding, margin, flex, dimensions, etc.). Ideal for verifying layout without screenshots. Shows testID/accessibilityLabel when available for element identification.",
+        inputSchema: {
+            maxDepth: z
+                .number()
+                .optional()
+                .default(60)
+                .describe("Maximum tree depth to traverse (default: 60)"),
+            componentsOnly: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Only show custom components, hide host components (View, Text, etc.)"),
+            shortPath: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Show only last 3 path segments instead of full path (default: true)"),
+            summary: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return only component counts by name instead of full element list (default: false)"),
+            format: z
+                .enum(["json", "tonl"])
+                .optional()
+                .default("tonl")
+                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)")
+        }
+    },
+    async ({ maxDepth, componentsOnly, shortPath, summary, format }) => {
+        const result = await getScreenLayout({ maxDepth, componentsOnly, shortPath, summary, format });
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Screen Layout:\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Inspect a specific component by name
+registerToolWithTelemetry(
+    "inspect_component",
+    {
+        description:
+            "Inspect a specific React component by name. Returns its props, style, and state (hooks). Use get_component_tree first to find component names. If multiple instances exist, use index to select which one.",
+        inputSchema: {
+            componentName: z
+                .string()
+                .describe("Name of the component to inspect (e.g., 'Button', 'HomeScreen', 'FlatList')"),
+            index: z
+                .number()
+                .optional()
+                .default(0)
+                .describe("If multiple instances exist, which one to inspect (0-based index, default: 0)"),
+            includeState: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Include component state/hooks (default: true)"),
+            includeChildren: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Include direct children component names"),
+            shortPath: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Show only last 3 path segments (default: true)"),
+            simplifyHooks: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Simplify hooks output by hiding effects and reducing depth (default: true)")
+        }
+    },
+    async ({ componentName, index, includeState, includeChildren, shortPath, simplifyHooks }) => {
+        const result = await inspectComponent(componentName, { index, includeState, includeChildren, shortPath, simplifyHooks });
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Component Inspection: ${componentName}\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Find components matching a pattern
+registerToolWithTelemetry(
+    "find_components",
+    {
+        description:
+            "Find all components matching a name pattern (regex). Returns matching components with their paths and optional layout info. Useful for finding all instances of a component type or searching for components by partial name.",
+        inputSchema: {
+            pattern: z
+                .string()
+                .describe("Regex pattern to match component names (case-insensitive). Examples: 'Button', 'Screen$', 'List.*Item'"),
+            maxResults: z
+                .number()
+                .optional()
+                .default(20)
+                .describe("Maximum number of results to return (default: 20)"),
+            includeLayout: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Include layout styles for each matched component"),
+            shortPath: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Show only last 3 path segments (default: true)"),
+            summary: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return only component counts by name instead of full list (default: false)"),
+            format: z
+                .enum(["json", "tonl"])
+                .optional()
+                .default("tonl")
+                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)")
+        }
+    },
+    async ({ pattern, maxResults, includeLayout, shortPath, summary, format }) => {
+        const result = await findComponents(pattern, { maxResults, includeLayout, shortPath, summary, format });
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Find Components (pattern: "${pattern}"):\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
 // Tool: Get network requests
 registerToolWithTelemetry(
     "get_network_requests",
@@ -807,8 +1062,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format, ~30-50% smaller)"),
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format, ~30-50% smaller)"),
             summary: z
                 .boolean()
                 .optional()
@@ -893,8 +1148,8 @@ registerToolWithTelemetry(
             format: z
                 .enum(["text", "tonl"])
                 .optional()
-                .default("text")
-                .describe("Output format: 'text' (default) or 'tonl' (compact token-optimized format)")
+                .default("tonl")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)")
         }
     },
     async ({ urlPattern, maxResults, format }) => {
