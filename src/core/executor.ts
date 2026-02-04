@@ -486,6 +486,98 @@ export async function reloadApp(): Promise<ExecutionResult> {
 // React Component Tree Inspection (via DevTools Global Hook)
 // ============================================================================
 
+// TONL (Token-Optimized Notation Language) formatters for component tools
+// These reduce token usage by 40-60% compared to JSON for nested/repetitive structures
+
+interface ComponentTreeNode {
+    component: string;
+    children?: ComponentTreeNode[];
+    props?: Record<string, unknown>;
+    layout?: Record<string, unknown>;
+}
+
+function formatTreeToTonl(node: ComponentTreeNode, indent = 0): string {
+    const prefix = '  '.repeat(indent);
+    let result = `${prefix}${node.component}`;
+
+    // Add props inline if present
+    if (node.props && Object.keys(node.props).length > 0) {
+        const propsStr = Object.entries(node.props)
+            .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+            .join(',');
+        result += ` (${propsStr})`;
+    }
+
+    // Add layout inline if present
+    if (node.layout && Object.keys(node.layout).length > 0) {
+        const layoutStr = Object.entries(node.layout)
+            .map(([k, v]) => `${k}:${v}`)
+            .join(',');
+        result += ` [${layoutStr}]`;
+    }
+
+    result += '\n';
+
+    // Recurse children
+    if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+            result += formatTreeToTonl(child, indent + 1);
+        }
+    }
+
+    return result;
+}
+
+interface ScreenElement {
+    component: string;
+    path: string;
+    depth: number;
+    layout?: Record<string, unknown>;
+    text?: string;
+    identifiers?: Record<string, string>;
+}
+
+function formatScreenLayoutToTonl(elements: ScreenElement[]): string {
+    const lines: string[] = ['#elements{component,path,depth,layout,id}'];
+    for (const el of elements) {
+        const layout = el.layout ? Object.entries(el.layout).map(([k, v]) => `${k}:${v}`).join(';') : '';
+        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || '';
+        lines.push(`${el.component}|${el.path}|${el.depth}|${layout}|${id}`);
+    }
+    return lines.join('\n');
+}
+
+interface FoundComponent {
+    component: string;
+    path: string;
+    depth: number;
+    key?: string;
+    testID?: string;
+    layout?: Record<string, unknown>;
+}
+
+function formatFoundComponentsToTonl(components: FoundComponent[]): string {
+    const lines: string[] = ['#found{component,path,depth,key,layout}'];
+    for (const c of components) {
+        const layout = c.layout ? Object.entries(c.layout).map(([k, v]) => `${k}:${v}`).join(';') : '';
+        lines.push(`${c.component}|${c.path}|${c.depth}|${c.key || ''}|${layout}`);
+    }
+    return lines.join('\n');
+}
+
+interface ComponentSummary {
+    component: string;
+    count: number;
+}
+
+function formatSummaryToTonl(components: ComponentSummary[], total: number): string {
+    const lines: string[] = [`#summary total=${total}`];
+    for (const c of components) {
+        lines.push(`${c.component}:${c.count}`);
+    }
+    return lines.join('\n');
+}
+
 /**
  * Get the React component tree from the running app.
  * This traverses the fiber tree to extract component hierarchy with names.
@@ -494,8 +586,10 @@ export async function getComponentTree(options: {
     maxDepth?: number;
     includeProps?: boolean;
     includeStyles?: boolean;
+    hideInternals?: boolean;
+    format?: 'json' | 'tonl';
 } = {}): Promise<ExecutionResult> {
-    const { maxDepth = 20, includeProps = false, includeStyles = false } = options;
+    const { maxDepth = 50, includeProps = false, includeStyles = false, hideInternals = true, format = 'json' } = options;
 
     const expression = `
         (function() {
@@ -522,11 +616,20 @@ export async function getComponentTree(options: {
             const maxDepth = ${maxDepth};
             const includeProps = ${includeProps};
             const includeStyles = ${includeStyles};
+            const hideInternals = ${hideInternals};
+
+            // Internal RN components to hide
+            const internalPatterns = /^(RCT|RNS|Animated\\(|AnimatedComponent|VirtualizedList|CellRenderer|ScrollViewContext|PerformanceLoggerContext|RootTagContext|HeaderShownContext|HeaderHeightContext|HeaderBackContext|SafeAreaFrameContext|SafeAreaInsetsContext|VirtualizedListContext|VirtualizedListCellContextProvider|StaticContainer|DelayedFreeze|Freeze|Suspender|DebugContainer|MaybeNestedStack|SceneView|NavigationContent|PreventRemoveProvider|EnsureSingleNavigator)/;
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
                 if (typeof fiber.type === 'string') return fiber.type; // Host component (View, Text, etc.)
                 return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function shouldHide(name) {
+                if (!hideInternals || !name) return false;
+                return internalPatterns.test(name);
             }
 
             function extractLayoutStyles(style) {
@@ -561,7 +664,7 @@ export async function getComponentTree(options: {
                 const name = getComponentName(fiber);
 
                 // Skip anonymous/internal components unless they have meaningful children
-                if (!name) {
+                if (!name || shouldHide(name)) {
                     // Still traverse children
                     let child = fiber.child;
                     const children = [];
@@ -617,7 +720,22 @@ export async function getComponentTree(options: {
         })()
     `;
 
-    return executeInApp(expression, false);
+    const result = await executeInApp(expression, false);
+
+    // Apply TONL formatting if requested
+    if (format === 'tonl' && result.success && result.result) {
+        try {
+            const parsed = JSON.parse(result.result);
+            if (parsed.tree) {
+                const tonl = formatTreeToTonl(parsed.tree);
+                return { success: true, result: tonl };
+            }
+        } catch {
+            // If parsing fails, return original result
+        }
+    }
+
+    return result;
 }
 
 /**
@@ -627,8 +745,11 @@ export async function getComponentTree(options: {
 export async function getScreenLayout(options: {
     maxDepth?: number;
     componentsOnly?: boolean;
+    shortPath?: boolean;
+    summary?: boolean;
+    format?: 'json' | 'tonl';
 } = {}): Promise<ExecutionResult> {
-    const { maxDepth = 30, componentsOnly = false } = options;
+    const { maxDepth = 60, componentsOnly = false, shortPath = true, summary = false, format = 'json' } = options;
 
     const expression = `
         (function() {
@@ -649,6 +770,9 @@ export async function getScreenLayout(options: {
 
             const maxDepth = ${maxDepth};
             const componentsOnly = ${componentsOnly};
+            const shortPath = ${shortPath};
+            const summaryMode = ${summary};
+            const pathSegments = 3; // Number of path segments to show in shortPath mode
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
@@ -658,6 +782,13 @@ export async function getScreenLayout(options: {
 
             function isHostComponent(fiber) {
                 return typeof fiber?.type === 'string';
+            }
+
+            function formatPath(pathArray) {
+                if (!shortPath || pathArray.length <= pathSegments) {
+                    return pathArray.join(' > ');
+                }
+                return '... > ' + pathArray.slice(-pathSegments).join(' > ');
             }
 
             function extractAllStyles(style) {
@@ -718,7 +849,7 @@ export async function getScreenLayout(options: {
 
                     const element = {
                         component: name,
-                        path: path.join(' > '),
+                        path: formatPath(path),
                         depth
                     };
 
@@ -749,6 +880,23 @@ export async function getScreenLayout(options: {
 
             walkFiber(roots[0].current, 0, []);
 
+            // Summary mode: return counts by component name
+            if (summaryMode) {
+                const counts = {};
+                for (const el of elements) {
+                    counts[el.component] = (counts[el.component] || 0) + 1;
+                }
+                // Sort by count descending
+                const sorted = Object.entries(counts)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([name, count]) => ({ component: name, count }));
+                return {
+                    totalElements: elements.length,
+                    uniqueComponents: sorted.length,
+                    components: sorted
+                };
+            }
+
             return {
                 totalElements: elements.length,
                 elements: elements
@@ -756,7 +904,27 @@ export async function getScreenLayout(options: {
         })()
     `;
 
-    return executeInApp(expression, false);
+    const result = await executeInApp(expression, false);
+
+    // Apply TONL formatting if requested
+    if (format === 'tonl' && result.success && result.result) {
+        try {
+            const parsed = JSON.parse(result.result);
+            if (parsed.components) {
+                // Summary mode
+                const tonl = formatSummaryToTonl(parsed.components, parsed.totalElements);
+                return { success: true, result: tonl };
+            } else if (parsed.elements) {
+                // Full element list
+                const tonl = formatScreenLayoutToTonl(parsed.elements);
+                return { success: true, result: tonl };
+            }
+        } catch {
+            // If parsing fails, return original result
+        }
+    }
+
+    return result;
 }
 
 /**
@@ -766,8 +934,10 @@ export async function inspectComponent(componentName: string, options: {
     index?: number;
     includeState?: boolean;
     includeChildren?: boolean;
+    shortPath?: boolean;
+    simplifyHooks?: boolean;
 } = {}): Promise<ExecutionResult> {
-    const { index = 0, includeState = true, includeChildren = false } = options;
+    const { index = 0, includeState = true, includeChildren = false, shortPath = true, simplifyHooks = true } = options;
     const escapedName = componentName.replace(/'/g, "\\'");
 
     const expression = `
@@ -791,11 +961,21 @@ export async function inspectComponent(componentName: string, options: {
             const targetIndex = ${index};
             const includeState = ${includeState};
             const includeChildren = ${includeChildren};
+            const shortPath = ${shortPath};
+            const simplifyHooks = ${simplifyHooks};
+            const pathSegments = 3;
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
                 if (typeof fiber.type === 'string') return fiber.type;
                 return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function formatPath(pathArray) {
+                if (!shortPath || pathArray.length <= pathSegments) {
+                    return pathArray.join(' > ');
+                }
+                return '... > ' + pathArray.slice(-pathSegments).join(' > ');
             }
 
             function extractStyles(style) {
@@ -869,7 +1049,7 @@ export async function inspectComponent(componentName: string, options: {
 
             const result = {
                 component: targetName,
-                path: path.join(' > '),
+                path: formatPath(path),
                 instancesFound: matches.length,
                 instanceIndex: targetIndex
             };
@@ -891,16 +1071,48 @@ export async function inspectComponent(componentName: string, options: {
 
             // State (for hooks, this is a linked list)
             if (includeState && fiber.memoizedState) {
+                // Simplified hook value serialization
+                function serializeHookValue(val, depth = 0) {
+                    if (depth > 2) return '[...]';
+                    if (val === null || val === undefined) return val;
+                    if (typeof val === 'function') return '[Function]';
+                    if (typeof val !== 'object') return val;
+                    // Skip React internal structures (effects, refs with destroy/create)
+                    if (val.create && val.destroy !== undefined) return '[Effect]';
+                    if (val.inst && val.deps) return '[Effect]';
+                    if (val.current !== undefined && Object.keys(val).length === 1) {
+                        // Ref object - just show current value
+                        return { current: serializeHookValue(val.current, depth + 1) };
+                    }
+                    if (Array.isArray(val)) {
+                        if (val.length > 5) return '[Array(' + val.length + ')]';
+                        return val.slice(0, 5).map(v => serializeHookValue(v, depth + 1));
+                    }
+                    const keys = Object.keys(val);
+                    if (keys.length > 10) return '[Object(' + keys.length + ' keys)]';
+                    const result = {};
+                    for (const k of keys.slice(0, 10)) {
+                        result[k] = serializeHookValue(val[k], depth + 1);
+                    }
+                    return result;
+                }
+
                 // For function components with hooks
                 const states = [];
                 let state = fiber.memoizedState;
                 let hookIndex = 0;
                 while (state && hookIndex < 20) {
                     if (state.memoizedState !== undefined) {
-                        states.push({
-                            hookIndex,
-                            value: serializeValue(state.memoizedState)
-                        });
+                        const hookVal = simplifyHooks
+                            ? serializeHookValue(state.memoizedState)
+                            : serializeValue(state.memoizedState);
+                        // Skip effect hooks in simplified mode
+                        if (!simplifyHooks || (hookVal !== '[Effect]' && hookVal !== undefined)) {
+                            states.push({
+                                hookIndex,
+                                value: hookVal
+                            });
+                        }
                     }
                     state = state.next;
                     hookIndex++;
@@ -931,8 +1143,11 @@ export async function inspectComponent(componentName: string, options: {
 export async function findComponents(pattern: string, options: {
     maxResults?: number;
     includeLayout?: boolean;
+    shortPath?: boolean;
+    summary?: boolean;
+    format?: 'json' | 'tonl';
 } = {}): Promise<ExecutionResult> {
-    const { maxResults = 50, includeLayout = false } = options;
+    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = 'json' } = options;
     const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
     const expression = `
@@ -956,11 +1171,21 @@ export async function findComponents(pattern: string, options: {
             const regex = new RegExp(pattern, 'i');
             const maxResults = ${maxResults};
             const includeLayout = ${includeLayout};
+            const shortPath = ${shortPath};
+            const summaryMode = ${summary};
+            const pathSegments = 3;
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
                 if (typeof fiber.type === 'string') return fiber.type;
                 return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function formatPath(pathArray) {
+                if (!shortPath || pathArray.length <= pathSegments) {
+                    return pathArray.join(' > ');
+                }
+                return '... > ' + pathArray.slice(-pathSegments).join(' > ');
             }
 
             function extractLayoutStyles(style) {
@@ -989,7 +1214,7 @@ export async function findComponents(pattern: string, options: {
                 if (name && regex.test(name)) {
                     const entry = {
                         component: name,
-                        path: path.join(' > '),
+                        path: formatPath(path),
                         depth
                     };
 
@@ -1014,6 +1239,23 @@ export async function findComponents(pattern: string, options: {
 
             search(roots[0].current, [], 0);
 
+            // Summary mode: just return counts by component name
+            if (summaryMode) {
+                const counts = {};
+                for (const r of results) {
+                    counts[r.component] = (counts[r.component] || 0) + 1;
+                }
+                const sorted = Object.entries(counts)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([name, count]) => ({ component: name, count }));
+                return {
+                    pattern,
+                    totalMatches: results.length,
+                    uniqueComponents: sorted.length,
+                    components: sorted
+                };
+            }
+
             return {
                 pattern,
                 found: results.length,
@@ -1022,5 +1264,27 @@ export async function findComponents(pattern: string, options: {
         })()
     `;
 
-    return executeInApp(expression, false);
+    const result = await executeInApp(expression, false);
+
+    // Apply TONL formatting if requested
+    if (format === 'tonl' && result.success && result.result) {
+        try {
+            const parsed = JSON.parse(result.result);
+            if (parsed.components) {
+                if (parsed.totalMatches !== undefined) {
+                    // Summary mode
+                    const tonl = formatSummaryToTonl(parsed.components, parsed.totalMatches);
+                    return { success: true, result: `pattern: ${parsed.pattern}\n${tonl}` };
+                } else {
+                    // Full list mode
+                    const tonl = formatFoundComponentsToTonl(parsed.components);
+                    return { success: true, result: `pattern: ${parsed.pattern}\nfound: ${parsed.found}\n${tonl}` };
+                }
+            }
+        } catch {
+            // If parsing fails, return original result
+        }
+    }
+
+    return result;
 }

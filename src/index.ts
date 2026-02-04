@@ -799,8 +799,8 @@ registerToolWithTelemetry(
             maxDepth: z
                 .number()
                 .optional()
-                .default(20)
-                .describe("Maximum tree depth to traverse (default: 20)"),
+                .default(50)
+                .describe("Maximum tree depth to traverse (default: 50)"),
             includeProps: z
                 .boolean()
                 .optional()
@@ -810,11 +810,21 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Include layout styles (padding, margin, flex, etc.)")
+                .describe("Include layout styles (padding, margin, flex, etc.)"),
+            hideInternals: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Hide internal RN components (RCTView, RNS*, Animated, etc.) for cleaner output (default: true)"),
+            format: z
+                .enum(["json", "tonl"])
+                .optional()
+                .default("json")
+                .describe("Output format: 'json' (default) or 'tonl' (compact indented tree, ~50% smaller)")
         }
     },
-    async ({ maxDepth, includeProps, includeStyles }) => {
-        const result = await getComponentTree({ maxDepth, includeProps, includeStyles });
+    async ({ maxDepth, includeProps, includeStyles, hideInternals, format }) => {
+        const result = await getComponentTree({ maxDepth, includeProps, includeStyles, hideInternals, format });
 
         if (!result.success) {
             return {
@@ -849,17 +859,32 @@ registerToolWithTelemetry(
             maxDepth: z
                 .number()
                 .optional()
-                .default(30)
-                .describe("Maximum tree depth to traverse (default: 30)"),
+                .default(60)
+                .describe("Maximum tree depth to traverse (default: 60)"),
             componentsOnly: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Only show custom components, hide host components (View, Text, etc.)")
+                .describe("Only show custom components, hide host components (View, Text, etc.)"),
+            shortPath: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Show only last 3 path segments instead of full path (default: true)"),
+            summary: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return only component counts by name instead of full element list (default: false)"),
+            format: z
+                .enum(["json", "tonl"])
+                .optional()
+                .default("json")
+                .describe("Output format: 'json' (default) or 'tonl' (pipe-delimited rows, ~40% smaller)")
         }
     },
-    async ({ maxDepth, componentsOnly }) => {
-        const result = await getScreenLayout({ maxDepth, componentsOnly });
+    async ({ maxDepth, componentsOnly, shortPath, summary, format }) => {
+        const result = await getScreenLayout({ maxDepth, componentsOnly, shortPath, summary, format });
 
         if (!result.success) {
             return {
@@ -908,11 +933,21 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Include direct children component names")
+                .describe("Include direct children component names"),
+            shortPath: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Show only last 3 path segments (default: true)"),
+            simplifyHooks: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Simplify hooks output by hiding effects and reducing depth (default: true)")
         }
     },
-    async ({ componentName, index, includeState, includeChildren }) => {
-        const result = await inspectComponent(componentName, { index, includeState, includeChildren });
+    async ({ componentName, index, includeState, includeChildren, shortPath, simplifyHooks }) => {
+        const result = await inspectComponent(componentName, { index, includeState, includeChildren, shortPath, simplifyHooks });
 
         if (!result.success) {
             return {
@@ -950,17 +985,32 @@ registerToolWithTelemetry(
             maxResults: z
                 .number()
                 .optional()
-                .default(50)
-                .describe("Maximum number of results to return (default: 50)"),
+                .default(20)
+                .describe("Maximum number of results to return (default: 20)"),
             includeLayout: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Include layout styles for each matched component")
+                .describe("Include layout styles for each matched component"),
+            shortPath: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Show only last 3 path segments (default: true)"),
+            summary: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe("Return only component counts by name instead of full list (default: false)"),
+            format: z
+                .enum(["json", "tonl"])
+                .optional()
+                .default("json")
+                .describe("Output format: 'json' (default) or 'tonl' (pipe-delimited rows, ~40% smaller)")
         }
     },
-    async ({ pattern, maxResults, includeLayout }) => {
-        const result = await findComponents(pattern, { maxResults, includeLayout });
+    async ({ pattern, maxResults, includeLayout, shortPath, summary, format }) => {
+        const result = await findComponents(pattern, { maxResults, includeLayout, shortPath, summary, format });
 
         if (!result.success) {
             return {
