@@ -481,3 +481,546 @@ export async function reloadApp(): Promise<ExecutionResult> {
         };
     }
 }
+
+// ============================================================================
+// React Component Tree Inspection (via DevTools Global Hook)
+// ============================================================================
+
+/**
+ * Get the React component tree from the running app.
+ * This traverses the fiber tree to extract component hierarchy with names.
+ */
+export async function getComponentTree(options: {
+    maxDepth?: number;
+    includeProps?: boolean;
+    includeStyles?: boolean;
+} = {}): Promise<ExecutionResult> {
+    const { maxDepth = 20, includeProps = false, includeStyles = false } = options;
+
+    const expression = `
+        (function() {
+            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not found. Make sure you are running a development build.' };
+
+            // Try to get fiber roots (renderer ID is usually 1)
+            let roots = [];
+            if (hook.getFiberRoots) {
+                roots = [...(hook.getFiberRoots(1) || [])];
+            }
+            if (roots.length === 0 && hook.renderers) {
+                // Try all renderers
+                for (const [id] of hook.renderers) {
+                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
+                    if (r.length > 0) {
+                        roots = r;
+                        break;
+                    }
+                }
+            }
+            if (roots.length === 0) return { error: 'No fiber roots found. The app may not have rendered yet.' };
+
+            const maxDepth = ${maxDepth};
+            const includeProps = ${includeProps};
+            const includeStyles = ${includeStyles};
+
+            function getComponentName(fiber) {
+                if (!fiber || !fiber.type) return null;
+                if (typeof fiber.type === 'string') return fiber.type; // Host component (View, Text, etc.)
+                return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function extractLayoutStyles(style) {
+                if (!style) return null;
+                const merged = Array.isArray(style)
+                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
+                    : (typeof style === 'object' ? style : {});
+
+                const layout = {};
+                const layoutKeys = [
+                    'padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
+                    'paddingHorizontal', 'paddingVertical',
+                    'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
+                    'marginHorizontal', 'marginVertical',
+                    'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+                    'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
+                    'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
+                    'position', 'top', 'bottom', 'left', 'right',
+                    'gap', 'rowGap', 'columnGap',
+                    'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth'
+                ];
+
+                for (const key of layoutKeys) {
+                    if (merged[key] !== undefined) layout[key] = merged[key];
+                }
+                return Object.keys(layout).length > 0 ? layout : null;
+            }
+
+            function walkFiber(fiber, depth) {
+                if (!fiber || depth > maxDepth) return null;
+
+                const name = getComponentName(fiber);
+
+                // Skip anonymous/internal components unless they have meaningful children
+                if (!name) {
+                    // Still traverse children
+                    let child = fiber.child;
+                    const children = [];
+                    while (child) {
+                        const childResult = walkFiber(child, depth);
+                        if (childResult) children.push(childResult);
+                        child = child.sibling;
+                    }
+                    // Return first meaningful child or null
+                    return children.length === 1 ? children[0] : (children.length > 1 ? { component: '(Fragment)', children } : null);
+                }
+
+                const node = { component: name };
+
+                // Include props if requested (excluding children and style for cleaner output)
+                if (includeProps && fiber.memoizedProps) {
+                    const props = {};
+                    for (const key of Object.keys(fiber.memoizedProps)) {
+                        if (key === 'children' || key === 'style') continue;
+                        const val = fiber.memoizedProps[key];
+                        if (typeof val === 'function') {
+                            props[key] = '[Function]';
+                        } else if (typeof val === 'object' && val !== null) {
+                            props[key] = Array.isArray(val) ? '[Array]' : '[Object]';
+                        } else {
+                            props[key] = val;
+                        }
+                    }
+                    if (Object.keys(props).length > 0) node.props = props;
+                }
+
+                // Include layout styles if requested
+                if (includeStyles && fiber.memoizedProps?.style) {
+                    const layout = extractLayoutStyles(fiber.memoizedProps.style);
+                    if (layout) node.layout = layout;
+                }
+
+                // Traverse children
+                let child = fiber.child;
+                const children = [];
+                while (child) {
+                    const childResult = walkFiber(child, depth + 1);
+                    if (childResult) children.push(childResult);
+                    child = child.sibling;
+                }
+                if (children.length > 0) node.children = children;
+
+                return node;
+            }
+
+            const tree = walkFiber(roots[0].current, 0);
+            return { tree };
+        })()
+    `;
+
+    return executeInApp(expression, false);
+}
+
+/**
+ * Get layout styles for all components on the current screen.
+ * Useful for verifying layout without screenshots.
+ */
+export async function getScreenLayout(options: {
+    maxDepth?: number;
+    componentsOnly?: boolean;
+} = {}): Promise<ExecutionResult> {
+    const { maxDepth = 30, componentsOnly = false } = options;
+
+    const expression = `
+        (function() {
+            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not found.' };
+
+            let roots = [];
+            if (hook.getFiberRoots) {
+                roots = [...(hook.getFiberRoots(1) || [])];
+            }
+            if (roots.length === 0 && hook.renderers) {
+                for (const [id] of hook.renderers) {
+                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
+                    if (r.length > 0) { roots = r; break; }
+                }
+            }
+            if (roots.length === 0) return { error: 'No fiber roots found.' };
+
+            const maxDepth = ${maxDepth};
+            const componentsOnly = ${componentsOnly};
+
+            function getComponentName(fiber) {
+                if (!fiber || !fiber.type) return null;
+                if (typeof fiber.type === 'string') return fiber.type;
+                return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function isHostComponent(fiber) {
+                return typeof fiber?.type === 'string';
+            }
+
+            function extractAllStyles(style) {
+                if (!style) return null;
+                const merged = Array.isArray(style)
+                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
+                    : (typeof style === 'object' ? style : {});
+                return Object.keys(merged).length > 0 ? merged : null;
+            }
+
+            function extractLayoutStyles(style) {
+                if (!style) return null;
+                const merged = Array.isArray(style)
+                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
+                    : (typeof style === 'object' ? style : {});
+
+                const layout = {};
+                const layoutKeys = [
+                    'padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
+                    'paddingHorizontal', 'paddingVertical',
+                    'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
+                    'marginHorizontal', 'marginVertical',
+                    'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+                    'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
+                    'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
+                    'position', 'top', 'bottom', 'left', 'right',
+                    'gap', 'rowGap', 'columnGap',
+                    'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth',
+                    'backgroundColor', 'borderColor', 'borderRadius'
+                ];
+
+                for (const key of layoutKeys) {
+                    if (merged[key] !== undefined) layout[key] = merged[key];
+                }
+                return Object.keys(layout).length > 0 ? layout : null;
+            }
+
+            const elements = [];
+
+            function walkFiber(fiber, depth, path) {
+                if (!fiber || depth > maxDepth) return;
+
+                const name = getComponentName(fiber);
+                const isHost = isHostComponent(fiber);
+
+                // Include host components (View, Text, etc.) or named components
+                if (name && (!componentsOnly || !isHost)) {
+                    const style = fiber.memoizedProps?.style;
+                    const layout = extractLayoutStyles(style);
+
+                    // Get text content if it's a Text component
+                    let textContent = null;
+                    if (name === 'Text' || name === 'RCTText') {
+                        const children = fiber.memoizedProps?.children;
+                        if (typeof children === 'string') textContent = children;
+                        else if (typeof children === 'number') textContent = String(children);
+                    }
+
+                    const element = {
+                        component: name,
+                        path: path.join(' > '),
+                        depth
+                    };
+
+                    if (layout) element.layout = layout;
+                    if (textContent) element.text = textContent.slice(0, 100);
+
+                    // Include key props for identification
+                    if (fiber.memoizedProps) {
+                        const identifiers = {};
+                        if (fiber.memoizedProps.testID) identifiers.testID = fiber.memoizedProps.testID;
+                        if (fiber.memoizedProps.accessibilityLabel) identifiers.accessibilityLabel = fiber.memoizedProps.accessibilityLabel;
+                        if (fiber.memoizedProps.nativeID) identifiers.nativeID = fiber.memoizedProps.nativeID;
+                        if (fiber.key) identifiers.key = fiber.key;
+                        if (Object.keys(identifiers).length > 0) element.identifiers = identifiers;
+                    }
+
+                    elements.push(element);
+                }
+
+                // Traverse children
+                let child = fiber.child;
+                while (child) {
+                    const childName = getComponentName(child);
+                    walkFiber(child, depth + 1, childName ? [...path, childName] : path);
+                    child = child.sibling;
+                }
+            }
+
+            walkFiber(roots[0].current, 0, []);
+
+            return {
+                totalElements: elements.length,
+                elements: elements
+            };
+        })()
+    `;
+
+    return executeInApp(expression, false);
+}
+
+/**
+ * Inspect a specific component by name, returning its props, state, and layout.
+ */
+export async function inspectComponent(componentName: string, options: {
+    index?: number;
+    includeState?: boolean;
+    includeChildren?: boolean;
+} = {}): Promise<ExecutionResult> {
+    const { index = 0, includeState = true, includeChildren = false } = options;
+    const escapedName = componentName.replace(/'/g, "\\'");
+
+    const expression = `
+        (function() {
+            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not found.' };
+
+            let roots = [];
+            if (hook.getFiberRoots) {
+                roots = [...(hook.getFiberRoots(1) || [])];
+            }
+            if (roots.length === 0 && hook.renderers) {
+                for (const [id] of hook.renderers) {
+                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
+                    if (r.length > 0) { roots = r; break; }
+                }
+            }
+            if (roots.length === 0) return { error: 'No fiber roots found.' };
+
+            const targetName = '${escapedName}';
+            const targetIndex = ${index};
+            const includeState = ${includeState};
+            const includeChildren = ${includeChildren};
+
+            function getComponentName(fiber) {
+                if (!fiber || !fiber.type) return null;
+                if (typeof fiber.type === 'string') return fiber.type;
+                return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function extractStyles(style) {
+                if (!style) return null;
+                const merged = Array.isArray(style)
+                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
+                    : (typeof style === 'object' ? style : {});
+                return Object.keys(merged).length > 0 ? merged : null;
+            }
+
+            function serializeValue(val, depth = 0) {
+                if (depth > 3) return '[Max depth]';
+                if (val === null) return null;
+                if (val === undefined) return undefined;
+                if (typeof val === 'function') return '[Function]';
+                if (typeof val !== 'object') return val;
+                if (Array.isArray(val)) {
+                    if (val.length > 10) return '[Array(' + val.length + ')]';
+                    return val.map(v => serializeValue(v, depth + 1));
+                }
+                // Object
+                const keys = Object.keys(val);
+                if (keys.length > 20) return '[Object(' + keys.length + ' keys)]';
+                const result = {};
+                for (const k of keys) {
+                    result[k] = serializeValue(val[k], depth + 1);
+                }
+                return result;
+            }
+
+            function getChildNames(fiber) {
+                const names = [];
+                let child = fiber?.child;
+                while (child && names.length < 20) {
+                    const name = getComponentName(child);
+                    if (name) names.push(name);
+                    child = child.sibling;
+                }
+                return names;
+            }
+
+            const matches = [];
+
+            function findComponent(fiber, path) {
+                if (!fiber) return;
+
+                const name = getComponentName(fiber);
+                if (name === targetName) {
+                    matches.push({ fiber, path: [...path, name] });
+                }
+
+                let child = fiber.child;
+                while (child) {
+                    const childName = getComponentName(child);
+                    findComponent(child, childName ? [...path, childName] : path);
+                    child = child.sibling;
+                }
+            }
+
+            findComponent(roots[0].current, []);
+
+            if (matches.length === 0) {
+                return { error: 'Component "' + targetName + '" not found in the component tree.' };
+            }
+
+            if (targetIndex >= matches.length) {
+                return { error: 'Component "' + targetName + '" found ' + matches.length + ' times, but index ' + targetIndex + ' requested.' };
+            }
+
+            const { fiber, path } = matches[targetIndex];
+
+            const result = {
+                component: targetName,
+                path: path.join(' > '),
+                instancesFound: matches.length,
+                instanceIndex: targetIndex
+            };
+
+            // Props (excluding children)
+            if (fiber.memoizedProps) {
+                const props = {};
+                for (const key of Object.keys(fiber.memoizedProps)) {
+                    if (key === 'children') continue;
+                    props[key] = serializeValue(fiber.memoizedProps[key]);
+                }
+                result.props = props;
+            }
+
+            // Style separately for clarity
+            if (fiber.memoizedProps?.style) {
+                result.style = extractStyles(fiber.memoizedProps.style);
+            }
+
+            // State (for hooks, this is a linked list)
+            if (includeState && fiber.memoizedState) {
+                // For function components with hooks
+                const states = [];
+                let state = fiber.memoizedState;
+                let hookIndex = 0;
+                while (state && hookIndex < 20) {
+                    if (state.memoizedState !== undefined) {
+                        states.push({
+                            hookIndex,
+                            value: serializeValue(state.memoizedState)
+                        });
+                    }
+                    state = state.next;
+                    hookIndex++;
+                }
+                if (states.length > 0) result.hooks = states;
+
+                // For class components, memoizedState is the state object directly
+                if (states.length === 0 && typeof fiber.memoizedState === 'object') {
+                    result.state = serializeValue(fiber.memoizedState);
+                }
+            }
+
+            // Direct children names
+            if (includeChildren) {
+                result.children = getChildNames(fiber);
+            }
+
+            return result;
+        })()
+    `;
+
+    return executeInApp(expression, false);
+}
+
+/**
+ * Find all components matching a name pattern and return summary info.
+ */
+export async function findComponents(pattern: string, options: {
+    maxResults?: number;
+    includeLayout?: boolean;
+} = {}): Promise<ExecutionResult> {
+    const { maxResults = 50, includeLayout = false } = options;
+    const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
+
+    const expression = `
+        (function() {
+            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not found.' };
+
+            let roots = [];
+            if (hook.getFiberRoots) {
+                roots = [...(hook.getFiberRoots(1) || [])];
+            }
+            if (roots.length === 0 && hook.renderers) {
+                for (const [id] of hook.renderers) {
+                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
+                    if (r.length > 0) { roots = r; break; }
+                }
+            }
+            if (roots.length === 0) return { error: 'No fiber roots found.' };
+
+            const pattern = '${escapedPattern}';
+            const regex = new RegExp(pattern, 'i');
+            const maxResults = ${maxResults};
+            const includeLayout = ${includeLayout};
+
+            function getComponentName(fiber) {
+                if (!fiber || !fiber.type) return null;
+                if (typeof fiber.type === 'string') return fiber.type;
+                return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function extractLayoutStyles(style) {
+                if (!style) return null;
+                const merged = Array.isArray(style)
+                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
+                    : (typeof style === 'object' ? style : {});
+
+                const layout = {};
+                const keys = ['padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
+                    'paddingHorizontal', 'paddingVertical', 'margin', 'marginTop', 'marginBottom',
+                    'marginLeft', 'marginRight', 'marginHorizontal', 'marginVertical',
+                    'width', 'height', 'flex', 'flexDirection', 'justifyContent', 'alignItems'];
+                for (const k of keys) {
+                    if (merged[k] !== undefined) layout[k] = merged[k];
+                }
+                return Object.keys(layout).length > 0 ? layout : null;
+            }
+
+            const results = [];
+
+            function search(fiber, path, depth) {
+                if (!fiber || results.length >= maxResults) return;
+
+                const name = getComponentName(fiber);
+                if (name && regex.test(name)) {
+                    const entry = {
+                        component: name,
+                        path: path.join(' > '),
+                        depth
+                    };
+
+                    if (fiber.memoizedProps?.testID) entry.testID = fiber.memoizedProps.testID;
+                    if (fiber.key) entry.key = fiber.key;
+
+                    if (includeLayout && fiber.memoizedProps?.style) {
+                        const layout = extractLayoutStyles(fiber.memoizedProps.style);
+                        if (layout) entry.layout = layout;
+                    }
+
+                    results.push(entry);
+                }
+
+                let child = fiber.child;
+                while (child && results.length < maxResults) {
+                    const childName = getComponentName(child);
+                    search(child, childName ? [...path, childName] : path, depth + 1);
+                    child = child.sibling;
+                }
+            }
+
+            search(roots[0].current, [], 0);
+
+            return {
+                pattern,
+                found: results.length,
+                components: results
+            };
+        })()
+    `;
+
+    return executeInApp(expression, false);
+}
