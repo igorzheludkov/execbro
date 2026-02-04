@@ -148,6 +148,46 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 | `find_components`    | **Targeted search**: Find components by pattern with optional layout info |
 | `get_screen_layout`  | Full layout data - use sparingly, can be large for complex screens  |
 
+### Element Inspector (Coordinate-Based)
+
+Inspect React components at specific screen coordinates - like React Native's built-in Element Inspector, but programmatically.
+
+| Tool                       | Description                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `get_inspector_selection`  | **Main tool**: Get React component at coordinates. Auto-enables inspector and taps if x/y provided |
+| `toggle_element_inspector` | Manually toggle the Element Inspector overlay on/off                           |
+
+**Quick Inspection (Recommended)**:
+```
+# Single call - auto-enables inspector, taps, returns component info
+get_inspector_selection(x=210, y=400)
+```
+
+Returns:
+```
+Element: FastImageView
+Path: App > RootNavigation > ... > PlayerModal > FastImage > FastImageView
+Frame: (62.3, 130.0) 295.67x295.67
+Style: { borderRadius: 15, overflow: "hidden" }
+```
+
+**Manual Flow** (for more control):
+```
+# 1. Enable the inspector overlay
+toggle_element_inspector()
+
+# 2. Tap to select element (iOS)
+ios_tap(x=210, y=400)
+
+# 3. Read the selection
+get_inspector_selection()
+
+# 4. Disable overlay when done
+toggle_element_inspector()
+```
+
+**Token Efficiency**: Returns ~0.2-0.5KB vs 15-25KB for full component tree. Works on all React Native versions including Fabric/New Architecture.
+
 ### Android (ADB)
 
 | Tool                        | Description                                                   |

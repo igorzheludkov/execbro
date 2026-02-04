@@ -24,6 +24,11 @@ import {
     getScreenLayout,
     inspectComponent,
     findComponents,
+    inspectAtPoint,
+    toggleElementInspector,
+    isInspectorActive,
+    getInspectorSelection,
+    getFirstConnectedApp,
     getLogs,
     searchLogs,
     getLogSummary,
@@ -1043,6 +1048,240 @@ registerToolWithTelemetry(
                 {
                     type: "text",
                     text: `Find Components (pattern: "${pattern}"):\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Toggle Element Inspector programmatically
+registerToolWithTelemetry(
+    "toggle_element_inspector",
+    {
+        description:
+            "Toggle React Native's Element Inspector overlay programmatically. This is the same as manually doing: Dev Menu > Toggle Element Inspector. Useful for enabling inspector features without user interaction.",
+        inputSchema: {}
+    },
+    async () => {
+        const result = await toggleElementInspector();
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        try {
+            const parsed = JSON.parse(result.result || "{}");
+            if (parsed.error) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Failed to toggle Element Inspector: ${parsed.error}`
+                        }
+                    ],
+                    isError: true
+                };
+            }
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: parsed.message || "Element Inspector toggled successfully"
+                    }
+                ]
+            };
+        } catch {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.result || "Element Inspector toggled"
+                    }
+                ]
+            };
+        }
+    }
+);
+
+// Tool: Get currently selected element from Element Inspector
+registerToolWithTelemetry(
+    "get_inspector_selection",
+    {
+        description:
+            "Get the React component at coordinates or read the current Element Inspector selection. If x/y provided: auto-enables inspector, taps at coordinates, returns component hierarchy. If no coordinates: returns current selection. Works in all React Native versions including Fabric.",
+        inputSchema: {
+            x: z
+                .number()
+                .optional()
+                .describe("X coordinate (in points). If provided with y, auto-taps at this location."),
+            y: z
+                .number()
+                .optional()
+                .describe("Y coordinate (in points). If provided with x, auto-taps at this location.")
+        }
+    },
+    async ({ x, y }) => {
+        // If coordinates provided, do the full flow: enable inspector -> tap -> read
+        if (x !== undefined && y !== undefined) {
+            // Check if inspector is active
+            const inspectorActive = await isInspectorActive();
+
+            // Enable inspector if not active
+            if (!inspectorActive) {
+                await toggleElementInspector();
+                // Wait for inspector to initialize
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+            // Detect platform from connected app
+            const app = getFirstConnectedApp();
+            if (!app) {
+                return {
+                    content: [{ type: "text", text: "No app connected. Run scan_metro first." }],
+                    isError: true
+                };
+            }
+
+            const isIOS = app.deviceInfo.title?.toLowerCase().includes('iphone') ||
+                         app.deviceInfo.title?.toLowerCase().includes('ipad') ||
+                         app.deviceInfo.deviceName?.toLowerCase().includes('simulator') ||
+                         app.deviceInfo.description?.toLowerCase().includes('ios');
+
+            // Tap at coordinates
+            try {
+                if (isIOS) {
+                    await iosTap(x, y, {});
+                } else {
+                    await androidTap(x, y);
+                }
+            } catch (tapError) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `Failed to tap at (${x}, ${y}): ${tapError instanceof Error ? tapError.message : String(tapError)}`
+                    }],
+                    isError: true
+                };
+            }
+
+            // Wait for selection to update
+            await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        // Read the current selection
+        const result = await getInspectorSelection();
+
+        if (!result.success) {
+            return {
+                content: [{ type: "text", text: `Error: ${result.error}` }],
+                isError: true
+            };
+        }
+
+        try {
+            const parsed = JSON.parse(result.result || "{}");
+            if (parsed.error) {
+                const hint = parsed.hint ? `\n\n${parsed.hint}` : "";
+                return {
+                    content: [{ type: "text", text: `${parsed.error}${hint}` }],
+                    isError: true
+                };
+            }
+
+            // Format the output nicely
+            let output = `Element: ${parsed.element}\n`;
+            output += `Path: ${parsed.path}\n`;
+            if (parsed.frame) {
+                output += `Frame: (${parsed.frame.left?.toFixed(1)}, ${parsed.frame.top?.toFixed(1)}) ${parsed.frame.width}x${parsed.frame.height}\n`;
+            }
+            if (parsed.style) {
+                output += `Style: ${JSON.stringify(parsed.style, null, 2)}\n`;
+            }
+
+            return {
+                content: [{ type: "text", text: output }]
+            };
+        } catch {
+            return {
+                content: [{ type: "text", text: result.result || "No selection data" }]
+            };
+        }
+    }
+);
+
+// Tool: Inspect component at coordinates (like Element Inspector)
+registerToolWithTelemetry(
+    "inspect_at_point",
+    {
+        description:
+            "Inspect the React component at specific (x, y) coordinates. Works like React Native's Element Inspector. **NOTE**: This API (getInspectorDataForViewAtPoint) may not be available in newer React Native versions with Fabric. If unavailable, use ios_describe_point/android_describe_point for native element info, then find_components to locate the React component.",
+        inputSchema: {
+            x: z
+                .number()
+                .describe("X coordinate (in points for iOS, pixels for Android)"),
+            y: z
+                .number()
+                .describe("Y coordinate (in points for iOS, pixels for Android)"),
+            includeProps: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Include component props in the output (default: true)"),
+            includeFrame: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Include position/dimensions (frame) in the output (default: true)")
+        }
+    },
+    async ({ x, y, includeProps, includeFrame }) => {
+        const result = await inspectAtPoint(x, y, { includeProps, includeFrame });
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        // Parse the result to check for errors in the response
+        try {
+            const parsed = JSON.parse(result.result || "{}");
+            if (parsed.error) {
+                const hint = parsed.hint ? `\n\n${parsed.hint}` : "";
+                const alternatives = parsed.alternatives ? `\n\nAlternatives:\n${parsed.alternatives.map((a: string) => `  - ${a}`).join('\n')}` : "";
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Inspect at (${x}, ${y}): ${parsed.error}${hint}${alternatives}`
+                        }
+                    ],
+                    isError: true
+                };
+            }
+        } catch {
+            // If parsing fails, just return the raw result
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: `Element at (${x}, ${y}):\n\n${result.result}`
                 }
             ]
         };

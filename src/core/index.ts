@@ -85,7 +85,12 @@ export {
     getComponentTree,
     getScreenLayout,
     inspectComponent,
-    findComponents
+    findComponents,
+    // Coordinate-based inspection
+    inspectAtPoint,
+    toggleElementInspector,
+    isInspectorActive,
+    getInspectorSelection
 } from "./executor.js";
 
 // Android (ADB)

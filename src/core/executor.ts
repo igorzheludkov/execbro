@@ -1395,3 +1395,301 @@ export async function findComponents(pattern: string, options: {
 
     return result;
 }
+
+// ============================================================================
+// Coordinate-Based Element Inspection (via DevTools Inspector API)
+// ============================================================================
+
+/**
+ * Toggle the Element Inspector via DevSettings native module.
+ * This enables the inspector overlay programmatically.
+ */
+export async function toggleElementInspector(): Promise<ExecutionResult> {
+    const expression = `
+        (function() {
+            const ds = globalThis.nativeModuleProxy?.DevSettings;
+            if (!ds) return { error: 'DevSettings not available' };
+
+            const proto = Object.getPrototypeOf(ds);
+            if (!proto || typeof proto.toggleElementInspector !== 'function') {
+                return { error: 'toggleElementInspector not found' };
+            }
+
+            try {
+                proto.toggleElementInspector.call(ds);
+                return { success: true, message: 'Element Inspector toggled' };
+            } catch (e) {
+                return { error: 'Failed to toggle: ' + e.message };
+            }
+        })()
+    `;
+
+    return executeInApp(expression, false);
+}
+
+/**
+ * Check if the Element Inspector overlay is currently active.
+ */
+export async function isInspectorActive(): Promise<boolean> {
+    const expression = `
+        (function() {
+            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return false;
+
+            let roots = [...(hook.getFiberRoots?.(1) || [])];
+            if (roots.length === 0) {
+                for (const [id] of (hook.renderers || [])) {
+                    roots = [...(hook.getFiberRoots?.(id) || [])];
+                    if (roots.length > 0) break;
+                }
+            }
+            if (roots.length === 0) return false;
+
+            function findComponent(fiber, targetName, depth = 0) {
+                if (!fiber || depth > 100) return null;
+                const name = fiber.type?.displayName || fiber.type?.name;
+                if (name === targetName) return fiber;
+                let child = fiber.child;
+                while (child) {
+                    const found = findComponent(child, targetName, depth + 1);
+                    if (found) return found;
+                    child = child.sibling;
+                }
+                return null;
+            }
+
+            return !!findComponent(roots[0].current, 'InspectorPanel');
+        })()
+    `;
+
+    const result = await executeInApp(expression, false);
+    if (result.success && result.result) {
+        return result.result === 'true';
+    }
+    return false;
+}
+
+/**
+ * Get the currently selected element from the Element Inspector overlay.
+ * This reads the InspectorPanel component's props to get the hierarchy, frame, and style.
+ * Requires the Element Inspector to be enabled and an element to be selected.
+ */
+export async function getInspectorSelection(): Promise<ExecutionResult> {
+    const expression = `
+        (function() {
+            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not available.' };
+
+            // Find fiber roots
+            let roots = [...(hook.getFiberRoots?.(1) || [])];
+            if (roots.length === 0) {
+                for (const [id] of (hook.renderers || [])) {
+                    roots = [...(hook.getFiberRoots?.(id) || [])];
+                    if (roots.length > 0) break;
+                }
+            }
+            if (roots.length === 0) return { error: 'No fiber roots found.' };
+
+            // Find InspectorPanel component
+            function findComponent(fiber, targetName, depth = 0) {
+                if (!fiber || depth > 100) return null;
+                const name = fiber.type?.displayName || fiber.type?.name;
+                if (name === targetName) return fiber;
+                let child = fiber.child;
+                while (child) {
+                    const found = findComponent(child, targetName, depth + 1);
+                    if (found) return found;
+                    child = child.sibling;
+                }
+                return null;
+            }
+
+            const panelFiber = findComponent(roots[0].current, 'InspectorPanel');
+            if (!panelFiber) {
+                return {
+                    error: 'Element Inspector is not active.',
+                    hint: 'Use toggle_element_inspector to enable the inspector, then tap an element to select it.'
+                };
+            }
+
+            const props = panelFiber.memoizedProps;
+            if (!props.hierarchy || props.hierarchy.length === 0) {
+                return {
+                    error: 'No element selected.',
+                    hint: 'Tap on an element in the app to select it for inspection.'
+                };
+            }
+
+            // Build the path from hierarchy
+            const path = props.hierarchy.map(h => h.name).join(' > ');
+            const element = props.hierarchy[props.hierarchy.length - 1]?.name || 'Unknown';
+
+            // Extract style info
+            let style = {};
+            if (props.inspected?.style) {
+                const styles = Array.isArray(props.inspected.style)
+                    ? props.inspected.style
+                    : [props.inspected.style];
+                for (const s of styles) {
+                    if (s && typeof s === 'object') {
+                        Object.assign(style, s);
+                    }
+                }
+            }
+
+            return {
+                element,
+                path,
+                frame: props.inspected?.frame || null,
+                style: Object.keys(style).length > 0 ? style : null,
+                selection: props.selection,
+                hierarchyLength: props.hierarchy.length
+            };
+        })()
+    `;
+
+    return executeInApp(expression, false);
+}
+
+/**
+ * Inspect the React component at a specific (x, y) coordinate.
+ * Uses the same internal API as React Native's Element Inspector.
+ *
+ * Note: This API (getInspectorDataForViewAtPoint) is only available in certain
+ * React Native versions. In newer versions with Fabric, use ios_describe_point
+ * or android_describe_point as alternatives.
+ */
+export async function inspectAtPoint(x: number, y: number, options: {
+    includeProps?: boolean;
+    includeFrame?: boolean;
+} = {}): Promise<ExecutionResult> {
+    const { includeProps = true, includeFrame = true } = options;
+
+    const expression = `
+        (function() {
+            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not available. Make sure you are running a development build.' };
+            if (!hook.renderers) return { error: 'No renderers found in DevTools hook.' };
+
+            // Find a renderer with getInspectorDataForViewAtPoint
+            let inspectorFn = null;
+            let rendererId = null;
+            for (const [id, renderer] of hook.renderers) {
+                if (renderer.getInspectorDataForViewAtPoint) {
+                    inspectorFn = renderer.getInspectorDataForViewAtPoint.bind(renderer);
+                    rendererId = id;
+                    break;
+                }
+            }
+
+            if (!inspectorFn) {
+                // This API is not available in newer React Native versions (Fabric/New Architecture)
+                return {
+                    error: 'getInspectorDataForViewAtPoint not available in this React Native version.',
+                    hint: 'This API was removed in newer React Native versions. Use ios_describe_point or android_describe_point instead to get native element info at coordinates, then use find_components to locate the React component.',
+                    point: { x: ${x}, y: ${y} },
+                    alternatives: [
+                        'ios_describe_point(x, y) - get native accessibility element at point',
+                        'android_describe_point(x, y) - get native UI element at point',
+                        'find_components(pattern) - find React components by name pattern'
+                    ]
+                };
+            }
+
+            // Call the inspector API with coordinates
+            // Note: This is a callback-based API that we need to wrap
+            return new Promise((resolve) => {
+                try {
+                    inspectorFn(
+                        null,  // containerRef (null = root view)
+                        ${x},  // x coordinate
+                        ${y},  // y coordinate
+                        (viewData, viewTag, touchedViewTag, fiber, measure) => {
+                            if (!fiber) {
+                                resolve({
+                                    point: { x: ${x}, y: ${y} },
+                                    error: 'No component found at this point. The coordinates may be outside the app bounds or on a native-only element.'
+                                });
+                                return;
+                            }
+
+                            // Build hierarchy from the selected fiber by walking up the tree
+                            const hierarchy = [];
+                            let current = fiber;
+                            while (current) {
+                                const name = current.type?.displayName ||
+                                            current.type?.name ||
+                                            (typeof current.type === 'string' ? current.type : null);
+                                if (name) hierarchy.unshift(name);
+                                current = current.return;
+                            }
+
+                            const result = {
+                                point: { x: ${x}, y: ${y} },
+                                element: hierarchy[hierarchy.length - 1] || 'Unknown',
+                                path: hierarchy.join(' > ')
+                            };
+
+                            // Include props if requested (exclude children and functions for cleaner output)
+                            if (${includeProps} && viewData?.props) {
+                                const props = {};
+                                for (const key of Object.keys(viewData.props)) {
+                                    if (key === 'children') continue;
+                                    const val = viewData.props[key];
+                                    if (typeof val === 'function') {
+                                        props[key] = '[Function]';
+                                    } else if (typeof val === 'object' && val !== null) {
+                                        // Shallow serialize objects
+                                        try {
+                                            const str = JSON.stringify(val);
+                                            if (str.length > 200) {
+                                                props[key] = Array.isArray(val) ? '[Array(' + val.length + ')]' : '[Object]';
+                                            } else {
+                                                props[key] = val;
+                                            }
+                                        } catch {
+                                            props[key] = Array.isArray(val) ? '[Array]' : '[Object]';
+                                        }
+                                    } else {
+                                        props[key] = val;
+                                    }
+                                }
+                                if (Object.keys(props).length > 0) result.props = props;
+                            }
+
+                            // Include frame/dimensions if requested
+                            if (${includeFrame}) {
+                                if (viewData?.frame) {
+                                    result.frame = viewData.frame;
+                                }
+                                if (measure) {
+                                    // measure is a callback in some versions, an object in others
+                                    if (typeof measure === 'object') {
+                                        result.measure = measure;
+                                    }
+                                }
+                            }
+
+                            resolve(result);
+                        }
+                    );
+
+                    // Timeout after 3 seconds in case callback never fires
+                    setTimeout(() => {
+                        resolve({
+                            point: { x: ${x}, y: ${y} },
+                            error: 'Timeout: Inspector callback did not respond. The coordinates may be invalid or outside app bounds.'
+                        });
+                    }, 3000);
+                } catch (e) {
+                    resolve({
+                        point: { x: ${x}, y: ${y} },
+                        error: 'Exception calling inspector: ' + (e.message || String(e))
+                    });
+                }
+            });
+        })()
+    `;
+
+    return executeInApp(expression, true);
+}
