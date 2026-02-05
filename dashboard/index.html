@@ -416,6 +416,11 @@
             <div class="label">Avg Duration</div>
             <div class="value" id="avg-duration">-</div>
         </div>
+        <div class="stat-card">
+            <div class="label">NPM Downloads (Week)</div>
+            <div class="value" id="npm-downloads">-</div>
+            <div class="change" id="npm-downloads-trend"></div>
+        </div>
         <div class="stat-card stat-card-chart">
             <div class="label">User Activity</div>
             <div class="mini-chart-container">
@@ -525,6 +530,51 @@
     <script>
         // Configuration
         const API_URL = 'https://rn-debugger-telemetry.500griven.workers.dev';
+        const NPM_PACKAGE = 'react-native-ai-debugger';
+
+        async function fetchNpmDownloads() {
+            try {
+                const response = await fetch(
+                    `https://api.npmjs.org/downloads/range/last-month/${NPM_PACKAGE}`
+                );
+                if (!response.ok) return null;
+                const data = await response.json();
+
+                const downloads = data.downloads || [];
+                if (downloads.length < 14) return null;
+
+                // Use last 7 days of available data (API lags ~1 day)
+                const recentDays = downloads.slice(-14);
+                const thisWeek = recentDays.slice(-7).reduce((sum, d) => sum + d.downloads, 0);
+                const lastWeek = recentDays.slice(0, 7).reduce((sum, d) => sum + d.downloads, 0);
+
+                const trend = lastWeek > 0
+                    ? ((thisWeek - lastWeek) / lastWeek * 100)
+                    : (thisWeek > 0 ? 100 : 0);
+
+                return { thisWeek, lastWeek, trend };
+            } catch (error) {
+                console.error('Failed to fetch NPM downloads:', error);
+                return null;
+            }
+        }
+
+        async function updateNpmStats() {
+            const stats = await fetchNpmDownloads();
+            const valueEl = document.getElementById('npm-downloads');
+            const trendEl = document.getElementById('npm-downloads-trend');
+
+            if (!stats) {
+                valueEl.textContent = 'N/A';
+                trendEl.textContent = '';
+                return;
+            }
+
+            valueEl.textContent = stats.thisWeek.toLocaleString();
+            const trendSign = stats.trend >= 0 ? '+' : '';
+            trendEl.textContent = `${trendSign}${stats.trend.toFixed(1)}% vs last week`;
+            trendEl.className = `change ${stats.trend >= 0 ? 'positive' : 'negative'}`;
+        }
 
         let toolUsageChart = null;
         let timelineChart = null;
@@ -580,6 +630,7 @@
         function forceRefresh() {
             clearCache();
             loadData(true);
+            updateNpmStats();
         }
 
         function handleExcludeInputKeydown(event) {
@@ -1023,6 +1074,7 @@
         // Initial load
         renderExcludedUsers();
         loadData();
+        updateNpmStats();
     </script>
 </body>
 </html>
