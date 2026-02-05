@@ -1,6 +1,6 @@
 {
   "name": "react-native-ai-debugger",
-  "version": "1.0.32",
+  "version": "1.0.33",
   "description": "MCP server for AI-powered React Native debugging - logs, REPL, state inspection",
   "type": "module",
   "main": "build/index.js",
@@ -43,7 +43,7 @@
     "fast-xml-parser": "^5.3.3",
     "node-easyocr": "^1.0.9",
     "sharp": "^0.34.5",
-        "tonl": "^2.5.2",
+    "tonl": "^2.5.2",
     "ws": "^8.18.3",
     "zod": "^3.25.76"
   },
