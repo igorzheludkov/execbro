@@ -29,5 +29,5 @@ Thumbs.db
 PRODUCT_ROADMAP.md
 TODO.md
 
-# OCR trained data (downloaded by tesseract.js at runtime)
+# OCR trained data files (legacy, no longer used)
 *.traineddata

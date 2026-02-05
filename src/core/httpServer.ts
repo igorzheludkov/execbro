@@ -2369,8 +2369,7 @@ function createRequestHandler() {
                 // OCR endpoint - takes screenshot and runs OCR
                 const platform = params.get('platform') || 'ios';
                 const deviceId = params.get('deviceId') || undefined;
-                const engine = params.get('engine') || 'auto';
-                console.log(`[OCR] Request: platform=${platform}, engine=${engine}, deviceId=${deviceId || 'auto'}`);
+                console.log(`[OCR] Request: platform=${platform}, deviceId=${deviceId || 'auto'}`);
                 try {
                     // Take screenshot
                     let screenshotResult;
@@ -2395,12 +2394,11 @@ function createRequestHandler() {
 
                     console.log(`[OCR] Screenshot captured, size=${screenshotResult.data.length} bytes, scaleFactor=${screenshotResult.scaleFactor}, devicePixelRatio=${devicePixelRatio}`);
 
-                    // Run OCR with scale factor, platform, device pixel ratio, and engine selection
+                    // Run OCR with scale factor, platform, and device pixel ratio
                     const scaleFactor = screenshotResult.scaleFactor || 1;
                     const ocrResult = await recognizeText(screenshotResult.data, {
                         scaleFactor,
                         platform: platform as "ios" | "android",
-                        engine: engine as "auto" | "easyocr" | "tesseract",
                         devicePixelRatio
                     });
 
@@ -2456,7 +2454,7 @@ function createRequestHandler() {
                         "/api/tap-verifier/mark": "Add a marker to visualize agent-calculated coordinates (POST: x, y, label?, color?)",
                         "/api/tap-verifier/markers": "Get all agent-added markers (GET)",
                         "/api/tap-verifier/clear-markers": "Clear all agent-added markers (POST)",
-                        "/api/ocr": "Take screenshot and run OCR to extract text with coordinates (query: platform=ios|android, engine=auto|easyocr|tesseract, deviceId?)"
+                        "/api/ocr": "Take screenshot and run OCR to extract text with coordinates (query: platform=ios|android, deviceId?)"
                     }
                 };
                 res.end(JSON.stringify(endpoints, null, 2));

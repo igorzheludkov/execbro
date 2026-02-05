@@ -1048,18 +1048,11 @@ Then tap the element:
 ios_tap with x=187 y=420
 ```
 
-### OCR Engines
+### OCR Engine
 
-The tool uses two OCR engines with automatic fallback:
+The tool uses EasyOCR (Python-based) for text recognition. It provides excellent accuracy on colored backgrounds and stylized text common in mobile UIs.
 
-| Engine | Description | Requirements |
-|--------|-------------|--------------|
-| **EasyOCR** (preferred) | Python-based, better accuracy on colored backgrounds | Python 3.10+, ~100MB for models |
-| **Tesseract.js** (fallback) | JavaScript-based, no Python needed | None (included in npm package) |
-
-### Installing EasyOCR (Optional)
-
-For better OCR accuracy, especially on colored backgrounds and stylized text:
+### Installing EasyOCR (Required for OCR)
 
 ```bash
 # Install Python 3.10+ if not already installed
@@ -1069,7 +1062,7 @@ brew install python@3.11
 pip3 install easyocr
 ```
 
-First run will download models (~100MB for English). Additional language models are downloaded automatically when configured. If EasyOCR is not available, the tool automatically falls back to Tesseract.js.
+First run will download models (~100MB for English). Additional language models are downloaded automatically when configured.
 
 ### OCR Language Configuration
 

@@ -1,5 +1,3 @@
-import { createWorker, Worker } from "tesseract.js";
-import sharp from "sharp";
 import { tmpdir } from "os";
 import { join } from "path";
 import { writeFile, unlink } from "fs/promises";
@@ -30,8 +28,6 @@ export interface OCROptions {
     scaleFactor?: number;
     /** Platform for coordinate conversion: ios uses points, android uses raw pixels */
     platform?: "ios" | "android";
-    /** OCR engine to use: auto (default), easyocr, or tesseract */
-    engine?: "auto" | "easyocr" | "tesseract";
     /** Device pixel ratio for iOS coordinate conversion (default: 3 for @3x devices, use 2 for older/iPad) */
     devicePixelRatio?: number;
 }
@@ -63,7 +59,7 @@ export interface OCRResult {
     words: OCRWord[];
     lines: OCRLine[];
     processingTimeMs: number;
-    engine?: "easyocr" | "tesseract";
+    engine: "easyocr";
 }
 
 // EasyOCR types
@@ -73,14 +69,9 @@ interface EasyOCRResult {
     bbox: number[][];  // [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
 }
 
-// Cached Tesseract worker for fallback
-let cachedTesseractWorker: Worker | null = null;
-let tesseractWorkerPromise: Promise<Worker> | null = null;
-
 // EasyOCR instance
 let easyOCRInstance: import("node-easyocr").EasyOCR | null = null;
-let easyOCRInitPromise: Promise<import("node-easyocr").EasyOCR | null> | null = null;
-let easyOCRAvailable: boolean | null = null;
+let easyOCRInitPromise: Promise<import("node-easyocr").EasyOCR> | null = null;
 
 /**
  * Promise with timeout helper
@@ -116,13 +107,9 @@ function getOCRLanguages(): string[] {
 
 /**
  * Initialize EasyOCR (Python-based, better for colored backgrounds)
- * Times out after 10 seconds to fall back to Tesseract
+ * Requires Python and easyocr package: pip install easyocr
  */
-async function getEasyOCR(): Promise<import("node-easyocr").EasyOCR | null> {
-    if (easyOCRAvailable === false) {
-        return null;
-    }
-
+async function getEasyOCR(): Promise<import("node-easyocr").EasyOCR> {
     if (easyOCRInstance) {
         return easyOCRInstance;
     }
@@ -132,44 +119,15 @@ async function getEasyOCR(): Promise<import("node-easyocr").EasyOCR | null> {
     }
 
     easyOCRInitPromise = (async () => {
-        try {
-            const languages = getOCRLanguages();
-            const { EasyOCR } = await import("node-easyocr");
-            const ocr = new EasyOCR();
-            await withTimeout(ocr.init(languages), 10000, "EasyOCR init timeout");
-            easyOCRInstance = ocr;
-            easyOCRAvailable = true;
-            return ocr;
-        } catch {
-            easyOCRAvailable = false;
-            return null;
-        }
+        const languages = getOCRLanguages();
+        const { EasyOCR } = await import("node-easyocr");
+        const ocr = new EasyOCR();
+        await withTimeout(ocr.init(languages), 30000, "EasyOCR init timeout - ensure Python and easyocr are installed: pip install easyocr");
+        easyOCRInstance = ocr;
+        return ocr;
     })();
 
     return easyOCRInitPromise;
-}
-
-/**
- * Initialize Tesseract worker (fallback)
- */
-async function getTesseractWorker(): Promise<Worker> {
-    if (cachedTesseractWorker) {
-        return cachedTesseractWorker;
-    }
-
-    if (tesseractWorkerPromise) {
-        return tesseractWorkerPromise;
-    }
-
-    tesseractWorkerPromise = (async () => {
-        const worker = await createWorker("eng", 1, {
-            logger: () => {} // Suppress progress logs
-        });
-        cachedTesseractWorker = worker;
-        return worker;
-    })();
-
-    return tesseractWorkerPromise;
 }
 
 /**
@@ -218,19 +176,21 @@ function toTapCoord(
 }
 
 /**
- * Run OCR using EasyOCR (better for colored backgrounds)
+ * Run OCR using EasyOCR
+ * Requires Python and easyocr package: pip install easyocr
  */
-async function runEasyOCR(
-    imageBuffer: Buffer,
-    scaleFactor: number,
-    platform: "ios" | "android",
-    devicePixelRatio: number
-): Promise<OCRResult | null> {
+export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): Promise<OCRResult> {
+    const scaleFactor = options?.scaleFactor ?? 1;
+    const platform = options?.platform ?? "ios";
+    const devicePixelRatio = options?.devicePixelRatio ?? 3;
     const startTime = Date.now();
 
-    const ocr = await getEasyOCR();
-    if (!ocr) {
-        return null;
+    let ocr: import("node-easyocr").EasyOCR;
+    try {
+        ocr = await getEasyOCR();
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`EasyOCR initialization failed. Ensure Python and easyocr are installed: pip install easyocr. Error: ${message}`);
     }
 
     // Write buffer to temp file (EasyOCR requires file path)
@@ -295,149 +255,7 @@ async function runEasyOCR(
     }
 }
 
-/**
- * Run OCR using Tesseract (fallback)
- */
-async function runTesseract(
-    imageBuffer: Buffer,
-    scaleFactor: number,
-    platform: "ios" | "android",
-    devicePixelRatio: number
-): Promise<OCRResult> {
-    const startTime = Date.now();
-
-    try {
-        // Preprocess for Tesseract
-        const processedImage = await sharp(imageBuffer)
-            .normalize()
-            .sharpen({ sigma: 1.5 })
-            .toBuffer();
-
-        const worker = await getTesseractWorker();
-        const { data } = await worker.recognize(processedImage, {}, { blocks: true, text: true });
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const anyData = data as any;
-
-        const allWords: OCRWord[] = [];
-        const allLines: OCRLine[] = [];
-
-        if (anyData.blocks && Array.isArray(anyData.blocks)) {
-            for (const block of anyData.blocks) {
-                if (block.paragraphs) {
-                    for (const para of block.paragraphs) {
-                        if (para.lines) {
-                            for (const line of para.lines) {
-                                if (line.text && line.bbox) {
-                                    const centerX = Math.round((line.bbox.x0 + line.bbox.x1) / 2);
-                                    const centerY = Math.round((line.bbox.y0 + line.bbox.y1) / 2);
-                                    allLines.push({
-                                        text: line.text.trim(),
-                                        confidence: line.confidence || 90,
-                                        bbox: line.bbox,
-                                        center: { x: centerX, y: centerY },
-                                        tapCenter: {
-                                            x: toTapCoord(centerX, scaleFactor, platform, devicePixelRatio),
-                                            y: toTapCoord(centerY, scaleFactor, platform, devicePixelRatio)
-                                        }
-                                    });
-                                }
-                                if (line.words) {
-                                    for (const word of line.words) {
-                                        if (word.text && word.bbox) {
-                                            const centerX = Math.round((word.bbox.x0 + word.bbox.x1) / 2);
-                                            const centerY = Math.round((word.bbox.y0 + word.bbox.y1) / 2);
-                                            allWords.push({
-                                                text: word.text.trim(),
-                                                confidence: word.confidence || 90,
-                                                bbox: word.bbox,
-                                                center: { x: centerX, y: centerY },
-                                                tapCenter: {
-                                                    x: toTapCoord(centerX, scaleFactor, platform, devicePixelRatio),
-                                                    y: toTapCoord(centerY, scaleFactor, platform, devicePixelRatio)
-                                                }
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return {
-            success: true,
-            fullText: anyData.text || "",
-            confidence: anyData.confidence || 0,
-            words: allWords,
-            lines: allLines,
-            processingTimeMs: Date.now() - startTime,
-            engine: "tesseract"
-        };
-    } catch {
-        return {
-            success: false,
-            fullText: "",
-            confidence: 0,
-            words: [],
-            lines: [],
-            processingTimeMs: Date.now() - startTime,
-            engine: "tesseract"
-        };
-    }
-}
-
-/**
- * Main OCR function - tries EasyOCR first (better for colors), falls back to Tesseract
- */
-export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): Promise<OCRResult> {
-    const scaleFactor = options?.scaleFactor ?? 1;
-    const platform = options?.platform ?? "ios";
-    const engine = options?.engine ?? "auto";
-    const devicePixelRatio = options?.devicePixelRatio ?? 3;
-
-    // If tesseract explicitly requested, use it
-    if (engine === "tesseract") {
-        return runTesseract(imageBuffer, scaleFactor, platform, devicePixelRatio);
-    }
-
-    // If easyocr explicitly requested, try it (fail if not available)
-    if (engine === "easyocr") {
-        const easyResult = await runEasyOCR(imageBuffer, scaleFactor, platform, devicePixelRatio);
-        if (easyResult) {
-            return easyResult;
-        }
-        // EasyOCR not available, return error result
-        return {
-            success: false,
-            fullText: "",
-            confidence: 0,
-            words: [],
-            lines: [],
-            processingTimeMs: 0,
-            engine: "easyocr"
-        };
-    }
-
-    // Auto mode: Try EasyOCR first (better for white text on colored backgrounds)
-    const easyResult = await runEasyOCR(imageBuffer, scaleFactor, platform, devicePixelRatio);
-    if (easyResult) {
-        return easyResult;
-    }
-
-    // Fall back to Tesseract
-    return runTesseract(imageBuffer, scaleFactor, platform, devicePixelRatio);
-}
-
 export async function terminateOCRWorker(): Promise<void> {
-    if (cachedTesseractWorker) {
-        await cachedTesseractWorker.terminate();
-        cachedTesseractWorker = null;
-        tesseractWorkerPromise = null;
-    }
-
     if (easyOCRInstance) {
         try {
             await easyOCRInstance.close();
