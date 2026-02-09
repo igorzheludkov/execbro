@@ -140,7 +140,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 | Tool                 | Description                                                         |
 | -------------------- | ------------------------------------------------------------------- |
-| `execute_in_app`     | Execute JavaScript code in the connected app and return the result  |
+| `execute_in_app`     | Execute simple JS expressions using globals discovered via `list_debug_globals` |
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.) |
 | `inspect_global`     | Inspect a global object to see its properties and callable methods  |
 | `reload_app`         | Reload the app (auto-connects if needed). Use sparingly - Fast Refresh handles most changes |
@@ -600,7 +600,7 @@ Example output:
 
 ### Execute Code in App
 
-Run JavaScript directly in the connected app:
+Run simple JavaScript expressions using globals discovered via `list_debug_globals`:
 
 ```
 execute_in_app with expression="__DEV__"
@@ -613,15 +613,11 @@ execute_in_app with expression="__EXPO_ROUTER__.navigate('/settings')"
 // Navigates the app to /settings
 ```
 
-### Async Code
-
-For async operations, promises are awaited by default:
-
-```
-execute_in_app with expression="AsyncStorage.getItem('userToken')"
-```
-
-Set `awaitPromise=false` for synchronous execution only.
+**Limitations (Hermes engine):**
+- No `require()` or `import` — only pre-existing globals are available
+- No `async/await` syntax — use simple expressions or promise chains (`.then()`)
+- No emoji or non-ASCII characters in string literals — causes parse errors
+- Keep expressions simple and synchronous when possible
 
 ## React Component Inspection
 

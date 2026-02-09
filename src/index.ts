@@ -161,7 +161,7 @@ function registerToolWithTelemetry(
 registerToolWithTelemetry(
     "scan_metro",
     {
-        description: "Scan for running Metro bundler servers and automatically connect to any found React Native apps. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, execute_in_app, and reload_app.",
+        description: "Scan for running Metro bundler servers and automatically connect to any found React Native apps. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.",
         inputSchema: {
             startPort: z.coerce.number().optional().default(8081).describe("Start port for scanning (default: 8081)"),
             endPort: z.coerce.number().optional().default(19002).describe("End port for scanning (default: 19002)")
@@ -663,9 +663,17 @@ registerToolWithTelemetry(
     "execute_in_app",
     {
         description:
-            "Execute JavaScript code in the connected React Native app and return the result. Use this for REPL-style interactions, inspecting app state, or running diagnostic code. Hermes compatible: 'global' is automatically polyfilled to 'globalThis', so both global.__REDUX_STORE__ and globalThis.__REDUX_STORE__ work.",
+            "Execute JavaScript code in the connected React Native app and return the result. Use this for inspecting app state, calling methods on exposed global objects, or running diagnostic code. Hermes compatible: 'global' is automatically polyfilled to 'globalThis', so both global.__REDUX_STORE__ and globalThis.__REDUX_STORE__ work.\n\n" +
+            "RECOMMENDED WORKFLOW: 1) list_debug_globals to discover available objects, 2) inspect_global to see properties/methods, 3) execute_in_app to call specific methods or read values.\n\n" +
+            "LIMITATIONS (Hermes engine):\n" +
+            "- NO require() or import — only pre-existing globals are available\n" +
+            "- NO async/await syntax — use simple expressions or promise chains (.then())\n" +
+            "- NO emoji or non-ASCII characters in string literals — causes parse errors\n" +
+            "- Keep expressions simple and synchronous when possible\n\n" +
+            "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
+            "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`, `console.log('\\u{1F600}')`",
         inputSchema: {
-            expression: z.string().describe("JavaScript expression to execute in the app"),
+            expression: z.string().describe("JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await, no emoji/non-ASCII in strings. Use globals discovered via list_debug_globals."),
             awaitPromise: z.coerce.boolean().optional().default(true).describe("Whether to await promises (default: true)"),
             maxResultLength: z
                 .coerce.number()

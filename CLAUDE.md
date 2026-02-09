@@ -46,7 +46,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_apps`: List connected devices
 - `get_logs` / `search_logs` / `clear_logs`: Log management
 - `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking
-- `execute_in_app`: Run JavaScript in the connected app
+- `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
 - `reload_app`: Reload the React Native app (triggers JS bundle reload)
 
