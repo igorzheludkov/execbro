@@ -181,7 +181,6 @@ function calculateDailyUserActivity(rows: Array<{ index1: string; activity_date:
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
 
     const dailyActiveUsers = new Map<string, Set<string>>();
-    const totalUniqueUsers = new Set<string>();
 
     for (const row of rows) {
         const rowDate = new Date(row.activity_date);
@@ -193,21 +192,21 @@ function calculateDailyUserActivity(rows: Array<{ index1: string; activity_date:
             dailyActiveUsers.set(dateKey, new Set());
         }
         dailyActiveUsers.get(dateKey)!.add(row.index1);
-        totalUniqueUsers.add(row.index1);
     }
 
-    const totalUsers = totalUniqueUsers.size;
     const result: Array<{ date: string; activeCount: number; inactiveCount: number }> = [];
+    const seenUsers = new Set<string>();
 
     for (let i = 29; i >= 0; i--) {
         const d = new Date(today);
         d.setDate(d.getDate() - i);
         const dateKey = d.toISOString().split('T')[0];
-        const activeOnDay = dailyActiveUsers.get(dateKey)?.size ?? 0;
-        result.push({ date: dateKey, activeCount: activeOnDay, inactiveCount: Math.max(0, totalUsers - activeOnDay) });
+        const activeUsersOnDay = dailyActiveUsers.get(dateKey) ?? new Set<string>();
+        for (const user of activeUsersOnDay) seenUsers.add(user);
+        result.push({ date: dateKey, activeCount: activeUsersOnDay.size, inactiveCount: seenUsers.size - activeUsersOnDay.size });
     }
 
-    return { days: result, totalUsers };
+    return { days: result, totalUsers: seenUsers.size };
 }
 
 async function handleStats(request: Request, env: Env): Promise<Response> {
