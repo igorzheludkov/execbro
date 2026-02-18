@@ -45,6 +45,8 @@ interface TelemetryEvent {
     errorCategory?: ErrorCategory;
     errorMessage?: string;
     errorContext?: string; // Additional context like the expression that caused the error
+    inputTokens?: number;
+    outputTokens?: number;
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -251,7 +253,9 @@ export function trackToolInvocation(
     success: boolean,
     durationMs: number,
     errorMessage?: string,
-    errorContext?: string
+    errorContext?: string,
+    inputTokens?: number,
+    outputTokens?: number
 ): void {
     if (!telemetryEnabled) return;
 
@@ -272,6 +276,9 @@ export function trackToolInvocation(
             event.errorContext = errorContext.substring(0, 150);
         }
     }
+
+    if (inputTokens !== undefined && inputTokens > 0) event.inputTokens = inputTokens;
+    if (outputTokens !== undefined && outputTokens > 0) event.outputTokens = outputTokens;
 
     eventQueue.push(event);
 

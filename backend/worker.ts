@@ -24,6 +24,8 @@ interface TelemetryEvent {
     errorCategory?: string;
     errorMessage?: string;
     errorContext?: string; // Additional context like the expression that caused the error
+    inputTokens?: number;
+    outputTokens?: number;
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -103,8 +105,10 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
                     (event.errorContext || "").slice(0, 150)                       // blob8 - additional error context
                 ],
                 doubles: [
-                    event.duration || 0,
-                    event.isFirstRun ? 1 : 0
+                    event.duration || 0,       // double1: duration
+                    event.isFirstRun ? 1 : 0,  // double2: isFirstRun
+                    event.inputTokens || 0,    // double3: inputTokens
+                    event.outputTokens || 0    // double4: outputTokens
                 ],
                 indexes: [
                     payload.installationId.slice(0, 8)
@@ -265,7 +269,9 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 blob2 as tool,
                 blob3 as status,
                 SUM(_sample_interval) as count,
-                SUM(double1 * _sample_interval) as total_duration
+                SUM(double1 * _sample_interval) as total_duration,
+                SUM(double3 * _sample_interval) as total_input_tokens,
+                SUM(double4 * _sample_interval) as total_output_tokens
             FROM rn_debugger_events
             WHERE
                 blob1 = 'tool_invocation'
@@ -409,6 +415,8 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             status: string;
             count: number;
             total_duration: number;
+            total_input_tokens: number;
+            total_output_tokens: number;
         }>(toolStatsRes, 'toolStats');
         const sessionStats = await parseResponse<{
             unique_installs: number;
@@ -489,12 +497,12 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
         }
 
         // Process tool stats into breakdown
-        const toolMap = new Map<string, { count: number; success: number; totalDuration: number }>();
+        const toolMap = new Map<string, { count: number; success: number; totalDuration: number; totalInputTokens: number; totalOutputTokens: number }>();
 
         for (const row of toolStats.data || []) {
             const tool = row.tool || "unknown";
             if (!toolMap.has(tool)) {
-                toolMap.set(tool, { count: 0, success: 0, totalDuration: 0 });
+                toolMap.set(tool, { count: 0, success: 0, totalDuration: 0, totalInputTokens: 0, totalOutputTokens: 0 });
             }
             const entry = toolMap.get(tool)!;
             const rowCount = Number(row.count) || 0;
@@ -502,6 +510,8 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             entry.count += rowCount;
             if (row.status === "success") entry.success += rowCount;
             entry.totalDuration += rowDuration;
+            entry.totalInputTokens += Number(row.total_input_tokens) || 0;
+            entry.totalOutputTokens += Number(row.total_output_tokens) || 0;
         }
 
         const toolBreakdown = Array.from(toolMap.entries())
@@ -509,7 +519,10 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 tool,
                 count: data.count,
                 successRate: data.count > 0 ? (data.success / data.count) * 100 : 0,
-                avgDuration: data.count > 0 ? data.totalDuration / data.count : 0
+                avgDuration: data.count > 0 ? data.totalDuration / data.count : 0,
+                avgInputTokens: Math.round(data.totalInputTokens / data.count),
+                avgOutputTokens: Math.round(data.totalOutputTokens / data.count),
+                avgTotalTokens: Math.round((data.totalInputTokens + data.totalOutputTokens) / data.count)
             }))
             .sort((a, b) => b.count - a.count);
 

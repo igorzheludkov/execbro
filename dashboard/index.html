@@ -483,10 +483,11 @@
                     <th>Calls</th>
                     <th>Success Rate</th>
                     <th>Avg Duration</th>
+                    <th>Avg Tokens</th>
                 </tr>
             </thead>
             <tbody id="tools-table">
-                <tr><td colspan="4" class="loading">Loading...</td></tr>
+                <tr><td colspan="5" class="loading">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -877,7 +878,7 @@
             const tbody = document.getElementById('tools-table');
 
             if (toolData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" class="loading">No data available</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="loading">No data available</td></tr>';
                 return;
             }
 
@@ -891,6 +892,7 @@
                         </span>
                     </td>
                     <td>${tool.avgDuration.toFixed(0)}ms</td>
+                    <td>${tool.avgTotalTokens ? tool.avgTotalTokens.toLocaleString() : '-'}</td>
                 </tr>
             `).join('');
         }

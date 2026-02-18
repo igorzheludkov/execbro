@@ -134,6 +134,12 @@ function registerToolWithTelemetry(
         let success = true;
         let errorMessage: string | undefined;
         let errorContext: string | undefined;
+        let inputTokens: number | undefined;
+        let outputTokens: number | undefined;
+
+        try {
+            inputTokens = Math.ceil(JSON.stringify(args).length / 4);
+        } catch { /* circular refs — leave undefined */ }
 
         try {
             const result = await handler(args);
@@ -144,6 +150,17 @@ function registerToolWithTelemetry(
                 // Extract error context if provided (e.g., the expression that caused a syntax error)
                 errorContext = result._errorContext;
             }
+            if (Array.isArray(result?.content)) {
+                let totalChars = 0;
+                for (const item of result.content) {
+                    if (item.type === "text" && typeof item.text === "string") {
+                        totalChars += item.text.length;
+                    } else if (item.type === "image" && typeof item.data === "string") {
+                        totalChars += item.data.length;
+                    }
+                }
+                if (totalChars > 0) outputTokens = Math.ceil(totalChars / 4);
+            }
             return result;
         } catch (error) {
             success = false;
@@ -151,7 +168,7 @@ function registerToolWithTelemetry(
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens);
         }
     });
 }
