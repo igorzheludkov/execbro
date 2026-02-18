@@ -174,6 +174,42 @@ function calculateRetention(rows: Array<{ index1: string; activity_date: string 
     return { data, totalUsers: userActivity.size };
 }
 
+function calculateDailyUserActivity(rows: Array<{ index1: string; activity_date: string }>) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
+
+    const dailyActiveUsers = new Map<string, Set<string>>();
+    const totalUniqueUsers = new Set<string>();
+
+    for (const row of rows) {
+        const rowDate = new Date(row.activity_date);
+        rowDate.setHours(0, 0, 0, 0);
+        if (rowDate < thirtyDaysAgo || rowDate > today) continue;
+
+        const dateKey = row.activity_date;
+        if (!dailyActiveUsers.has(dateKey)) {
+            dailyActiveUsers.set(dateKey, new Set());
+        }
+        dailyActiveUsers.get(dateKey)!.add(row.index1);
+        totalUniqueUsers.add(row.index1);
+    }
+
+    const totalUsers = totalUniqueUsers.size;
+    const result: Array<{ date: string; activeCount: number; inactiveCount: number }> = [];
+
+    for (let i = 29; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateKey = d.toISOString().split('T')[0];
+        const activeOnDay = dailyActiveUsers.get(dateKey)?.size ?? 0;
+        result.push({ date: dateKey, activeCount: activeOnDay, inactiveCount: Math.max(0, totalUsers - activeOnDay) });
+    }
+
+    return { days: result, totalUsers };
+}
+
 async function handleStats(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -576,6 +612,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
 
         // Calculate user retention
         const retention = calculateRetention(retentionRaw.data || []);
+        const dailyUserActivity = calculateDailyUserActivity(retentionRaw.data || []);
 
         return new Response(JSON.stringify({
             totalCalls,
@@ -596,6 +633,7 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 users: userActivityList
             },
             retention,
+            dailyUserActivity,
             errorBreakdown: (errorBreakdown.data || []).map(row => ({
                 tool: row.tool,
                 category: row.error_category,

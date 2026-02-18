@@ -444,6 +444,21 @@
         </div>
     </div>
 
+    <!-- Daily Active vs Inactive Users Chart -->
+    <div class="chart-card" style="margin-bottom: 32px;">
+        <h3>
+            Daily Active vs Inactive Users (Last 30 Days)
+            <span style="color: #64748b; font-size: 12px; cursor: help; margin-left: 8px;"
+                  title="Active: had at least 1 tool call or session on that day. Inactive: all other users seen in the 30-day window.">&#9432;</span>
+        </h3>
+        <div class="chart-container">
+            <canvas id="dailyUserActivityChart"></canvas>
+        </div>
+        <div id="daily-user-activity-footer" style="text-align: center; color: #64748b; font-size: 12px; margin-top: 12px;">
+            Loading...
+        </div>
+    </div>
+
     <!-- User Retention Chart -->
     <div class="chart-card" style="margin-bottom: 32px;">
         <h3>
@@ -580,6 +595,7 @@
         let timelineChart = null;
         let userActivityChart = null;
         let retentionChart = null;
+        let dailyUserActivityChart = null;
         let selectedDays = 0;
         let dashboardKey = localStorage.getItem('dashboardKey') || '';
 
@@ -758,6 +774,9 @@
 
             // Update retention chart
             updateRetentionChart(data.retention);
+
+            // Update daily active vs inactive users chart
+            updateDailyUserActivityChart(data.dailyUserActivity);
 
             // Update tools table
             updateToolsTable(data.toolBreakdown || []);
@@ -1003,6 +1022,67 @@
 
             document.getElementById('retention-footer').textContent =
                 `Based on ${retentionData.totalUsers} users (last 90 days)`;
+        }
+
+        function updateDailyUserActivityChart(dailyUserActivity) {
+            const ctx = document.getElementById('dailyUserActivityChart').getContext('2d');
+            if (dailyUserActivityChart) dailyUserActivityChart.destroy();
+
+            if (!dailyUserActivity?.days?.length) {
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#94a3b8';
+                ctx.textAlign = 'center';
+                ctx.fillText('No daily activity data', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                document.getElementById('daily-user-activity-footer').textContent = 'Insufficient data';
+                return;
+            }
+
+            const labels = dailyUserActivity.days.map(d => d.date);
+            dailyUserActivityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Active',
+                            data: dailyUserActivity.days.map(d => d.activeCount),
+                            borderColor: '#8b5cf6',
+                            backgroundColor: 'rgba(139, 92, 246, 0.15)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
+                        },
+                        {
+                            label: 'Inactive',
+                            data: dailyUserActivity.days.map(d => d.inactiveCount),
+                            borderColor: '#64748b',
+                            backgroundColor: 'rgba(100, 116, 139, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, labels: { color: '#94a3b8', usePointStyle: true } },
+                        tooltip: {
+                            callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.raw} users` }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8', maxTicksLimit: 10, maxRotation: 45 }, grid: { color: '#334155' } },
+                        y: { min: 0, ticks: { color: '#94a3b8', precision: 0 }, grid: { color: '#334155' } }
+                    }
+                }
+            });
+            document.getElementById('daily-user-activity-footer').textContent =
+                `Based on ${dailyUserActivity.totalUsers} distinct users in the last 30 days`;
         }
 
         function updateUsersActivityTable(userActivity) {
