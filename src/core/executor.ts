@@ -1553,11 +1553,15 @@ export async function getInspectorSelection(): Promise<ExecutionResult> {
 
 /**
  * Inspect the React component at a specific (x, y) coordinate.
- * Uses the same internal API as React Native's Element Inspector.
  *
- * Note: This API (getInspectorDataForViewAtPoint) is only available in certain
- * React Native versions. In newer versions with Fabric, use ios_describe_point
- * or android_describe_point as alternatives.
+ * Works on both Paper and Fabric (New Architecture). Uses a two-step approach
+ * because measureInWindow callbacks fire in a future native event loop tick
+ * (not microtasks), so awaitPromise cannot be used to collect them:
+ *
+ * Step 1 — dispatch: walk the fiber tree, call measureInWindow on each host
+ *   component, store fiber refs and results in app globals.
+ * Step 2 — resolve (after 300ms): read the globals, hit-test against target
+ *   coordinates, return the innermost matching React component.
  */
 export async function inspectAtPoint(x: number, y: number, options: {
     includeProps?: boolean;
@@ -1565,131 +1569,202 @@ export async function inspectAtPoint(x: number, y: number, options: {
 } = {}): Promise<ExecutionResult> {
     const { includeProps = true, includeFrame = true } = options;
 
-    const expression = `
+    // --- Step 1: walk fiber tree + dispatch measureInWindow calls ---
+    const dispatchExpression = `
         (function() {
-            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             if (!hook) return { error: 'React DevTools hook not available. Make sure you are running a development build.' };
-            if (!hook.renderers) return { error: 'No renderers found in DevTools hook.' };
 
-            // Find a renderer with getInspectorDataForViewAtPoint
-            let inspectorFn = null;
-            let rendererId = null;
-            for (const [id, renderer] of hook.renderers) {
-                if (renderer.getInspectorDataForViewAtPoint) {
-                    inspectorFn = renderer.getInspectorDataForViewAtPoint.bind(renderer);
-                    rendererId = id;
-                    break;
+            var roots = [];
+            if (hook.getFiberRoots) {
+                try { roots = Array.from(hook.getFiberRoots(1) || []); } catch(e) {}
+            }
+            if (roots.length === 0 && hook.renderers) {
+                for (var entry of hook.renderers) {
+                    try {
+                        var r = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
+                        if (r.length > 0) { roots = r; break; }
+                    } catch(e) {}
                 }
             }
+            if (roots.length === 0) return { error: 'No fiber roots found. The app may not have rendered yet.' };
 
-            if (!inspectorFn) {
-                // This API is not available in newer React Native versions (Fabric/New Architecture)
-                return {
-                    error: 'getInspectorDataForViewAtPoint not available in this React Native version.',
-                    hint: 'This API was removed in newer React Native versions. Use ios_describe_point or android_describe_point instead to get native element info at coordinates, then use find_components to locate the React component.',
-                    point: { x: ${x}, y: ${y} },
-                    alternatives: [
-                        'ios_describe_point(x, y) - get native accessibility element at point',
-                        'android_describe_point(x, y) - get native UI element at point',
-                        'find_components(pattern) - find React components by name pattern'
-                    ]
-                };
+            // Paper: measureInWindow is on stateNode directly.
+            // Fabric: measureInWindow is on stateNode.canonical.publicInstance.
+            function getMeasurable(fiber) {
+                var sn = fiber.stateNode;
+                if (!sn) return null;
+                if (typeof sn.measureInWindow === 'function') return sn;
+                if (sn.canonical && sn.canonical.publicInstance &&
+                    typeof sn.canonical.publicInstance.measureInWindow === 'function') {
+                    return sn.canonical.publicInstance;
+                }
+                return null;
             }
 
-            // Call the inspector API with coordinates
-            // Note: This is a callback-based API that we need to wrap
-            return new Promise((resolve) => {
+            var hostFibers = [];
+            function walkFibers(fiber, depth) {
+                var cur = fiber;
+                while (cur) {
+                    if (hostFibers.length >= 500) return;
+                    if (typeof cur.type === 'string' && getMeasurable(cur)) hostFibers.push(cur);
+                    if (cur.child && depth < 250) walkFibers(cur.child, depth + 1);
+                    cur = cur.sibling;
+                }
+            }
+            for (var root of roots) { walkFibers(root.current, 0); }
+
+            if (hostFibers.length === 0) return { error: 'No measurable host components found. App may not be fully rendered.' };
+
+            globalThis.__inspectFibers = hostFibers;
+            globalThis.__inspectMeasurements = new Array(hostFibers.length).fill(null);
+
+            hostFibers.forEach(function(fiber, i) {
                 try {
-                    inspectorFn(
-                        null,  // containerRef (null = root view)
-                        ${x},  // x coordinate
-                        ${y},  // y coordinate
-                        (viewData, viewTag, touchedViewTag, fiber, measure) => {
-                            if (!fiber) {
-                                resolve({
-                                    point: { x: ${x}, y: ${y} },
-                                    error: 'No component found at this point. The coordinates may be outside the app bounds or on a native-only element.'
-                                });
-                                return;
-                            }
-
-                            // Build hierarchy from the selected fiber by walking up the tree
-                            const hierarchy = [];
-                            let current = fiber;
-                            while (current) {
-                                const name = current.type?.displayName ||
-                                            current.type?.name ||
-                                            (typeof current.type === 'string' ? current.type : null);
-                                if (name) hierarchy.unshift(name);
-                                current = current.return;
-                            }
-
-                            const result = {
-                                point: { x: ${x}, y: ${y} },
-                                element: hierarchy[hierarchy.length - 1] || 'Unknown',
-                                path: hierarchy.join(' > ')
-                            };
-
-                            // Include props if requested (exclude children and functions for cleaner output)
-                            if (${includeProps} && viewData?.props) {
-                                const props = {};
-                                for (const key of Object.keys(viewData.props)) {
-                                    if (key === 'children') continue;
-                                    const val = viewData.props[key];
-                                    if (typeof val === 'function') {
-                                        props[key] = '[Function]';
-                                    } else if (typeof val === 'object' && val !== null) {
-                                        // Shallow serialize objects
-                                        try {
-                                            const str = JSON.stringify(val);
-                                            if (str.length > 200) {
-                                                props[key] = Array.isArray(val) ? '[Array(' + val.length + ')]' : '[Object]';
-                                            } else {
-                                                props[key] = val;
-                                            }
-                                        } catch {
-                                            props[key] = Array.isArray(val) ? '[Array]' : '[Object]';
-                                        }
-                                    } else {
-                                        props[key] = val;
-                                    }
-                                }
-                                if (Object.keys(props).length > 0) result.props = props;
-                            }
-
-                            // Include frame/dimensions if requested
-                            if (${includeFrame}) {
-                                if (viewData?.frame) {
-                                    result.frame = viewData.frame;
-                                }
-                                if (measure) {
-                                    // measure is a callback in some versions, an object in others
-                                    if (typeof measure === 'object') {
-                                        result.measure = measure;
-                                    }
-                                }
-                            }
-
-                            resolve(result);
-                        }
-                    );
-
-                    // Timeout after 3 seconds in case callback never fires
-                    setTimeout(() => {
-                        resolve({
-                            point: { x: ${x}, y: ${y} },
-                            error: 'Timeout: Inspector callback did not respond. The coordinates may be invalid or outside app bounds.'
-                        });
-                    }, 3000);
-                } catch (e) {
-                    resolve({
-                        point: { x: ${x}, y: ${y} },
-                        error: 'Exception calling inspector: ' + (e.message || String(e))
+                    getMeasurable(fiber).measureInWindow(function(fx, fy, fw, fh) {
+                        globalThis.__inspectMeasurements[i] = { x: fx, y: fy, width: fw, height: fh };
                     });
-                }
+                } catch(e) {}
             });
+
+            return { count: hostFibers.length };
         })()
     `;
 
-    return executeInApp(expression, true);
+    const dispatchResult = await executeInApp(dispatchExpression, false);
+    if (!dispatchResult.success) return dispatchResult;
+
+    try {
+        const parsed = JSON.parse(dispatchResult.result || '{}');
+        if (parsed.error) return { success: false, error: parsed.error };
+    } catch { /* ignore parse errors */ }
+
+    // Wait for native measureInWindow callbacks to fire
+    await delay(300);
+
+    // --- Step 2: read measurements, hit-test, return result ---
+    const resolveExpression = `
+        (function() {
+            var fibers = globalThis.__inspectFibers;
+            var measurements = globalThis.__inspectMeasurements;
+            globalThis.__inspectFibers = null;
+            globalThis.__inspectMeasurements = null;
+
+            if (!fibers || !measurements) return { error: 'No measurement data available. Run inspect_at_point again.' };
+
+            var targetX = ${x};
+            var targetY = ${y};
+
+            var hits = [];
+            for (var i = 0; i < measurements.length; i++) {
+                var m = measurements[i];
+                if (m && m.width > 0 && m.height > 0 &&
+                    targetX >= m.x && targetX <= m.x + m.width &&
+                    targetY >= m.y && targetY <= m.y + m.height) {
+                    hits.push({ fiber: fibers[i], x: m.x, y: m.y, width: m.width, height: m.height });
+                }
+            }
+
+            if (hits.length === 0) {
+                return { point: { x: targetX, y: targetY }, error: 'No component found at this point. Coordinates may be outside the app bounds or over a native-only element.' };
+            }
+
+            // Smallest area = innermost (most specific) component
+            hits.sort(function(a, b) { return (a.width * a.height) - (b.width * b.height); });
+            var best = hits[0];
+
+            // RN primitives and internal components to skip when surfacing the "element" name.
+            // We want the nearest *custom* component, not a library wrapper.
+            var RN_PRIMITIVES = /^(View|Text|Image|ScrollView|FlatList|SectionList|TextInput|TouchableOpacity|TouchableHighlight|TouchableNativeFeedback|TouchableWithoutFeedback|Pressable|Button|Switch|ActivityIndicator|Modal|SafeAreaView|KeyboardAvoidingView|Animated\(.*|withAnimated.*|ForwardRef.*|memo\(.*|Context\.Consumer|Context\.Provider|VirtualizedList.*|CellRenderer.*|FrameSizeProvider|MaybeScreenContainer|RCT.*|RNS.*|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer)$/;
+
+            function getNearestNamed(fiber, skipPrimitives) {
+                var cur = fiber;
+                var fallback = null;
+                while (cur) {
+                    if (cur.type && typeof cur.type !== 'string') {
+                        var name = cur.type.displayName || cur.type.name;
+                        if (name) {
+                            if (!fallback) fallback = { name: name, fiber: cur };
+                            if (!skipPrimitives || !RN_PRIMITIVES.test(name)) {
+                                return { name: name, fiber: cur };
+                            }
+                        }
+                    }
+                    cur = cur.return;
+                }
+                return fallback;
+            }
+
+            function buildPath(fiber) {
+                var path = [];
+                var cur = fiber;
+                while (cur) {
+                    if (cur.type) {
+                        var n = typeof cur.type === 'string'
+                            ? cur.type
+                            : (cur.type.displayName || cur.type.name);
+                        if (n) path.unshift(n);
+                    }
+                    cur = cur.return;
+                }
+                return path.slice(-8).join(' > ');
+            }
+
+            // Find nearest custom component (skipping RN primitives) for the element name,
+            // but fall back to the nearest named component if nothing custom is found.
+            var named = getNearestNamed(best.fiber.return || best.fiber, true);
+            var result = {
+                point: { x: targetX, y: targetY },
+                element: named ? named.name : best.fiber.type,
+                nativeElement: best.fiber.type,
+                path: buildPath(best.fiber)
+            };
+
+            if (${includeFrame}) {
+                result.frame = { x: best.x, y: best.y, width: best.width, height: best.height };
+            }
+
+            if (${includeProps} && named && named.fiber.memoizedProps) {
+                var props = {};
+                var keys = Object.keys(named.fiber.memoizedProps);
+                for (var i = 0; i < keys.length; i++) {
+                    var key = keys[i];
+                    if (key === 'children') continue;
+                    var val = named.fiber.memoizedProps[key];
+                    if (typeof val === 'function') {
+                        props[key] = '[Function]';
+                    } else if (typeof val === 'object' && val !== null) {
+                        try {
+                            var str = JSON.stringify(val);
+                            props[key] = str.length > 200
+                                ? (Array.isArray(val) ? '[Array(' + val.length + ')]' : '[Object]')
+                                : val;
+                        } catch(e) {
+                            props[key] = '[Object]';
+                        }
+                    } else {
+                        props[key] = val;
+                    }
+                }
+                if (Object.keys(props).length > 0) result.props = props;
+            }
+
+            // Hierarchy: custom-named component for each hit, deduped, innermost→outermost
+            var hierarchy = [];
+            for (var j = 0; j < Math.min(hits.length, 15); j++) {
+                var n2 = getNearestNamed(hits[j].fiber.return, true) || getNearestNamed(hits[j].fiber, true);
+                if (n2 && !hierarchy.some(function(h) { return h.name === n2.name; })) {
+                    hierarchy.push({
+                        name: n2.name,
+                        frame: { x: hits[j].x, y: hits[j].y, width: hits[j].width, height: hits[j].height }
+                    });
+                }
+            }
+            if (hierarchy.length > 1) result.hierarchy = hierarchy;
+
+            return result;
+        })()
+    `;
+
+    return executeInApp(resolveExpression, false);
 }

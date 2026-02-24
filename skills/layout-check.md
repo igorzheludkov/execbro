@@ -4,7 +4,9 @@ Capture screenshots from running React Native devices to verify layout changes.
 
 ## When to Trigger
 
-Use this skill when the task involves:
+**Auto-trigger after code changes:** When you modify any style, layout, or UI component code, automatically run this skill to capture a screenshot and verify the change visually — do not wait for the user to ask. This includes fixing padding, margins, safe areas, colors, font sizes, component structure, or any visual property.
+
+Also use this skill when the task involves:
 - Verifying layout changes after modifying UI code
 - Comparing how the app looks across different device sizes (iPhone, iPad, Android)
 - Checking responsive layout behavior

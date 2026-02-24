@@ -47,6 +47,9 @@ This repository includes pre-built [Claude Code skills](https://docs.anthropic.c
 | `layout-check` | Verify UI layout against design specs using screenshots and component data |
 | `device-interact` | Automate device interaction: tap, swipe, text input, and element finding |
 | `bundle-check` | Detect and diagnose Metro bundler errors and compilation failures |
+| `native-rebuild` | Rebuild and verify the app after installing native Expo packages |
+
+See [`skills/overview.md`](./skills/overview.md) for a decision guide on which skill to use and a recommended workflow.
 
 ### Installing Skills (Claude Code)
 

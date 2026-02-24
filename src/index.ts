@@ -1243,14 +1243,14 @@ registerToolWithTelemetry(
     "inspect_at_point",
     {
         description:
-            "Inspect the React component at specific (x, y) coordinates. Works like React Native's Element Inspector. **NOTE**: This API (getInspectorDataForViewAtPoint) may not be available in newer React Native versions with Fabric. If unavailable, use ios_describe_point/android_describe_point for native element info, then find_components to locate the React component.",
+            "Inspect the React component at specific (x, y) coordinates. Returns the React component name, props, measured frame (actual dp position/size on screen), and component path. Works on both Paper and Fabric (New Architecture). Coordinates are in dp (density-independent pixels) — the same unit React Native uses for all layout. To convert from screenshot pixels: divide by the device pixel ratio (e.g. 540px / 2.625 = 205dp). Use this to identify what component is rendered at a given point and get its exact layout bounds for pixel-perfect debugging.",
         inputSchema: {
             x: z
                 .number()
-                .describe("X coordinate (in points for iOS, pixels for Android)"),
+                .describe("X coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."),
             y: z
                 .number()
-                .describe("Y coordinate (in points for iOS, pixels for Android)"),
+                .describe("Y coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."),
             includeProps: z
                 .boolean()
                 .optional()
