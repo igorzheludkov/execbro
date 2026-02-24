@@ -155,6 +155,7 @@ export interface ExecuteOptions {
     maxRetries?: number;      // Default: 2
     retryDelayMs?: number;    // Default: 1000
     autoReconnect?: boolean;  // Default: true
+    timeoutMs?: number;       // Default: 10000
 }
 
 // Result of ensure_connection

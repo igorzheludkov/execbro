@@ -123,6 +123,61 @@ const server = new McpServer({
 // Telemetry Wrapper
 // ============================================================================
 
+/**
+ * Parse JPEG dimensions from a raw buffer by scanning for the SOF marker.
+ * Only needs the first ~2KB of the image to find dimensions.
+ */
+function getJpegDimensions(buffer: Buffer): { width: number; height: number } | null {
+    if (buffer.length < 4 || buffer[0] !== 0xFF || buffer[1] !== 0xD8) return null;
+
+    let offset = 2;
+    while (offset < buffer.length - 9) {
+        if (buffer[offset] !== 0xFF) return null;
+        const marker = buffer[offset + 1];
+
+        // SOF markers: C0-CF except C4 (DHT) and CC (DAC)
+        if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xCC) {
+            const height = buffer.readUInt16BE(offset + 5);
+            const width = buffer.readUInt16BE(offset + 7);
+            return { width, height };
+        }
+
+        // Skip segment (read its length)
+        const segLength = buffer.readUInt16BE(offset + 2);
+        offset += 2 + segLength;
+    }
+    return null;
+}
+
+/**
+ * Estimate how many tokens an image will consume in Claude's vision encoder.
+ * Claude resizes images to fit within 1568px on any side, then uses ~(w*h)/750 tokens.
+ * We only decode the first ~2KB of the base64 string to read JPEG dimensions.
+ */
+function estimateImageTokens(base64Data: string): number {
+    try {
+        // Decode only the first ~2KB (2732 base64 chars ≈ 2048 bytes) to find JPEG header
+        const headerBase64 = base64Data.slice(0, 2732);
+        const buffer = Buffer.from(headerBase64, "base64");
+        const dims = getJpegDimensions(buffer);
+        if (!dims) return Math.ceil(base64Data.length / 4); // fallback for non-JPEG
+
+        let { width, height } = dims;
+
+        // Claude internally resizes to fit within 1568x1568 preserving aspect ratio
+        const MAX_CLAUDE_DIM = 1568;
+        if (width > MAX_CLAUDE_DIM || height > MAX_CLAUDE_DIM) {
+            const scale = MAX_CLAUDE_DIM / Math.max(width, height);
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+        }
+
+        return Math.ceil((width * height) / 750);
+    } catch {
+        return Math.ceil(base64Data.length / 4); // fallback
+    }
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function registerToolWithTelemetry(
     toolName: string,
@@ -151,15 +206,15 @@ function registerToolWithTelemetry(
                 errorContext = result._errorContext;
             }
             if (Array.isArray(result?.content)) {
-                let totalChars = 0;
+                let totalTokens = 0;
                 for (const item of result.content) {
                     if (item.type === "text" && typeof item.text === "string") {
-                        totalChars += item.text.length;
+                        totalTokens += Math.ceil(item.text.length / 4);
                     } else if (item.type === "image" && typeof item.data === "string") {
-                        totalChars += item.data.length;
+                        totalTokens += estimateImageTokens(item.data);
                     }
                 }
-                if (totalChars > 0) outputTokens = Math.ceil(totalChars / 4);
+                if (totalTokens > 0) outputTokens = totalTokens;
             }
             return result;
         } catch (error) {
@@ -1547,7 +1602,7 @@ registerToolWithTelemetry(
     "reload_app",
     {
         description:
-            "Reload the React Native app (triggers JavaScript bundle reload like pressing 'r' in Metro). Will auto-connect to Metro if no connection exists. IMPORTANT: React Native has Fast Refresh enabled by default - code changes are automatically applied without needing reload. Only use when: (1) logs/behavior don't reflect code changes after a few seconds, (2) app is in broken/error state, or (3) need to reset app state completely (navigation stack, context, etc.).",
+            "Reload the React Native app (triggers JavaScript bundle reload like pressing 'r' in Metro). Will auto-connect to Metro if no connection exists. Note: After reload, the app may take a few seconds to fully restart and become responsive — wait before running other tools. IMPORTANT: React Native has Fast Refresh enabled by default - code changes are automatically applied without needing reload. Only use when: (1) logs/behavior don't reflect code changes after a few seconds, (2) app is in broken/error state, or (3) need to reset app state completely (navigation stack, context, etc.).",
         inputSchema: {}
     },
     async () => {

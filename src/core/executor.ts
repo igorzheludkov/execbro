@@ -109,6 +109,64 @@ function validateAndPreprocessExpression(expression: string): ExpressionValidati
     };
 }
 
+/**
+ * Detect if an expression contains multiple statements or declarations.
+ * These cannot be wrapped with `return (expr)` — they need block wrapping.
+ *
+ * Examples:
+ * - "console.log('x'); 'result'"  → multi-statement (semicolon between statements)
+ * - "var x = 1; btoa(x)"          → declaration + multi-statement
+ * - "var x = 1"                    → declaration
+ * - "JSON.stringify(obj)"          → single expression (NOT multi-statement)
+ * - "JSON.stringify({a: 'x;y'})"  → single expression with semicolon in string
+ */
+function isMultiStatementExpression(expr: string): boolean {
+    const trimmed = expr.trim();
+
+    // Starts with a declaration or statement keyword
+    if (/^(var|let|const|function|class|for|while|if|switch|try|do|throw)\b/.test(trimmed)) {
+        return true;
+    }
+
+    // Check for semicolons that separate statements (not trailing, not inside strings)
+    // Remove the trailing semicolon and whitespace first
+    const withoutTrailing = trimmed.replace(/;\s*$/, '');
+
+    // Simple heuristic: check if there's a semicolon that's likely between statements
+    // Skip semicolons inside string literals by tracking quote state
+    let inSingle = false;
+    let inDouble = false;
+    let inTemplate = false;
+    let escaped = false;
+
+    for (let i = 0; i < withoutTrailing.length; i++) {
+        const ch = withoutTrailing[i];
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+
+        if (ch === '\\') {
+            escaped = true;
+            continue;
+        }
+
+        if (ch === "'" && !inDouble && !inTemplate) {
+            inSingle = !inSingle;
+        } else if (ch === '"' && !inSingle && !inTemplate) {
+            inDouble = !inDouble;
+        } else if (ch === '`' && !inSingle && !inDouble) {
+            inTemplate = !inTemplate;
+        } else if (ch === ';' && !inSingle && !inDouble && !inTemplate) {
+            // Found a semicolon outside of strings — multi-statement
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Error patterns that indicate a stale/destroyed context
 const CONTEXT_ERROR_PATTERNS = [
     "cannot find context",
@@ -118,6 +176,7 @@ const CONTEXT_ERROR_PATTERNS = [
     "session closed",
     "context with specified id",
     "no execution context",
+    "runningdetached",
 ];
 
 /**
@@ -162,7 +221,8 @@ async function attemptQuickReconnect(preferredPort?: number): Promise<boolean> {
  */
 async function executeExpressionCore(
     expression: string,
-    awaitPromise: boolean
+    awaitPromise: boolean,
+    timeoutMs: number = 10000
 ): Promise<ExecutionResult> {
     const app = getFirstConnectedApp();
 
@@ -181,11 +241,15 @@ async function executeExpressionCore(
     }
 
     const cleanedExpression = validation.expression;
-    const TIMEOUT_MS = 10000;
+    const TIMEOUT_MS = timeoutMs;
     const currentMessageId = getNextMessageId();
 
     // Wrap expression with global polyfill for Hermes compatibility
-    const wrappedExpression = `(function() { ${GLOBAL_POLYFILL} return (${cleanedExpression}); })()`;
+    // Multi-statement expressions (var x = 1; foo(x)) can't use `return (expr)` wrapping
+    // because declarations and semicolons are invalid inside parenthesized expressions
+    const wrappedExpression = isMultiStatementExpression(cleanedExpression)
+        ? `(function() { ${GLOBAL_POLYFILL} ${cleanedExpression} })()`
+        : `(function() { ${GLOBAL_POLYFILL} return (${cleanedExpression}); })()`;
 
     return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
@@ -226,7 +290,7 @@ export async function executeInApp(
     awaitPromise: boolean = true,
     options: ExecuteOptions = {}
 ): Promise<ExecutionResult> {
-    const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true } = options;
+    const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true, timeoutMs = 10000 } = options;
 
     let lastError: string | undefined;
     let preferredPort: number | undefined;
@@ -273,7 +337,7 @@ export async function executeInApp(
         }
 
         // Execute the expression
-        const result = await executeExpressionCore(expression, awaitPromise);
+        const result = await executeExpressionCore(expression, awaitPromise, timeoutMs);
 
         // Success - return result
         if (result.success) {
@@ -358,6 +422,8 @@ export async function inspectGlobal(objectName: string): Promise<ExecutionResult
 }
 
 // Reload the React Native app using __ReactRefresh (Page.reload is not supported by Hermes)
+// Uses fire-and-forget: sends the reload command without waiting for a response,
+// since the JS context is destroyed during reload and would always timeout.
 export async function reloadApp(): Promise<ExecutionResult> {
     // Get current connection info before reload
     let app = getFirstConnectedApp();
@@ -402,38 +468,50 @@ export async function reloadApp(): Promise<ExecutionResult> {
 
     const port = app.port;
 
-    // Use __ReactRefresh.performFullRefresh() which is available in Metro bundler dev mode
-    // This works with Hermes unlike the CDP Page.reload method
-    const expression = `
-        (function() {
-            try {
-                // Use React Refresh's full refresh - most reliable method
-                if (typeof __ReactRefresh !== 'undefined' && typeof __ReactRefresh.performFullRefresh === 'function') {
-                    __ReactRefresh.performFullRefresh('mcp-reload');
-                    return 'Reload triggered via __ReactRefresh.performFullRefresh';
-                }
-                // Fallback: Try DevSettings if available on global
-                if (typeof global !== 'undefined' && global.DevSettings && typeof global.DevSettings.reload === 'function') {
-                    global.DevSettings.reload();
-                    return 'Reload triggered via DevSettings';
-                }
-                return 'Reload not available - make sure app is in development mode with Metro bundler';
-            } catch (e) {
-                return 'Reload failed: ' + e.message;
+    // Fire-and-forget: send reload command via CDP without waiting for response.
+    // The JS context is destroyed during reload, so Runtime.evaluate would always timeout.
+    const reloadExpression = `(function() {
+        try {
+            if (typeof __ReactRefresh !== 'undefined' && typeof __ReactRefresh.performFullRefresh === 'function') {
+                __ReactRefresh.performFullRefresh('mcp-reload');
+                return 'ok';
             }
-        })()
-    `;
+            if (typeof global !== 'undefined' && global.DevSettings && typeof global.DevSettings.reload === 'function') {
+                global.DevSettings.reload();
+                return 'ok';
+            }
+            return 'no-method';
+        } catch (e) { return 'error:' + e.message; }
+    })()`;
 
-    const result = await executeInApp(expression, false);
+    try {
+        if (app.ws.readyState !== WebSocket.OPEN) {
+            return { success: false, error: "WebSocket connection is not open." };
+        }
 
-    if (!result.success) {
-        return result;
+        // Send without registering a pending execution — fire and forget
+        const messageId = getNextMessageId();
+        app.ws.send(JSON.stringify({
+            id: messageId,
+            method: "Runtime.evaluate",
+            params: {
+                expression: reloadExpression,
+                returnByValue: true,
+                awaitPromise: false,
+                userGesture: true,
+            },
+        }));
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to send reload command: ${error instanceof Error ? error.message : String(error)}`
+        };
     }
 
     // Auto-reconnect after reload
     try {
         // Wait for app to reload (give it time to restart JS context)
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await delay(2000);
 
         // Close existing connections to this port and cancel any pending auto-reconnections
         // This prevents the dual-reconnection bug where both auto-reconnect and manual reconnect compete
@@ -451,7 +529,7 @@ export async function reloadApp(): Promise<ExecutionResult> {
         }
 
         // Small delay to ensure cleanup
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await delay(500);
 
         // Reconnect to Metro on the same port with auto-reconnection DISABLED
         // We're doing a manual reconnection here, so we don't want the auto-reconnect
@@ -805,7 +883,8 @@ export async function getComponentTree(options: {
         })()
     `;
 
-    const result = await executeInApp(expression, false);
+    // Use a longer timeout for component tree traversal — large apps can exceed 10s
+    const result = await executeInApp(expression, false, { timeoutMs: 30000 });
 
     // Apply formatting if requested
     if (result.success && result.result) {
@@ -999,7 +1078,8 @@ export async function getScreenLayout(options: {
         })()
     `;
 
-    const result = await executeInApp(expression, false);
+    // Use a longer timeout for layout traversal — large component trees can exceed 10s
+    const result = await executeInApp(expression, false, { timeoutMs: 30000 });
 
     // Apply TONL formatting if requested
     if (format === 'tonl' && result.success && result.result) {
