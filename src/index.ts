@@ -151,7 +151,10 @@ function getJpegDimensions(buffer: Buffer): { width: number; height: number } | 
 
 /**
  * Estimate how many tokens an image will consume in Claude's vision encoder.
- * Claude resizes images to fit within 1568px on any side, then uses ~(w*h)/750 tokens.
+ * Per Anthropic docs, Claude auto-resizes images to fit within:
+ *   1) 1568px on any side, AND
+ *   2) ~1.15 megapixels total (whichever is hit first)
+ * Then tokens ≈ (width * height) / 750 (capped at ~1,600 per image).
  * We only decode the first ~2KB of the base64 string to read JPEG dimensions.
  */
 function estimateImageTokens(base64Data: string): number {
@@ -164,10 +167,18 @@ function estimateImageTokens(base64Data: string): number {
 
         let { width, height } = dims;
 
-        // Claude internally resizes to fit within 1568x1568 preserving aspect ratio
+        // Step 1: Claude resizes to fit within 1568px on any side
         const MAX_CLAUDE_DIM = 1568;
         if (width > MAX_CLAUDE_DIM || height > MAX_CLAUDE_DIM) {
             const scale = MAX_CLAUDE_DIM / Math.max(width, height);
+            width = Math.round(width * scale);
+            height = Math.round(height * scale);
+        }
+
+        // Step 2: Claude further resizes to fit within ~1.15 megapixels
+        const MAX_PIXELS = 1_150_000;
+        if (width * height > MAX_PIXELS) {
+            const scale = Math.sqrt(MAX_PIXELS / (width * height));
             width = Math.round(width * scale);
             height = Math.round(height * scale);
         }
