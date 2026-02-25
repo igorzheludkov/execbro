@@ -1,7 +1,10 @@
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
 import { writeFile, unlink } from "fs/promises";
+import { existsSync } from "fs";
 import { randomUUID } from "crypto";
+import { createRequire } from "module";
+import { spawn } from "child_process";
 
 export interface OCRWord {
     text: string;
@@ -107,7 +110,7 @@ function getOCRLanguages(): string[] {
 
 /**
  * Initialize EasyOCR (Python-based, better for colored backgrounds)
- * Requires Python and easyocr package: pip install easyocr
+ * Requires Python 3.6+ on the system; easyocr is provided by node-easyocr's bundled venv.
  */
 async function getEasyOCR(): Promise<import("node-easyocr").EasyOCR> {
     if (easyOCRInstance) {
@@ -119,12 +122,49 @@ async function getEasyOCR(): Promise<import("node-easyocr").EasyOCR> {
     }
 
     easyOCRInitPromise = (async () => {
-        const languages = getOCRLanguages();
-        const { EasyOCR } = await import("node-easyocr");
-        const ocr = new EasyOCR();
-        await withTimeout(ocr.init(languages), 30000, "EasyOCR init timeout - ensure Python and easyocr are installed: pip install easyocr");
-        easyOCRInstance = ocr;
-        return ocr;
+        try {
+            const languages = getOCRLanguages();
+            const { EasyOCR } = await import("node-easyocr");
+            const ocr = new EasyOCR();
+
+            // node-easyocr's preinstall creates a venv with easyocr, but the
+            // runtime hardcodes pythonPath to system 'python3' which won't have it.
+            // Resolve the package location and point at its bundled venv instead.
+            const require = createRequire(import.meta.url);
+            const easyocrPkgDir = dirname(require.resolve("node-easyocr"));
+            // Matches the convention in node-easyocr's own setup-python-env.js
+            const venvBin = process.platform === "win32" ? "Scripts" : "bin";
+            const venvExe = process.platform === "win32" ? "python.exe" : "python";
+            const venvPython = join(easyocrPkgDir, "..", "venv", venvBin, venvExe);
+            if (existsSync(venvPython)) {
+                (ocr as any).pythonPath = venvPython;
+            }
+
+            // node-easyocr's JSON parser chokes on easyocr's progress bar output
+            // during model downloads. Pre-download models with verbose=False so
+            // node-easyocr's init never sees non-JSON output on stdout.
+            // Always run with the configured languages since each language has its
+            // own recognition model that may need downloading.
+            const pythonPath = (ocr as any).pythonPath || "python3";
+            const langArg = JSON.stringify(languages);
+            await new Promise<void>((resolve, reject) => {
+                const proc = spawn(pythonPath, [
+                    "-c", `import easyocr; easyocr.Reader(${langArg}, verbose=False)`
+                ]);
+                proc.on("close", (code) => {
+                    if (code === 0) resolve();
+                    else reject(new Error(`EasyOCR model setup exited with code ${code}. Ensure Python 3.6+ is installed.`));
+                });
+                proc.on("error", reject);
+            });
+
+            await withTimeout(ocr.init(languages), 30000, "EasyOCR init timeout. Ensure Python 3.6+ is available on your system.");
+            easyOCRInstance = ocr;
+            return ocr;
+        } catch (error) {
+            easyOCRInitPromise = null;
+            throw error;
+        }
     })();
 
     return easyOCRInitPromise;
@@ -177,7 +217,7 @@ function toTapCoord(
 
 /**
  * Run OCR using EasyOCR
- * Requires Python and easyocr package: pip install easyocr
+ * Requires Python 3.6+ on the system; easyocr is provided by node-easyocr's bundled venv.
  */
 export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): Promise<OCRResult> {
     const scaleFactor = options?.scaleFactor ?? 1;
@@ -190,7 +230,7 @@ export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): 
         ocr = await getEasyOCR();
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`EasyOCR initialization failed. Ensure Python and easyocr are installed: pip install easyocr. Error: ${message}`);
+        throw new Error(`EasyOCR initialization failed. Ensure Python 3.6+ is available on your system. Error: ${message}`);
     }
 
     // Write buffer to temp file (EasyOCR requires file path)
