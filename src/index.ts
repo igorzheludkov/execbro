@@ -774,11 +774,19 @@ registerToolWithTelemetry(
         const result = await executeInApp(expression, awaitPromise);
 
         if (!result.success) {
+            let errorText = `Error: ${result.error}`;
+
+            // If the error is a ReferenceError (accessing a global that doesn't exist),
+            // guide the agent to expose the variable as a global first
+            if (result.error?.includes("ReferenceError")) {
+                errorText += "\n\nNOTE: This variable is not exposed as a global. To access it, first assign it to a global variable in your app code (e.g., `globalThis.__MY_VAR__ = myVar;`), then use execute_in_app to read `__MY_VAR__`. You can also use list_debug_globals to see what globals ARE currently available.";
+            }
+
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Error: ${result.error}`
+                        text: errorText
                     }
                 ],
                 isError: true,
@@ -855,11 +863,19 @@ registerToolWithTelemetry(
         const result = await inspectGlobal(objectName);
 
         if (!result.success) {
+            let errorText = `Error: ${result.error}`;
+
+            // If the error is a ReferenceError (accessing a global that doesn't exist),
+            // guide the agent to expose the variable as a global first
+            if (result.error?.includes("ReferenceError")) {
+                errorText += `\n\nNOTE: '${objectName}' is not exposed as a global variable. To inspect it, first assign it to a global in your app code (e.g., \`globalThis.${objectName} = ${objectName.replace(/^__/, '').replace(/__$/, '')};\`), then call inspect_global again. Use list_debug_globals to see what globals ARE currently available.`;
+            }
+
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Error: ${result.error}`
+                        text: errorText
                     }
                 ],
                 isError: true
