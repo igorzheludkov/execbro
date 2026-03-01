@@ -31,6 +31,7 @@ interface TelemetryEvent {
 
 interface TelemetryPayload {
     installationId: string;
+    sessionId?: string;
     serverVersion: string;
     nodeVersion: string;
     platform: string;
@@ -55,6 +56,10 @@ export default {
         // Route handling
         if (url.pathname === "/api/stats" && request.method === "GET") {
             return handleStats(request, env);
+        }
+
+        if (url.pathname === "/api/flows" && request.method === "GET") {
+            return handleFlows(request, env);
         }
 
         if (url.pathname === "/" && request.method === "POST") {
@@ -102,13 +107,15 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
                     payload.serverVersion,                                         // blob5
                     event.errorCategory || "",                                     // blob6
                     (event.errorMessage || "").slice(0, 200),                      // blob7
-                    (event.errorContext || "").slice(0, 150)                       // blob8 - additional error context
+                    (event.errorContext || "").slice(0, 150),                      // blob8 - additional error context
+                    (payload.sessionId || "").slice(0, 12)                          // blob9 - session ID for flow tracking
                 ],
                 doubles: [
                     event.duration || 0,       // double1: duration
                     event.isFirstRun ? 1 : 0,  // double2: isFirstRun
                     event.inputTokens || 0,    // double3: inputTokens
-                    event.outputTokens || 0    // double4: outputTokens
+                    event.outputTokens || 0,   // double4: outputTokens
+                    event.timestamp || 0       // double5: client-side epoch ms for flow ordering
                 ],
                 indexes: [
                     payload.installationId.slice(0, 8)
@@ -123,6 +130,316 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
     } catch {
         return new Response("Server error", { status: 500 });
     }
+}
+
+// ============================================================================
+// Flow Tracking
+// ============================================================================
+
+const SESSION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+interface FlowSession {
+    sessionId: string;
+    userId: string;
+    startTime: number;
+    endTime: number;
+    tools: Array<{ name: string; status: string; duration: number; timestamp: number }>;
+}
+
+async function handleFlows(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Authenticate
+    const key = url.searchParams.get("key") || request.headers.get("X-Dashboard-Key");
+    if (!key || key !== env.DASHBOARD_KEY) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        });
+    }
+
+    const daysParam = parseInt(url.searchParams.get("days") || "7");
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 200);
+    const userIdFilter = url.searchParams.get("userId") || "";
+
+    const isToday = daysParam === 0;
+    const isAll = daysParam === -1;
+
+    // Parse excluded users
+    const excludeUsersParam = url.searchParams.get("excludeUsers") || "";
+    const excludedUsers = excludeUsersParam
+        .split(",")
+        .map(u => u.trim().toLowerCase())
+        .filter(u => u.length > 0 && u.length <= 8);
+
+    let userExclusionFilter = "";
+    if (excludedUsers.length > 0) {
+        const exclusions = excludedUsers.map(u => `index1 NOT LIKE '${u}%'`).join(" AND ");
+        userExclusionFilter = `AND ${exclusions}`;
+    }
+
+    let userFilter = "";
+    if (userIdFilter) {
+        userFilter = `AND index1 LIKE '${userIdFilter.slice(0, 8)}%'`;
+    }
+
+    const timeFilter = isAll
+        ? "1=1"
+        : isToday
+            ? "timestamp >= toStartOfDay(now())"
+            : `timestamp >= NOW() - INTERVAL '${daysParam}' DAY`;
+
+    if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
+        return new Response(JSON.stringify({ error: "Dashboard not configured" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        });
+    }
+
+    const sqlEndpoint = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/analytics_engine/sql`;
+
+    try {
+        const flowQuery = `
+            SELECT
+                index1,
+                blob1 as event_name,
+                blob2 as tool_name,
+                blob3 as status,
+                blob9 as session_id,
+                double1 as duration,
+                double5 as client_timestamp,
+                timestamp
+            FROM rn_debugger_events
+            WHERE
+                (blob1 = 'tool_invocation' OR blob1 = 'session_start')
+                AND ${timeFilter}
+                ${userExclusionFilter}
+                ${userFilter}
+            ORDER BY timestamp ASC
+            LIMIT 50000
+        `;
+
+        const res = await fetch(sqlEndpoint, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
+            body: flowQuery
+        });
+
+        const text = await res.text();
+        let parsed: { data?: Array<{
+            index1: string;
+            event_name: string;
+            tool_name: string;
+            status: string;
+            session_id: string;
+            duration: number;
+            client_timestamp: number;
+            timestamp: string;
+        }>; errors?: Array<{ message: string }> };
+
+        try {
+            parsed = JSON.parse(text);
+        } catch {
+            return new Response(JSON.stringify({ error: "Failed to parse analytics response" }), {
+                status: 500,
+                headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+            });
+        }
+
+        if (parsed.errors?.length) {
+            return new Response(JSON.stringify({ error: parsed.errors[0].message }), {
+                status: 500,
+                headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+            });
+        }
+
+        const rows = parsed.data || [];
+
+        // Sort by client timestamp (precise ms), fallback to AE timestamp
+        const sorted = rows.sort((a, b) => {
+            const aTime = Number(a.client_timestamp) || new Date(a.timestamp).getTime();
+            const bTime = Number(b.client_timestamp) || new Date(b.timestamp).getTime();
+            return aTime - bTime;
+        });
+
+        // Group events into sessions
+        const sessions = composeSessions(sorted);
+
+        // Compute N-gram patterns
+        const patterns = computePatterns(sessions);
+
+        const legacyEvents = sorted.filter(e => !e.session_id).length;
+
+        return new Response(JSON.stringify({
+            sessions: sessions
+                .sort((a, b) => b.startTime - a.startTime)
+                .slice(0, limit)
+                .map(s => ({
+                    sessionId: s.sessionId,
+                    userId: s.userId,
+                    startTime: new Date(s.startTime).toISOString(),
+                    endTime: new Date(s.endTime).toISOString(),
+                    durationMs: s.endTime - s.startTime,
+                    toolCount: s.tools.length,
+                    tools: s.tools.map(t => ({
+                        name: t.name,
+                        status: t.status,
+                        duration: t.duration,
+                        relativeTime: t.timestamp - s.startTime
+                    })),
+                    flow: s.tools.map(t => t.name).join(" -> ")
+                })),
+            patterns,
+            meta: {
+                totalSessions: sessions.length,
+                totalEvents: sorted.length,
+                legacyEvents,
+                timeRange: { days: daysParam }
+            }
+        }), {
+            status: 200,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        });
+    } catch (error) {
+        return new Response(JSON.stringify({ error: "Failed to query flows", details: String(error) }), {
+            status: 500,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS }
+        });
+    }
+}
+
+function composeSessions(sorted: Array<{
+    index1: string;
+    event_name: string;
+    tool_name: string;
+    status: string;
+    session_id: string;
+    duration: number;
+    client_timestamp: number;
+    timestamp: string;
+}>): FlowSession[] {
+    // Sessions keyed by userId:sessionId (for events with sessionId)
+    const sessionsByKey = new Map<string, FlowSession>();
+    // Active legacy sessions keyed by userId (for events without sessionId)
+    const legacySessions = new Map<string, FlowSession>();
+    const allSessions: FlowSession[] = [];
+    let legacyCounter = 0;
+
+    for (const event of sorted) {
+        const userId = event.index1;
+        const eventTime = Number(event.client_timestamp) || new Date(event.timestamp).getTime();
+        const hasSessionId = event.session_id && event.session_id.length > 0;
+
+        if (hasSessionId) {
+            // Events WITH sessionId: group by exact key
+            const key = `${userId}:${event.session_id}`;
+            let session = sessionsByKey.get(key);
+            if (!session) {
+                session = {
+                    sessionId: event.session_id,
+                    userId,
+                    startTime: eventTime,
+                    endTime: eventTime,
+                    tools: []
+                };
+                sessionsByKey.set(key, session);
+                allSessions.push(session);
+            }
+
+            if (event.event_name === "tool_invocation" && event.tool_name) {
+                session.tools.push({
+                    name: event.tool_name,
+                    status: event.status,
+                    duration: Number(event.duration) || 0,
+                    timestamp: eventTime
+                });
+            }
+            session.endTime = Math.max(session.endTime, eventTime);
+        } else {
+            // Legacy events: split by session_start or 10-min gap
+            const currentSession = legacySessions.get(userId);
+            const needsNewSession = !currentSession
+                || event.event_name === "session_start"
+                || (eventTime - currentSession.endTime) > SESSION_TIMEOUT_MS;
+
+            if (needsNewSession) {
+                legacyCounter++;
+                const newSession: FlowSession = {
+                    sessionId: `legacy-${legacyCounter}`,
+                    userId,
+                    startTime: eventTime,
+                    endTime: eventTime,
+                    tools: []
+                };
+                legacySessions.set(userId, newSession);
+                allSessions.push(newSession);
+            }
+
+            const session = legacySessions.get(userId)!;
+            if (event.event_name === "tool_invocation" && event.tool_name) {
+                session.tools.push({
+                    name: event.tool_name,
+                    status: event.status,
+                    duration: Number(event.duration) || 0,
+                    timestamp: eventTime
+                });
+            }
+            session.endTime = Math.max(session.endTime, eventTime);
+        }
+    }
+
+    // Filter out empty sessions (e.g., session_start with no tool invocations)
+    return allSessions.filter(s => s.tools.length > 0);
+}
+
+function computePatterns(sessions: FlowSession[]) {
+    const pairCounts = new Map<string, { count: number; users: Set<string> }>();
+    const tripleCounts = new Map<string, { count: number; users: Set<string> }>();
+
+    for (const session of sessions) {
+        const toolNames = session.tools.map(t => t.name);
+
+        // Bigrams
+        for (let i = 0; i < toolNames.length - 1; i++) {
+            const key = `${toolNames[i]} -> ${toolNames[i + 1]}`;
+            if (!pairCounts.has(key)) {
+                pairCounts.set(key, { count: 0, users: new Set() });
+            }
+            const entry = pairCounts.get(key)!;
+            entry.count++;
+            entry.users.add(session.userId);
+        }
+
+        // Trigrams
+        for (let i = 0; i < toolNames.length - 2; i++) {
+            const key = `${toolNames[i]} -> ${toolNames[i + 1]} -> ${toolNames[i + 2]}`;
+            if (!tripleCounts.has(key)) {
+                tripleCounts.set(key, { count: 0, users: new Set() });
+            }
+            const entry = tripleCounts.get(key)!;
+            entry.count++;
+            entry.users.add(session.userId);
+        }
+    }
+
+    return {
+        pairs: Array.from(pairCounts.entries())
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 20)
+            .map(([flow, data]) => ({
+                flow,
+                count: data.count,
+                uniqueUsers: data.users.size
+            })),
+        triples: Array.from(tripleCounts.entries())
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 20)
+            .map(([flow, data]) => ({
+                flow,
+                count: data.count,
+                uniqueUsers: data.users.size
+            }))
+    };
 }
 
 function calculateRetention(rows: Array<{ index1: string; activity_date: string }>) {

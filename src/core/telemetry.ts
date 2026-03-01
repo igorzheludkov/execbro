@@ -88,6 +88,7 @@ interface TelemetryConfig {
 
 interface TelemetryPayload {
     installationId: string;
+    sessionId?: string;
     serverVersion: string;
     nodeVersion: string;
     platform: string;
@@ -103,6 +104,7 @@ let config: TelemetryConfig | null = null;
 let eventQueue: TelemetryEvent[] = [];
 let batchTimer: NodeJS.Timeout | null = null;
 let sessionStartTime: number | null = null;
+let sessionId: string | null = null;
 let isFirstRunSession = false;
 
 // ============================================================================
@@ -193,6 +195,7 @@ export function initTelemetry(): void {
     // Load/create config (generates installation ID)
     loadOrCreateConfig();
     sessionStartTime = Date.now();
+    sessionId = randomUUID();
 
     // Track session start
     trackEvent("session_start", {
@@ -329,6 +332,7 @@ function flushSync(): void {
 async function sendEvents(events: TelemetryEvent[]): Promise<void> {
     const payload: TelemetryPayload = {
         installationId: getInstallationId(),
+        sessionId: sessionId || undefined,
         serverVersion: getServerVersion(),
         nodeVersion: process.version,
         platform: process.platform,

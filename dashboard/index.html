@@ -357,6 +357,86 @@
             height: 80px;
             margin-top: 8px;
         }
+
+        /* Flow tracking styles */
+        .flow-sequence {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+            padding: 8px 0;
+        }
+
+        .flow-tool {
+            display: inline-block;
+            background: #334155;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #e2e8f0;
+            white-space: nowrap;
+        }
+
+        .flow-tool.success { border-left: 3px solid #4ade80; }
+        .flow-tool.failure { border-left: 3px solid #f87171; }
+
+        .flow-arrow {
+            color: #64748b;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .session-item {
+            border: 1px solid #334155;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            cursor: pointer;
+            background: #1e293b;
+            transition: background 0.2s;
+        }
+
+        .session-header:hover { background: #263347; }
+
+        .session-body {
+            padding: 12px 16px;
+            border-top: 1px solid #334155;
+            display: none;
+        }
+
+        .session-body.open { display: block; }
+
+        .session-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .pattern-flow {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .flow-load-btn {
+            background: #3b82f6;
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .flow-load-btn:hover { background: #2563eb; }
     </style>
 </head>
 <body>
@@ -541,6 +621,52 @@
                 <tr><td colspan="3" class="loading">Loading...</td></tr>
             </tbody>
         </table>
+    </div>
+
+    <!-- Session Flows Section -->
+    <div class="chart-card" style="margin-bottom: 32px;">
+        <h3>
+            Session Flows
+            <span style="color: #64748b; font-size: 12px; cursor: help; margin-left: 8px;"
+                  title="Sequences of tool invocations within sessions. Sessions end after 10 minutes of inactivity or on new session start.">&#9432;</span>
+        </h3>
+        <div class="filter-section" style="margin-bottom: 16px;">
+            <span class="filter-label">Filter by user:</span>
+            <input type="text" id="flow-user-filter" class="filter-input" style="min-width: 200px;"
+                placeholder="User ID prefix (e.g., 674b31e5)"
+                onkeydown="if(event.key==='Enter') loadFlows()">
+            <button class="flow-load-btn" onclick="loadFlows()">Load Flows</button>
+        </div>
+        <div id="flows-summary">
+            <p style="color: #64748b; text-align: center;">Click "Load Flows" to fetch session flow data</p>
+        </div>
+    </div>
+
+    <!-- Common Patterns -->
+    <div class="table-card" id="patterns-section" style="display: none;">
+        <h3>Common Tool Sequences</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div>
+                <h4 style="color: #94a3b8; font-size: 13px; margin-bottom: 12px;">Tool Pairs</h4>
+                <table>
+                    <thead><tr><th>Sequence</th><th>Count</th><th>Users</th></tr></thead>
+                    <tbody id="pairs-table"></tbody>
+                </table>
+            </div>
+            <div>
+                <h4 style="color: #94a3b8; font-size: 13px; margin-bottom: 12px;">Tool Triples</h4>
+                <table>
+                    <thead><tr><th>Sequence</th><th>Count</th><th>Users</th></tr></thead>
+                    <tbody id="triples-table"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Explorer -->
+    <div class="table-card" id="sessions-section" style="display: none;">
+        <h3>Session Explorer <span id="sessions-count" style="color: #64748b; font-size: 13px;"></span></h3>
+        <div id="sessions-list"></div>
     </div>
 
     <script>
@@ -1142,6 +1268,114 @@
             } catch {
                 return dateStr;
             }
+        }
+
+        // ============================================================================
+        // Flow Tracking
+        // ============================================================================
+
+        async function loadFlows() {
+            const userFilter = document.getElementById('flow-user-filter').value.trim();
+            const excludeParam = excludedUsers.length > 0
+                ? `&excludeUsers=${encodeURIComponent(excludedUsers.join(','))}`
+                : '';
+            const userParam = userFilter ? `&userId=${encodeURIComponent(userFilter)}` : '';
+
+            const summary = document.getElementById('flows-summary');
+            summary.innerHTML = '<p class="loading">Loading flows...</p>';
+
+            try {
+                const response = await fetch(
+                    `${API_URL}/api/flows?days=${selectedDays}&key=${encodeURIComponent(dashboardKey)}${excludeParam}${userParam}&limit=50`
+                );
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+                const data = await response.json();
+                renderFlows(data);
+            } catch (error) {
+                summary.innerHTML = `<div class="error">Failed to load flows: ${error.message}</div>`;
+                document.getElementById('patterns-section').style.display = 'none';
+                document.getElementById('sessions-section').style.display = 'none';
+            }
+        }
+
+        function renderFlows(data) {
+            // Summary
+            document.getElementById('flows-summary').innerHTML =
+                `<p style="color: #94a3b8; font-size: 13px; text-align: center;">
+                    ${data.meta?.totalSessions || 0} sessions, ${data.meta?.totalEvents || 0} events
+                    ${data.meta?.legacyEvents > 0 ? ` (${data.meta.legacyEvents} legacy without session ID)` : ''}
+                </p>`;
+
+            // Patterns
+            const patternsSection = document.getElementById('patterns-section');
+            patternsSection.style.display = 'block';
+
+            document.getElementById('pairs-table').innerHTML = (data.patterns?.pairs || [])
+                .map(p => `<tr>
+                    <td><div class="pattern-flow">${renderCompactFlow(p.flow)}</div></td>
+                    <td>${p.count}</td>
+                    <td>${p.uniqueUsers}</td>
+                </tr>`).join('') || '<tr><td colspan="3" style="color: #64748b;">No patterns found</td></tr>';
+
+            document.getElementById('triples-table').innerHTML = (data.patterns?.triples || [])
+                .map(p => `<tr>
+                    <td><div class="pattern-flow">${renderCompactFlow(p.flow)}</div></td>
+                    <td>${p.count}</td>
+                    <td>${p.uniqueUsers}</td>
+                </tr>`).join('') || '<tr><td colspan="3" style="color: #64748b;">No patterns found</td></tr>';
+
+            // Sessions
+            const sessionsSection = document.getElementById('sessions-section');
+            sessionsSection.style.display = 'block';
+            document.getElementById('sessions-count').textContent =
+                `(showing ${(data.sessions || []).length} of ${data.meta?.totalSessions || 0})`;
+
+            const sessionsList = document.getElementById('sessions-list');
+            sessionsList.innerHTML = (data.sessions || []).map((session, i) => `
+                <div class="session-item">
+                    <div class="session-header" onclick="toggleSession(${i})">
+                        <div class="session-meta">
+                            <span><code>${escapeHtml(session.userId)}</code></span>
+                            <span>${formatDate(session.startTime)}</span>
+                            <span>${session.toolCount} tools</span>
+                            <span>${formatDurationMs(session.durationMs)}</span>
+                        </div>
+                        <span style="color: #64748b;">&#9660;</span>
+                    </div>
+                    <div class="session-body" id="session-body-${i}">
+                        <div class="flow-sequence">
+                            ${renderSessionFlow(session.tools)}
+                        </div>
+                    </div>
+                </div>
+            `).join('') || '<p style="color: #64748b; text-align: center;">No sessions found</p>';
+        }
+
+        function renderCompactFlow(flowStr) {
+            return flowStr.split(' -> ')
+                .map(tool => `<span class="flow-tool" style="padding: 2px 6px;">${escapeHtml(tool)}</span>`)
+                .join('<span class="flow-arrow">&rarr;</span>');
+        }
+
+        function renderSessionFlow(tools) {
+            if (!tools || tools.length === 0) return '<span style="color: #64748b;">Empty session</span>';
+            return tools.map((t, i) => {
+                const pill = `<span class="flow-tool ${t.status}" title="${escapeHtml(t.name)} (${t.duration}ms)">${escapeHtml(t.name)} <span style="color: #64748b; font-size: 10px; margin-left: 4px;">${t.duration}ms</span></span>`;
+                const arrow = i < tools.length - 1 ? '<span class="flow-arrow">&rarr;</span>' : '';
+                return pill + arrow;
+            }).join('');
+        }
+
+        function toggleSession(index) {
+            const body = document.getElementById(`session-body-${index}`);
+            if (body) body.classList.toggle('open');
+        }
+
+        function formatDurationMs(ms) {
+            if (!ms || ms < 0) return '-';
+            if (ms < 1000) return `${ms}ms`;
+            if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+            return `${(ms / 60000).toFixed(1)}m`;
         }
 
         function resetKey() {
