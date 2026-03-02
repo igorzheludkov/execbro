@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import { connectToDevice } from "../../core/connection.js";
 import { executeInApp } from "../../core/executor.js";
 import { connectedApps, pendingExecutions } from "../../core/state.js";
@@ -7,6 +8,14 @@ import { FakeCDPServer } from "../helpers/fake-cdp-server.js";
 describe("executeInApp (integration)", () => {
     let server: FakeCDPServer;
     let device: DeviceInfo;
+
+    beforeAll(() => {
+        jest.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterAll(() => {
+        jest.restoreAllMocks();
+    });
 
     beforeEach(async () => {
         // Clean up any existing state
