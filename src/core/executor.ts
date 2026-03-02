@@ -13,7 +13,7 @@ const GLOBAL_POLYFILL = `var global = typeof global !== 'undefined' ? global : g
 // Expression Preprocessing & Validation
 // ============================================================================
 
-interface ExpressionValidation {
+export interface ExpressionValidation {
     valid: boolean;
     expression: string;
     error?: string;
@@ -23,7 +23,7 @@ interface ExpressionValidation {
  * Check if a string contains emoji or other problematic Unicode characters
  * Hermes has issues with certain UTF-16 surrogate pairs (like emoji)
  */
-function containsProblematicUnicode(str: string): boolean {
+export function containsProblematicUnicode(str: string): boolean {
     // Detect UTF-16 surrogate pairs (emoji and other characters outside BMP)
     // These cause "Invalid UTF-8 code point" errors in Hermes
     // eslint-disable-next-line no-control-regex
@@ -34,7 +34,7 @@ function containsProblematicUnicode(str: string): boolean {
  * Strip leading comments from an expression
  * Users often start with // comments which break the (return expr) wrapping
  */
-function stripLeadingComments(expression: string): string {
+export function stripLeadingComments(expression: string): string {
     let result = expression;
 
     // Strip leading whitespace first
@@ -67,7 +67,7 @@ function stripLeadingComments(expression: string): string {
  * Validate and preprocess an expression before execution
  * Returns cleaned expression or error with helpful message
  */
-function validateAndPreprocessExpression(expression: string): ExpressionValidation {
+export function validateAndPreprocessExpression(expression: string): ExpressionValidation {
     // Check for emoji/problematic Unicode before any processing
     if (containsProblematicUnicode(expression)) {
         return {
