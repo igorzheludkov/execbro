@@ -28,7 +28,7 @@ interface CDPResponse {
     };
 }
 
-type ResponseHandler = (params: Record<string, unknown>) => CDPResponse;
+type ResponseHandler = (params: Record<string, unknown>) => CDPResponse | null;
 
 export class FakeCDPServer {
     private server: WebSocketServer | null = null;
@@ -69,7 +69,10 @@ export class FakeCDPServer {
         if (msg.method === "Runtime.evaluate") {
             if (this.evaluateHandler) {
                 const response = this.evaluateHandler(msg.params || {});
-                ws.send(JSON.stringify({ id: msg.id, ...response }));
+                // If handler returns null, don't send a response (simulates timeout)
+                if (response !== null) {
+                    ws.send(JSON.stringify({ id: msg.id, ...response }));
+                }
             } else {
                 // Default: return undefined
                 ws.send(JSON.stringify({
@@ -115,7 +118,8 @@ export class FakeCDPServer {
 
     /** Convenience: don't respond (causes timeout) */
     respondWithTimeout(): void {
-        this.evaluateHandler = null;
+        // Set a handler that returns null — handleMessage skips sending
+        this.onEvaluate(() => null);
     }
 
     /** Get all received messages */
