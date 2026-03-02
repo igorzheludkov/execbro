@@ -1,3 +1,4 @@
+import { describe, it, expect } from "@jest/globals";
 import { selectMainDevice } from "../../core/metro.js";
 import { DeviceInfo } from "../../core/types.js";
 

@@ -1,3 +1,4 @@
+import { describe, it, expect } from "@jest/globals";
 import { NetworkBuffer } from "../../core/network.js";
 import { NetworkRequest } from "../../core/types.js";
 

@@ -1,3 +1,4 @@
+import { describe, it, expect } from "@jest/globals";
 import { BundleErrorBuffer, BundleError } from "../../core/bundle.js";
 
 function makeError(message: string, type: BundleError["type"] = "other"): BundleError {

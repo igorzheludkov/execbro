@@ -1,4 +1,4 @@
-import { jest } from "@jest/globals";
+import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "@jest/globals";
 import { connectToDevice } from "../../core/connection.js";
 import { executeInApp } from "../../core/executor.js";
 import { connectedApps, pendingExecutions } from "../../core/state.js";

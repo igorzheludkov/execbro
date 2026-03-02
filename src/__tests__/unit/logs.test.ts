@@ -1,3 +1,4 @@
+import { describe, it, expect } from "@jest/globals";
 import { LogBuffer, mapConsoleType } from "../../core/logs.js";
 import { LogEntry } from "../../core/types.js";
 
