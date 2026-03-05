@@ -48,3 +48,14 @@ export function clearActiveSimulatorIfSource(appKey: string): void {
         _activeSimulatorSourceAppKey = null;
     }
 }
+
+// Last CDP message received timestamp (for connection liveness detection)
+let _lastCDPMessageAt: Date | null = null;
+
+export function getLastCDPMessageTime(): Date | null {
+    return _lastCDPMessageAt;
+}
+
+export function updateLastCDPMessageTime(time: Date | null): void {
+    _lastCDPMessageAt = time;
+}

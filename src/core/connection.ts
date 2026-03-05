@@ -1,6 +1,6 @@
 import WebSocket from "ws";
-import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult } from "./types.js";
-import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer, setActiveSimulatorUdid, clearActiveSimulatorIfSource } from "./state.js";
+import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
+import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 import { findSimulatorByName } from "./ios.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
@@ -27,6 +27,9 @@ import {
 
 // Connection locks to prevent concurrent connection attempts to the same device
 const connectionLocks: Set<string> = new Set();
+
+const STALE_ACTIVITY_THRESHOLD_MS = 30_000;
+const RECONNECT_SETTLE_MS = 500;
 
 // Helper to find appKey from device info by searching connectedApps
 function findAppKeyForDevice(device: DeviceInfo): string | null {
@@ -149,6 +152,9 @@ function extractExceptionMessage(exceptionDetails: ExceptionDetails): string {
 
 // Handle CDP messages
 export function handleCDPMessage(message: Record<string, unknown>, _device: DeviceInfo): void {
+    // Track last CDP activity for connection liveness detection
+    updateLastCDPMessageTime(new Date());
+
     // Handle responses to our requests (e.g., Runtime.evaluate)
     if (typeof message.id === "number") {
         const pending = pendingExecutions.get(message.id);
@@ -889,5 +895,73 @@ export async function ensureConnection(options: {
             uptime,
             contextId: contextHealth?.contextId ?? null,
         } : null,
+    };
+}
+
+export interface PassiveConnectionStatus {
+    connected: boolean;
+    needsPing: boolean;
+    reason: "ok" | "no_connection" | "context_stale" | "no_activity" | "activity_stale";
+}
+
+export function getPassiveConnectionStatus(): PassiveConnectionStatus {
+    if (!hasConnectedApp()) {
+        return { connected: false, needsPing: false, reason: "no_connection" };
+    }
+
+    const app = getFirstConnectedApp();
+    if (app) {
+        const appKey = `${app.port}-${app.deviceInfo.id}`;
+        const health = getContextHealth(appKey);
+        if (health?.isStale) {
+            return { connected: false, needsPing: false, reason: "context_stale" };
+        }
+    }
+
+    const lastMessage = getLastCDPMessageTime();
+    if (!lastMessage) {
+        return { connected: false, needsPing: false, reason: "no_activity" };
+    }
+
+    const elapsed = Date.now() - lastMessage.getTime();
+    if (elapsed > STALE_ACTIVITY_THRESHOLD_MS) {
+        return { connected: true, needsPing: true, reason: "activity_stale" };
+    }
+
+    return { connected: true, needsPing: false, reason: "ok" };
+}
+
+export async function checkAndEnsureConnection(): Promise<ConnectionCheckResult> {
+    const passive = getPassiveConnectionStatus();
+
+    if (passive.connected && !passive.needsPing) {
+        return { connected: true, wasReconnected: false, message: null };
+    }
+
+    if (passive.connected && passive.needsPing) {
+        const app = getFirstConnectedApp();
+        if (app) {
+            const healthy = await runQuickHealthCheck(app);
+            if (healthy) {
+                return { connected: true, wasReconnected: false, message: null };
+            }
+        }
+    }
+
+    const result = await ensureConnection({ forceRefresh: true, healthCheck: true });
+
+    if (result.connected && result.healthCheckPassed) {
+        await new Promise(resolve => setTimeout(resolve, RECONNECT_SETTLE_MS));
+        return {
+            connected: true,
+            wasReconnected: true,
+            message: "[CONNECTION] Was stale, re-established. Earlier data may be incomplete; new data will appear on next call.",
+        };
+    }
+
+    return {
+        connected: false,
+        wasReconnected: false,
+        message: "[CONNECTION] No active connection. Could not reconnect. Ensure Metro and the app are running, then call scan_metro.",
     };
 }

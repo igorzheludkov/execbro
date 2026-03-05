@@ -158,6 +158,12 @@ export interface ExecuteOptions {
     timeoutMs?: number;       // Default: 10000
 }
 
+export interface ConnectionCheckResult {
+    connected: boolean;
+    wasReconnected: boolean;
+    message: string | null;
+}
+
 // Result of ensure_connection
 export interface EnsureConnectionResult {
     connected: boolean;

@@ -46,6 +46,8 @@ import {
     getContextHealth,
     // Connection resilience
     ensureConnection,
+    checkAndEnsureConnection,
+    getPassiveConnectionStatus,
     // Bundle (Metro build errors)
     connectMetroBuildEvents,
     getBundleErrors,
@@ -550,11 +552,16 @@ registerToolWithTelemetry(
         // Return summary if requested
         if (summary) {
             const summaryText = getLogSummary(logBuffer, { lastN: 5, maxMessageLength: 100 });
+            let connectionWarning = "";
+            if (logBuffer.size === 0) {
+                const status = await checkAndEnsureConnection();
+                connectionWarning = status.message ? `\n\n${status.message}` : "";
+            }
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Log Summary:\n\n${summaryText}`
+                        text: `Log Summary:\n\n${summaryText}${connectionWarning}`
                     }
                 ]
             };
@@ -562,10 +569,22 @@ registerToolWithTelemetry(
 
         const { logs, count, formatted } = getLogs(logBuffer, { maxLogs, level, startFromText, maxMessageLength, verbose });
 
+        // Check connection health
+        let connectionWarning = "";
+        if (count === 0) {
+            const status = await checkAndEnsureConnection();
+            connectionWarning = status.message ? `\n\n${status.message}` : "";
+        } else {
+            const passive = getPassiveConnectionStatus();
+            connectionWarning = !passive.connected
+                ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
+                : "";
+        }
+
         // Check for recent connection gaps
         const warningThresholdMs = 30000; // 30 seconds
         const recentGaps = getRecentGaps(warningThresholdMs);
-        let warning = "";
+        let gapWarning = "";
 
         if (recentGaps.length > 0) {
             const latestGap = recentGaps[recentGaps.length - 1];
@@ -573,9 +592,9 @@ registerToolWithTelemetry(
 
             if (latestGap.reconnectedAt) {
                 const secAgo = Math.round((Date.now() - latestGap.reconnectedAt.getTime()) / 1000);
-                warning = `\n\n[WARNING] Connection was restored ${secAgo}s ago. Some logs may have been missed during the ${formatDuration(gapDuration)} gap.`;
+                gapWarning = `\n\n[WARNING] Connection was restored ${secAgo}s ago. Some logs may have been missed during the ${formatDuration(gapDuration)} gap.`;
             } else {
-                warning = `\n\n[WARNING] Connection is currently disconnected. Logs may be incomplete.`;
+                gapWarning = `\n\n[WARNING] Connection is currently disconnected. Logs may be incomplete.`;
             }
         }
 
@@ -588,7 +607,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text",
-                        text: `React Native Console Logs (${count} entries)${startNote}:\n\n${tonlOutput}${warning}`
+                        text: `React Native Console Logs (${count} entries)${startNote}:\n\n${tonlOutput}${gapWarning}${connectionWarning}`
                     }
                 ]
             };
@@ -598,7 +617,7 @@ registerToolWithTelemetry(
             content: [
                 {
                     type: "text",
-                    text: `React Native Console Logs (${count} entries)${startNote}:\n\n${formatted}${warning}`
+                    text: `React Native Console Logs (${count} entries)${startNote}:\n\n${formatted}${gapWarning}${connectionWarning}`
                 }
             ]
         };
@@ -633,6 +652,18 @@ registerToolWithTelemetry(
     async ({ text, maxResults, maxMessageLength, verbose, format }) => {
         const { logs, count, formatted } = searchLogs(logBuffer, text, { maxResults, maxMessageLength, verbose });
 
+        // Check connection health
+        let connectionWarning = "";
+        if (count === 0) {
+            const status = await checkAndEnsureConnection();
+            connectionWarning = status.message ? `\n\n${status.message}` : "";
+        } else {
+            const passive = getPassiveConnectionStatus();
+            connectionWarning = !passive.connected
+                ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
+                : "";
+        }
+
         // Use TONL format if requested
         if (format === "tonl") {
             const tonlOutput = formatLogsAsTonl(logs, { maxMessageLength: verbose ? 0 : maxMessageLength });
@@ -640,7 +671,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text",
-                        text: `Search results for "${text}" (${count} matches):\n\n${tonlOutput}`
+                        text: `Search results for "${text}" (${count} matches):\n\n${tonlOutput}${connectionWarning}`
                     }
                 ]
             };
@@ -650,7 +681,7 @@ registerToolWithTelemetry(
             content: [
                 {
                     type: "text",
-                    text: `Search results for "${text}" (${count} matches):\n\n${formatted}`
+                    text: `Search results for "${text}" (${count} matches):\n\n${formatted}${connectionWarning}`
                 }
             ]
         };
@@ -1431,11 +1462,16 @@ registerToolWithTelemetry(
         // Return summary if requested
         if (summary) {
             const stats = getNetworkStats(networkBuffer);
+            let connectionWarning = "";
+            if (networkBuffer.size === 0) {
+                const connStatus = await checkAndEnsureConnection();
+                connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
+            }
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Network Summary:\n\n${stats}`
+                        text: `Network Summary:\n\n${stats}${connectionWarning}`
                     }
                 ]
             };
@@ -1448,10 +1484,22 @@ registerToolWithTelemetry(
             status
         });
 
+        // Check connection health
+        let connectionWarning = "";
+        if (count === 0) {
+            const connStatus = await checkAndEnsureConnection();
+            connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
+        } else {
+            const passive = getPassiveConnectionStatus();
+            connectionWarning = !passive.connected
+                ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
+                : "";
+        }
+
         // Check for recent connection gaps
         const warningThresholdMs = 30000; // 30 seconds
         const recentGaps = getRecentGaps(warningThresholdMs);
-        let warning = "";
+        let gapWarning = "";
 
         if (recentGaps.length > 0) {
             const latestGap = recentGaps[recentGaps.length - 1];
@@ -1459,9 +1507,9 @@ registerToolWithTelemetry(
 
             if (latestGap.reconnectedAt) {
                 const secAgo = Math.round((Date.now() - latestGap.reconnectedAt.getTime()) / 1000);
-                warning = `\n\n[WARNING] Connection was restored ${secAgo}s ago. Some requests may have been missed during the ${formatDuration(gapDuration)} gap.`;
+                gapWarning = `\n\n[WARNING] Connection was restored ${secAgo}s ago. Some requests may have been missed during the ${formatDuration(gapDuration)} gap.`;
             } else {
-                warning = `\n\n[WARNING] Connection is currently disconnected. Network data may be incomplete.`;
+                gapWarning = `\n\n[WARNING] Connection is currently disconnected. Network data may be incomplete.`;
             }
         }
 
@@ -1472,7 +1520,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text",
-                        text: `Network Requests (${count} entries):\n\n${tonlOutput}${warning}`
+                        text: `Network Requests (${count} entries):\n\n${tonlOutput}${gapWarning}${connectionWarning}`
                     }
                 ]
             };
@@ -1482,7 +1530,7 @@ registerToolWithTelemetry(
             content: [
                 {
                     type: "text",
-                    text: `Network Requests (${count} entries):\n\n${formatted}${warning}`
+                    text: `Network Requests (${count} entries):\n\n${formatted}${gapWarning}${connectionWarning}`
                 }
             ]
         };
@@ -1511,6 +1559,18 @@ registerToolWithTelemetry(
     async ({ urlPattern, maxResults, format }) => {
         const { requests, count, formatted } = searchNetworkRequests(networkBuffer, urlPattern, maxResults);
 
+        // Check connection health
+        let connectionWarning = "";
+        if (count === 0) {
+            const status = await checkAndEnsureConnection();
+            connectionWarning = status.message ? `\n\n${status.message}` : "";
+        } else {
+            const passive = getPassiveConnectionStatus();
+            connectionWarning = !passive.connected
+                ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
+                : "";
+        }
+
         // Use TONL format if requested
         if (format === "tonl") {
             const tonlOutput = formatNetworkAsTonl(requests);
@@ -1518,7 +1578,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text",
-                        text: `Network search results for "${urlPattern}" (${count} matches):\n\n${tonlOutput}`
+                        text: `Network search results for "${urlPattern}" (${count} matches):\n\n${tonlOutput}${connectionWarning}`
                     }
                 ]
             };
@@ -1528,7 +1588,7 @@ registerToolWithTelemetry(
             content: [
                 {
                     type: "text",
-                    text: `Network search results for "${urlPattern}" (${count} matches):\n\n${formatted}`
+                    text: `Network search results for "${urlPattern}" (${count} matches):\n\n${formatted}${connectionWarning}`
                 }
             ]
         };
@@ -1559,11 +1619,13 @@ registerToolWithTelemetry(
         const request = networkBuffer.get(requestId);
 
         if (!request) {
+            const status = await checkAndEnsureConnection();
+            const connectionNote = status.message ? `\n\n${status.message}` : "";
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Request not found: ${requestId}`
+                        text: `Request not found: ${requestId}${connectionNote}`
                     }
                 ],
                 isError: true
@@ -1592,11 +1654,23 @@ registerToolWithTelemetry(
     async () => {
         const stats = getNetworkStats(networkBuffer);
 
+        // Check connection health
+        let connectionWarning = "";
+        if (networkBuffer.size === 0) {
+            const status = await checkAndEnsureConnection();
+            connectionWarning = status.message ? `\n\n${status.message}` : "";
+        } else {
+            const passive = getPassiveConnectionStatus();
+            connectionWarning = !passive.connected
+                ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
+                : "";
+        }
+
         return {
             content: [
                 {
                     type: "text",
-                    text: `Network Statistics:\n\n${stats}`
+                    text: `Network Statistics:\n\n${stats}${connectionWarning}`
                 }
             ]
         };

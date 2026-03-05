@@ -34,7 +34,7 @@ export {
 } from "./connectionState.js";
 
 // State
-export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid } from "./state.js";
+export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid, getLastCDPMessageTime, updateLastCDPMessageTime } from "./state.js";
 
 // Logs
 export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs, getLogSummary } from "./logs.js";
@@ -73,7 +73,11 @@ export {
     hasConnectedApp,
     runQuickHealthCheck,
     ensureConnection,
+    getPassiveConnectionStatus,
+    checkAndEnsureConnection,
 } from "./connection.js";
+
+export type { PassiveConnectionStatus } from "./connection.js";
 
 // Executor
 export {
