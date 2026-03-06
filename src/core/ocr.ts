@@ -147,16 +147,18 @@ async function getEasyOCR(): Promise<import("node-easyocr").EasyOCR> {
             // own recognition model that may need downloading.
             const pythonPath = (ocr as any).pythonPath || "python3";
             const langArg = JSON.stringify(languages);
-            await new Promise<void>((resolve, reject) => {
+            await withTimeout(new Promise<void>((resolve, reject) => {
                 const proc = spawn(pythonPath, [
                     "-c", `import easyocr; easyocr.Reader(${langArg}, verbose=False)`
                 ]);
+                let stderr = "";
+                proc.stderr.on("data", (d: Buffer) => { stderr += d; });
                 proc.on("close", (code) => {
                     if (code === 0) resolve();
-                    else reject(new Error(`EasyOCR model setup exited with code ${code}. Ensure Python 3.6+ is installed.`));
+                    else reject(new Error(`EasyOCR model setup failed (code ${code}): ${stderr.trim() || "unknown error"}. Ensure Python 3.6+ is installed.`));
                 });
                 proc.on("error", reject);
-            });
+            }), 120000, "EasyOCR model download timeout -- check your network connection");
 
             await withTimeout(ocr.init(languages), 30000, "EasyOCR init timeout. Ensure Python 3.6+ is available on your system.");
             easyOCRInstance = ocr;
