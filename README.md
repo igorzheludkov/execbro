@@ -81,7 +81,7 @@ Skills can also be triggered **automatically** — each skill file contains a "W
 -   Node.js 18+
 -   React Native app running with Metro bundler
 -   **Optional for iOS UI automation**: [Facebook IDB](https://fbidb.io/) - `brew install idb-companion`
--   **Optional for enhanced OCR**: Python 3.10+ with EasyOCR (see [OCR Setup](#ocr-text-extraction))
+-   **Optional for OCR**: Python 3.6+ (EasyOCR is installed automatically, see [OCR Setup](#ocr-text-extraction))
 
 ## Claude Code Setup
 
@@ -1095,9 +1095,20 @@ The tool uses EasyOCR (Python-based) for text recognition. It provides excellent
 
 ### EasyOCR Setup
 
-EasyOCR and its Python dependencies are installed automatically by the `node-easyocr` package. You just need Python 3.6+ available on your system (e.g. `brew install python@3.11`).
+EasyOCR and all its Python dependencies (PyTorch, OpenCV, etc.) are installed automatically into an isolated virtual environment by the `node-easyocr` package — no need to run `pip install` manually. The only prerequisite is having Python 3.6+ available on your system:
 
-The first OCR call will download language models (~100MB for English). Additional language models are downloaded automatically when configured.
+```bash
+# macOS
+brew install python@3.11
+
+# Ubuntu/Debian
+sudo apt install python3
+
+# Windows
+# Download from https://www.python.org/downloads/
+```
+
+On the first OCR call, language models (~100MB for English) are downloaded automatically. This may take a moment, but subsequent calls use the cached models.
 
 ### OCR Language Configuration
 
