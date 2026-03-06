@@ -1093,17 +1093,11 @@ ios_tap with x=187 y=420
 
 The tool uses EasyOCR (Python-based) for text recognition. It provides excellent accuracy on colored backgrounds and stylized text common in mobile UIs.
 
-### Installing EasyOCR (Required for OCR)
+### EasyOCR Setup
 
-```bash
-# Install Python 3.10+ if not already installed
-brew install python@3.11
+EasyOCR and its Python dependencies are installed automatically by the `node-easyocr` package. You just need Python 3.6+ available on your system (e.g. `brew install python@3.11`).
 
-# Install EasyOCR
-pip3 install easyocr
-```
-
-First run will download models (~100MB for English). Additional language models are downloaded automatically when configured.
+The first OCR call will download language models (~100MB for English). Additional language models are downloaded automatically when configured.
 
 ### OCR Language Configuration
 
