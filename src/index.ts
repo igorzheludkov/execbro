@@ -24,6 +24,7 @@ import {
     getScreenLayout,
     inspectComponent,
     findComponents,
+    pressElement,
     inspectAtPoint,
     toggleElementInspector,
     isInspectorActive,
@@ -1182,6 +1183,62 @@ registerToolWithTelemetry(
                 {
                     type: "text",
                     text: `Find Components (pattern: "${pattern}"):\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Press element via React Fiber tree
+registerToolWithTelemetry(
+    "press_element",
+    {
+        description:
+            "Press a UI element by finding it in the React fiber tree and calling its onPress handler directly. " +
+            "Bypasses the accessibility layer — works on elements without accessibilityLabel. " +
+            "Matches by text content, testID, or component name. At least one search criterion must be provided. " +
+            "Works only in __DEV__ mode. Use get_component_tree or find_components first to understand the UI structure. " +
+            "LIMITATION: text param only supports ASCII — for non-Latin text (Cyrillic, CJK, etc.), use testID or component param instead, or fall back to ocr_screenshot + tap.",
+        inputSchema: {
+            text: z
+                .string()
+                .optional()
+                .describe("Case-insensitive partial match on the element's text content (e.g., 'Submit', 'Log in'). ASCII only — non-Latin characters (Cyrillic, CJK, etc.) cause Hermes parse errors. Use testID or component for localized UIs."),
+            testID: z
+                .string()
+                .optional()
+                .describe("Exact match on the element's testID prop"),
+            component: z
+                .string()
+                .optional()
+                .describe("Case-insensitive partial match on the component's displayName or name (e.g., 'Button', 'MenuItem')"),
+            index: z
+                .coerce.number()
+                .optional()
+                .default(0)
+                .describe("Zero-based index when multiple elements match (default: 0). If unsure, omit to press the first match.")
+        }
+    },
+    async ({ text, testID, component, index }: { text?: string; testID?: string; component?: string; index?: number }) => {
+        const result = await pressElement({ text, testID, component, index });
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: result.result || "Element pressed successfully."
                 }
             ]
         };

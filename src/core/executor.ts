@@ -1418,6 +1418,174 @@ export async function findComponents(pattern: string, options: {
 }
 
 // ============================================================================
+// Press Element (invoke onPress via React Fiber Tree)
+// ============================================================================
+
+/**
+ * Find a pressable element in the React fiber tree and invoke its onPress handler.
+ * Matches by text content, testID, or component name.
+ */
+export async function pressElement(options: {
+    text?: string;
+    testID?: string;
+    component?: string;
+    index?: number;
+}): Promise<ExecutionResult> {
+    const { text, testID, component, index = 0 } = options;
+
+    if (!text && !testID && !component) {
+        return { success: false, error: "At least one of text, testID, or component must be provided." };
+    }
+
+    const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const textParam = text ? `'${esc(text)}'` : 'null';
+    const testIDParam = testID ? `'${esc(testID)}'` : 'null';
+    const componentParam = component ? `'${esc(component)}'` : 'null';
+
+    const expression = `
+        (function() {
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not found. Ensure app is running in __DEV__ mode.' };
+
+            var roots = [];
+            if (hook.getFiberRoots) {
+                var renderers = hook.renderers;
+                if (renderers) {
+                    for (var entry of renderers) {
+                        var r = Array.from(hook.getFiberRoots(entry[0]) || []);
+                        if (r.length > 0) { roots = r; break; }
+                    }
+                }
+            }
+            if (roots.length === 0) return { error: 'No fiber roots found. Is a React Native app mounted?' };
+
+            var searchText = ${textParam};
+            var searchTestID = ${testIDParam};
+            var searchComponent = ${componentParam};
+            var targetIndex = ${index};
+
+            function getComponentName(fiber) {
+                if (!fiber || !fiber.type) return null;
+                if (typeof fiber.type === 'string') return fiber.type;
+                return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            function extractText(fiber, depth) {
+                if (!fiber || depth > 15) return '';
+                var parts = [];
+                var props = fiber.memoizedProps;
+                if (props) {
+                    var ch = props.children;
+                    if (typeof ch === 'string') parts.push(ch);
+                    else if (typeof ch === 'number') parts.push(String(ch));
+                    else if (Array.isArray(ch)) {
+                        for (var i = 0; i < ch.length; i++) {
+                            if (typeof ch[i] === 'string') parts.push(ch[i]);
+                            else if (typeof ch[i] === 'number') parts.push(String(ch[i]));
+                        }
+                    }
+                }
+                var child = fiber.child;
+                while (child) {
+                    parts.push(extractText(child, depth + 1));
+                    child = child.sibling;
+                }
+                return parts.join('');
+            }
+
+            var matches = [];
+
+            function walkFiber(fiber, path) {
+                if (!fiber) return;
+                var name = getComponentName(fiber);
+                var props = fiber.memoizedProps;
+
+                // Skip off-screen subtrees — React Navigation marks hidden screens with aria-hidden
+                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+
+                if (props && typeof props.onPress === 'function') {
+                    var text = extractText(fiber, 0);
+                    var tid = props.testID || props.nativeID || null;
+                    var matched = true;
+
+                    if (searchText !== null) {
+                        matched = matched && text.toLowerCase().indexOf(searchText.toLowerCase()) !== -1;
+                    }
+                    if (searchTestID !== null) {
+                        matched = matched && (tid === searchTestID);
+                    }
+                    if (searchComponent !== null) {
+                        matched = matched && (name || '').toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1;
+                    }
+
+                    if (matched) {
+                        matches.push({
+                            fiber: fiber,
+                            name: name || '(anonymous)',
+                            text: text.substring(0, 100),
+                            testID: tid,
+                            path: path.join(' > ')
+                        });
+                    }
+                }
+
+                var child = fiber.child;
+                while (child) {
+                    var childName = getComponentName(child);
+                    walkFiber(child, childName ? path.concat([childName]) : path);
+                    child = child.sibling;
+                }
+            }
+
+            for (var ri = 0; ri < roots.length; ri++) {
+                walkFiber(roots[ri].current, []);
+            }
+
+            if (matches.length === 0) {
+                var criteria = [];
+                if (searchText !== null) criteria.push('text="' + searchText + '"');
+                if (searchTestID !== null) criteria.push('testID="' + searchTestID + '"');
+                if (searchComponent !== null) criteria.push('component="' + searchComponent + '"');
+                return { error: 'No pressable elements found matching: ' + criteria.join(', ') };
+            }
+
+            if (targetIndex >= matches.length) {
+                return {
+                    error: 'Found ' + matches.length + ' match(es) but index ' + targetIndex + ' requested (0-based). Use index 0-' + (matches.length - 1) + '.',
+                    matches: matches.map(function(m, i) {
+                        return { index: i, component: m.name, text: m.text, testID: m.testID };
+                    })
+                };
+            }
+
+            var target = matches[targetIndex];
+            try {
+                target.fiber.memoizedProps.onPress();
+                var result = {
+                    success: true,
+                    pressed: target.name,
+                    matchIndex: targetIndex,
+                    totalMatches: matches.length,
+                    text: target.text,
+                    testID: target.testID,
+                    path: target.path
+                };
+                if (matches.length > 1) {
+                    result.allMatches = matches.map(function(m, i) {
+                        return { index: i, component: m.name, text: m.text, testID: m.testID };
+                    });
+                }
+                return result;
+            } catch (e) {
+                return { error: 'onPress() threw: ' + (e.message || String(e)), component: target.name };
+            }
+        })()
+    `;
+
+    return executeInApp(expression, false);
+}
+
+// ============================================================================
 // Coordinate-Based Element Inspection (via DevTools Inspector API)
 // ============================================================================
 

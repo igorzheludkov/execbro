@@ -39,7 +39,25 @@ Before interacting, understand the current screen:
 
 ### 3. Interact with Elements
 
-**Tap by element (preferred for known elements):**
+**Press via React Fiber (preferred — works even without accessibility labels):**
+- `mcp__rn-debugger-local__press_element` — invokes `onPress` directly via the JS fiber tree
+- Match by `text` (case-insensitive partial match), `testID` (exact), or `component` name (case-insensitive partial)
+- Use `index` param when multiple elements match (0-based, default: 0)
+- Only works in `__DEV__` mode; only finds elements on the **visible** screen (hidden nav screens are skipped)
+
+**Fallback chain for pressing buttons:**
+1. `press_element(text="Login")` — try text match first
+2. If text fails (icon-only buttons): use `find_components` to discover component names, then `press_element(component="ButtonName", index=N)`
+3. If `press_element` fails entirely + has visible text → `ocr_screenshot` → `ios_tap`/`android_tap` with coordinates
+4. If `press_element` fails + no visible text → `ios_tap_element`/`android_tap_element` (accessibility tree)
+5. Coordinate-based `ios_tap`/`android_tap` as last resort
+
+**Icon-only buttons (no text inside the pressable):**
+- `press_element(text=...)` will fail because the label is outside the pressable component
+- Use `find_components` with a pattern related to the button area (e.g., `Button|Action|Settings`)
+- Then `press_element(component="DiscoveredName", index=N)` — check screenshot to pick the right index
+
+**Tap by element (accessibility tree):**
 - iOS: `mcp__rn-debugger-local__ios_tap_element` with `label` or `labelContains`
 - Android: `mcp__rn-debugger-local__android_tap_element` with `text`, `textContains`, `contentDesc`, or `resourceId`
 
@@ -105,6 +123,8 @@ After interactions, verify the result:
 
 ## MCP Tools Used
 
+- `mcp__rn-debugger-local__press_element`
+- `mcp__rn-debugger-local__find_components`
 - `mcp__rn-debugger-local__list_ios_simulators`
 - `mcp__rn-debugger-local__list_android_devices`
 - `mcp__rn-debugger-local__ocr_screenshot`
@@ -127,7 +147,10 @@ After interactions, verify the result:
 
 - Requires the rn-debugger-local MCP server to be running
 - iOS simulator interactions require IDB (`brew install idb-companion`)
-- Always use `ocr_screenshot` first when you need to find and tap text elements
+- **Prefer `press_element` over OCR/accessibility for pressing buttons** — it works directly via the JS fiber tree, is faster, and handles icon-only buttons that lack accessibility labels
+- For icon-only buttons: `press_element(text=...)` will fail → use `find_components` to discover component names → then `press_element(component=..., index=N)`
+- **Non-ASCII text limitation**: `press_element(text=...)` only supports ASCII due to Hermes. For localized UIs (Cyrillic, CJK, Arabic, etc.), use `testID` or `component` params, or fall back to `ocr_screenshot` → coordinate tap
+- Use `ocr_screenshot` only as a fallback when `press_element` fails and the target has visible text
 - Use `wait_for_element` after navigation to ensure the next screen is ready before interacting
 - For Android, the Back button is available via `android_key_event` with key "BACK"
 - `ios_open_url` works for both custom scheme deep links (`myapp://`) and universal links (`https://`) — use it to test deep link routing without manually typing URLs in the device

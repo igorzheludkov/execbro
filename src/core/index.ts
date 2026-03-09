@@ -90,6 +90,7 @@ export {
     getScreenLayout,
     inspectComponent,
     findComponents,
+    pressElement,
     // Coordinate-based inspection
     inspectAtPoint,
     toggleElementInspector,

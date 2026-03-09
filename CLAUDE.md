@@ -48,6 +48,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
+- `press_element`: Press a UI element by invoking its `onPress` handler via the React fiber tree (matches by text, testID, or component name)
 - `reload_app`: Reload the React Native app (triggers JS bundle reload)
 
 ## Agent Usage Guidelines
@@ -61,6 +62,15 @@ When debugging React Native apps through this MCP server:
   - You need to completely reset the app state (e.g., clear navigation stack, reset context)
   - You made changes to native code or configuration files
 - **Verify Changes**: After code edits, use `get_logs` to check if the app picked up changes (look for fresh log entries or changed behavior) before deciding to reload.
+- **UI Interaction — Preferred Method**: When pressing buttons or interactive elements:
+  1. ALWAYS try `press_element` first (text, testID, or component query)
+  2. If `press_element` fails and querying by text → use `ocr_screenshot` to locate text on screen, then tap coordinates with `ios_tap` / `android_tap`
+  3. If `press_element` fails and querying by testID or component → skip OCR, use `ios_tap_element` / `android_tap_element`
+  4. Use coordinate-based tap (`ios_tap` / `android_tap`) only as a last resort
+- **Icon-only buttons** (no text label inside the pressable): When `press_element(text=...)` fails because the button only contains an icon:
+  1. Use `find_components` with a pattern related to the button's area (e.g., `Button|Action|Settings`) to discover actual component names
+  2. Use `press_element(component="DiscoveredName", index=N)` — if multiple instances exist, use the screenshot to determine the correct index (elements are ordered by their position in the fiber tree, typically top-to-bottom, left-to-right)
+- **Non-ASCII text** (Cyrillic, CJK, Arabic, etc.): The `text` param in `press_element` only supports ASCII due to Hermes engine limitations. For localized UIs, use `testID` or `component` params instead, or fall back to `ocr_screenshot` → coordinate tap.
 
 ## Telemetry System
 
