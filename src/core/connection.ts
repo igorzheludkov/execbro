@@ -150,8 +150,211 @@ function extractExceptionMessage(exceptionDetails: ExceptionDetails): string {
     return parts.join(' ');
 }
 
+// CDP console argument type
+interface CDPConsoleArg {
+    type?: string;
+    subtype?: string;
+    value?: unknown;
+    description?: string;
+    objectId?: string;
+    preview?: CDPObjectPreview;
+}
+
+// CDP object preview (used for objects, arrays, etc.)
+interface CDPObjectPreview {
+    type?: string;
+    subtype?: string;
+    description?: string;
+    overflow?: boolean;
+    properties?: Array<{
+        name: string;
+        type?: string;
+        value?: string;
+        subtype?: string;
+        valuePreview?: CDPObjectPreview;
+    }>;
+}
+
+// Format a CDP object preview recursively
+function formatPreview(preview: CDPObjectPreview): string {
+    const isArray = preview.subtype === "array";
+    const props = preview.properties || [];
+
+    const formatted = props.map((p) => {
+        let value: string;
+        if (p.valuePreview) {
+            value = formatPreview(p.valuePreview);
+        } else if (p.subtype === "null") {
+            value = "null";
+        } else if (p.type === "string") {
+            value = `"${p.value}"`;
+        } else {
+            value = p.value ?? "undefined";
+        }
+        return isArray ? value : `${p.name}: ${value}`;
+    });
+
+    const overflow = preview.overflow ? ", ..." : "";
+    return isArray
+        ? `[${formatted.join(", ")}${overflow}]`
+        : `{${formatted.join(", ")}${overflow}}`;
+}
+
+// Format a single CDP console argument (sync — without object resolution)
+function formatConsoleArg(arg: CDPConsoleArg): string {
+    // Primitives
+    if (arg.type === "string" || arg.type === "number" || arg.type === "boolean") {
+        return String(arg.value);
+    }
+
+    // Objects/arrays with preview — expand inline
+    if (arg.preview?.properties) {
+        return formatPreview(arg.preview);
+    }
+
+    // Raw value (e.g. null sent as value)
+    if (arg.value !== undefined) {
+        return JSON.stringify(arg.value);
+    }
+
+    // Description fallback (functions, symbols, errors without preview)
+    if (arg.description) {
+        return arg.description;
+    }
+
+    return "[object]";
+}
+
+// Fetch object properties via CDP Runtime.getProperties
+function fetchObjectProperties(ws: WebSocket, objectId: string, depth: number = 2): Promise<string> {
+    return new Promise((resolve) => {
+        const msgId = getNextMessageId();
+        const timeout = setTimeout(() => {
+            resolve("Object"); // Fallback on timeout
+        }, 3000);
+
+        const handler = (data: WebSocket.Data) => {
+            try {
+                const response = JSON.parse(data.toString());
+                if (response.id === msgId) {
+                    clearTimeout(timeout);
+                    ws.removeListener("message", handler);
+                    if (response.result?.result) {
+                        resolve(formatCDPProperties(ws, response.result.result, depth));
+                    } else {
+                        resolve("Object");
+                    }
+                }
+            } catch {
+                // Ignore parse errors
+            }
+        };
+
+        ws.on("message", handler);
+        ws.send(JSON.stringify({
+            id: msgId,
+            method: "Runtime.getProperties",
+            params: { objectId, ownProperties: true, generatePreview: true }
+        }));
+    });
+}
+
+// Format CDP property descriptors into a readable string
+async function formatCDPProperties(ws: WebSocket, properties: Array<Record<string, unknown>>, depth: number): Promise<string> {
+    const parts: string[] = [];
+    let isArrayLike = false;
+
+    // Detect arrays by checking for numeric keys and "length" property
+    const propNames = properties.filter((p) => !p.isAccessor && p.name !== "__proto__").map((p) => p.name as string);
+    const hasLength = propNames.includes("length");
+    const numericKeys = propNames.filter((n) => /^\d+$/.test(n));
+    if (hasLength && numericKeys.length > 0 && numericKeys.length >= propNames.length - 1) {
+        isArrayLike = true;
+    }
+
+    const filteredProps = properties.filter((p) =>
+        !p.isAccessor && p.name !== "__proto__" && (!isArrayLike || p.name !== "length")
+    );
+
+    for (const prop of filteredProps) {
+        const val = prop.value as Record<string, unknown> | undefined;
+        if (!val) continue;
+
+        const formatted = await formatPropertyValue(ws, val, depth - 1);
+        if (isArrayLike) {
+            parts.push(formatted);
+        } else {
+            parts.push(`${prop.name}: ${formatted}`);
+        }
+    }
+
+    return isArrayLike
+        ? `[${parts.join(", ")}]`
+        : `{${parts.join(", ")}}`;
+}
+
+// Format a single property value
+async function formatPropertyValue(ws: WebSocket, val: Record<string, unknown>, remainingDepth: number): Promise<string> {
+    const type = val.type as string;
+    const subtype = val.subtype as string | undefined;
+
+    if (subtype === "null") return "null";
+    if (type === "undefined") return "undefined";
+    if (type === "string") return `"${val.value}"`;
+    if (type === "number" || type === "boolean") return String(val.value);
+    if (type === "function") return "[Function]";
+
+    // Nested object — recurse if depth allows
+    if (type === "object" && val.objectId && remainingDepth > 0) {
+        return fetchObjectProperties(ws, val.objectId as string, remainingDepth);
+    }
+
+    // Object but no depth left — use description
+    if (type === "object") {
+        return (val.description as string) || "[Object]";
+    }
+
+    if (val.value !== undefined) return JSON.stringify(val.value);
+    if (val.description) return val.description as string;
+    return `[${type}]`;
+}
+
+// Resolve all object args in a console message, returning formatted text
+async function resolveConsoleArgs(ws: WebSocket, args: CDPConsoleArg[]): Promise<string> {
+    const parts = await Promise.all(args.map(async (arg) => {
+        // Primitives — format synchronously
+        if (arg.type === "string" || arg.type === "number" || arg.type === "boolean") {
+            return String(arg.value);
+        }
+
+        // Objects/arrays with preview — expand inline
+        if (arg.preview?.properties) {
+            return formatPreview(arg.preview);
+        }
+
+        // Object with objectId — fetch properties via CDP
+        if (arg.type === "object" && arg.objectId) {
+            return fetchObjectProperties(ws, arg.objectId);
+        }
+
+        // Raw value
+        if (arg.value !== undefined) {
+            return JSON.stringify(arg.value);
+        }
+
+        // Description fallback
+        if (arg.description) {
+            return arg.description;
+        }
+
+        return "[object]";
+    }));
+
+    return parts.join(" ");
+}
+
 // Handle CDP messages
-export function handleCDPMessage(message: Record<string, unknown>, _device: DeviceInfo): void {
+export function handleCDPMessage(message: Record<string, unknown>, _device: DeviceInfo, ws?: WebSocket): void {
     // Track last CDP activity for connection liveness detection
     updateLastCDPMessageTime(new Date());
 
@@ -206,12 +409,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
     if (method === "Runtime.consoleAPICalled") {
         const params = message.params as {
             type?: string;
-            args?: Array<{
-                type?: string;
-                value?: unknown;
-                description?: string;
-                preview?: { properties?: Array<{ name: string; value: string }> };
-            }>;
+            args?: Array<CDPConsoleArg>;
             timestamp?: number;
         };
 
@@ -219,32 +417,42 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
         const level = mapConsoleType(type);
         const args = params.args || [];
 
-        const messageText = args
-            .map((arg) => {
-                if (arg.type === "string" || arg.type === "number" || arg.type === "boolean") {
-                    return String(arg.value);
-                }
-                if (arg.description) {
-                    return arg.description;
-                }
-                if (arg.preview?.properties) {
-                    const props = arg.preview.properties.map((p) => `${p.name}: ${p.value}`).join(", ");
-                    return `{${props}}`;
-                }
-                if (arg.value !== undefined) {
-                    return JSON.stringify(arg.value);
-                }
-                return "[object]";
-            })
-            .join(" ");
+        // Check if any args need async object resolution
+        const hasObjectArgs = ws && args.some((a) => a.type === "object" && a.objectId && !a.preview?.properties);
 
-        if (messageText.trim()) {
-            logBuffer.add({
-                timestamp: new Date(),
-                level,
-                message: messageText,
-                args: args.map((a) => a.value)
+        if (hasObjectArgs) {
+            // Resolve object args asynchronously via CDP
+            resolveConsoleArgs(ws, args).then((messageText) => {
+                if (messageText.trim()) {
+                    logBuffer.add({
+                        timestamp: new Date(),
+                        level,
+                        message: messageText,
+                        args: args.map((a) => a.value)
+                    });
+                }
+            }).catch(() => {
+                // Fallback to sync formatting on error
+                const messageText = args.map(formatConsoleArg).join(" ");
+                if (messageText.trim()) {
+                    logBuffer.add({
+                        timestamp: new Date(),
+                        level,
+                        message: messageText,
+                        args: args.map((a) => a.value)
+                    });
+                }
             });
+        } else {
+            const messageText = args.map(formatConsoleArg).join(" ");
+            if (messageText.trim()) {
+                logBuffer.add({
+                    timestamp: new Date(),
+                    level,
+                    message: messageText,
+                    args: args.map((a) => a.value)
+                });
+            }
         }
     }
 
@@ -496,7 +704,7 @@ export async function connectToDevice(
             ws.on("message", (data: WebSocket.Data) => {
                 try {
                     const message = JSON.parse(data.toString());
-                    handleCDPMessage(message, device);
+                    handleCDPMessage(message, device, ws);
                 } catch {
                     // Ignore non-JSON messages
                 }
