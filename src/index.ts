@@ -1250,7 +1250,7 @@ registerToolWithTelemetry(
     "toggle_element_inspector",
     {
         description:
-            "Toggle React Native's Element Inspector overlay programmatically. This is the same as manually doing: Dev Menu > Toggle Element Inspector. Useful for enabling inspector features without user interaction.",
+            "Toggle React Native's Element Inspector overlay on/off. Rarely needed directly — get_inspector_selection auto-enables the inspector when called with coordinates. Use this only when you need manual control over the overlay visibility.",
         inputSchema: {}
     },
     async () => {
@@ -1307,7 +1307,7 @@ registerToolWithTelemetry(
     "get_inspector_selection",
     {
         description:
-            "Get the React component at coordinates or read the current Element Inspector selection. If x/y provided: auto-enables inspector, taps at coordinates, returns component hierarchy. If no coordinates: returns current selection. Works in all React Native versions including Fabric.",
+            "Identify the React component at a screen location by reading RN's Element Inspector. Returns a clean component hierarchy with file paths — ideal for finding the real component name (e.g. HomeScreen > SneakerCard > PulseActionButton). If x/y provided: auto-enables inspector, taps at coordinates, returns hierarchy. If no coordinates: returns current selection. WORKFLOW: Use ios_screenshot or ocr_screenshot to visually identify the target element, then call this tool with coordinates to get the component tree.",
         inputSchema: {
             x: z
                 .number()
@@ -1413,7 +1413,7 @@ registerToolWithTelemetry(
     "inspect_at_point",
     {
         description:
-            "Inspect the React component at specific (x, y) coordinates. Returns the React component name, props, measured frame (actual dp position/size on screen), and component path. Works on both Paper and Fabric (New Architecture). Coordinates are in dp (density-independent pixels) — the same unit React Native uses for all layout. To convert from screenshot pixels: divide by the device pixel ratio (e.g. 540px / 2.625 = 205dp). Use this to identify what component is rendered at a given point and get its exact layout bounds for pixel-perfect debugging.",
+            "Inspect the React component at specific (x, y) coordinates for layout debugging. Returns component props, measured frame (position/size in dp), and component path. Works on both Paper and Fabric. Coordinates are in dp (density-independent pixels). To convert from screenshot pixels: divide by the device pixel ratio (e.g. 540px / 2.625 = 205dp). Best for: checking layout bounds, reading component props/styles, pixel-perfect debugging. For identifying component names: prefer get_inspector_selection which returns a cleaner hierarchy with file paths.",
         inputSchema: {
             x: z
                 .number()

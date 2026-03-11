@@ -39,9 +39,11 @@ Based on the task, inspect individual components:
 - Use `mcp__rn-debugger-local__find_components` with regex `pattern` to find components
 - Use `includeLayout=true` to get padding/margin/flex styles for matched components
 
-**By screen coordinates:**
-- Use `mcp__rn-debugger-local__get_inspector_selection` with x/y coordinates to find the component at a specific point
-- Alternatively, use `mcp__rn-debugger-local__inspect_at_point` for direct coordinate inspection
+**By screen coordinates (preferred for identifying components):**
+1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
+2. Identify the target element visually and estimate its coordinates (convert screenshot pixels to points: divide by device pixel ratio)
+3. Use `mcp__rn-debugger-local__get_inspector_selection` with x/y coordinates — returns a clean component hierarchy with file paths (e.g. `HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton`). Auto-enables the Element Inspector overlay, taps at coordinates, and reads the result.
+4. If you also need layout details (frame bounds, props, styles), use `mcp__rn-debugger-local__inspect_at_point` with the same coordinates
 
 ### 4. Get Layout Details
 
@@ -52,9 +54,12 @@ For layout debugging:
 
 ### 5. Element Inspector Mode
 
-For interactive inspection:
-- Use `mcp__rn-debugger-local__toggle_element_inspector` to enable/disable the visual inspector overlay
-- Use `mcp__rn-debugger-local__get_inspector_selection` to read the currently selected component
+`get_inspector_selection` auto-enables the inspector when called with coordinates, so `toggle_element_inspector` is rarely needed directly. Use it only when you want manual control over the overlay visibility.
+
+**When to use which inspection tool:**
+- `get_inspector_selection(x, y)` → finding component names and screen structure (returns clean hierarchy with file paths, like RN's Element Inspector overlay)
+- `inspect_at_point(x, y)` → layout debugging with component props, exact frame measurements (position/size in dp), and component path
+- `find_components(pattern)` → searching for components by name pattern across the entire fiber tree
 
 ### 6. Present Findings
 
@@ -90,5 +95,7 @@ For interactive inspection:
 
 - Requires the rn-debugger-local MCP server to be running and connected to the app
 - Always start with `structureOnly=true` to get an overview before drilling down
-- `inspect_at_point` may not work in newer React Native versions with Fabric - use `get_inspector_selection` instead
+- Both `inspect_at_point` and `get_inspector_selection` work on Paper and Fabric (New Architecture)
+- `inspect_at_point` returns the nearest user-defined component (skipping RN primitives and common library wrappers like Expo, SVG, gesture handler components)
+- `get_inspector_selection` returns the most complete hierarchy with source file paths — prefer it when you need to find the exact component name to edit
 - Layout data can be large for complex screens - use `find_components` with `includeLayout=true` for targeted queries

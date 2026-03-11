@@ -41,18 +41,18 @@ export function stripLeadingComments(expression: string): string {
     result = result.trimStart();
 
     // Repeatedly strip leading single-line comments (// ...)
-    while (result.startsWith('//')) {
-        const newlineIndex = result.indexOf('\n');
+    while (result.startsWith("//")) {
+        const newlineIndex = result.indexOf("\n");
         if (newlineIndex === -1) {
             // Entire expression is a comment
-            return '';
+            return "";
         }
         result = result.slice(newlineIndex + 1).trimStart();
     }
 
     // Strip leading multi-line comments (/* ... */)
-    while (result.startsWith('/*')) {
-        const endIndex = result.indexOf('*/');
+    while (result.startsWith("/*")) {
+        const endIndex = result.indexOf("*/");
         if (endIndex === -1) {
             // Unclosed comment
             return result;
@@ -73,8 +73,9 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         return {
             valid: false,
             expression,
-            error: "Expression contains emoji or special Unicode characters that Hermes cannot compile. " +
-                   "Please remove emoji and use ASCII characters only."
+            error:
+                "Expression contains emoji or special Unicode characters that Hermes cannot compile. " +
+                "Please remove emoji and use ASCII characters only."
         };
     }
 
@@ -92,14 +93,15 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
     // Check for top-level async that Hermes doesn't support in Runtime.evaluate
     // Pattern: starts with (async or async keyword at expression level
     const trimmed = cleaned.trim();
-    if (trimmed.startsWith('(async') || trimmed.startsWith('async ') || trimmed.startsWith('async(')) {
+    if (trimmed.startsWith("(async") || trimmed.startsWith("async ") || trimmed.startsWith("async(")) {
         return {
             valid: false,
             expression: cleaned,
-            error: "Hermes does not support top-level async functions in Runtime.evaluate. " +
-                   "Instead of `(async () => { ... })()`, use a synchronous approach or " +
-                   "execute the async code and access the result via a global variable: " +
-                   "`global.__result = null; myAsyncFn().then(r => global.__result = r)`"
+            error:
+                "Hermes does not support top-level async functions in Runtime.evaluate. " +
+                "Instead of `(async () => { ... })()`, use a synchronous approach or " +
+                "execute the async code and access the result via a global variable: " +
+                "`global.__result = null; myAsyncFn().then(r => global.__result = r)`"
         };
     }
 
@@ -108,7 +110,6 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         expression: cleaned
     };
 }
-
 
 // Error patterns that indicate a stale/destroyed context
 const CONTEXT_ERROR_PATTERNS = [
@@ -119,7 +120,7 @@ const CONTEXT_ERROR_PATTERNS = [
     "session closed",
     "context with specified id",
     "no execution context",
-    "runningdetached",
+    "runningdetached"
 ];
 
 /**
@@ -210,8 +211,8 @@ async function executeExpressionCore(
                         returnByValue: true,
                         awaitPromise,
                         userGesture: true,
-                        generatePreview: true,
-                    },
+                        generatePreview: true
+                    }
                 })
             );
         } catch (error) {
@@ -219,7 +220,7 @@ async function executeExpressionCore(
             pendingExecutions.delete(currentMessageId);
             resolve({
                 success: false,
-                error: `Failed to send: ${error instanceof Error ? error.message : String(error)}`,
+                error: `Failed to send: ${error instanceof Error ? error.message : String(error)}`
             });
         }
     });
@@ -248,7 +249,9 @@ export async function executeInApp(
         // No connection - try to reconnect if enabled
         if (!app) {
             if (autoReconnect && attempt < maxRetries) {
-                console.error(`[rn-ai-debugger] No connection, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`);
+                console.error(
+                    `[rn-ai-debugger] No connection, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
+                );
                 const reconnected = await attemptQuickReconnect(preferredPort);
                 if (reconnected) {
                     await delay(retryDelayMs);
@@ -261,11 +264,17 @@ export async function executeInApp(
         // WebSocket not open - try to reconnect
         if (app.ws.readyState !== WebSocket.OPEN) {
             if (autoReconnect && attempt < maxRetries) {
-                console.error(`[rn-ai-debugger] WebSocket not open, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`);
+                console.error(
+                    `[rn-ai-debugger] WebSocket not open, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
+                );
                 // Close stale connection
                 const appKey = `${app.port}-${app.deviceInfo.id}`;
                 cancelReconnectionTimer(appKey);
-                try { app.ws.close(); } catch { /* ignore */ }
+                try {
+                    app.ws.close();
+                } catch {
+                    /* ignore */
+                }
                 connectedApps.delete(appKey);
 
                 const reconnected = await attemptQuickReconnect(app.port);
@@ -290,12 +299,18 @@ export async function executeInApp(
         // Check if this is a context error that might be recoverable
         if (isContextError(result.error)) {
             if (autoReconnect && attempt < maxRetries) {
-                console.error(`[rn-ai-debugger] Context error detected, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`);
+                console.error(
+                    `[rn-ai-debugger] Context error detected, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
+                );
 
                 // Close and reconnect
                 const appKey = `${app.port}-${app.deviceInfo.id}`;
                 cancelReconnectionTimer(appKey);
-                try { app.ws.close(); } catch { /* ignore */ }
+                try {
+                    app.ws.close();
+                } catch {
+                    /* ignore */
+                }
                 connectedApps.delete(appKey);
 
                 const reconnected = await attemptQuickReconnect(app.port);
@@ -312,7 +327,7 @@ export async function executeInApp(
 
     return {
         success: false,
-        error: lastError ?? "Execution failed after all retries. Connection may be stale.",
+        error: lastError ?? "Execution failed after all retries. Connection may be stale."
     };
 }
 
@@ -432,16 +447,18 @@ export async function reloadApp(): Promise<ExecutionResult> {
 
         // Send without registering a pending execution — fire and forget
         const messageId = getNextMessageId();
-        app.ws.send(JSON.stringify({
-            id: messageId,
-            method: "Runtime.evaluate",
-            params: {
-                expression: reloadExpression,
-                returnByValue: true,
-                awaitPromise: false,
-                userGesture: true,
-            },
-        }));
+        app.ws.send(
+            JSON.stringify({
+                id: messageId,
+                method: "Runtime.evaluate",
+                params: {
+                    expression: reloadExpression,
+                    returnByValue: true,
+                    awaitPromise: false,
+                    userGesture: true
+                }
+            })
+        );
     } catch (error) {
         return {
             success: false,
@@ -516,14 +533,14 @@ interface ComponentTreeNode {
 }
 
 function formatTreeToTonl(node: ComponentTreeNode, indent = 0): string {
-    const prefix = '  '.repeat(indent);
+    const prefix = "  ".repeat(indent);
     let result = `${prefix}${node.component}`;
 
     // Add props inline if present
     if (node.props && Object.keys(node.props).length > 0) {
         const propsStr = Object.entries(node.props)
-            .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
-            .join(',');
+            .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+            .join(",");
         result += ` (${propsStr})`;
     }
 
@@ -531,11 +548,11 @@ function formatTreeToTonl(node: ComponentTreeNode, indent = 0): string {
     if (node.layout && Object.keys(node.layout).length > 0) {
         const layoutStr = Object.entries(node.layout)
             .map(([k, v]) => `${k}:${v}`)
-            .join(',');
+            .join(",");
         result += ` [${layoutStr}]`;
     }
 
-    result += '\n';
+    result += "\n";
 
     // Recurse children
     if (node.children && node.children.length > 0) {
@@ -549,7 +566,7 @@ function formatTreeToTonl(node: ComponentTreeNode, indent = 0): string {
 
 // Ultra-compact structure-only tree format (just component names, indented)
 function formatTreeStructureOnly(node: ComponentTreeNode, indent = 0): string {
-    const prefix = '  '.repeat(indent);
+    const prefix = "  ".repeat(indent);
     let result = `${prefix}${node.component}\n`;
 
     if (node.children && node.children.length > 0) {
@@ -571,13 +588,17 @@ interface ScreenElement {
 }
 
 function formatScreenLayoutToTonl(elements: ScreenElement[]): string {
-    const lines: string[] = ['#elements{component,path,depth,layout,id}'];
+    const lines: string[] = ["#elements{component,path,depth,layout,id}"];
     for (const el of elements) {
-        const layout = el.layout ? Object.entries(el.layout).map(([k, v]) => `${k}:${v}`).join(';') : '';
-        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || '';
+        const layout = el.layout
+            ? Object.entries(el.layout)
+                  .map(([k, v]) => `${k}:${v}`)
+                  .join(";")
+            : "";
+        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
         lines.push(`${el.component}|${el.path}|${el.depth}|${layout}|${id}`);
     }
-    return lines.join('\n');
+    return lines.join("\n");
 }
 
 interface FoundComponent {
@@ -590,12 +611,16 @@ interface FoundComponent {
 }
 
 function formatFoundComponentsToTonl(components: FoundComponent[]): string {
-    const lines: string[] = ['#found{component,path,depth,key,layout}'];
+    const lines: string[] = ["#found{component,path,depth,key,layout}"];
     for (const c of components) {
-        const layout = c.layout ? Object.entries(c.layout).map(([k, v]) => `${k}:${v}`).join(';') : '';
-        lines.push(`${c.component}|${c.path}|${c.depth}|${c.key || ''}|${layout}`);
+        const layout = c.layout
+            ? Object.entries(c.layout)
+                  .map(([k, v]) => `${k}:${v}`)
+                  .join(";")
+            : "";
+        lines.push(`${c.component}|${c.path}|${c.depth}|${c.key || ""}|${layout}`);
     }
-    return lines.join('\n');
+    return lines.join("\n");
 }
 
 interface ComponentSummary {
@@ -608,23 +633,32 @@ function formatSummaryToTonl(components: ComponentSummary[], total: number): str
     for (const c of components) {
         lines.push(`${c.component}:${c.count}`);
     }
-    return lines.join('\n');
+    return lines.join("\n");
 }
 
 /**
  * Get the React component tree from the running app.
  * This traverses the fiber tree to extract component hierarchy with names.
  */
-export async function getComponentTree(options: {
-    maxDepth?: number;
-    includeProps?: boolean;
-    includeStyles?: boolean;
-    hideInternals?: boolean;
-    format?: 'json' | 'tonl';
-    structureOnly?: boolean;
-    focusedOnly?: boolean;
-} = {}): Promise<ExecutionResult> {
-    const { includeProps = false, includeStyles = false, hideInternals = true, format = 'tonl', structureOnly = false, focusedOnly = false } = options;
+export async function getComponentTree(
+    options: {
+        maxDepth?: number;
+        includeProps?: boolean;
+        includeStyles?: boolean;
+        hideInternals?: boolean;
+        format?: "json" | "tonl";
+        structureOnly?: boolean;
+        focusedOnly?: boolean;
+    } = {}
+): Promise<ExecutionResult> {
+    const {
+        includeProps = false,
+        includeStyles = false,
+        hideInternals = true,
+        format = "tonl",
+        structureOnly = false,
+        focusedOnly = false
+    } = options;
     // Use lower default depth for structureOnly to keep output compact (~2-5KB)
     // Full mode uses higher depth since TONL format handles it better
     // focusedOnly mode uses moderate depth since we're already filtering to active screen
@@ -832,7 +866,7 @@ export async function getComponentTree(options: {
         try {
             const parsed = JSON.parse(result.result);
             if (parsed.tree) {
-                const prefix = parsed.focusedScreen ? `Focused: ${parsed.focusedScreen}\n\n` : '';
+                const prefix = parsed.focusedScreen ? `Focused: ${parsed.focusedScreen}\n\n` : "";
 
                 // Structure-only mode: ultra-compact format with just component names
                 if (structureOnly) {
@@ -840,7 +874,7 @@ export async function getComponentTree(options: {
                     return { success: true, result: prefix + structure };
                 }
                 // TONL format: compact with props/layout
-                if (format === 'tonl') {
+                if (format === "tonl") {
                     const tonl = formatTreeToTonl(parsed.tree);
                     return { success: true, result: prefix + tonl };
                 }
@@ -857,14 +891,16 @@ export async function getComponentTree(options: {
  * Get layout styles for all components on the current screen.
  * Useful for verifying layout without screenshots.
  */
-export async function getScreenLayout(options: {
-    maxDepth?: number;
-    componentsOnly?: boolean;
-    shortPath?: boolean;
-    summary?: boolean;
-    format?: 'json' | 'tonl';
-} = {}): Promise<ExecutionResult> {
-    const { maxDepth = 65, componentsOnly = false, shortPath = true, summary = false, format = 'tonl' } = options;
+export async function getScreenLayout(
+    options: {
+        maxDepth?: number;
+        componentsOnly?: boolean;
+        shortPath?: boolean;
+        summary?: boolean;
+        format?: "json" | "tonl";
+    } = {}
+): Promise<ExecutionResult> {
+    const { maxDepth = 65, componentsOnly = false, shortPath = true, summary = false, format = "tonl" } = options;
 
     const expression = `
         (function() {
@@ -1023,7 +1059,7 @@ export async function getScreenLayout(options: {
     const result = await executeInApp(expression, false, { timeoutMs: 30000 });
 
     // Apply TONL formatting if requested
-    if (format === 'tonl' && result.success && result.result) {
+    if (format === "tonl" && result.success && result.result) {
         try {
             const parsed = JSON.parse(result.result);
             if (parsed.components) {
@@ -1046,15 +1082,25 @@ export async function getScreenLayout(options: {
 /**
  * Inspect a specific component by name, returning its props, state, and layout.
  */
-export async function inspectComponent(componentName: string, options: {
-    index?: number;
-    includeState?: boolean;
-    includeChildren?: boolean;
-    childrenDepth?: number;
-    shortPath?: boolean;
-    simplifyHooks?: boolean;
-} = {}): Promise<ExecutionResult> {
-    const { index = 0, includeState = true, includeChildren = false, childrenDepth = 1, shortPath = true, simplifyHooks = true } = options;
+export async function inspectComponent(
+    componentName: string,
+    options: {
+        index?: number;
+        includeState?: boolean;
+        includeChildren?: boolean;
+        childrenDepth?: number;
+        shortPath?: boolean;
+        simplifyHooks?: boolean;
+    } = {}
+): Promise<ExecutionResult> {
+    const {
+        index = 0,
+        includeState = true,
+        includeChildren = false,
+        childrenDepth = 1,
+        shortPath = true,
+        simplifyHooks = true
+    } = options;
     const escapedName = componentName.replace(/'/g, "\\'");
 
     const expression = `
@@ -1268,14 +1314,17 @@ export async function inspectComponent(componentName: string, options: {
 /**
  * Find all components matching a name pattern and return summary info.
  */
-export async function findComponents(pattern: string, options: {
-    maxResults?: number;
-    includeLayout?: boolean;
-    shortPath?: boolean;
-    summary?: boolean;
-    format?: 'json' | 'tonl';
-} = {}): Promise<ExecutionResult> {
-    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = 'tonl' } = options;
+export async function findComponents(
+    pattern: string,
+    options: {
+        maxResults?: number;
+        includeLayout?: boolean;
+        shortPath?: boolean;
+        summary?: boolean;
+        format?: "json" | "tonl";
+    } = {}
+): Promise<ExecutionResult> {
+    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl" } = options;
     const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
     const expression = `
@@ -1395,7 +1444,7 @@ export async function findComponents(pattern: string, options: {
     const result = await executeInApp(expression, false);
 
     // Apply TONL formatting if requested
-    if (format === 'tonl' && result.success && result.result) {
+    if (format === "tonl" && result.success && result.result) {
         try {
             const parsed = JSON.parse(result.result);
             if (parsed.components) {
@@ -1438,9 +1487,9 @@ export async function pressElement(options: {
     }
 
     const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-    const textParam = text ? `'${esc(text)}'` : 'null';
-    const testIDParam = testID ? `'${esc(testID)}'` : 'null';
-    const componentParam = component ? `'${esc(component)}'` : 'null';
+    const textParam = text ? `'${esc(text)}'` : "null";
+    const testIDParam = testID ? `'${esc(testID)}'` : "null";
+    const componentParam = component ? `'${esc(component)}'` : "null";
 
     const expression = `
         (function() {
@@ -1653,7 +1702,7 @@ export async function isInspectorActive(): Promise<boolean> {
 
     const result = await executeInApp(expression, false);
     if (result.success && result.result) {
-        return result.result === 'true';
+        return result.result === "true";
     }
     return false;
 }
@@ -1752,10 +1801,14 @@ export async function getInspectorSelection(): Promise<ExecutionResult> {
  * Step 2 — resolve (after 300ms): read the globals, hit-test against target
  *   coordinates, return the innermost matching React component.
  */
-export async function inspectAtPoint(x: number, y: number, options: {
-    includeProps?: boolean;
-    includeFrame?: boolean;
-} = {}): Promise<ExecutionResult> {
+export async function inspectAtPoint(
+    x: number,
+    y: number,
+    options: {
+        includeProps?: boolean;
+        includeFrame?: boolean;
+    } = {}
+): Promise<ExecutionResult> {
     const { includeProps = true, includeFrame = true } = options;
 
     // --- Step 1: walk fiber tree + dispatch measureInWindow calls ---
@@ -1824,9 +1877,11 @@ export async function inspectAtPoint(x: number, y: number, options: {
     if (!dispatchResult.success) return dispatchResult;
 
     try {
-        const parsed = JSON.parse(dispatchResult.result || '{}');
+        const parsed = JSON.parse(dispatchResult.result || "{}");
         if (parsed.error) return { success: false, error: parsed.error };
-    } catch { /* ignore parse errors */ }
+    } catch {
+        /* ignore parse errors */
+    }
 
     // Wait for native measureInWindow callbacks to fire
     await delay(300);
@@ -1864,7 +1919,7 @@ export async function inspectAtPoint(x: number, y: number, options: {
 
             // RN primitives and internal components to skip when surfacing the "element" name.
             // We want the nearest *custom* component, not a library wrapper.
-            var RN_PRIMITIVES = /^(View|Text|Image|ScrollView|FlatList|SectionList|TextInput|TouchableOpacity|TouchableHighlight|TouchableNativeFeedback|TouchableWithoutFeedback|Pressable|Button|Switch|ActivityIndicator|Modal|SafeAreaView|KeyboardAvoidingView|Animated\(.*|withAnimated.*|ForwardRef.*|memo\(.*|Context\.Consumer|Context\.Provider|VirtualizedList.*|CellRenderer.*|FrameSizeProvider|MaybeScreenContainer|RCT.*|RNS.*|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer)$/;
+            var RN_PRIMITIVES = /^(View|Text|Image|ScrollView|FlatList|SectionList|TextInput|TouchableOpacity|TouchableHighlight|TouchableNativeFeedback|TouchableWithoutFeedback|Pressable|Button|Switch|ActivityIndicator|Modal|SafeAreaView|KeyboardAvoidingView|Animated\\(.*|withAnimated.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|VirtualizedList.*|CellRenderer.*|FrameSizeProvider|MaybeScreenContainer|RCT.*|RNS.*|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|Expo.*|LinearGradient|ViewManagerAdapter_.*|Svg.*|Defs|Path|Rect|Circle|G|Line|Polygon|Polyline|Ellipse|ClipPath|GestureHandler.*|NativeViewGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|MaybeScreen|SafeAreaProvider.*|GestureDetector|PanGestureHandler|DropShadow|BlurView|MaskedView.*)$/;
 
             function getNearestNamed(fiber, skipPrimitives) {
                 var cur = fiber;

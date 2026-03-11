@@ -41,7 +41,13 @@ Based on what's running, capture screenshots:
 - If multiple devices are captured, clearly label each (e.g., "iPhone 16 Pro", "iPad Pro 13-inch")
 - Point out any visible layout issues or differences between device sizes
 
-### 4. Optional: Compare with Design
+### 4. Optional: Inspect Layout Details
+
+If a screenshot reveals a layout issue and you need precise measurements:
+- Use `mcp__rn-debugger-local__inspect_at_point` with x/y coordinates (in points) to get the component's frame (position/size), props, and styles at that location
+- Use `mcp__rn-debugger-local__get_inspector_selection` with x/y coordinates to identify the component name and source file path — helps you find the exact file to fix
+
+### 5. Optional: Compare with Design
 
 If the user provides a Figma URL or design reference:
 - Use the Figma MCP tools to fetch the design
@@ -65,6 +71,8 @@ If the user provides a Figma URL or design reference:
 - `mcp__rn-debugger-local__list_android_devices`
 - `mcp__rn-debugger-local__ios_screenshot`
 - `mcp__rn-debugger-local__android_screenshot`
+- `mcp__rn-debugger-local__inspect_at_point` (optional: layout detail drill-down)
+- `mcp__rn-debugger-local__get_inspector_selection` (optional: identify component name/source file)
 
 ## Notes
 
