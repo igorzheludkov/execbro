@@ -158,6 +158,14 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ## Available Tools
 
+### Usage Guide
+
+| Tool              | Description                                                                 |
+| ----------------- | --------------------------------------------------------------------------- |
+| `get_usage_guide` | Get recommended workflows for all tools. Call without params for overview, with a topic (`setup`, `inspect`, `layout`, `interact`, `logs`, `network`, `state`, `bundle`) for the full guide |
+
+The server also sends instructions on connection, so MCP clients automatically learn about `get_usage_guide`.
+
 ### Connection & Logs
 
 | Tool                    | Description                                                        |
