@@ -4,6 +4,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
+import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
+
 import {
     logBuffer,
     networkBuffer,
@@ -117,10 +119,16 @@ import {
 } from "./core/index.js";
 
 // Create MCP server
-const server = new McpServer({
-    name: "react-native-ai-debugger",
-    version: "1.0.0"
-});
+const server = new McpServer(
+    {
+        name: "react-native-ai-debugger",
+        version: "1.0.0"
+    },
+    {
+        instructions:
+            "React Native debugging MCP server. Call get_usage_guide to learn recommended workflows for all tools. Quick start: scan_metro → get_logs / search_logs (console debugging) → ios_screenshot → get_inspector_selection(x, y) (identify components)."
+    }
+);
 
 // ============================================================================
 // Telemetry Wrapper
@@ -131,15 +139,15 @@ const server = new McpServer({
  * Only needs the first ~2KB of the image to find dimensions.
  */
 function getJpegDimensions(buffer: Buffer): { width: number; height: number } | null {
-    if (buffer.length < 4 || buffer[0] !== 0xFF || buffer[1] !== 0xD8) return null;
+    if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
 
     let offset = 2;
     while (offset < buffer.length - 9) {
-        if (buffer[offset] !== 0xFF) return null;
+        if (buffer[offset] !== 0xff) return null;
         const marker = buffer[offset + 1];
 
         // SOF markers: C0-CF except C4 (DHT) and CC (DAC)
-        if (marker >= 0xC0 && marker <= 0xCF && marker !== 0xC4 && marker !== 0xCC) {
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xcc) {
             const height = buffer.readUInt16BE(offset + 5);
             const width = buffer.readUInt16BE(offset + 7);
             return { width, height };
@@ -193,11 +201,7 @@ function estimateImageTokens(base64Data: string): number {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-function registerToolWithTelemetry(
-    toolName: string,
-    config: any,
-    handler: (args: any) => Promise<any>
-): void {
+function registerToolWithTelemetry(toolName: string, config: any, handler: (args: any) => Promise<any>): void {
     server.registerTool(toolName, config, async (args: any) => {
         const startTime = Date.now();
         let success = true;
@@ -208,14 +212,16 @@ function registerToolWithTelemetry(
 
         try {
             inputTokens = Math.ceil(JSON.stringify(args).length / 4);
-        } catch { /* circular refs — leave undefined */ }
+        } catch {
+            /* circular refs — leave undefined */
+        }
 
         try {
             const result = await handler(args);
             // Check if result indicates an error
             if (result?.isError) {
                 success = false;
-                errorMessage = result.content?.[0]?.text || 'Unknown error';
+                errorMessage = result.content?.[0]?.text || "Unknown error";
                 // Extract error context if provided (e.g., the expression that caused a syntax error)
                 errorContext = result._errorContext;
             }
@@ -243,11 +249,54 @@ function registerToolWithTelemetry(
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
+// Tool: Usage guide for agents
+registerToolWithTelemetry(
+    "get_usage_guide",
+    {
+        description:
+            "Get recommended workflows and best practices for using the debugging tools. Call without parameters to see all available topics with short descriptions. Call with a topic parameter to get the full guide for that topic.",
+        inputSchema: {
+            topic: z
+                .string()
+                .optional()
+                .describe(
+                    "Topic to get the full guide for. Available topics: setup, inspect, layout, interact, logs, network, state, bundle. Omit to see the overview of all topics."
+                )
+        }
+    },
+    async ({ topic }) => {
+        if (!topic) {
+            return {
+                content: [{ type: "text", text: getGuideOverview() }]
+            };
+        }
+
+        const guide = getGuideByTopic(topic);
+        if (!guide) {
+            const available = getAvailableTopics().join(", ");
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Unknown topic: "${topic}". Available topics: ${available}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [{ type: "text", text: guide }]
+        };
+    }
+);
+
 // Tool: Scan for Metro servers
 registerToolWithTelemetry(
     "scan_metro",
     {
-        description: "Scan for running Metro bundler servers and automatically connect to any found React Native apps. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.",
+        description:
+            "Scan for running Metro bundler servers and automatically connect to any found React Native apps. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.",
         inputSchema: {
             startPort: z.coerce.number().optional().default(8081).describe("Start port for scanning (default: 8081)"),
             endPort: z.coerce.number().optional().default(19002).describe("End port for scanning (default: 19002)")
@@ -312,7 +361,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "get_apps",
     {
-        description: "List currently connected React Native apps and their connection status. If no apps are connected, run scan_metro first to establish a connection.",
+        description:
+            "List currently connected React Native apps and their connection status. If no apps are connected, run scan_metro first to establish a connection.",
         inputSchema: {}
     },
     async () => {
@@ -402,9 +452,7 @@ registerToolWithTelemetry(
                         lines.push(`  Recent gaps: ${recentGaps.length}`);
                         for (const gap of recentGaps.slice(-3)) {
                             const duration = gap.durationMs ? formatDuration(gap.durationMs) : "ongoing";
-                            lines.push(
-                                `    - ${gap.disconnectedAt.toLocaleTimeString()} (${duration}): ${gap.reason}`
-                            );
+                            lines.push(`    - ${gap.disconnectedAt.toLocaleTimeString()} (${duration}): ${gap.reason}`);
                         }
                     }
                 }
@@ -417,7 +465,9 @@ registerToolWithTelemetry(
                 lines.push(`    Status: ${contextHealth.isStale ? "STALE" : "HEALTHY"}`);
                 if (contextHealth.lastHealthCheck) {
                     const healthResult = contextHealth.lastHealthCheckSuccess ? "PASS" : "FAIL";
-                    lines.push(`    Last Check: ${contextHealth.lastHealthCheck.toLocaleTimeString()} (${healthResult})`);
+                    lines.push(
+                        `    Last Check: ${contextHealth.lastHealthCheck.toLocaleTimeString()} (${healthResult})`
+                    );
                 }
                 if (contextHealth.lastContextCreated) {
                     lines.push(`    Context Created: ${contextHealth.lastContextCreated.toLocaleTimeString()}`);
@@ -518,25 +568,34 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "get_logs",
     {
-        description: "Retrieve console logs from connected React Native app. Tip: Use summary=true first for a quick overview (counts by level + last 5 messages), then fetch specific logs as needed.",
+        description:
+            "Retrieve console logs from connected React Native app. Tip: Use summary=true first for a quick overview (counts by level + last 5 messages), then fetch specific logs as needed.",
         inputSchema: {
-            maxLogs: z.coerce.number().optional().default(50).describe("Maximum number of logs to return (default: 50)"),
+            maxLogs: z.coerce
+                .number()
+                .optional()
+                .default(50)
+                .describe("Maximum number of logs to return (default: 50)"),
             level: z
                 .enum(["all", "log", "warn", "error", "info", "debug"])
                 .optional()
                 .default("all")
                 .describe("Filter by log level (default: all)"),
             startFromText: z.string().optional().describe("Start from the first log line containing this text"),
-            maxMessageLength: z
-                .coerce.number()
+            maxMessageLength: z.coerce
+                .number()
                 .optional()
                 .default(500)
-                .describe("Max characters per message (default: 500, set to 0 for unlimited). Tip: Use lower values for overview, higher when debugging specific data structures."),
+                .describe(
+                    "Max characters per message (default: 500, set to 0 for unlimited). Tip: Use lower values for overview, higher when debugging specific data structures."
+                ),
             verbose: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Disable all truncation and return full messages. Tip: Use with lower maxLogs (e.g., 10) to avoid token overload when inspecting large objects."),
+                .describe(
+                    "Disable all truncation and return full messages. Tip: Use with lower maxLogs (e.g., 10) to avoid token overload when inspecting large objects."
+                ),
             format: z
                 .enum(["text", "tonl"])
                 .optional()
@@ -546,7 +605,9 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Return summary statistics instead of full logs (count by level + last 5 messages). Use for quick overview.")
+                .describe(
+                    "Return summary statistics instead of full logs (count by level + last 5 messages). Use for quick overview."
+                )
         }
     },
     async ({ maxLogs, level, startFromText, maxMessageLength, verbose, format, summary }) => {
@@ -568,7 +629,13 @@ registerToolWithTelemetry(
             };
         }
 
-        const { logs, count, formatted } = getLogs(logBuffer, { maxLogs, level, startFromText, maxMessageLength, verbose });
+        const { logs, count, formatted } = getLogs(logBuffer, {
+            maxLogs,
+            level,
+            startFromText,
+            maxMessageLength,
+            verbose
+        });
 
         // Check connection health
         let connectionWarning = "";
@@ -589,7 +656,7 @@ registerToolWithTelemetry(
 
         if (recentGaps.length > 0) {
             const latestGap = recentGaps[recentGaps.length - 1];
-            const gapDuration = latestGap.durationMs || (Date.now() - latestGap.disconnectedAt.getTime());
+            const gapDuration = latestGap.durationMs || Date.now() - latestGap.disconnectedAt.getTime();
 
             if (latestGap.reconnectedAt) {
                 const secAgo = Math.round((Date.now() - latestGap.reconnectedAt.getTime()) / 1000);
@@ -632,17 +699,17 @@ registerToolWithTelemetry(
         description: "Search console logs for text (case-insensitive)",
         inputSchema: {
             text: z.string().describe("Text to search for in log messages"),
-            maxResults: z.coerce.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
-            maxMessageLength: z
-                .coerce.number()
+            maxResults: z.coerce
+                .number()
+                .optional()
+                .default(50)
+                .describe("Maximum number of results to return (default: 50)"),
+            maxMessageLength: z.coerce
+                .number()
                 .optional()
                 .default(500)
                 .describe("Max characters per message (default: 500, set to 0 for unlimited)"),
-            verbose: z
-                .boolean()
-                .optional()
-                .default(false)
-                .describe("Disable all truncation and return full messages"),
+            verbose: z.boolean().optional().default(false).describe("Disable all truncation and return full messages"),
             format: z
                 .enum(["text", "tonl"])
                 .optional()
@@ -714,7 +781,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "connect_metro",
     {
-        description: "Connect to a Metro server on a specific port. Use this when you know the exact port, otherwise use scan_metro which auto-detects. Establishes the WebSocket connection needed for debugging tools.",
+        description:
+            "Connect to a Metro server on a specific port. Use this when you know the exact port, otherwise use scan_metro which auto-detects. Establishes the WebSocket connection needed for debugging tools.",
         inputSchema: {
             port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")
         }
@@ -788,13 +856,23 @@ registerToolWithTelemetry(
             "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
             "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`, `console.log('\\u{1F600}')`",
         inputSchema: {
-            expression: z.string().describe("JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await, no emoji/non-ASCII in strings. Use globals discovered via list_debug_globals."),
-            awaitPromise: z.coerce.boolean().optional().default(true).describe("Whether to await promises (default: true)"),
-            maxResultLength: z
-                .coerce.number()
+            expression: z
+                .string()
+                .describe(
+                    "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await, no emoji/non-ASCII in strings. Use globals discovered via list_debug_globals."
+                ),
+            awaitPromise: z.coerce
+                .boolean()
+                .optional()
+                .default(true)
+                .describe("Whether to await promises (default: true)"),
+            maxResultLength: z.coerce
+                .number()
                 .optional()
                 .default(2000)
-                .describe("Max characters in result (default: 2000, set to 0 for unlimited). Tip: For large objects like Redux stores, use inspect_global instead or set higher limit."),
+                .describe(
+                    "Max characters in result (default: 2000, set to 0 for unlimited). Tip: For large objects like Redux stores, use inspect_global instead or set higher limit."
+                ),
             verbose: z
                 .boolean()
                 .optional()
@@ -811,7 +889,8 @@ registerToolWithTelemetry(
             // If the error is a ReferenceError (accessing a global that doesn't exist),
             // guide the agent to expose the variable as a global first
             if (result.error?.includes("ReferenceError")) {
-                errorText += "\n\nNOTE: This variable is not exposed as a global. To access it, first assign it to a global variable in your app code (e.g., `globalThis.__MY_VAR__ = myVar;`), then use execute_in_app to read `__MY_VAR__`. You can also use list_debug_globals to see what globals ARE currently available.";
+                errorText +=
+                    "\n\nNOTE: This variable is not exposed as a global. To access it, first assign it to a global variable in your app code (e.g., `globalThis.__MY_VAR__ = myVar;`), then use execute_in_app to read `__MY_VAR__`. You can also use list_debug_globals to see what globals ARE currently available.";
             }
 
             return {
@@ -831,7 +910,8 @@ registerToolWithTelemetry(
 
         // Apply truncation unless verbose or unlimited
         if (!verbose && maxResultLength > 0 && resultText.length > maxResultLength) {
-            resultText = resultText.slice(0, maxResultLength) + `... [truncated: ${result.result?.length ?? 0} chars total]`;
+            resultText =
+                resultText.slice(0, maxResultLength) + `... [truncated: ${result.result?.length ?? 0} chars total]`;
         }
 
         return {
@@ -900,7 +980,7 @@ registerToolWithTelemetry(
             // If the error is a ReferenceError (accessing a global that doesn't exist),
             // guide the agent to expose the variable as a global first
             if (result.error?.includes("ReferenceError")) {
-                errorText += `\n\nNOTE: '${objectName}' is not exposed as a global variable. To inspect it, first assign it to a global in your app code (e.g., \`globalThis.${objectName} = ${objectName.replace(/^__/, '').replace(/__$/, '')};\`), then call inspect_global again. Use list_debug_globals to see what globals ARE currently available.`;
+                errorText += `\n\nNOTE: '${objectName}' is not exposed as a global variable. To inspect it, first assign it to a global in your app code (e.g., \`globalThis.${objectName} = ${objectName.replace(/^__/, "").replace(/__$/, "")};\`), then call inspect_global again. Use list_debug_globals to see what globals ARE currently available.`;
             }
 
             return {
@@ -940,16 +1020,22 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Return only the focused/active screen subtree, skipping navigation wrappers and overlays. Dramatically reduces output size. (Recommended: true)"),
+                .describe(
+                    "Return only the focused/active screen subtree, skipping navigation wrappers and overlays. Dramatically reduces output size. (Recommended: true)"
+                ),
             structureOnly: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Return ultra-compact structure with just component names (no props, styles, or paths). Use this first for overview, then drill down with inspect_component."),
+                .describe(
+                    "Return ultra-compact structure with just component names (no props, styles, or paths). Use this first for overview, then drill down with inspect_component."
+                ),
             maxDepth: z
                 .number()
                 .optional()
-                .describe("Maximum tree depth (default: 25 for focusedOnly+structureOnly, 40 for structureOnly, 100 for full mode)"),
+                .describe(
+                    "Maximum tree depth (default: 25 for focusedOnly+structureOnly, 40 for structureOnly, 100 for full mode)"
+                ),
             includeProps: z
                 .boolean()
                 .optional()
@@ -964,16 +1050,28 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(true)
-                .describe("Hide internal RN components (RCTView, RNS*, Animated, etc.) for cleaner output (default: true)"),
+                .describe(
+                    "Hide internal RN components (RCTView, RNS*, Animated, etc.) for cleaner output (default: true)"
+                ),
             format: z
                 .enum(["json", "tonl"])
                 .optional()
                 .default("tonl")
-                .describe("Output format: 'json' or 'tonl' (default, compact indented tree). Ignored if structureOnly=true.")
+                .describe(
+                    "Output format: 'json' or 'tonl' (default, compact indented tree). Ignored if structureOnly=true."
+                )
         }
     },
     async ({ focusedOnly, structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format }) => {
-        const result = await getComponentTree({ focusedOnly, structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format });
+        const result = await getComponentTree({
+            focusedOnly,
+            structureOnly,
+            maxDepth,
+            includeProps,
+            includeStyles,
+            hideInternals,
+            format
+        });
 
         if (!result.success) {
             return {
@@ -1078,21 +1176,15 @@ registerToolWithTelemetry(
                 .optional()
                 .default(true)
                 .describe("Include component state/hooks (default: true)"),
-            includeChildren: z
-                .boolean()
-                .optional()
-                .default(false)
-                .describe("Include children component tree"),
+            includeChildren: z.boolean().optional().default(false).describe("Include children component tree"),
             childrenDepth: z
                 .number()
                 .optional()
                 .default(1)
-                .describe("How many levels deep to show children (default: 1 = direct children only, 2+ = nested tree)"),
-            shortPath: z
-                .boolean()
-                .optional()
-                .default(true)
-                .describe("Show only last 3 path segments (default: true)"),
+                .describe(
+                    "How many levels deep to show children (default: 1 = direct children only, 2+ = nested tree)"
+                ),
+            shortPath: z.boolean().optional().default(true).describe("Show only last 3 path segments (default: true)"),
             simplifyHooks: z
                 .boolean()
                 .optional()
@@ -1101,7 +1193,14 @@ registerToolWithTelemetry(
         }
     },
     async ({ componentName, index, includeState, includeChildren, childrenDepth, shortPath, simplifyHooks }) => {
-        const result = await inspectComponent(componentName, { index, includeState, includeChildren, childrenDepth, shortPath, simplifyHooks });
+        const result = await inspectComponent(componentName, {
+            index,
+            includeState,
+            includeChildren,
+            childrenDepth,
+            shortPath,
+            simplifyHooks
+        });
 
         if (!result.success) {
             return {
@@ -1135,22 +1234,16 @@ registerToolWithTelemetry(
         inputSchema: {
             pattern: z
                 .string()
-                .describe("Regex pattern to match component names (case-insensitive). Examples: 'Button', 'Screen$', 'List.*Item'"),
-            maxResults: z
-                .number()
-                .optional()
-                .default(20)
-                .describe("Maximum number of results to return (default: 20)"),
+                .describe(
+                    "Regex pattern to match component names (case-insensitive). Examples: 'Button', 'Screen$', 'List.*Item'"
+                ),
+            maxResults: z.number().optional().default(20).describe("Maximum number of results to return (default: 20)"),
             includeLayout: z
                 .boolean()
                 .optional()
                 .default(false)
                 .describe("Include layout styles (padding, margin, flex) for each matched component"),
-            shortPath: z
-                .boolean()
-                .optional()
-                .default(true)
-                .describe("Show only last 3 path segments (default: true)"),
+            shortPath: z.boolean().optional().default(true).describe("Show only last 3 path segments (default: true)"),
             summary: z
                 .boolean()
                 .optional()
@@ -1203,23 +1296,36 @@ registerToolWithTelemetry(
             text: z
                 .string()
                 .optional()
-                .describe("Case-insensitive partial match on the element's text content (e.g., 'Submit', 'Log in'). ASCII only — non-Latin characters (Cyrillic, CJK, etc.) cause Hermes parse errors. Use testID or component for localized UIs."),
-            testID: z
-                .string()
-                .optional()
-                .describe("Exact match on the element's testID prop"),
+                .describe(
+                    "Case-insensitive partial match on the element's text content (e.g., 'Submit', 'Log in'). ASCII only — non-Latin characters (Cyrillic, CJK, etc.) cause Hermes parse errors. Use testID or component for localized UIs."
+                ),
+            testID: z.string().optional().describe("Exact match on the element's testID prop"),
             component: z
                 .string()
                 .optional()
-                .describe("Case-insensitive partial match on the component's displayName or name (e.g., 'Button', 'MenuItem')"),
-            index: z
-                .coerce.number()
+                .describe(
+                    "Case-insensitive partial match on the component's displayName or name (e.g., 'Button', 'MenuItem')"
+                ),
+            index: z.coerce
+                .number()
                 .optional()
                 .default(0)
-                .describe("Zero-based index when multiple elements match (default: 0). If unsure, omit to press the first match.")
+                .describe(
+                    "Zero-based index when multiple elements match (default: 0). If unsure, omit to press the first match."
+                )
         }
     },
-    async ({ text, testID, component, index }: { text?: string; testID?: string; component?: string; index?: number }) => {
+    async ({
+        text,
+        testID,
+        component,
+        index
+    }: {
+        text?: string;
+        testID?: string;
+        component?: string;
+        index?: number;
+    }) => {
         const result = await pressElement({ text, testID, component, index });
 
         if (!result.success) {
@@ -1329,7 +1435,7 @@ registerToolWithTelemetry(
             if (!inspectorActive) {
                 await toggleElementInspector();
                 // Wait for inspector to initialize
-                await new Promise(resolve => setTimeout(resolve, 300));
+                await new Promise((resolve) => setTimeout(resolve, 300));
             }
 
             // Detect platform from connected app
@@ -1341,10 +1447,11 @@ registerToolWithTelemetry(
                 };
             }
 
-            const isIOS = app.deviceInfo.title?.toLowerCase().includes('iphone') ||
-                         app.deviceInfo.title?.toLowerCase().includes('ipad') ||
-                         app.deviceInfo.deviceName?.toLowerCase().includes('simulator') ||
-                         app.deviceInfo.description?.toLowerCase().includes('ios');
+            const isIOS =
+                app.deviceInfo.title?.toLowerCase().includes("iphone") ||
+                app.deviceInfo.title?.toLowerCase().includes("ipad") ||
+                app.deviceInfo.deviceName?.toLowerCase().includes("simulator") ||
+                app.deviceInfo.description?.toLowerCase().includes("ios");
 
             // Tap at coordinates
             try {
@@ -1355,16 +1462,18 @@ registerToolWithTelemetry(
                 }
             } catch (tapError) {
                 return {
-                    content: [{
-                        type: "text",
-                        text: `Failed to tap at (${x}, ${y}): ${tapError instanceof Error ? tapError.message : String(tapError)}`
-                    }],
+                    content: [
+                        {
+                            type: "text",
+                            text: `Failed to tap at (${x}, ${y}): ${tapError instanceof Error ? tapError.message : String(tapError)}`
+                        }
+                    ],
                     isError: true
                 };
             }
 
             // Wait for selection to update
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise((resolve) => setTimeout(resolve, 200));
         }
 
         // Read the current selection
@@ -1417,10 +1526,14 @@ registerToolWithTelemetry(
         inputSchema: {
             x: z
                 .number()
-                .describe("X coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."),
+                .describe(
+                    "X coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."
+                ),
             y: z
                 .number()
-                .describe("Y coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."),
+                .describe(
+                    "Y coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."
+                ),
             includeProps: z
                 .boolean()
                 .optional()
@@ -1453,7 +1566,9 @@ registerToolWithTelemetry(
             const parsed = JSON.parse(result.result || "{}");
             if (parsed.error) {
                 const hint = parsed.hint ? `\n\n${parsed.hint}` : "";
-                const alternatives = parsed.alternatives ? `\n\nAlternatives:\n${parsed.alternatives.map((a: string) => `  - ${a}`).join('\n')}` : "";
+                const alternatives = parsed.alternatives
+                    ? `\n\nAlternatives:\n${parsed.alternatives.map((a: string) => `  - ${a}`).join("\n")}`
+                    : "";
                 return {
                     content: [
                         {
@@ -1491,18 +1606,9 @@ registerToolWithTelemetry(
                 .optional()
                 .default(50)
                 .describe("Maximum number of requests to return (default: 50)"),
-            method: z
-                .string()
-                .optional()
-                .describe("Filter by HTTP method (GET, POST, PUT, DELETE, etc.)"),
-            urlPattern: z
-                .string()
-                .optional()
-                .describe("Filter by URL pattern (case-insensitive substring match)"),
-            status: z
-                .number()
-                .optional()
-                .describe("Filter by HTTP status code (e.g., 200, 401, 500)"),
+            method: z.string().optional().describe("Filter by HTTP method (GET, POST, PUT, DELETE, etc.)"),
+            urlPattern: z.string().optional().describe("Filter by URL pattern (case-insensitive substring match)"),
+            status: z.number().optional().describe("Filter by HTTP status code (e.g., 200, 401, 500)"),
             format: z
                 .enum(["text", "tonl"])
                 .optional()
@@ -1560,7 +1666,7 @@ registerToolWithTelemetry(
 
         if (recentGaps.length > 0) {
             const latestGap = recentGaps[recentGaps.length - 1];
-            const gapDuration = latestGap.durationMs || (Date.now() - latestGap.disconnectedAt.getTime());
+            const gapDuration = latestGap.durationMs || Date.now() - latestGap.disconnectedAt.getTime();
 
             if (latestGap.reconnectedAt) {
                 const secAgo = Math.round((Date.now() - latestGap.reconnectedAt.getTime()) / 1000);
@@ -1601,11 +1707,7 @@ registerToolWithTelemetry(
         description: "Search network requests by URL pattern (case-insensitive)",
         inputSchema: {
             urlPattern: z.string().describe("URL pattern to search for"),
-            maxResults: z
-                .number()
-                .optional()
-                .default(50)
-                .describe("Maximum number of results to return (default: 50)"),
+            maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
             format: z
                 .enum(["text", "tonl"])
                 .optional()
@@ -1660,11 +1762,13 @@ registerToolWithTelemetry(
             "Get full details of a specific network request including headers, body, and timing. Use get_network_requests first to find the request ID.",
         inputSchema: {
             requestId: z.string().describe("The request ID to get details for"),
-            maxBodyLength: z
-                .coerce.number()
+            maxBodyLength: z.coerce
+                .number()
                 .optional()
                 .default(500)
-                .describe("Max characters for request body (default: 500, set to 0 for unlimited). Tip: Large POST bodies (file uploads, base64) can be 10KB+."),
+                .describe(
+                    "Max characters for request body (default: 500, set to 0 for unlimited). Tip: Large POST bodies (file uploads, base64) can be 10KB+."
+                ),
             verbose: z
                 .boolean()
                 .optional()
@@ -1704,8 +1808,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "get_network_stats",
     {
-        description:
-            "Get statistics about captured network requests: counts by method, status code, and domain.",
+        description: "Get statistics about captured network requests: counts by method, status code, and domain.",
         inputSchema: {}
     },
     async () => {
@@ -1826,15 +1929,13 @@ registerToolWithTelemetry(
         description:
             "Retrieve captured Metro bundling/compilation errors. These are errors that occur during the bundle build process (import resolution, syntax errors, transform errors) that prevent the app from loading. If no errors are captured but Metro is running without connected apps, automatically falls back to screenshot+OCR to capture the error from the device screen.",
         inputSchema: {
-            maxErrors: z
-                .number()
-                .optional()
-                .default(10)
-                .describe("Maximum number of errors to return (default: 10)"),
+            maxErrors: z.number().optional().default(10).describe("Maximum number of errors to return (default: 10)"),
             platform: z
                 .enum(["ios", "android"])
                 .optional()
-                .describe("Platform for screenshot fallback when no errors are captured via CDP. Required to enable fallback."),
+                .describe(
+                    "Platform for screenshot fallback when no errors are captured via CDP. Required to enable fallback."
+                ),
             deviceId: z
                 .string()
                 .optional()
@@ -1890,7 +1991,14 @@ registerToolWithTelemetry(
 
         // Metro is running but no apps connected - try screenshot fallback
         try {
-            let screenshotResult: { success: boolean; error?: string; data?: Buffer; scaleFactor?: number; originalWidth?: number; originalHeight?: number };
+            let screenshotResult: {
+                success: boolean;
+                error?: string;
+                data?: Buffer;
+                scaleFactor?: number;
+                originalWidth?: number;
+                originalHeight?: number;
+            };
 
             if (platform === "android") {
                 screenshotResult = await androidScreenshot(undefined, deviceId);
@@ -1910,9 +2018,10 @@ registerToolWithTelemetry(
             }
 
             // Calculate device pixel ratio for iOS
-            const devicePixelRatio = platform === "ios" && screenshotResult.originalWidth && screenshotResult.originalHeight
-                ? inferIOSDevicePixelRatio(screenshotResult.originalWidth, screenshotResult.originalHeight)
-                : 1;
+            const devicePixelRatio =
+                platform === "ios" && screenshotResult.originalWidth && screenshotResult.originalHeight
+                    ? inferIOSDevicePixelRatio(screenshotResult.originalWidth, screenshotResult.originalHeight)
+                    : 1;
 
             // Run OCR on the screenshot
             const ocrResult = await recognizeText(screenshotResult.data, {
@@ -2021,8 +2130,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_screenshot",
     {
-        description:
-            "Take a screenshot from an Android device/emulator. Returns the image data that can be displayed.",
+        description: "Take a screenshot from an Android device/emulator. Returns the image data that can be displayed.",
         inputSchema: {
             outputPath: z
                 .string()
@@ -2031,7 +2139,9 @@ registerToolWithTelemetry(
             deviceId: z
                 .string()
                 .optional()
-                .describe("Optional device ID (from list_android_devices). Uses first available device if not specified.")
+                .describe(
+                    "Optional device ID (from list_android_devices). Uses first available device if not specified."
+                )
         }
     },
     async ({ outputPath, deviceId }) => {
@@ -2160,7 +2270,9 @@ registerToolWithTelemetry(
             activityName: z
                 .string()
                 .optional()
-                .describe("Optional activity name to launch (e.g., .MainActivity). If not provided, launches the main activity."),
+                .describe(
+                    "Optional activity name to launch (e.g., .MainActivity). If not provided, launches the main activity."
+                ),
             deviceId: z
                 .string()
                 .optional()
@@ -2192,10 +2304,7 @@ registerToolWithTelemetry(
                 .string()
                 .optional()
                 .describe("Optional device ID. Uses first available device if not specified."),
-            filter: z
-                .string()
-                .optional()
-                .describe("Optional filter to search packages by name (case-insensitive)")
+            filter: z.string().optional().describe("Optional filter to search packages by name (case-insensitive)")
         }
     },
     async ({ deviceId, filter }) => {
@@ -2221,7 +2330,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_tap",
     {
-        description: "Tap at specific coordinates on an Android device/emulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values.",
+        description:
+            "Tap at specific coordinates on an Android device/emulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values.",
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -2254,11 +2364,7 @@ registerToolWithTelemetry(
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
-            durationMs: z
-                .number()
-                .optional()
-                .default(1000)
-                .describe("Press duration in milliseconds (default: 1000)"),
+            durationMs: z.number().optional().default(1000).describe("Press duration in milliseconds (default: 1000)"),
             deviceId: z
                 .string()
                 .optional()
@@ -2290,11 +2396,7 @@ registerToolWithTelemetry(
             startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
             endX: z.coerce.number().describe("Ending X coordinate in pixels"),
             endY: z.coerce.number().describe("Ending Y coordinate in pixels"),
-            durationMs: z
-                .number()
-                .optional()
-                .default(300)
-                .describe("Swipe duration in milliseconds (default: 300)"),
+            durationMs: z.number().optional().default(300).describe("Swipe duration in milliseconds (default: 300)"),
             deviceId: z
                 .string()
                 .optional()
@@ -2351,11 +2453,7 @@ registerToolWithTelemetry(
     {
         description: `Send a key event to an Android device/emulator. Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}`,
         inputSchema: {
-            key: z
-                .string()
-                .describe(
-                    `Key name (${Object.keys(ANDROID_KEY_EVENTS).join(", ")}) or numeric keycode`
-                ),
+            key: z.string().describe(`Key name (${Object.keys(ANDROID_KEY_EVENTS).join(", ")}) or numeric keycode`),
             deviceId: z
                 .string()
                 .optional()
@@ -2364,9 +2462,7 @@ registerToolWithTelemetry(
     },
     async ({ key, deviceId }) => {
         // Try to parse as number first, otherwise treat as key name
-        const keyCode = /^\d+$/.test(key)
-            ? parseInt(key, 10)
-            : (key.toUpperCase() as keyof typeof ANDROID_KEY_EVENTS);
+        const keyCode = /^\d+$/.test(key) ? parseInt(key, 10) : (key.toUpperCase() as keyof typeof ANDROID_KEY_EVENTS);
 
         const result = await androidKeyEvent(keyCode, deviceId);
 
@@ -2489,22 +2585,10 @@ server.registerTool(
         description:
             "Tap an element by its text, content-description, or resource-id using uiautomator. TIP: Consider using ocr_screenshot first - it returns ready-to-use tap coordinates for all visible text and works more reliably across different apps.",
         inputSchema: {
-            text: z
-                .string()
-                .optional()
-                .describe("Exact text match for the element"),
-            textContains: z
-                .string()
-                .optional()
-                .describe("Partial text match (case-insensitive)"),
-            contentDesc: z
-                .string()
-                .optional()
-                .describe("Exact content-description match"),
-            contentDescContains: z
-                .string()
-                .optional()
-                .describe("Partial content-description match (case-insensitive)"),
+            text: z.string().optional().describe("Exact text match for the element"),
+            textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
+            contentDesc: z.string().optional().describe("Exact content-description match"),
+            contentDescContains: z.string().optional().describe("Partial content-description match (case-insensitive)"),
             resourceId: z
                 .string()
                 .optional()
@@ -2550,15 +2634,9 @@ server.registerTool(
             "Find a UI element on Android screen by text, content description, or resource ID. Returns element details including tap coordinates. Use this to check if an element exists without tapping it. Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
         inputSchema: {
             text: z.string().optional().describe("Exact text match for the element"),
-            textContains: z
-                .string()
-                .optional()
-                .describe("Partial text match (case-insensitive)"),
+            textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
             contentDesc: z.string().optional().describe("Exact content-description match"),
-            contentDescContains: z
-                .string()
-                .optional()
-                .describe("Partial content-description match (case-insensitive)"),
+            contentDescContains: z.string().optional().describe("Partial content-description match (case-insensitive)"),
             resourceId: z
                 .string()
                 .optional()
@@ -2623,15 +2701,9 @@ server.registerTool(
             "Wait for a UI element to appear on Android screen. Polls the accessibility tree until the element is found or timeout is reached. Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
         inputSchema: {
             text: z.string().optional().describe("Exact text match for the element"),
-            textContains: z
-                .string()
-                .optional()
-                .describe("Partial text match (case-insensitive)"),
+            textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
             contentDesc: z.string().optional().describe("Exact content-description match"),
-            contentDescContains: z
-                .string()
-                .optional()
-                .describe("Partial content-description match (case-insensitive)"),
+            contentDescContains: z.string().optional().describe("Partial content-description match (case-insensitive)"),
             resourceId: z
                 .string()
                 .optional()
@@ -2753,8 +2825,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_screenshot",
     {
-        description:
-            "Take a screenshot from an iOS simulator. Returns the image data that can be displayed.",
+        description: "Take a screenshot from an iOS simulator. Returns the image data that can be displayed.",
         inputSchema: {
             outputPath: z
                 .string()
@@ -2807,7 +2878,9 @@ registerToolWithTelemetry(
                         }
                     } else if (rootElement.AXFrame) {
                         // Parse format: "{{x, y}, {width, height}}"
-                        const match = rootElement.AXFrame.match(/\{\{([\d.]+),\s*([\d.]+)\},\s*\{([\d.]+),\s*([\d.]+)\}\}/);
+                        const match = rootElement.AXFrame.match(
+                            /\{\{([\d.]+),\s*([\d.]+)\},\s*\{([\d.]+),\s*([\d.]+)\}\}/
+                        );
                         if (match) {
                             const frameY = parseFloat(match[2]);
                             pointWidth = Math.round(parseFloat(match[3]));
@@ -2972,10 +3045,7 @@ registerToolWithTelemetry(
         description: "Install an app bundle (.app) on an iOS simulator",
         inputSchema: {
             appPath: z.string().describe("Path to the .app bundle to install"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ appPath, udid }) => {
@@ -3000,10 +3070,7 @@ registerToolWithTelemetry(
         description: "Launch an app on an iOS simulator by bundle ID",
         inputSchema: {
             bundleId: z.string().describe("Bundle ID of the app (e.g., com.example.myapp)"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ bundleId, udid }) => {
@@ -3028,10 +3095,7 @@ registerToolWithTelemetry(
         description: "Open a URL in the iOS simulator (opens in default handler or Safari)",
         inputSchema: {
             url: z.string().describe("URL to open (e.g., https://example.com or myapp://path)"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ url, udid }) => {
@@ -3056,10 +3120,7 @@ registerToolWithTelemetry(
         description: "Terminate a running app on an iOS simulator",
         inputSchema: {
             bundleId: z.string().describe("Bundle ID of the app to terminate"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ bundleId, udid }) => {
@@ -3115,14 +3176,8 @@ server.registerTool(
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
-            duration: z
-                .number()
-                .optional()
-                .describe("Optional tap duration in seconds (for long press)"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            duration: z.number().optional().describe("Optional tap duration in seconds (for long press)"),
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ x, y, duration, udid }) => {
@@ -3147,10 +3202,7 @@ server.registerTool(
         description:
             "Tap an element by its accessibility label. Requires IDB (brew install idb-companion). TIP: Consider using ocr_screenshot first - it returns ready-to-use tap coordinates for all visible text and works without requiring accessibility labels.",
         inputSchema: {
-            label: z
-                .string()
-                .optional()
-                .describe("Exact accessibility label to match (e.g., 'Home', 'Settings')"),
+            label: z.string().optional().describe("Exact accessibility label to match (e.g., 'Home', 'Settings')"),
             labelContains: z
                 .string()
                 .optional()
@@ -3159,14 +3211,8 @@ server.registerTool(
                 .number()
                 .optional()
                 .describe("If multiple elements match, tap the nth one (0-indexed, default: 0)"),
-            duration: z
-                .number()
-                .optional()
-                .describe("Optional tap duration in seconds (for long press)"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            duration: z.number().optional().describe("Optional tap duration in seconds (for long press)"),
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ label, labelContains, index, duration, udid }) => {
@@ -3197,10 +3243,7 @@ server.registerTool(
             endY: z.coerce.number().describe("Ending Y coordinate in pixels"),
             duration: z.coerce.number().optional().describe("Optional swipe duration in seconds"),
             delta: z.coerce.number().optional().describe("Optional delta between touch events (step size)"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ startX, startY, endX, endY, duration, delta, udid }) => {
@@ -3226,10 +3269,7 @@ server.registerTool(
             "Type text into the active input field on an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
         inputSchema: {
             text: z.string().describe("Text to type into the active input field"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ text, udid }) => {
@@ -3258,10 +3298,7 @@ server.registerTool(
                 .enum(IOS_BUTTON_TYPES)
                 .describe("Hardware button to press: HOME, LOCK, SIDE_BUTTON, SIRI, or APPLE_PAY"),
             duration: z.coerce.number().optional().describe("Optional button press duration in seconds"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ button, duration, udid }) => {
@@ -3288,10 +3325,7 @@ server.registerTool(
         inputSchema: {
             keycode: z.coerce.number().describe("iOS keycode to send"),
             duration: z.coerce.number().optional().describe("Optional key press duration in seconds"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ keycode, duration, udid }) => {
@@ -3317,10 +3351,7 @@ server.registerTool(
             "Send a sequence of key events to an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
         inputSchema: {
             keycodes: z.array(z.coerce.number()).describe("Array of iOS keycodes to send in sequence"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ keycodes, udid }) => {
@@ -3345,10 +3376,7 @@ server.registerTool(
         description:
             "Get accessibility information for the entire iOS simulator screen. Returns a nested tree of UI elements with labels, values, and frames. Requires IDB to be installed (brew install idb-companion).",
         inputSchema: {
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ udid }) => {
@@ -3375,10 +3403,7 @@ server.registerTool(
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ x, y, udid }) => {
@@ -3404,34 +3429,19 @@ server.registerTool(
             "Find a UI element on iOS simulator by accessibility label or value. Returns element details including tap coordinates. Requires IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
-            labelContains: z
-                .string()
-                .optional()
-                .describe("Partial label match (case-insensitive)"),
+            labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
             value: z.string().optional().describe("Exact accessibility value match"),
-            valueContains: z
-                .string()
-                .optional()
-                .describe("Partial value match (case-insensitive)"),
-            type: z
-                .string()
-                .optional()
-                .describe("Element type to match (e.g., 'Button', 'TextField')"),
+            valueContains: z.string().optional().describe("Partial value match (case-insensitive)"),
+            type: z.string().optional().describe("Element type to match (e.g., 'Button', 'TextField')"),
             index: z
                 .number()
                 .optional()
                 .describe("If multiple elements match, select the nth one (0-indexed, default: 0)"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ label, labelContains, value, valueContains, type, index, udid }) => {
-        const result = await iosFindElement(
-            { label, labelContains, value, valueContains, type, index },
-            udid
-        );
+        const result = await iosFindElement({ label, labelContains, value, valueContains, type, index }, udid);
 
         if (!result.success) {
             return {
@@ -3476,19 +3486,10 @@ server.registerTool(
             "Wait for a UI element to appear on iOS simulator. Polls until found or timeout. Requires IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
-            labelContains: z
-                .string()
-                .optional()
-                .describe("Partial label match (case-insensitive)"),
+            labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
             value: z.string().optional().describe("Exact accessibility value match"),
-            valueContains: z
-                .string()
-                .optional()
-                .describe("Partial value match (case-insensitive)"),
-            type: z
-                .string()
-                .optional()
-                .describe("Element type to match (e.g., 'Button', 'TextField')"),
+            valueContains: z.string().optional().describe("Partial value match (case-insensitive)"),
+            type: z.string().optional().describe("Element type to match (e.g., 'Button', 'TextField')"),
             index: z
                 .number()
                 .optional()
@@ -3503,23 +3504,10 @@ server.registerTool(
                 .optional()
                 .default(500)
                 .describe("Time between polls in milliseconds (default: 500)"),
-            udid: z
-                .string()
-                .optional()
-                .describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
-    async ({
-        label,
-        labelContains,
-        value,
-        valueContains,
-        type,
-        index,
-        timeoutMs,
-        pollIntervalMs,
-        udid
-    }) => {
+    async ({ label, labelContains, value, valueContains, type, index, timeoutMs, pollIntervalMs, udid }) => {
         const result = await iosWaitForElement(
             {
                 label,

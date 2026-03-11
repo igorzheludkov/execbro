@@ -14,6 +14,7 @@ npm start        # Run the compiled server
 ```
 
 To lint a specific file:
+
 ```bash
 npx tsc --noEmit src/index.ts
 ```
@@ -24,9 +25,9 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 1. **Metro Discovery**: Scans common ports (8081, 8082, 19000-19002) for running Metro bundlers
 2. **Device Selection**: Fetches `/json` endpoint from Metro, prioritizes devices in order:
-   - React Native Bridgeless (Expo SDK 54+)
-   - Hermes React Native
-   - Any React Native (excluding Reanimated/Experimental)
+    - React Native Bridgeless (Expo SDK 54+)
+    - Hermes React Native
+    - Any React Native (excluding Reanimated/Experimental)
 3. **CDP Connection**: Connects via WebSocket to device's debugger URL
 4. **Log Capture**: Enables `Runtime.enable` and `Log.enable` CDP domains to receive console events
 5. **Network Tracking**: Enables `Network.enable` CDP domain to capture HTTP requests/responses
@@ -42,6 +43,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 ### MCP Tools Exposed
 
+- `get_usage_guide`: Get recommended workflows and best practices for all tools (call without params for overview, with topic for full guide)
 - `scan_metro` / `connect_metro`: Discover and connect to Metro servers
 - `get_apps`: List connected devices
 - `get_logs` / `search_logs` / `clear_logs`: Log management
@@ -63,29 +65,29 @@ When debugging React Native apps through this MCP server:
 
 - **Hot Reloading**: React Native has Fast Refresh enabled by default. After editing JavaScript/TypeScript code, changes are automatically applied to the running app within 1-2 seconds. Do NOT use `reload_app` after every code change.
 - **When to Reload**: Only use `reload_app` when:
-  - Logs or app behavior don't reflect recent code changes after waiting a few seconds
-  - The app is in a broken/error state
-  - You need to completely reset the app state (e.g., clear navigation stack, reset context)
-  - You made changes to native code or configuration files
+    - Logs or app behavior don't reflect recent code changes after waiting a few seconds
+    - The app is in a broken/error state
+    - You need to completely reset the app state (e.g., clear navigation stack, reset context)
+    - You made changes to native code or configuration files
 - **Verify Changes**: After code edits, use `get_logs` to check if the app picked up changes (look for fresh log entries or changed behavior) before deciding to reload.
 - **UI Interaction — Preferred Method**: When pressing buttons or interactive elements:
-  1. ALWAYS try `press_element` first (text, testID, or component query)
-  2. If `press_element` fails and querying by text → use `ocr_screenshot` to locate text on screen, then tap coordinates with `ios_tap` / `android_tap`
-  3. If `press_element` fails and querying by testID or component → skip OCR, use `ios_tap_element` / `android_tap_element`
-  4. Use coordinate-based tap (`ios_tap` / `android_tap`) only as a last resort
+    1. ALWAYS try `press_element` first (text, testID, or component query)
+    2. If `press_element` fails and querying by text → use `ocr_screenshot` to locate text on screen, then tap coordinates with `ios_tap` / `android_tap`
+    3. If `press_element` fails and querying by testID or component → skip OCR, use `ios_tap_element` / `android_tap_element`
+    4. Use coordinate-based tap (`ios_tap` / `android_tap`) only as a last resort
 - **Icon-only buttons** (no text label inside the pressable): When `press_element(text=...)` fails because the button only contains an icon:
-  1. Use `find_components` with a pattern related to the button's area (e.g., `Button|Action|Settings`) to discover actual component names
-  2. Use `press_element(component="DiscoveredName", index=N)` — if multiple instances exist, use the screenshot to determine the correct index (elements are ordered by their position in the fiber tree, typically top-to-bottom, left-to-right)
+    1. Use `find_components` with a pattern related to the button's area (e.g., `Button|Action|Settings`) to discover actual component names
+    2. Use `press_element(component="DiscoveredName", index=N)` — if multiple instances exist, use the screenshot to determine the correct index (elements are ordered by their position in the fiber tree, typically top-to-bottom, left-to-right)
 - **Non-ASCII text** (Cyrillic, CJK, Arabic, etc.): The `text` param in `press_element` only supports ASCII due to Hermes engine limitations. For localized UIs, use `testID` or `component` params instead, or fall back to `ocr_screenshot` → coordinate tap.
 - **Component Inspection — Identifying elements on screen**: When you need to find which React component renders a specific UI element (to fix layout, styling, or behavior):
-  1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
-  2. Identify the target element visually and estimate its coordinates (convert screenshot pixels to points: divide by device pixel ratio)
-  3. Use `get_inspector_selection(x, y)` to get the clean component hierarchy with file paths — this tells you the exact component name and source file (e.g. `HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton`)
-  4. If you also need layout details (frame bounds, props, styles), use `inspect_at_point(x, y)` on the same coordinates
+    1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
+    2. Identify the target element visually and estimate its coordinates (convert screenshot pixels to points: divide by device pixel ratio)
+    3. Use `get_inspector_selection(x, y)` to get the clean component hierarchy with file paths — this tells you the exact component name and source file (e.g. `HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton`)
+    4. If you also need layout details (frame bounds, props, styles), use `inspect_at_point(x, y)` on the same coordinates
 - **When to use which inspection tool**:
-  - `get_inspector_selection` → finding component names and screen structure (returns hierarchy like RN's Element Inspector overlay)
-  - `inspect_at_point` → layout debugging with props and exact frame measurements
-  - `find_components` → searching for components by name pattern across the entire fiber tree
+    - `get_inspector_selection` → finding component names and screen structure (returns hierarchy like RN's Element Inspector overlay)
+    - `inspect_at_point` → layout debugging with props and exact frame measurements
+    - `find_components` → searching for components by name pattern across the entire fiber tree
 
 ## Telemetry System
 
@@ -116,6 +118,7 @@ npx wrangler deploy           # Deploy to Cloudflare
 ### Local Development
 
 Create `backend/.dev.vars` with secrets (not committed to git):
+
 ```
 TELEMETRY_API_KEY=<write-key>
 DASHBOARD_KEY=<read-key>
@@ -143,6 +146,7 @@ CF_ACCOUNT_ID=<cloudflare-account-id>
 ### Data Schema (Analytics Engine)
 
 Events are written with:
+
 - `blob1`: Event name (`tool_invocation`, `session_start`)
 - `blob2`: Tool name
 - `blob3`: Status (`success` or `failure`)
