@@ -99,14 +99,14 @@ const guides: Guide[] = [
         content: `# Device Interaction
 
 ## Pressing Buttons (Fallback Chain)
-1. press_element(text="Login") — try text match first (preferred, works via JS fiber tree)
-2. If text fails (icon-only buttons): use find_components to discover names, then press_element(component="ButtonName", index=N)
-3. If press_element fails + has visible text: ocr_screenshot -> ios_tap/android_tap with coordinates
-4. If press_element fails + no visible text: ios_tap_element/android_tap_element (accessibility tree)
-5. Coordinate-based ios_tap/android_tap as last resort
+Use tap — it handles fallbacks automatically in this order:
+1. tap(text="Login") — text match via JS fiber tree (preferred)
+2. tap(component="ButtonName", index=N) — component name match (for icon-only buttons; use find_components to discover names first)
+3. tap(testID="login-btn") — accessibility testID match
+4. tap(x=..., y=...) — coordinate-based tap (last resort)
 
 ## Non-ASCII Text (Cyrillic, CJK, Arabic)
-press_element(text=...) only supports ASCII (Hermes limitation). Use testID or component params instead, or fall back to ocr_screenshot -> coordinate tap.
+tap(text=...) only supports ASCII (Hermes limitation). Use testID or component params instead, or fall back to ocr_screenshot -> tap(x=..., y=...).
 
 ## Other Interactions
 - ios_swipe / android_swipe: swipe/scroll with start/end coordinates
