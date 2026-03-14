@@ -149,3 +149,28 @@ describe("formatTapFailure", () => {
         expect(result.suggestion).toBe("Use screenshot");
     });
 });
+
+describe("tap orchestrator", () => {
+    it("returns error when no app is connected", async () => {
+        const { tap } = await import("../../core/tap.js");
+        const { connectedApps } = await import("../../core/state.js");
+        connectedApps.clear();
+        const result = await tap({ text: "Submit" });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("No connected app");
+    });
+
+    it("validates that at least one search param is provided", async () => {
+        const { tap } = await import("../../core/tap.js");
+        const result = await tap({});
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Must provide");
+    });
+
+    it("validates x and y are both provided for coordinate tap", async () => {
+        const { tap } = await import("../../core/tap.js");
+        const result = await tap({ x: 100 });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Both x and y");
+    });
+});
