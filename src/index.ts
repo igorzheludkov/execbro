@@ -2164,6 +2164,17 @@ registerToolWithTelemetry(
             // Build info text with coordinate conversion guidance
             const pixelWidth = result.originalWidth || 0;
             const pixelHeight = result.originalHeight || 0;
+
+            // Store screenshot metadata for coordinate conversion
+            const firstApp = connectedApps.values().next().value;
+            if (firstApp) {
+                firstApp.lastScreenshot = {
+                    originalWidth: pixelWidth,
+                    originalHeight: pixelHeight,
+                    scaleFactor: result.scaleFactor || 1,
+                };
+            }
+
             let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
 
             // Get status bar height for coordinate guidance
@@ -2857,6 +2868,16 @@ registerToolWithTelemetry(
             // Build info text with coordinate guidance for iOS
             const pixelWidth = result.originalWidth || 0;
             const pixelHeight = result.originalHeight || 0;
+
+            // Store screenshot metadata for coordinate conversion
+            const firstApp = connectedApps.values().next().value;
+            if (firstApp) {
+                firstApp.lastScreenshot = {
+                    originalWidth: pixelWidth,
+                    originalHeight: pixelHeight,
+                    scaleFactor: result.scaleFactor || 1,
+                };
+            }
 
             // Try to get actual screen dimensions and safe area from accessibility tree
             let pointWidth = 0;
