@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
+import { tap, type TapResult } from "./core/tap.js";
 
 import {
     logBuffer,
@@ -26,7 +27,6 @@ import {
     getScreenLayout,
     inspectComponent,
     findComponents,
-    pressElement,
     inspectAtPoint,
     toggleElementInspector,
     isInspectorActive,
@@ -81,7 +81,6 @@ import {
     // Android Accessibility (UI Hierarchy)
     androidDescribeAll,
     androidDescribePoint,
-    androidTapElement,
     // Android Element Finding (no screenshots)
     androidFindElement,
     androidWaitForElement,
@@ -95,7 +94,6 @@ import {
     iosBootSimulator,
     // iOS IDB-based UI tools
     iosTap,
-    iosTapElement,
     iosSwipe,
     iosInputText,
     iosButton,
@@ -126,7 +124,7 @@ const server = new McpServer(
     },
     {
         instructions:
-            "React Native debugging MCP server. Call get_usage_guide to learn recommended workflows for all tools. Quick start: scan_metro → get_logs / search_logs (console debugging) → ios_screenshot → get_inspector_selection(x, y) (identify components)."
+            "React Native debugging MCP server. Call get_usage_guide to learn recommended workflows for all tools. Quick start: scan_metro → get_logs / search_logs (console debugging) → ios_screenshot → tap(text=\"Submit\") or tap(x, y) (interact with UI)."
     }
 );
 
@@ -1282,71 +1280,76 @@ registerToolWithTelemetry(
     }
 );
 
-// Tool: Press element via React Fiber tree
+// Tool: Unified tap — tries fiber, accessibility, OCR, coordinate strategies
 registerToolWithTelemetry(
-    "press_element",
+    "tap",
     {
         description:
-            "Press a UI element by finding it in the React fiber tree and calling its onPress handler directly. " +
-            "Bypasses the accessibility layer — works on elements without accessibilityLabel. " +
-            "Matches by text content, testID, or component name. At least one search criterion must be provided. " +
-            "Works only in __DEV__ mode. Use get_component_tree or find_components first to understand the UI structure. " +
-            "LIMITATION: text param only supports ASCII — for non-Latin text (Cyrillic, CJK, etc.), use testID or component param instead, or fall back to ocr_screenshot + tap.",
+            "Tap a UI element. Automatically tries multiple strategies: fiber tree (React), accessibility tree (native), and OCR (visual). " +
+            "Auto-detects platform (iOS/Android). For coordinates, accepts pixels from screenshot and converts internally.\n\n" +
+            "Examples:\n" +
+            "- tap(text=\"Submit\") — finds and taps element with matching text\n" +
+            "- tap(testID=\"login-btn\") — finds by testID\n" +
+            "- tap(component=\"HamburgerIcon\") — finds by React component name\n" +
+            "- tap(x=300, y=600) — taps at pixel coordinates from screenshot\n" +
+            "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only",
         inputSchema: {
-            text: z
-                .string()
-                .optional()
-                .describe(
-                    "Case-insensitive partial match on the element's text content (e.g., 'Submit', 'Log in'). ASCII only — non-Latin characters (Cyrillic, CJK, etc.) cause Hermes parse errors. Use testID or component for localized UIs."
-                ),
-            testID: z.string().optional().describe("Exact match on the element's testID prop"),
-            component: z
-                .string()
-                .optional()
-                .describe(
-                    "Case-insensitive partial match on the component's displayName or name (e.g., 'Button', 'MenuItem')"
-                ),
-            index: z.coerce
-                .number()
-                .optional()
-                .default(0)
-                .describe(
-                    "Zero-based index when multiple elements match (default: 0). If unsure, omit to press the first match."
-                )
-        }
+            type: "object" as const,
+            properties: {
+                text: {
+                    type: "string",
+                    description:
+                        "Visible text to match (case-insensitive substring). ASCII only for fiber strategy; OCR handles non-ASCII.",
+                },
+                testID: {
+                    type: "string",
+                    description: "Exact match on the element's testID prop.",
+                },
+                component: {
+                    type: "string",
+                    description:
+                        "Component name match (case-insensitive substring, e.g. 'Button', 'MenuItem').",
+                },
+                index: {
+                    type: "number",
+                    description:
+                        "Zero-based index when multiple elements match (default: 0).",
+                },
+                x: {
+                    type: "number",
+                    description:
+                        "X coordinate in pixels (from screenshot). Must provide both x and y.",
+                },
+                y: {
+                    type: "number",
+                    description:
+                        "Y coordinate in pixels (from screenshot). Must provide both x and y.",
+                },
+                strategy: {
+                    type: "string",
+                    enum: ["auto", "fiber", "accessibility", "ocr", "coordinate"],
+                    description:
+                        '"auto" (default) tries fiber → accessibility → OCR. ' +
+                        'Set explicitly to skip strategies you know will fail.',
+                },
+            },
+        },
     },
-    async ({
-        text,
-        testID,
-        component,
-        index
-    }: {
-        text?: string;
-        testID?: string;
-        component?: string;
-        index?: number;
-    }) => {
-        const result = await pressElement({ text, testID, component, index });
+    async (args: any) => {
+        const result: TapResult = await tap({
+            text: args.text,
+            testID: args.testID,
+            component: args.component,
+            index: args.index,
+            x: args.x,
+            y: args.y,
+            strategy: args.strategy,
+        });
 
-        if (!result.success) {
-            return {
-                content: [
-                    {
-                        type: "text" as const,
-                        text: `Error: ${result.error}`
-                    }
-                ],
-                isError: true
-            };
-        }
-
+        const text = JSON.stringify(result, null, 2);
         return {
-            content: [
-                {
-                    type: "text" as const,
-                    text: result.result || "Element pressed successfully."
-                }
-            ]
+            content: [{ type: "text", text }],
+            isError: !result.success,
         };
     }
 );
@@ -2337,36 +2340,6 @@ registerToolWithTelemetry(
 // Android UI Input Tools (Phase 2)
 // ============================================================================
 
-// Tool: Android tap
-registerToolWithTelemetry(
-    "android_tap",
-    {
-        description:
-            "Tap at specific coordinates on an Android device/emulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values.",
-        inputSchema: {
-            x: z.coerce.number().describe("X coordinate in pixels"),
-            y: z.coerce.number().describe("Y coordinate in pixels"),
-            deviceId: z
-                .string()
-                .optional()
-                .describe("Optional device ID. Uses first available device if not specified.")
-        }
-    },
-    async ({ x, y, deviceId }) => {
-        const result = await androidTap(x, y, deviceId);
-
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: result.success ? result.result! : `Error: ${result.error}`
-                }
-            ],
-            isError: !result.success
-        };
-    }
-);
-
 // Tool: Android long press
 registerToolWithTelemetry(
     "android_long_press",
@@ -2582,54 +2555,6 @@ server.registerTool(
                 {
                     type: "text",
                     text: result.success ? result.formatted! : `Error: ${result.error}`
-                }
-            ],
-            isError: !result.success
-        };
-    }
-);
-
-// Tool: Android tap element
-server.registerTool(
-    "android_tap_element",
-    {
-        description:
-            "Tap an element by its text, content-description, or resource-id using uiautomator. TIP: Consider using ocr_screenshot first - it returns ready-to-use tap coordinates for all visible text and works more reliably across different apps.",
-        inputSchema: {
-            text: z.string().optional().describe("Exact text match for the element"),
-            textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
-            contentDesc: z.string().optional().describe("Exact content-description match"),
-            contentDescContains: z.string().optional().describe("Partial content-description match (case-insensitive)"),
-            resourceId: z
-                .string()
-                .optional()
-                .describe("Resource ID match (e.g., 'com.app:id/button' or just 'button')"),
-            index: z
-                .number()
-                .optional()
-                .describe("If multiple elements match, tap the nth one (0-indexed, default: 0)"),
-            deviceId: z
-                .string()
-                .optional()
-                .describe("Optional device ID. Uses first available device if not specified.")
-        }
-    },
-    async ({ text, textContains, contentDesc, contentDescContains, resourceId, index, deviceId }) => {
-        const result = await androidTapElement({
-            text,
-            textContains,
-            contentDesc,
-            contentDescContains,
-            resourceId,
-            index,
-            deviceId
-        });
-
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: result.success ? result.result! : `Error: ${result.error}`
                 }
             ],
             isError: !result.success
@@ -3187,69 +3112,6 @@ registerToolWithTelemetry(
 // iOS IDB-Based UI Tools (require Facebook IDB)
 // Install with: brew install idb-companion
 // ============================================================================
-
-// Tool: iOS tap
-server.registerTool(
-    "ios_tap",
-    {
-        description:
-            "Tap at specific coordinates on an iOS simulator screen. WORKFLOW: Use ocr_screenshot first to get tap coordinates, then use this tool with the returned tapX/tapY values. Requires IDB (brew install idb-companion).",
-        inputSchema: {
-            x: z.coerce.number().describe("X coordinate in pixels"),
-            y: z.coerce.number().describe("Y coordinate in pixels"),
-            duration: z.number().optional().describe("Optional tap duration in seconds (for long press)"),
-            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
-        }
-    },
-    async ({ x, y, duration, udid }) => {
-        const result = await iosTap(x, y, { duration, udid });
-
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: result.success ? result.result! : `Error: ${result.error}`
-                }
-            ],
-            isError: !result.success
-        };
-    }
-);
-
-// Tool: iOS tap element by label
-server.registerTool(
-    "ios_tap_element",
-    {
-        description:
-            "Tap an element by its accessibility label. Requires IDB (brew install idb-companion). TIP: Consider using ocr_screenshot first - it returns ready-to-use tap coordinates for all visible text and works without requiring accessibility labels.",
-        inputSchema: {
-            label: z.string().optional().describe("Exact accessibility label to match (e.g., 'Home', 'Settings')"),
-            labelContains: z
-                .string()
-                .optional()
-                .describe("Partial label match, case-insensitive (e.g., 'Circular' matches 'Circulars, 3, 12 total')"),
-            index: z
-                .number()
-                .optional()
-                .describe("If multiple elements match, tap the nth one (0-indexed, default: 0)"),
-            duration: z.number().optional().describe("Optional tap duration in seconds (for long press)"),
-            udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
-        }
-    },
-    async ({ label, labelContains, index, duration, udid }) => {
-        const result = await iosTapElement({ label, labelContains, index, duration, udid });
-
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: result.success ? result.result! : `Error: ${result.error}`
-                }
-            ],
-            isError: !result.success
-        };
-    }
-);
 
 // Tool: iOS swipe
 server.registerTool(
