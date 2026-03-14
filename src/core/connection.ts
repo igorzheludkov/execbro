@@ -643,7 +643,7 @@ export async function connectToDevice(
                 // Release connection lock
                 connectionLocks.delete(appKey);
 
-                connectedApps.set(appKey, { ws, deviceInfo: device, port });
+                connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
 
                 // Initialize or update connection state
                 // Note: We do NOT reset reconnectionAttempts here - that happens
@@ -694,6 +694,11 @@ export async function connectToDevice(
                     const simulatorUdid = await findSimulatorByName(device.deviceName);
                     if (simulatorUdid) {
                         setActiveSimulatorUdid(simulatorUdid, appKey);
+                        // Update platform to ios now that simulator is confirmed
+                        const connectedApp = connectedApps.get(appKey);
+                        if (connectedApp) {
+                            connectedApp.platform = "ios";
+                        }
                         console.error(`[rn-ai-debugger] Linked to iOS simulator: ${simulatorUdid}`);
                     }
                 }
