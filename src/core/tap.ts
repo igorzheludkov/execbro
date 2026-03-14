@@ -112,8 +112,81 @@ export function convertPixelsToPoints(
 }
 
 export async function getCurrentScreen(): Promise<string | null> {
-    // Placeholder — will be implemented via fiber tree traversal in Task 7
-    return null;
+    try {
+        // Note: Uses var instead of let/const because Hermes Runtime.evaluate
+        // sometimes has issues with block-scoped declarations
+        const expression = `(function() {
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return null;
+            var roots = [];
+            if (hook.getFiberRoots) {
+                hook.renderers.forEach(function(r, id) {
+                    var fiberRoots = hook.getFiberRoots(id);
+                    if (fiberRoots) fiberRoots.forEach(function(root) { roots.push(root); });
+                });
+            }
+            if (roots.length === 0) return null;
+
+            function findScreen(fiber, depth) {
+                if (!fiber || depth > 30) return null;
+                var name = fiber.type && (fiber.type.displayName || fiber.type.name || (typeof fiber.type === 'string' ? fiber.type : null));
+
+                if (name === 'RNSScreen') {
+                    var props = fiber.memoizedProps || {};
+                    if (props['aria-hidden'] === true) return null;
+                    var child = fiber.child;
+                    while (child) {
+                        var childName = child.type && (child.type.displayName || child.type.name);
+                        if (childName && typeof child.type !== 'string' && childName !== 'RNSScreenContentWrapper') {
+                            return childName;
+                        }
+                        child = child.child;
+                    }
+                }
+
+                var child = fiber.child;
+                while (child) {
+                    var found = findScreen(child, depth + 1);
+                    if (found) return found;
+                    child = child.sibling;
+                }
+                return null;
+            }
+
+            for (var i = 0; i < roots.length; i++) {
+                var root = roots[i].current;
+                var screen = findScreen(root, 0);
+                if (screen) return screen;
+            }
+
+            function findFirstUserComponent(fiber, depth) {
+                if (!fiber || depth > 10) return null;
+                var name = fiber.type && (fiber.type.displayName || fiber.type.name);
+                if (name && typeof fiber.type !== 'string') return name;
+                var child = fiber.child;
+                while (child) {
+                    var found = findFirstUserComponent(child, depth + 1);
+                    if (found) return found;
+                    child = child.sibling;
+                }
+                return null;
+            }
+
+            for (var i = 0; i < roots.length; i++) {
+                var fallback = findFirstUserComponent(roots[i].current, 0);
+                if (fallback) return fallback;
+            }
+            return null;
+        })()`;
+
+        const result = await executeInApp(expression, false);
+        if (result.success && result.result && result.result !== "null" && result.result !== "undefined") {
+            return result.result.replace(/^"|"$/g, "");
+        }
+        return null;
+    } catch {
+        return null;
+    }
 }
 
 export function formatTapSuccess(data: {
@@ -397,7 +470,13 @@ async function tryCoordinateStrategy(
             const converted = convertPixelsToPoints(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
             await iosTap(converted.x, converted.y);
 
-            const screen = await getCurrentScreen();
+            // Best-effort: identify what was tapped via fiber tree
+            let screen: string | null = null;
+            try {
+                screen = await getCurrentScreen();
+            } catch {
+                // Inspection failure is non-fatal
+            }
             return {
                 success: true,
                 reason: "Tapped at coordinates (iOS)",
@@ -409,7 +488,13 @@ async function tryCoordinateStrategy(
             const converted = convertPixelsToPoints(pixelX, pixelY, "android", 1, scaleFactor);
             await androidTap(converted.x, converted.y);
 
-            const screen = await getCurrentScreen();
+            // Best-effort: identify what was tapped via fiber tree
+            let screen: string | null = null;
+            try {
+                screen = await getCurrentScreen();
+            } catch {
+                // Inspection failure is non-fatal
+            }
             return {
                 success: true,
                 reason: "Tapped at coordinates (Android)",
