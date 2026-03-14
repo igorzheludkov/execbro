@@ -24,6 +24,12 @@ export interface ConnectedApp {
     ws: WebSocket;
     deviceInfo: DeviceInfo;
     port: number;
+    platform: "ios" | "android";
+    lastScreenshot?: {
+        originalWidth: number;
+        originalHeight: number;
+        scaleFactor: number;
+    };
 }
 
 // CDP RemoteObject type (result of Runtime.evaluate)
