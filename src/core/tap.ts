@@ -161,3 +161,395 @@ function buildErrorMessage(query: TapQuery): string {
     if (query.component) parts.push(`component="${query.component}"`);
     return `No element found matching ${parts.join(", ")}`;
 }
+
+// --- Strategy Result ---
+
+interface StrategyResult {
+    success: boolean;
+    reason: string;
+    pressed?: string;
+    text?: string;
+    screen?: string | null;
+    path?: string | null;
+    component?: string | null;
+    matches?: Array<{ index: number; component: string; text: string }>;
+    convertedTo?: { x: number; y: number; unit: string };
+}
+
+// --- Strategy Functions ---
+
+async function tryFiberStrategy(
+    query: TapQuery,
+    index?: number
+): Promise<StrategyResult> {
+    try {
+        const result = await pressElement({
+            text: query.text,
+            testID: query.testID,
+            component: query.component,
+            index,
+        });
+
+        if (!result.success) {
+            return { success: false, reason: result.error || "pressElement failed" };
+        }
+
+        if (!result.result) {
+            return { success: false, reason: "No result from pressElement" };
+        }
+
+        const parsed = JSON.parse(result.result);
+
+        if (parsed.error) {
+            const strategyResult: StrategyResult = {
+                success: false,
+                reason: parsed.error,
+            };
+            if (parsed.matches) {
+                strategyResult.matches = parsed.matches;
+            }
+            return strategyResult;
+        }
+
+        return {
+            success: true,
+            reason: "Pressed via React fiber tree",
+            pressed: parsed.pressed,
+            text: parsed.text,
+            path: parsed.path || null,
+            component: parsed.pressed || null,
+        };
+    } catch (err) {
+        return {
+            success: false,
+            reason: `Fiber strategy error: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
+}
+
+async function tryAccessibilityStrategy(
+    query: TapQuery,
+    index: number | undefined,
+    platform: "ios" | "android"
+): Promise<StrategyResult> {
+    try {
+        const searchText = query.text || query.testID;
+        if (!searchText) {
+            return { success: false, reason: "No text or testID for accessibility search" };
+        }
+
+        if (platform === "ios") {
+            const result = await iosFindElement({
+                labelContains: searchText,
+                index,
+            });
+
+            if (!result.success || !result.allMatches || result.allMatches.length === 0) {
+                return { success: false, reason: result.error ?? "No iOS accessibility match" };
+            }
+
+            const match = result.allMatches[index ?? 0];
+            if (!match) {
+                return { success: false, reason: `Index ${index} out of bounds (${result.allMatches.length} matches)` };
+            }
+
+            await iosTap(match.center.x, match.center.y);
+
+            return {
+                success: true,
+                reason: "Tapped via iOS accessibility",
+                pressed: match.label || match.type,
+                text: match.label || undefined,
+                component: match.type || null,
+                convertedTo: { x: match.center.x, y: match.center.y, unit: "points" },
+            };
+        } else {
+            const result = await androidFindElement({
+                textContains: searchText,
+                index,
+            });
+
+            if (!result.success || !result.allMatches || result.allMatches.length === 0) {
+                return { success: false, reason: result.error ?? "No Android accessibility match" };
+            }
+
+            const match = result.allMatches[index ?? 0];
+            if (!match) {
+                return { success: false, reason: `Index ${index} out of bounds (${result.allMatches.length} matches)` };
+            }
+
+            await androidTap(match.center.x, match.center.y);
+
+            return {
+                success: true,
+                reason: "Tapped via Android accessibility",
+                pressed: match.text || match.className || undefined,
+                text: match.text || undefined,
+                component: match.className || undefined,
+                convertedTo: { x: match.center.x, y: match.center.y, unit: "pixels" },
+            };
+        }
+    } catch (err) {
+        return {
+            success: false,
+            reason: `Accessibility strategy error: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
+}
+
+async function tryOcrStrategy(
+    query: TapQuery,
+    platform: "ios" | "android"
+): Promise<StrategyResult> {
+    try {
+        const searchText = query.text;
+        if (!searchText) {
+            return { success: false, reason: "OCR strategy requires text query" };
+        }
+
+        let imageBuffer: Buffer;
+        let scaleFactor = 1;
+        let originalWidth: number | undefined;
+        let originalHeight: number | undefined;
+
+        if (platform === "ios") {
+            const screenshot = await iosScreenshot();
+            if (!screenshot.success || !screenshot.data) {
+                return { success: false, reason: "Failed to capture iOS screenshot for OCR" };
+            }
+            imageBuffer = screenshot.data;
+            scaleFactor = screenshot.scaleFactor ?? 1;
+            originalWidth = screenshot.originalWidth;
+            originalHeight = screenshot.originalHeight;
+        } else {
+            const { androidScreenshot } = await import("./android.js");
+            const screenshot = await androidScreenshot();
+            if (!screenshot.success || !screenshot.data) {
+                return { success: false, reason: "Failed to capture Android screenshot for OCR" };
+            }
+            imageBuffer = screenshot.data;
+            scaleFactor = screenshot.scaleFactor ?? 1;
+            originalWidth = screenshot.originalWidth;
+            originalHeight = screenshot.originalHeight;
+        }
+
+        const devicePixelRatio = (platform === "ios" && originalWidth && originalHeight)
+            ? inferIOSDevicePixelRatio(originalWidth, originalHeight)
+            : 3;
+
+        const { recognizeText } = await import("./ocr.js");
+        const ocrResult = await recognizeText(imageBuffer, {
+            scaleFactor,
+            platform,
+            devicePixelRatio,
+        });
+
+        const lowerSearch = searchText.toLowerCase();
+        const matchingWord = ocrResult.words.find(
+            (w) => w.text.toLowerCase() === lowerSearch
+        ) || ocrResult.words.find(
+            (w) => w.text.toLowerCase().includes(lowerSearch)
+        );
+
+        if (!matchingWord) {
+            return { success: false, reason: `OCR did not find text "${searchText}" on screen` };
+        }
+
+        if (platform === "ios") {
+            await iosTap(matchingWord.tapCenter.x, matchingWord.tapCenter.y);
+        } else {
+            await androidTap(matchingWord.tapCenter.x, matchingWord.tapCenter.y);
+        }
+
+        return {
+            success: true,
+            reason: "Tapped via OCR text recognition",
+            text: matchingWord.text,
+            convertedTo: {
+                x: matchingWord.tapCenter.x,
+                y: matchingWord.tapCenter.y,
+                unit: platform === "ios" ? "points" : "pixels",
+            },
+        };
+    } catch (err) {
+        return {
+            success: false,
+            reason: `OCR strategy error: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
+}
+
+async function tryCoordinateStrategy(
+    pixelX: number,
+    pixelY: number,
+    platform: "ios" | "android",
+    lastScreenshot?: { originalWidth: number; originalHeight: number; scaleFactor: number }
+): Promise<StrategyResult> {
+    try {
+        if (platform === "ios") {
+            const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
+            const originalWidth = lastScreenshot?.originalWidth;
+            const originalHeight = lastScreenshot?.originalHeight;
+            const devicePixelRatio = (originalWidth && originalHeight)
+                ? inferIOSDevicePixelRatio(originalWidth, originalHeight)
+                : 3;
+
+            const converted = convertPixelsToPoints(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
+            await iosTap(converted.x, converted.y);
+
+            const screen = await getCurrentScreen();
+            return {
+                success: true,
+                reason: "Tapped at coordinates (iOS)",
+                screen,
+                convertedTo: { x: converted.x, y: converted.y, unit: "points" },
+            };
+        } else {
+            const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
+            const converted = convertPixelsToPoints(pixelX, pixelY, "android", 1, scaleFactor);
+            await androidTap(converted.x, converted.y);
+
+            const screen = await getCurrentScreen();
+            return {
+                success: true,
+                reason: "Tapped at coordinates (Android)",
+                screen,
+                convertedTo: { x: converted.x, y: converted.y, unit: "pixels" },
+            };
+        }
+    } catch (err) {
+        return {
+            success: false,
+            reason: `Coordinate strategy error: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
+}
+
+// --- Orchestrator ---
+
+export async function tap(options: TapOptions): Promise<TapResult> {
+    const query = buildQuery(options);
+    const strategy = options.strategy || "auto";
+    const index = options.index;
+
+    // Validate inputs
+    const hasSearchParam = query.text || query.testID || query.component;
+    const hasCoordinates = query.x !== undefined || query.y !== undefined;
+
+    if (!hasSearchParam && !hasCoordinates) {
+        return {
+            success: false,
+            query,
+            error: "Must provide at least one of: text, testID, component, or x/y coordinates",
+        };
+    }
+
+    if (hasCoordinates && (query.x === undefined || query.y === undefined)) {
+        return {
+            success: false,
+            query,
+            error: "Both x and y coordinates must be provided",
+        };
+    }
+
+    // Get connected app
+    const apps = Array.from(connectedApps.values());
+    if (apps.length === 0) {
+        return {
+            success: false,
+            query,
+            error: "No connected app. Use connect_metro first.",
+        };
+    }
+
+    const app = apps[0];
+    const platform = app.platform;
+
+    // Determine strategies
+    const strategies = getAvailableStrategies(query, strategy);
+    const attempted: TapAttempt[] = [];
+
+    // Execute strategies in order
+    for (const strat of strategies) {
+        let result: StrategyResult;
+
+        switch (strat) {
+            case "fiber":
+                result = await tryFiberStrategy(query, index);
+                break;
+            case "accessibility":
+                result = await tryAccessibilityStrategy(query, index, platform);
+                break;
+            case "ocr":
+                result = await tryOcrStrategy(query, platform);
+                break;
+            case "coordinate":
+                result = await tryCoordinateStrategy(
+                    query.x!,
+                    query.y!,
+                    platform,
+                    app.lastScreenshot
+                );
+                break;
+            default:
+                result = { success: false, reason: `Unknown strategy: ${strat}` };
+        }
+
+        if (result.success) {
+            return formatTapSuccess({
+                method: strat,
+                query,
+                pressed: result.pressed,
+                text: result.text,
+                screen: result.screen,
+                path: result.path,
+                component: result.component,
+                convertedTo: result.convertedTo,
+                platform,
+            });
+        }
+
+        attempted.push({ strategy: strat, reason: result.reason });
+
+        // If we got match suggestions from fiber, carry them forward
+        if (result.matches) {
+            return formatTapFailure({
+                query,
+                attempted,
+                suggestion: `Found ${result.matches.length} match(es) — specify index to select one`,
+                matches: result.matches,
+            });
+        }
+    }
+
+    // All strategies failed
+    const suggestion = buildSuggestion(query, strategies, platform);
+    return formatTapFailure({
+        query,
+        attempted,
+        suggestion,
+    });
+}
+
+function buildSuggestion(
+    query: TapQuery,
+    triedStrategies: string[],
+    platform: string
+): string {
+    const suggestions: string[] = [];
+
+    if (!triedStrategies.includes("ocr") && query.text) {
+        suggestions.push("Try strategy='ocr' to find text visually on screen");
+    }
+
+    if (query.text && isNonAscii(query.text)) {
+        suggestions.push("Non-ASCII text cannot use fiber strategy — use testID or coordinates instead");
+    }
+
+    suggestions.push(
+        `Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) ` +
+        "to verify the element is visible, then use x/y coordinates"
+    );
+
+    return suggestions.join(". ");
+}
