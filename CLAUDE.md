@@ -50,7 +50,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
-- `press_element`: Press a UI element by invoking its `onPress` handler via the React fiber tree (matches by text, testID, or component name)
+- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates.
 - `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
 - `get_inspector_selection`: Identify component at screen coordinates — returns clean hierarchy with file paths (e.g. `HomeScreen > SneakerCard > PulseActionButton`)
 - `inspect_at_point`: Layout debugging at coordinates — returns component props, frame (position/size), and path
@@ -70,20 +70,21 @@ When debugging React Native apps through this MCP server:
     - You need to completely reset the app state (e.g., clear navigation stack, reset context)
     - You made changes to native code or configuration files
 - **Verify Changes**: After code edits, use `get_logs` to check if the app picked up changes (look for fresh log entries or changed behavior) before deciding to reload.
-- **UI Interaction — Preferred Method**: When pressing buttons or interactive elements:
-    1. ALWAYS try `press_element` first (text, testID, or component query)
-    2. If `press_element` fails and querying by text → use `ocr_screenshot` to locate text on screen, then tap coordinates with `ios_tap` / `android_tap`
-    3. If `press_element` fails and querying by testID or component → skip OCR, use `ios_tap_element` / `android_tap_element`
-    4. Use coordinate-based tap (`ios_tap` / `android_tap`) only as a last resort
-- **Icon-only buttons** (no text label inside the pressable): When `press_element(text=...)` fails because the button only contains an icon:
-    1. Use `find_components` with a pattern related to the button's area (e.g., `Button|Action|Settings`) to discover actual component names
-    2. Use `press_element(component="DiscoveredName", index=N)` — if multiple instances exist, use the screenshot to determine the correct index (elements are ordered by their position in the fiber tree, typically top-to-bottom, left-to-right)
-- **Non-ASCII text** (Cyrillic, CJK, Arabic, etc.): The `text` param in `press_element` only supports ASCII due to Hermes engine limitations. For localized UIs, use `testID` or `component` params instead, or fall back to `ocr_screenshot` → coordinate tap.
+- **UI Interaction — Preferred Method**: Use the unified `tap` tool for all tapping:
+    1. `tap(text="Submit")` — matches visible text, tries fiber tree → accessibility → OCR automatically
+    2. `tap(testID="menu-btn")` — matches by testID prop
+    3. `tap(component="HamburgerIcon")` — matches by React component name (fiber tree only)
+    4. `tap(x=300, y=600)` — taps at pixel coordinates from screenshot (auto-converts to points)
+    5. Use `strategy` param to skip strategies you know will fail: `tap(text="≡", strategy="ocr")`
+    6. On failure, follow the `suggestion` field in the response — it tells you exactly what to try next
+- **Icon-only buttons** (no text label inside the pressable): Use `tap(component="ComponentName")` to match by React component name. Use `find_components` first to discover actual component names. If multiple instances exist, use `index` param.
+- **Non-ASCII text** (Cyrillic, CJK, Arabic, etc.): `tap(text="текст")` automatically skips fiber (Hermes limitation) and uses accessibility/OCR. For best results, use `testID` or `component` params instead.
 - **Component Inspection — Identifying elements on screen**: When you need to find which React component renders a specific UI element (to fix layout, styling, or behavior):
     1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
     2. Identify the target element visually and estimate its coordinates (convert screenshot pixels to points: divide by device pixel ratio)
     3. Use `get_inspector_selection(x, y)` to get the clean component hierarchy with file paths — this tells you the exact component name and source file (e.g. `HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton`)
     4. If you also need layout details (frame bounds, props, styles), use `inspect_at_point(x, y)` on the same coordinates
+    5. To tap at a specific coordinate after inspection, use `tap(x=..., y=...)`
 - **When to use which inspection tool**:
     - `get_inspector_selection` → finding component names and screen structure (returns hierarchy like RN's Element Inspector overlay)
     - `inspect_at_point` → layout debugging with props and exact frame measurements
