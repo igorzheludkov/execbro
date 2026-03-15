@@ -1294,45 +1294,47 @@ registerToolWithTelemetry(
             "- tap(x=300, y=600) — taps at pixel coordinates from screenshot\n" +
             "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only",
         inputSchema: {
-            type: "object" as const,
-            properties: {
-                text: {
-                    type: "string",
-                    description:
-                        "Visible text to match (case-insensitive substring). ASCII only for fiber strategy; OCR handles non-ASCII.",
-                },
-                testID: {
-                    type: "string",
-                    description: "Exact match on the element's testID prop.",
-                },
-                component: {
-                    type: "string",
-                    description:
-                        "Component name match (case-insensitive substring, e.g. 'Button', 'MenuItem').",
-                },
-                index: {
-                    type: "number",
-                    description:
-                        "Zero-based index when multiple elements match (default: 0).",
-                },
-                x: {
-                    type: "number",
-                    description:
-                        "X coordinate in pixels (from screenshot). Must provide both x and y.",
-                },
-                y: {
-                    type: "number",
-                    description:
-                        "Y coordinate in pixels (from screenshot). Must provide both x and y.",
-                },
-                strategy: {
-                    type: "string",
-                    enum: ["auto", "fiber", "accessibility", "ocr", "coordinate"],
-                    description:
-                        '"auto" (default) tries fiber → accessibility → OCR. ' +
-                        'Set explicitly to skip strategies you know will fail.',
-                },
-            },
+            text: z
+                .string()
+                .optional()
+                .describe(
+                    "Visible text to match (case-insensitive substring). ASCII only for fiber strategy; OCR handles non-ASCII."
+                ),
+            testID: z
+                .string()
+                .optional()
+                .describe("Exact match on the element's testID prop."),
+            component: z
+                .string()
+                .optional()
+                .describe(
+                    "Component name match (case-insensitive substring, e.g. 'Button', 'MenuItem')."
+                ),
+            index: z.coerce
+                .number()
+                .optional()
+                .describe(
+                    "Zero-based index when multiple elements match (default: 0)."
+                ),
+            x: z.coerce
+                .number()
+                .optional()
+                .describe(
+                    "X coordinate in pixels (from screenshot). Must provide both x and y."
+                ),
+            y: z.coerce
+                .number()
+                .optional()
+                .describe(
+                    "Y coordinate in pixels (from screenshot). Must provide both x and y."
+                ),
+            strategy: z
+                .enum(["auto", "fiber", "accessibility", "ocr", "coordinate"])
+                .optional()
+                .default("auto")
+                .describe(
+                    '"auto" (default) tries fiber -> accessibility -> OCR. Set explicitly to skip strategies you know will fail.'
+                ),
         },
     },
     async (args: any) => {
