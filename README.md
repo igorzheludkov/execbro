@@ -18,9 +18,9 @@ An MCP (Model Context Protocol) server for AI-powered React Native debugging. En
 
 -   **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
 -   **Android Devices** - Screenshots, app install/launch, package management (via ADB)
--   **UI Automation** - Tap, swipe, long press, text input, and key events on both platforms
+-   **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots
+-   **UI Automation** - Swipe, long press, text input, and key events on both platforms
 -   **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
--   **Element-Based Interaction** - Tap/wait for elements by text without screenshots (faster, cheaper)
 -   **OCR Text Extraction** - Extract visible text with tap-ready coordinates (works on any screen content)
 
 ### Under the Hood
@@ -248,8 +248,8 @@ Style: { borderRadius: 15, overflow: "hidden" }
 # 1. Enable the inspector overlay
 toggle_element_inspector()
 
-# 2. Tap to select element (iOS)
-ios_tap(x=210, y=400)
+# 2. Tap to select element
+tap with x=630 y=1200    # pixel coordinates from screenshot
 
 # 3. Read the selection
 get_inspector_selection()
@@ -260,6 +260,22 @@ toggle_element_inspector()
 
 **Token Efficiency**: Returns ~0.2-0.5KB vs 15-25KB for full component tree. Works on all React Native versions including Fabric/New Architecture.
 
+### UI Interaction (Cross-Platform)
+
+| Tool             | Description                                                              |
+| ---------------- | ------------------------------------------------------------------------ |
+| `tap`            | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots |
+| `ocr_screenshot` | Extract all visible text with tap-ready coordinates (works on iOS/Android) |
+
+**Examples:**
+```
+tap with text="Submit"                    # Finds and taps by visible text
+tap with testID="login-btn"               # Finds by testID prop
+tap with component="HamburgerIcon"        # Finds by React component name
+tap with x=300 y=600                      # Taps at pixel coordinates (auto-converts)
+tap with text="Menu" strategy="ocr"       # Forces OCR strategy only
+```
+
 ### Android (ADB)
 
 | Tool                        | Description                                                   |
@@ -269,7 +285,6 @@ toggle_element_inspector()
 | `android_install_app`       | Install an APK on an Android device/emulator                  |
 | `android_launch_app`        | Launch an app by package name                                 |
 | `android_list_packages`     | List installed packages (with optional filter)                |
-| `android_tap`               | Tap at specific coordinates on screen                         |
 | `android_long_press`        | Long press at specific coordinates                            |
 | `android_swipe`             | Swipe from one point to another                               |
 | `android_input_text`        | Type text at current focus point                              |
@@ -277,7 +292,6 @@ toggle_element_inspector()
 | `android_get_screen_size`   | Get device screen resolution                                  |
 | `android_describe_all`      | Get full UI accessibility tree via uiautomator                |
 | `android_describe_point`    | Get UI element info at specific coordinates                   |
-| `android_tap_element`       | Tap element by text/contentDesc/resourceId                    |
 | `android_find_element`      | Find element by text/contentDesc/resourceId (no screenshot)   |
 | `android_wait_for_element`  | Wait for element to appear (useful for screen transitions)    |
 
@@ -292,8 +306,6 @@ toggle_element_inspector()
 | `ios_open_url`          | Open a URL (deep links or web URLs)                             |
 | `ios_terminate_app`     | Terminate a running app                                         |
 | `ios_boot_simulator`    | Boot a simulator by UDID                                        |
-| `ios_tap`               | Tap at coordinates (requires IDB)                               |
-| `ios_tap_element`       | Tap element by accessibility label (requires IDB)               |
 | `ios_swipe`             | Swipe gesture (requires IDB)                                    |
 | `ios_input_text`        | Type text into active field (requires IDB)                      |
 | `ios_button`            | Press hardware button: HOME, LOCK, SIRI (requires IDB)          |
@@ -303,12 +315,6 @@ toggle_element_inspector()
 | `ios_describe_point`    | Get element at point (requires IDB)                             |
 | `ios_find_element`      | Find element by label/value (requires IDB, no screenshot)       |
 | `ios_wait_for_element`  | Wait for element to appear (requires IDB)                       |
-
-### OCR (Cross-Platform)
-
-| Tool             | Description                                                              |
-| ---------------- | ------------------------------------------------------------------------ |
-| `ocr_screenshot` | Extract all visible text with tap-ready coordinates (works on iOS/Android) |
 
 ## Usage
 
@@ -913,10 +919,10 @@ Take a screenshot:
 android_screenshot
 ```
 
-Tap on screen (coordinates in pixels):
+Tap on screen:
 
 ```
-android_tap with x=540 y=960
+tap with x=540 y=960
 ```
 
 Swipe gesture:
@@ -928,7 +934,7 @@ android_swipe with startX=540 startY=1500 endX=540 endY=500
 Type text (tap input field first):
 
 ```
-android_tap with x=540 y=400
+tap with x=540 y=400
 android_input_text with text="hello@example.com"
 ```
 
@@ -972,91 +978,57 @@ Open a deep link:
 ios_open_url with url="myapp://settings"
 ```
 
-## Efficient UI Automation (No Screenshots)
+## UI Interaction
 
-For action triggering without layout debugging, use element-based tools instead of screenshots. This is **2-3x faster** and uses fewer tokens.
+### Unified `tap` Tool (Recommended)
 
-### Android - Find and Tap by Text
-
-```
-# Wait for screen to load
-android_wait_for_element with text="Login"
-
-# Find element (returns tap coordinates)
-android_find_element with textContains="submit"
-
-# Tap the element (use coordinates from find_element)
-android_tap with x=540 y=960
-```
-
-Search options:
-- `text` - exact text match
-- `textContains` - partial text (case-insensitive)
-- `contentDesc` - accessibility content description
-- `contentDescContains` - partial content description
-- `resourceId` - resource ID (e.g., "button" or "com.app:id/button")
-
-### iOS - Find and Tap by Label (requires IDB)
-
-```bash
-# Install IDB first
-brew install idb-companion
-```
+The `tap` tool is the simplest way to interact with UI elements. It automatically tries multiple strategies and handles platform detection and coordinate conversion:
 
 ```
-# Wait for element
-ios_wait_for_element with label="Sign In"
+# By visible text — tries fiber tree, accessibility, then OCR
+tap with text="Submit"
 
-# Find element by partial label
-ios_find_element with labelContains="welcome"
+# By testID prop
+tap with testID="login-btn"
+
+# By React component name (fiber tree only)
+tap with component="HamburgerIcon"
+
+# By pixel coordinates from screenshot (auto-converts to points on iOS)
+tap with x=300 y=600
+
+# Force a specific strategy
+tap with text="Menu" strategy="ocr"
 ```
 
-Search options:
-- `label` - exact accessibility label
-- `labelContains` - partial label (case-insensitive)
-- `value` - accessibility value
-- `valueContains` - partial value
-- `type` - element type (e.g., "Button", "TextField")
+**Fallback chain:** fiber tree (direct `onPress`) → accessibility tree → OCR → error with suggestion.
+
+On failure, the response includes an actionable `suggestion` telling the agent exactly what to try next.
+
+### Platform-Specific Tools
+
+For gestures beyond tapping, use platform-specific tools:
+
+```
+# Swipe
+ios_swipe with startX=200 startY=400 endX=200 endY=100
+android_swipe with startX=540 startY=1500 endX=540 endY=500
+
+# Text input (tap input field first)
+tap with text="Email"
+ios_input_text with text="hello@example.com"
+
+# Key events
+android_key_event with key="BACK"
+ios_button with button="HOME"
+```
 
 ### Wait for Screen Transitions
 
-Both platforms support waiting with timeout:
-
 ```
-android_wait_for_element with text="Dashboard" timeoutMs=15000 pollIntervalMs=500
+android_wait_for_element with text="Dashboard" timeoutMs=15000
 ios_wait_for_element with label="Home" timeoutMs=10000
 ```
-
-### Recommended Workflow (Priority Order)
-
-**Always try accessibility tools first, fall back to screenshots only when needed:**
-
-1. **Wait for screen** → Use `wait_for_element` with expected text/label
-2. **Find target** → Use `find_element` to get tap coordinates
-3. **Tap** → Use `tap` with coordinates from step 2
-4. **Fallback** → If element not in accessibility tree, use `screenshot`
-
-```
-# Example: Tap "Submit" button after screen loads
-android_wait_for_element with text="Submit"     # Step 1: Wait
-android_find_element with text="Submit"         # Step 2: Find (returns center coordinates)
-android_tap with x=540 y=1200                   # Step 3: Tap (use returned coordinates)
-```
-
-**Why this order?**
-- `find_element`: ~100-200 tokens, <100ms
-- `screenshot`: ~400-500 tokens, 200-500ms
-
-### When to Use Screenshots vs Element Tools
-
-| Use Case | Recommended Tool |
-|----------|------------------|
-| Trigger button taps | `find_element` + `tap` |
-| Wait for screen load | `wait_for_element` |
-| Navigate through flow | `wait_for_element` + `tap` |
-| Debug layout issues | `screenshot` |
-| Verify visual appearance | `screenshot` |
-| Find elements without labels | `screenshot` |
 
 ## OCR Text Extraction
 
@@ -1094,7 +1066,7 @@ Returns all visible text with tap-ready coordinates:
 Then tap the element:
 
 ```
-ios_tap with x=187 y=420
+tap with x=187 y=420
 ```
 
 ### OCR Engine
@@ -1147,19 +1119,19 @@ See [EasyOCR supported languages](https://www.jaided.ai/easyocr/) for the full l
 
 ### Recommended Workflow
 
-1. **Try accessibility first** - Use `find_element` / `wait_for_element` (faster, cheaper)
-2. **Fall back to OCR** - When element isn't in accessibility tree
+1. **Use unified `tap`** - Handles fallback chain automatically
+2. **Fall back to OCR** - When `tap` suggests using coordinates
 3. **Use screenshot** - For visual debugging or layout verification
 
 ```
-# Step 1: Try accessibility-based approach
-android_find_element with text="Submit"
+# Simplest approach — tap handles everything
+tap with text="Submit"
 
-# Step 2: If not found, use OCR
+# If tap fails, use OCR to find coordinates
 ocr_screenshot with platform="android"
 
-# Step 3: Tap using coordinates from OCR result
-android_tap with x=540 y=1200
+# Then tap using coordinates from OCR result
+tap with x=540 y=1200
 ```
 
 ## Supported React Native Versions
