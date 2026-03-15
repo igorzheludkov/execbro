@@ -27,6 +27,7 @@ Thumbs.db
 .env.local
 
 PRODUCT_ROADMAP.md
+PRODUCT_ROADMAP_v2.md
 TODO.md
 
 # OCR trained data files (legacy, no longer used)
