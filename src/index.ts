@@ -47,6 +47,8 @@ import {
     ConnectionGap,
     cancelAllReconnectionTimers,
     clearAllConnectionState,
+    suppressReconnection,
+    clearReconnectionSuppression,
     // Context health tracking
     getContextHealth,
     // Connection resilience
@@ -304,6 +306,8 @@ registerToolWithTelemetry(
         }
     },
     async ({ startPort, endPort }) => {
+        // Clear reconnection suppression (in case user previously called disconnect_metro)
+        clearReconnectionSuppression();
         const openPorts = await scanMetroPorts(startPort, endPort);
 
         if (openPorts.length === 0) {
@@ -866,7 +870,9 @@ registerToolWithTelemetry(
 
         const disconnected: string[] = [];
 
-        // Cancel all reconnection timers first to prevent auto-reconnect
+        // Suppress reconnection BEFORE closing sockets
+        // (close handlers fire async and would re-schedule reconnection)
+        suppressReconnection();
         cancelAllReconnectionTimers();
 
         // Close all CDP WebSocket connections
