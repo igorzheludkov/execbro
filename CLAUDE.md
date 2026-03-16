@@ -19,6 +19,50 @@ To lint a specific file:
 npx tsc --noEmit src/index.ts
 ```
 
+## Development with Hot Reload
+
+For development, use HTTP transport mode to avoid restarting Claude Code sessions:
+
+```bash
+npm run dev:mcp    # Builds + runs with HTTP transport on port 8600, auto-restarts on file changes
+```
+
+Configure Claude Code to connect via HTTP (in `~/.claude.json` mcpServers):
+```json
+{
+  "rn-debugger-local": {
+    "type": "http",
+    "url": "http://localhost:8600/mcp"
+  }
+}
+```
+
+A SessionStart hook can auto-launch the dev server (in `~/.claude/settings.json`):
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "cd /path/to/react-native-ai-debugger && (lsof -ti:8600 > /dev/null 2>&1 || npm run dev:mcp > /tmp/rn-debugger-dev.log 2>&1 &)"
+      }]
+    }]
+  }
+}
+```
+
+Production users are unaffected — the default transport remains stdio.
+
+### Dev Tool (`dev`)
+
+In HTTP mode, a `dev` meta-tool is registered for full hot-reload testing. It proxies calls to any tool using the latest server code, so new/modified/removed tools are immediately testable without restarting the Claude Code session.
+
+- `dev(action="list")` — returns the current list of all tools with descriptions
+- `dev(action="call", tool="tool_name", args={...})` — invokes any tool by name using the latest handler
+
+This tool is only available in `--http` mode (dev). It does not appear in production (stdio).
+
 ## Architecture
 
 Modular MCP server with entry point at `src/index.ts` and core logic in `src/core/`:
@@ -59,6 +103,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
 - `ocr_screenshot`: Screenshot with OCR text recognition and tap coordinates
 - `find_components`: Search the React fiber tree for components by name pattern
+- `dev`: (dev mode only) Meta-tool for hot-reload testing — list all tools or call any tool by name using latest code
 
 ## Agent Usage Guidelines
 
