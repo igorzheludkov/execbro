@@ -18,7 +18,7 @@ const guides: Guide[] = [
         content: `# Session Setup
 
 ## Quick Start
-1. scan_metro — auto-discovers Metro on common ports (8081, 8082, 19000-19002) and connects
+1. scan_metro — auto-discovers Metro on common ports (8081, 8082, 19000-19002) and connects. Note: this occupies the CDP slot, which prevents the built-in React Native debugger from connecting. See "Switch to Native Debugger" below.
 2. get_apps — verify the app appears in connected list
 3. get_connection_status — check connection health
 
@@ -28,9 +28,15 @@ const guides: Guide[] = [
 - ios_launch_app / android_launch_app — launch the app
 - Wait 2-3 seconds, then scan_metro
 
+## Switch to Native Debugger
+- disconnect_metro — closes all CDP connections and stops auto-reconnect
+- The built-in React Native debugger can now connect
+- Use scan_metro to reconnect when done with native debugger
+
 ## Key Tools
 - scan_metro: auto-discover and connect (preferred)
 - connect_metro: connect to specific port (when you know it)
+- disconnect_metro: close all connections (free CDP slot for native debugger)
 - ensure_connection: health check with healthCheck=true
 - get_connection_status: check uptime and gaps`
     },
