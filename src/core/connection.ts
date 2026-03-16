@@ -28,6 +28,26 @@ import {
 // Connection locks to prevent concurrent connection attempts to the same device
 const connectionLocks: Set<string> = new Set();
 
+// Suppress auto-reconnection for intentionally disconnected devices
+const reconnectionSuppressed: Set<string> = new Set();
+
+/**
+ * Suppress auto-reconnection for all current connections.
+ * Used by disconnect_metro to prevent close handlers from re-connecting.
+ */
+export function suppressReconnection(): void {
+    for (const key of connectedApps.keys()) {
+        reconnectionSuppressed.add(key);
+    }
+}
+
+/**
+ * Clear reconnection suppression (called when user explicitly reconnects via scan_metro).
+ */
+export function clearReconnectionSuppression(): void {
+    reconnectionSuppressed.clear();
+}
+
 const STALE_ACTIVITY_THRESHOLD_MS = 30_000;
 const RECONNECT_SETTLE_MS = 500;
 
@@ -745,9 +765,12 @@ export async function connectToDevice(
 
                 console.error(`[rn-ai-debugger] Disconnected from ${device.title}`);
 
-                // Schedule auto-reconnection if enabled
-                if (reconnectionConfig.enabled) {
+                // Schedule auto-reconnection if enabled (skip if intentionally disconnected)
+                if (reconnectionConfig.enabled && !reconnectionSuppressed.has(appKey)) {
                     scheduleReconnection(appKey, reconnectionConfig);
+                } else if (reconnectionSuppressed.has(appKey)) {
+                    reconnectionSuppressed.delete(appKey);
+                    console.error(`[rn-ai-debugger] Reconnection suppressed for ${device.title} (intentional disconnect)`);
                 }
             });
 
