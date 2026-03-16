@@ -26,44 +26,61 @@ First, check what devices are running:
 
 Before interacting, understand the current screen:
 
-**OCR approach (recommended for tapping text/buttons):**
-- Use `mcp__rn-debugger-local__ocr_screenshot` with `platform` to get all visible text with tap coordinates
-- This returns ready-to-use `tapX`/`tapY` values for each text element
-
-**Accessibility tree approach:**
-- Use `mcp__rn-debugger-local__ios_describe_all` or `mcp__rn-debugger-local__android_describe_all` for full UI hierarchy
-- Use `ios_describe_point` / `android_describe_point` for element info at specific coordinates
-
-**Screenshot approach:**
+**Screenshot approach (recommended first step):**
 - Use `mcp__rn-debugger-local__ios_screenshot` or `mcp__rn-debugger-local__android_screenshot` for visual reference
 
-### 3. Interact with Elements
+**Accessibility tree approach (for finding elements without screenshots):**
+- Use `mcp__rn-debugger-local__ios_describe_all` or `mcp__rn-debugger-local__android_describe_all` for full UI hierarchy
 
-**Press via React Fiber (preferred — works even without accessibility labels):**
-- `mcp__rn-debugger-local__press_element` — invokes `onPress` directly via the JS fiber tree
-- Match by `text` (case-insensitive partial match), `testID` (exact), or `component` name (case-insensitive partial)
-- Use `index` param when multiple elements match (0-based, default: 0)
-- Only works in `__DEV__` mode; only finds elements on the **visible** screen (hidden nav screens are skipped)
+### 3. Tap Elements
 
-**Fallback chain for pressing buttons:**
-1. `press_element(text="Login")` — try text match first
-2. If text fails (icon-only buttons): use `find_components` to discover component names, then `press_element(component="ButtonName", index=N)`
-3. If `press_element` fails entirely + has visible text → `ocr_screenshot` → `ios_tap`/`android_tap` with coordinates
-4. If `press_element` fails + no visible text → `ios_tap_element`/`android_tap_element` (accessibility tree)
-5. Coordinate-based `ios_tap`/`android_tap` as last resort
+**Use the unified `tap` tool for all tapping — it auto-detects the platform and tries multiple strategies automatically:**
 
-**Icon-only buttons (no text inside the pressable):**
-- `press_element(text=...)` will fail because the label is outside the pressable component
-- Use `find_components` with a pattern related to the button area (e.g., `Button|Action|Settings`)
-- Then `press_element(component="DiscoveredName", index=N)` — check screenshot to pick the right index
+- `mcp__rn-debugger-local__tap` — single cross-platform tool with automatic fallback chain:
+  1. Fiber tree (direct `onPress` invocation)
+  2. Accessibility tree (native element matching)
+  3. OCR (visual text recognition)
+  4. Error with actionable suggestion
 
-**Tap by element (accessibility tree):**
-- iOS: `mcp__rn-debugger-local__ios_tap_element` with `label` or `labelContains`
-- Android: `mcp__rn-debugger-local__android_tap_element` with `text`, `textContains`, `contentDesc`, or `resourceId`
+**By visible text:**
+```
+tap(text="Login")          # case-insensitive substring match
+tap(text="Submit")
+```
 
-**Tap by coordinates (from OCR or screenshot):**
-- iOS: `mcp__rn-debugger-local__ios_tap` with x/y
-- Android: `mcp__rn-debugger-local__android_tap` with x/y
+**By testID prop:**
+```
+tap(testID="login-btn")    # exact match
+```
+
+**By React component name:**
+```
+tap(component="MenuIcon")  # case-insensitive substring match
+```
+
+**By pixel coordinates (from screenshot):**
+```
+tap(x=300, y=600)          # auto-converts pixels to points on iOS
+```
+
+**Force a specific strategy:**
+```
+tap(text="Settings", strategy="ocr")           # skip fiber/accessibility
+tap(text="Submit", strategy="accessibility")   # skip fiber
+```
+
+**Multiple matches — use index:**
+```
+tap(text="Button", index=2)   # tap the 3rd match (0-based)
+```
+
+**On failure**, the response includes a `suggestion` field telling you exactly what to try next. Follow it.
+
+**Non-ASCII text** (Cyrillic, CJK, Arabic): `tap` automatically skips fiber (Hermes limitation) and uses accessibility/OCR. For best results, use `testID` or `component` params instead.
+
+**Icon-only buttons** (no text label): Use `tap(component="ComponentName")`. Use `find_components` first to discover component names. If that fails, use screenshot coordinates: `tap(x=..., y=...)`.
+
+### 4. Other Interactions
 
 **Long press:**
 - Android: `mcp__rn-debugger-local__android_long_press` with x/y and optional duration
@@ -85,27 +102,24 @@ Before interacting, understand the current screen:
 
 **Deep links:**
 - iOS: `mcp__rn-debugger-local__ios_open_url` with the full URL (e.g., `myapp://settings/profile` or `https://example.com`)
-- Use this to test deep link routing, universal links, or open specific app screens directly
 
-### 4. Get Screen Dimensions (when needed for coordinates)
+### 5. Get Screen Dimensions (when needed for coordinates)
 
 When calculating swipe distances or tap positions on an unfamiliar device:
 - Android: `mcp__rn-debugger-local__android_get_screen_size` returns the device's pixel resolution
 - Use this before computing percentage-based coordinates (e.g., center = width/2, height/2)
 - For iOS simulators, the resolution is part of the simulator spec — use `list_ios_simulators` to identify the device model
 
-### 5. Wait for UI Updates
+### 6. Wait for UI Updates
 
 After navigation or interactions that change the screen:
 - iOS: `mcp__rn-debugger-local__ios_wait_for_element` to wait for an element to appear
 - Android: `mcp__rn-debugger-local__android_wait_for_element` to wait for an element to appear
-- Then use `find_element` to get coordinates before tapping
 
-### 6. Verify Results
+### 7. Verify Results
 
 After interactions, verify the result:
 - Take a screenshot to confirm the expected screen
-- Use OCR to verify text content changed
 - Check logs for any errors triggered by the interaction
 
 ## Arguments
@@ -123,16 +137,12 @@ After interactions, verify the result:
 
 ## MCP Tools Used
 
-- `mcp__rn-debugger-local__press_element`
+- `mcp__rn-debugger-local__tap`
 - `mcp__rn-debugger-local__find_components`
 - `mcp__rn-debugger-local__list_ios_simulators`
 - `mcp__rn-debugger-local__list_android_devices`
-- `mcp__rn-debugger-local__ocr_screenshot`
 - `mcp__rn-debugger-local__ios_screenshot` / `android_screenshot`
 - `mcp__rn-debugger-local__ios_describe_all` / `android_describe_all`
-- `mcp__rn-debugger-local__ios_describe_point` / `android_describe_point`
-- `mcp__rn-debugger-local__ios_tap` / `android_tap`
-- `mcp__rn-debugger-local__ios_tap_element` / `android_tap_element`
 - `mcp__rn-debugger-local__android_long_press`
 - `mcp__rn-debugger-local__ios_swipe` / `android_swipe`
 - `mcp__rn-debugger-local__ios_input_text` / `android_input_text`
@@ -147,11 +157,9 @@ After interactions, verify the result:
 
 - Requires the rn-debugger-local MCP server to be running
 - iOS simulator interactions require IDB (`brew install idb-companion`)
-- **Prefer `press_element` over OCR/accessibility for pressing buttons** — it works directly via the JS fiber tree, is faster, and handles icon-only buttons that lack accessibility labels
-- For icon-only buttons: `press_element(text=...)` will fail → use `find_components` to discover component names → then `press_element(component=..., index=N)`
-- **Non-ASCII text limitation**: `press_element(text=...)` only supports ASCII due to Hermes. For localized UIs (Cyrillic, CJK, Arabic, etc.), use `testID` or `component` params, or fall back to `ocr_screenshot` → coordinate tap
-- Use `ocr_screenshot` only as a fallback when `press_element` fails and the target has visible text
+- **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically
+- On failure, follow the `suggestion` field in the tap response — it tells you exactly what to try next
 - Use `wait_for_element` after navigation to ensure the next screen is ready before interacting
 - For Android, the Back button is available via `android_key_event` with key "BACK"
-- `ios_open_url` works for both custom scheme deep links (`myapp://`) and universal links (`https://`) — use it to test deep link routing without manually typing URLs in the device
+- `ios_open_url` works for both custom scheme deep links (`myapp://`) and universal links (`https://`)
 - Use `android_get_screen_size` before computing swipe coordinates on physical devices where screen resolution varies
