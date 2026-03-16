@@ -34,6 +34,8 @@ Quick reference for all available React Native debugging skills. Use this to pic
 
 **"I need to interact with the app"** → `/device-interact`
 
+**"I want to use the built-in React Native debugger"** → `/session-setup` with `disconnect_metro`, then `scan_metro` to reconnect
+
 ## Typical Workflow
 
 1. `/session-setup` — connect to the running app
@@ -47,3 +49,4 @@ Quick reference for all available React Native debugging skills. Use this to pic
 - All skills (except `/session-setup` and `/native-rebuild`) require an active debugger connection. If connection is missing, run `/session-setup` first.
 - `/layout-check` auto-triggers after any style/layout code change — no need to invoke it manually in that case.
 - Most skills accept optional arguments to narrow scope (e.g., `/debug-logs error`, `/network-inspect 500`). See individual skill files for details.
+- To switch to the built-in React Native debugger, use `disconnect_metro` to free the CDP connection. Use `scan_metro` to reconnect afterward.
