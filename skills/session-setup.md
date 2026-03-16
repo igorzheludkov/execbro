@@ -87,6 +87,14 @@ Report back to the user:
 - Connection health summary
 - Confirm ready to proceed with debugging
 
+### 8. Disconnect (when switching to native debugger)
+
+If the user wants to use the built-in React Native debugger:
+- Use `mcp__rn-debugger-local__disconnect_metro` to close all CDP connections and stop auto-reconnect
+- This frees the CDP WebSocket slot for the native debugger
+- Log and network buffers are preserved (cached data remains readable)
+- When done with the native debugger, use `mcp__rn-debugger-local__scan_metro` to reconnect
+
 ## Arguments
 
 - `$ARGUMENTS` - Optional: target platform or device hint (e.g., "ios", "android", "iPhone 16 Pro", "pixel"), or "status" to check existing connections only
@@ -115,6 +123,7 @@ Report back to the user:
 - `mcp__rn-debugger-local__scan_metro`
 - `mcp__rn-debugger-local__connect_metro`
 - `mcp__rn-debugger-local__ensure_connection`
+- `mcp__rn-debugger-local__disconnect_metro`
 
 ## Notes
 
@@ -124,3 +133,4 @@ Report back to the user:
 - `get_connection_status` reports connection gaps: a large gap means logs or network events from that period may be missing
 - If the app was previously connected and Metro reconnected automatically, `scan_metro` may report "already connected" — this is fine
 - To restart the app cleanly (e.g., reset navigation state), use `ios_terminate_app` followed by `ios_launch_app` rather than `reload_app`
+- Only one debugger client can connect to a device at a time via CDP. If the built-in React Native debugger needs the connection, use `disconnect_metro` to release it

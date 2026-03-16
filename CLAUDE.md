@@ -45,6 +45,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 - `get_usage_guide`: Get recommended workflows and best practices for all tools (call without params for overview, with topic for full guide)
 - `scan_metro` / `connect_metro`: Discover and connect to Metro servers
+- `disconnect_metro`: Disconnect from all Metro servers, free CDP slot for native debugger. Reconnect with `scan_metro`
 - `get_apps`: List connected devices
 - `get_logs` / `search_logs` / `clear_logs`: Log management
 - `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking

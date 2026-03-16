@@ -172,6 +172,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | ----------------------- | ------------------------------------------------------------------ |
 | `scan_metro`            | Scan for Metro servers and auto-connect. **Call this first** to start debugging |
 | `connect_metro`         | Connect to a specific Metro port (use when you know the exact port) |
+| `disconnect_metro`      | Disconnect from all Metro servers. Frees the CDP slot for the built-in RN debugger. Reconnect with `scan_metro` |
 | `get_apps`              | List connected apps. Run `scan_metro` first if none connected      |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects     |
 | `ensure_connection`     | Verify/establish connection with health checks                     |
