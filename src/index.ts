@@ -2,6 +2,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createServer as createHttpServer } from "node:http";
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
@@ -203,8 +205,12 @@ function estimateImageTokens(base64Data: string): number {
     }
 }
 
+// Registry for dev meta-tool — stores handlers and configs for dynamic dispatch
 /* eslint-disable @typescript-eslint/no-explicit-any */
+const toolRegistry = new Map<string, { config: any; handler: (args: any) => Promise<any> }>();
+
 function registerToolWithTelemetry(toolName: string, config: any, handler: (args: any) => Promise<any>): void {
+    toolRegistry.set(toolName, { config, handler });
     server.registerTool(toolName, config, async (args: any) => {
         const startTime = Date.now();
         let success = true;
@@ -3627,9 +3633,88 @@ async function main() {
     await startDebugHttpServer();
     console.error("[rn-ai-debugger] HTTP server started in-process");
 
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error("[rn-ai-debugger] Server started on stdio");
+    const useHttp = process.argv.includes("--http");
+    const httpPort = parseInt(process.env.MCP_HTTP_PORT || "8600", 10);
+
+    if (useHttp) {
+        // Register dev meta-tool — proxies calls to any tool using the latest handlers
+        server.registerTool(
+            "dev",
+            {
+                description:
+                    'Development meta-tool for hot-reload testing. Use action="list" to get all available tools with descriptions. ' +
+                    'Use action="call" with tool and args to invoke any tool using the latest code after hot-reload. ' +
+                    "This tool always reflects the latest server code without needing a session restart.",
+                inputSchema: {
+                    action: z.enum(["list", "call"]).describe('"list" to see all tools, "call" to invoke a tool'),
+                    tool: z.string().optional().describe("Tool name to call (required when action is call)"),
+                    args: z.record(z.any()).optional().describe("Arguments to pass to the tool (optional, default {})"),
+                },
+            },
+            async ({ action, tool, args }: { action: "list" | "call"; tool?: string; args?: Record<string, any> }) => {
+                if (action === "list") {
+                    const tools = Array.from(toolRegistry.entries()).map(([name, { config }]) => ({
+                        name,
+                        description: config.description || "",
+                    }));
+                    return {
+                        content: [{ type: "text" as const, text: JSON.stringify(tools, null, 2) }],
+                    };
+                }
+
+                if (action === "call") {
+                    if (!tool) {
+                        return {
+                            content: [{ type: "text" as const, text: 'Error: "tool" parameter is required when action is "call"' }],
+                            isError: true,
+                        };
+                    }
+                    const entry = toolRegistry.get(tool);
+                    if (!entry) {
+                        return {
+                            content: [{ type: "text" as const, text: `Error: Tool "${tool}" not found. Use action="list" to see available tools.` }],
+                            isError: true,
+                        };
+                    }
+                    return await entry.handler(args || {});
+                }
+
+                return {
+                    content: [{ type: "text" as const, text: 'Error: action must be "list" or "call"' }],
+                    isError: true,
+                };
+            }
+        );
+
+        // HTTP transport mode — stateless for dev hot-reload
+        // Stateless = no session IDs, so server restarts don't break Claude Code's connection
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+        });
+
+        await server.connect(transport);
+
+        const httpServer = createHttpServer(async (req, res) => {
+            const url = new URL(req.url || "", `http://localhost:${httpPort}`);
+
+            if (url.pathname === "/mcp") {
+                await transport.handleRequest(req, res);
+                return;
+            }
+
+            res.writeHead(404);
+            res.end("Not found");
+        });
+
+        httpServer.listen(httpPort, () => {
+            console.error(`[rn-ai-debugger] MCP HTTP server listening on http://localhost:${httpPort}/mcp`);
+        });
+    } else {
+        // Stdio transport mode — default for production
+        const transport = new StdioServerTransport();
+        await server.connect(transport);
+        console.error("[rn-ai-debugger] Server started on stdio");
+    }
 
     // Auto-connect to Metro in background (non-blocking)
     // Use setImmediate to ensure MCP server is fully ready first
