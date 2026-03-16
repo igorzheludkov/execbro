@@ -45,6 +45,8 @@ import {
     getRecentGaps,
     formatDuration,
     ConnectionGap,
+    cancelAllReconnectionTimers,
+    clearAllConnectionState,
     // Context health tracking
     getContextHealth,
     // Connection resilience
@@ -53,6 +55,7 @@ import {
     getPassiveConnectionStatus,
     // Bundle (Metro build errors)
     connectMetroBuildEvents,
+    disconnectMetroBuildEvents,
     getBundleErrors,
     getBundleStatusWithErrors,
     checkMetroState,
@@ -836,6 +839,65 @@ registerToolWithTelemetry(
                 ]
             };
         }
+    }
+);
+
+// Tool: Disconnect from Metro
+registerToolWithTelemetry(
+    "disconnect_metro",
+    {
+        description:
+            "Disconnect from all Metro servers and stop auto-reconnection. Use this when you want to switch to the built-in React Native debugger (which requires the CDP slot to be free). Log and network buffers are preserved. Reconnect later with scan_metro.",
+        inputSchema: {}
+    },
+    async () => {
+        const connections = getConnectedApps();
+
+        if (connections.length === 0) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "No active Metro connections to disconnect."
+                    }
+                ]
+            };
+        }
+
+        const disconnected: string[] = [];
+
+        // Cancel all reconnection timers first to prevent auto-reconnect
+        cancelAllReconnectionTimers();
+
+        // Close all CDP WebSocket connections
+        for (const [key, app] of connectedApps.entries()) {
+            try {
+                app.ws.close();
+            } catch {
+                // Ignore close errors
+            }
+            disconnected.push(`${app.deviceInfo.title} (port ${app.port})`);
+            connectedApps.delete(key);
+        }
+
+        // Disconnect Metro build events WebSocket
+        disconnectMetroBuildEvents();
+
+        // Clear connection state (but NOT log/network buffers)
+        clearAllConnectionState();
+
+        const lines = [
+            `Disconnected from ${disconnected.length} app(s):`,
+            ...disconnected.map((d) => `  - ${d}`),
+            "",
+            "Metro CDP connection is now free for the built-in React Native debugger.",
+            "Log and network buffers are preserved.",
+            'Use "scan_metro" to reconnect when ready.'
+        ];
+
+        return {
+            content: [{ type: "text", text: lines.join("\n") }]
+        };
     }
 );
 
