@@ -152,6 +152,23 @@ Anonymous usage telemetry is collected to understand how the MCP server is used.
 
 Telemetry sends data to a Cloudflare Worker endpoint. The API key is a write-only token safe to embed in client code.
 
-## Backend & Dashboard
+## Backend & Dashboard (separate repo)
 
-Telemetry backend (Cloudflare Worker) and analytics dashboard have been moved to a separate private repository (`rn-debugger-infra`). The telemetry client (`src/core/telemetry.ts`) remains here.
+Telemetry backend (Cloudflare Worker) and analytics dashboard live in a **separate private repository**: `~/rn-debugger-infra/`.
+
+The telemetry client that sends events lives here: `src/core/telemetry.ts`.
+
+### Cross-repo relationship
+
+| This repo (MCP server) | Infra repo (`~/rn-debugger-infra/`) |
+|---|---|
+| `src/core/telemetry.ts` — sends events | `backend/worker.ts` — receives and stores events |
+| Tool names, success/failure, duration | Analytics Engine schema, SQL queries |
+| Telemetry endpoint URL + API key (in telemetry.ts) | Worker deployment URL + API key (in wrangler secrets) |
+| — | `dashboard/index.html` — visualizes tool usage, user activity |
+
+### Common cross-repo workflows
+
+- **Analyzing metrics then changing tools**: Check dashboard stats in infra repo → identify underperforming tools → come back here to fix them
+- **Adding new telemetry fields**: Add field in `src/core/telemetry.ts` here → update `backend/worker.ts` schema in infra repo → update dashboard queries
+- **Changing Analytics Engine schema**: Update `backend/worker.ts` blob/double mappings in infra repo → update `src/core/telemetry.ts` to send matching data
