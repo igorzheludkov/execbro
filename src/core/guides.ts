@@ -104,15 +104,30 @@ const guides: Guide[] = [
         summary: "Tap buttons, swipe, type text, and navigate the app UI",
         content: `# Device Interaction
 
-## Pressing Buttons (Fallback Chain)
-Use tap — it handles fallbacks automatically in this order:
-1. tap(text="Login") — text match via JS fiber tree (preferred)
-2. tap(component="ButtonName", index=N) — component name match (for icon-only buttons; use find_components to discover names first)
-3. tap(testID="login-btn") — accessibility testID match
-4. tap(x=..., y=...) — coordinate-based tap (last resort)
+## Tapping Elements
+Use tap — it tries multiple strategies automatically:
+1. tap(testID="login-btn") — most reliable, works via fiber tree (both platforms) and accessibility (Android)
+2. tap(text="Login") — text match via fiber tree, then accessibility, then OCR
+3. tap(component="IconName") — component name match with parent traversal (for icon-only buttons; use find_components to discover names first)
+4. tap(x=..., y=...) — coordinate-based tap from screenshot (last resort)
+
+## Best Practice: Use testID
+Set testID on all interactive elements (buttons, inputs, links) for reliable tapping:
+- More stable than text matching — doesn't break with translations or UI text changes
+- Exact match — no ambiguity when multiple elements share similar text
+- Works across fiber (iOS + Android) and accessibility (Android via resource-id)
+- Also enables TextInput focusing: tap(testID="email-input") finds inputs via fiber
+
+## TextInput Fields
+tap detects TextInput elements (onChangeText/onFocus) in the fiber tree and falls through to native tap (accessibility or coordinates) for actual focus. This means tap(testID="email-input") works even though inputs don't have onPress.
+
+## Icon-Only Buttons
+For buttons that contain only an icon (no text):
+- tap(component="CartIcon") — finds the icon and walks up the fiber tree to press the nearest pressable parent
+- Use maxTraversalDepth to increase parent search depth (default: 15) for deeply wrapped components
 
 ## Non-ASCII Text (Cyrillic, CJK, Arabic)
-tap(text=...) only supports ASCII (Hermes limitation). Use testID or component params instead, or fall back to ocr_screenshot -> tap(x=..., y=...).
+tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibility/OCR instead. For best results, use testID or coordinates.
 
 ## Other Interactions
 - ios_swipe / android_swipe: swipe/scroll with start/end coordinates
