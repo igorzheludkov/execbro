@@ -1,6 +1,8 @@
-# React Native AI Debugger
+# React Native AI DevTools
 
-An MCP (Model Context Protocol) server for AI-powered React Native debugging. Enables AI assistants like Claude to capture logs, execute code, inspect state, and control navigation in your React Native app.
+An MCP server that gives AI assistants real-time access to a running React Native app. It bridges the gap between static code and live runtime, turning AI assistants from guessing machines into informed development partners.
+
+**Positioning:** This is not a debugger. This is not a QA tool. This is a Runtime AI Bridge — the missing layer between AI coding assistants and live mobile applications. Without it, your AI assistant is blind. With it, the AI sees everything happening in your app in real time.
 
 ## Features
 
@@ -58,7 +60,7 @@ Copy the skill files into your project's `.claude/skills/` directory:
 ```bash
 # Install all skills
 mkdir -p .claude/skills
-curl -s https://api.github.com/repos/igorzheludkov/react-native-ai-debugger/contents/skills \
+curl -s https://api.github.com/repos/igorzheludkov/react-native-ai-devtools/contents/skills \
   | grep download_url \
   | cut -d '"' -f 4 \
   | xargs -I {} sh -c 'curl -sL {} -o .claude/skills/$(basename {})'
@@ -90,13 +92,13 @@ No installation required - Claude Code uses `npx` to run the latest version auto
 ### Global (all projects)
 
 ```bash
-claude mcp add rn-debugger --scope user -- npx react-native-ai-debugger
+claude mcp add rn-debugger --scope user -- npx react-native-ai-devtools
 ```
 
 ### Project-specific
 
 ```bash
-claude mcp add rn-debugger --scope project -- npx react-native-ai-debugger
+claude mcp add rn-debugger --scope project -- npx react-native-ai-devtools
 ```
 
 ### Manual Configuration
@@ -109,7 +111,7 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
         "rn-debugger": {
             "type": "stdio",
             "command": "npx",
-            "args": ["react-native-ai-debugger"]
+            "args": ["react-native-ai-devtools"]
         }
     }
 }
@@ -131,7 +133,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
         "rn-debugger": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "react-native-ai-debugger"]
+            "args": ["-y", "react-native-ai-devtools"]
         }
     }
 }
@@ -150,7 +152,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
     "mcpServers": {
         "rn-debugger": {
             "command": "npx",
-            "args": ["-y", "react-native-ai-debugger"]
+            "args": ["-y", "react-native-ai-devtools"]
         }
     }
 }
@@ -1107,7 +1109,7 @@ Add to your MCP configuration:
     "mcpServers": {
         "rn-debugger": {
             "command": "npx",
-            "args": ["react-native-ai-debugger"],
+            "args": ["react-native-ai-devtools"],
             "env": {
                 "EASYOCR_LANGUAGES": "es,fr"
             }
@@ -1240,7 +1242,7 @@ export RN_DEBUGGER_TELEMETRY=false
 Or inline:
 
 ```bash
-RN_DEBUGGER_TELEMETRY=false npx react-native-ai-debugger
+RN_DEBUGGER_TELEMETRY=false npx react-native-ai-devtools
 ```
 
 ## License
