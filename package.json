@@ -1,11 +1,11 @@
 {
-  "name": "react-native-ai-debugger",
+  "name": "react-native-ai-devtools",
   "version": "1.1.4",
   "description": "MCP server for AI-powered React Native debugging - logs, REPL, state inspection",
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "react-native-ai-debugger": "./build/index.js"
+    "react-native-ai-devtools": "./build/index.js"
   },
   "scripts": {
     "build": "tsc && chmod 755 build/index.js && chmod 755 build/httpServerStandalone.js",
@@ -30,11 +30,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/igorzheludkov/react-native-ai-debugger.git"
+    "url": "git+https://github.com/igorzheludkov/react-native-ai-devtools.git"
   },
-  "homepage": "https://github.com/igorzheludkov/react-native-ai-debugger#readme",
+  "homepage": "https://github.com/igorzheludkov/react-native-ai-devtools#readme",
   "bugs": {
-    "url": "https://github.com/igorzheludkov/react-native-ai-debugger/issues"
+    "url": "https://github.com/igorzheludkov/react-native-ai-devtools/issues"
   },
   "engines": {
     "node": ">=18.0.0"
