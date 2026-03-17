@@ -7,7 +7,7 @@ import { createServer as createHttpServer } from "node:http";
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
-import { tap, type TapResult } from "./core/tap.js";
+import { tap, type TapResult } from "./pro/tap.js";
 
 import {
     logBuffer,

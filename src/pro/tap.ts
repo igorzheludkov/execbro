@@ -1,11 +1,11 @@
-import { connectedApps } from "./state.js";
-import { inferIOSDevicePixelRatio } from "./ocr.js";
-import { executeInApp } from "./executor.js";
-import { pressElement } from "./executor.js";
-import { iosTap, iosFindElement, iosScreenshot } from "./ios.js";
-import { androidTap, androidFindElement } from "./android.js";
-import { scanMetroPorts, fetchDevices, selectMainDevice } from "./metro.js";
-import { connectToDevice, clearReconnectionSuppression } from "./connection.js";
+import { connectedApps } from "../core/state.js";
+import { inferIOSDevicePixelRatio } from "../core/ocr.js";
+import { executeInApp } from "../core/executor.js";
+import { pressElement } from "../core/executor.js";
+import { iosTap, iosFindElement, iosScreenshot } from "../core/ios.js";
+import { androidTap, androidFindElement } from "../core/android.js";
+import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
+import { connectToDevice, clearReconnectionSuppression } from "../core/connection.js";
 
 // --- Types ---
 
@@ -435,7 +435,7 @@ async function tryOcrStrategy(
             originalWidth = screenshot.originalWidth;
             originalHeight = screenshot.originalHeight;
         } else {
-            const { androidScreenshot } = await import("./android.js");
+            const { androidScreenshot } = await import("../core/android.js");
             const screenshot = await androidScreenshot();
             if (!screenshot.success || !screenshot.data) {
                 return { success: false, reason: "Failed to capture Android screenshot for OCR" };
@@ -450,7 +450,7 @@ async function tryOcrStrategy(
             ? inferIOSDevicePixelRatio(originalWidth, originalHeight)
             : 3;
 
-        const { recognizeText } = await import("./ocr.js");
+        const { recognizeText } = await import("../core/ocr.js");
         const ocrResult = await recognizeText(imageBuffer, {
             scaleFactor,
             platform,
