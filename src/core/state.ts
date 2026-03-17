@@ -18,6 +18,11 @@ initBundleErrorBuffer(bundleErrorBuffer);
 // Connected apps
 export const connectedApps: Map<string, ConnectedApp> = new Map();
 
+export function getTargetPlatform(): string | undefined {
+    const firstApp = connectedApps.values().next().value;
+    return firstApp?.platform;
+}
+
 // Pending code executions (for executeInApp)
 export const pendingExecutions: Map<number, PendingExecution> = new Map();
 

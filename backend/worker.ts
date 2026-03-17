@@ -26,6 +26,7 @@ interface TelemetryEvent {
     errorContext?: string; // Additional context like the expression that caused the error
     inputTokens?: number;
     outputTokens?: number;
+    targetPlatform?: string;
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -108,7 +109,8 @@ async function handleTelemetry(request: Request, env: Env): Promise<Response> {
                     event.errorCategory || "",                                     // blob6
                     (event.errorMessage || "").slice(0, 200),                      // blob7
                     (event.errorContext || "").slice(0, 150),                      // blob8 - additional error context
-                    (payload.sessionId || "").slice(0, 12)                          // blob9 - session ID for flow tracking
+                    (payload.sessionId || "").slice(0, 12),                         // blob9 - session ID for flow tracking
+                    (event.targetPlatform || "").slice(0, 20)                      // blob10 - target platform (ios/android)
                 ],
                 doubles: [
                     event.duration || 0,       // double1: duration
@@ -805,6 +807,31 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
             count: number;
         }>(errorBreakdownRes, 'errorBreakdown');
 
+        // Query 9: Platform distribution (target platform per user)
+        const platformQuery = `
+            SELECT
+                index1,
+                blob10 as target_platform,
+                _sample_interval as weight
+            FROM rn_debugger_events
+            WHERE
+                blob1 = 'tool_invocation'
+                AND blob10 != ''
+                AND ${timeFilter}
+                ${userExclusionFilter}
+            LIMIT 100000
+        `;
+        const platformRes = await fetch(sqlEndpoint, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${env.CF_API_TOKEN}` },
+            body: platformQuery
+        });
+        const platformRaw = await parseResponse<{
+            index1: string;
+            target_platform: string;
+            weight: number;
+        }>(platformRes, 'platform');
+
         // Check for errors
         if (toolStats.errors?.length) {
             return new Response(JSON.stringify({ error: toolStats.errors[0].message }), {
@@ -939,6 +966,34 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
         // Sort by activity level
         userActivityList.sort((a, b) => b.totalCalls - a.totalCalls);
 
+        // Aggregate platform distribution per user
+        const userPlatformCounts = new Map<string, { ios: number; android: number }>();
+        for (const row of platformRaw.data || []) {
+            const userId = row.index1 || "unknown";
+            const platform = (row.target_platform || "").toLowerCase();
+            const weight = Number(row.weight) || 1;
+            if (!userPlatformCounts.has(userId)) {
+                userPlatformCounts.set(userId, { ios: 0, android: 0 });
+            }
+            const counts = userPlatformCounts.get(userId)!;
+            if (platform === "ios") counts.ios += weight;
+            else if (platform === "android") counts.android += weight;
+        }
+
+        // Classify each user by their dominant platform
+        let iosUsers = 0;
+        let androidUsers = 0;
+        let bothUsers = 0;
+        for (const [, counts] of userPlatformCounts) {
+            if (counts.ios > 0 && counts.android > 0) {
+                bothUsers++;
+            } else if (counts.ios > 0) {
+                iosUsers++;
+            } else if (counts.android > 0) {
+                androidUsers++;
+            }
+        }
+
         // Calculate user retention
         const retention = calculateRetention(retentionRaw.data || []);
         const dailyUserActivity = calculateDailyUserActivity(retentionRaw.data || []);
@@ -969,7 +1024,13 @@ async function handleStats(request: Request, env: Env): Promise<Response> {
                 message: row.error_message,
                 context: row.error_context || null,
                 count: Number(row.count)
-            }))
+            })),
+            platformDistribution: {
+                ios: iosUsers,
+                android: androidUsers,
+                both: bothUsers,
+                unknown: allUniqueUserIds.size - userPlatformCounts.size
+            }
         }), {
             status: 200,
             headers: { "Content-Type": "application/json", ...CORS_HEADERS }

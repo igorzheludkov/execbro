@@ -118,6 +118,7 @@ import {
     // Telemetry
     initTelemetry,
     trackToolInvocation,
+    getTargetPlatform,
     // Format utilities (TONL)
     formatLogsAsTonl,
     formatNetworkAsTonl
@@ -252,7 +253,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform());
         }
     });
 }

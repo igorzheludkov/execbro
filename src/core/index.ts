@@ -34,7 +34,7 @@ export {
 } from "./connectionState.js";
 
 // State
-export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid, getLastCDPMessageTime, updateLastCDPMessageTime } from "./state.js";
+export { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid, getLastCDPMessageTime, updateLastCDPMessageTime, getTargetPlatform } from "./state.js";
 
 // Logs
 export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs, getLogSummary } from "./logs.js";
