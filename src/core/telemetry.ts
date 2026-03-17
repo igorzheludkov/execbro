@@ -77,6 +77,14 @@ function categorizeError(errorMessage: string): ErrorCategory {
     if (lower.includes('evaluate') || lower.includes('execution') || lower.includes('runtime')) {
         return 'execution';
     }
+    // Tap element-not-found errors
+    if (lower.includes('no element found') || lower.includes('no pressable') || lower.includes('no focusable')) {
+        return 'validation';
+    }
+    // Tap connection errors (different message format from other tools)
+    if (lower.includes('no connected app') || lower.includes('connect_metro first') || lower.includes('auto-connect failed')) {
+        return 'connection';
+    }
     return 'unknown';
 }
 
