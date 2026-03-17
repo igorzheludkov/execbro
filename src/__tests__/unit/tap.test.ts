@@ -11,7 +11,7 @@ import {
     convertPixelsToPoints,
     formatTapSuccess,
     formatTapFailure,
-} from "../../core/tap.js";
+} from "../../pro/tap.js";
 
 describe("ConnectedApp type", () => {
     it("accepts platform and lastScreenshot fields", () => {
@@ -152,7 +152,7 @@ describe("formatTapFailure", () => {
 
 describe("tap orchestrator", () => {
     it("returns error when no app is connected and auto-connect fails", async () => {
-        const { tap } = await import("../../core/tap.js");
+        const { tap } = await import("../../pro/tap.js");
         const { connectedApps } = await import("../../core/state.js");
         connectedApps.clear();
         const result = await tap({ text: "Submit" });
@@ -163,14 +163,14 @@ describe("tap orchestrator", () => {
     }, 15000);
 
     it("validates that at least one search param is provided", async () => {
-        const { tap } = await import("../../core/tap.js");
+        const { tap } = await import("../../pro/tap.js");
         const result = await tap({});
         expect(result.success).toBe(false);
         expect(result.error).toContain("Must provide");
     });
 
     it("validates x and y are both provided for coordinate tap", async () => {
-        const { tap } = await import("../../core/tap.js");
+        const { tap } = await import("../../pro/tap.js");
         const result = await tap({ x: 100 });
         expect(result.success).toBe(false);
         expect(result.error).toContain("Both x and y");

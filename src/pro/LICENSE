@@ -1,0 +1,23 @@
+react-native-ai-debugger Commercial License
+
+Copyright (c) 2025-2026 Ihor Zheludkov. All rights reserved.
+
+The software code, files, and assets contained in the `src/pro/` directory and its subdirectories (the "Pro Software") is commercial software.
+
+1. Grant of License
+Subject to your compliance with the terms and conditions of this commercial license, and payment of the applicable subscription fees, you are granted a non-exclusive, non-transferable, non-sublicensable license to use the Pro Software for the features, usage limits, or number of seats you have purchased.
+
+2. Restrictions
+Unless explicitly permitted by a separate written agreement, you may not:
+- Distribute, lease, rent, sell, or sublicense the Pro Software or any part of it.
+- Modify, bypass, disable, or tamper with the license validation mechanisms built into the Pro Software.
+- Use the Pro Software to create a product that directly competes with react-native-ai-debugger.
+
+3. Ownership
+All rights, title, and interest in and to the Pro Software, including all intellectual property rights therein, are and will remain the exclusive property of the author.
+
+4. Termination
+This license is effective until terminated. Your rights under this license will terminate automatically without notice if you fail to comply with any of its terms or if your subscription expires.
+
+5. Warranty Disclaimer
+THE PRO SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE PRO SOFTWARE OR THE USE OR OTHER DEALINGS IN THE PRO SOFTWARE.
