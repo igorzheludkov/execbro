@@ -117,13 +117,15 @@ When debugging React Native apps through this MCP server:
     - You made changes to native code or configuration files
 - **Verify Changes**: After code edits, use `get_logs` to check if the app picked up changes (look for fresh log entries or changed behavior) before deciding to reload.
 - **UI Interaction — Preferred Method**: Use the unified `tap` tool for all tapping:
-    1. `tap(text="Submit")` — matches visible text, tries fiber tree → accessibility → OCR automatically
-    2. `tap(testID="menu-btn")` — matches by testID prop
-    3. `tap(component="HamburgerIcon")` — matches by React component name (fiber tree only)
+    1. `tap(testID="login-btn")` — **most reliable**: matches by testID prop via fiber (both platforms) and accessibility (Android via resource-id)
+    2. `tap(text="Submit")` — matches visible text, tries fiber tree → accessibility → OCR automatically
+    3. `tap(component="HamburgerIcon")` — matches by React component name, walks up fiber tree to find nearest pressable parent
     4. `tap(x=300, y=600)` — taps at pixel coordinates from screenshot (auto-converts to points)
     5. Use `strategy` param to skip strategies you know will fail: `tap(text="≡", strategy="ocr")`
     6. On failure, follow the `suggestion` field in the response — it tells you exactly what to try next
-- **Icon-only buttons** (no text label inside the pressable): Use `tap(component="ComponentName")` to match by React component name. Use `find_components` first to discover actual component names. If multiple instances exist, use `index` param.
+- **Best practice — use testID**: Set `testID` on all interactive elements (buttons, inputs, links). It's more stable than text matching (doesn't break with translations), provides exact matching (no ambiguity), and works for TextInput focusing too.
+- **TextInput fields**: `tap` detects TextInput elements (`onChangeText`/`onFocus`) in the fiber tree and falls through to native tap for actual focus. `tap(testID="email-input")` works even though inputs don't have `onPress`.
+- **Icon-only buttons** (no text label inside the pressable): Use `tap(component="ComponentName")` to match by React component name — automatically walks up to the nearest pressable parent. Use `find_components` first to discover actual component names. Use `maxTraversalDepth` param to increase parent search depth for deeply wrapped components (default: 15).
 - **Non-ASCII text** (Cyrillic, CJK, Arabic, etc.): `tap(text="текст")` automatically skips fiber (Hermes limitation) and uses accessibility/OCR. For best results, use `testID` or `component` params instead.
 - **Component Inspection — Identifying elements on screen**: When you need to find which React component renders a specific UI element (to fix layout, styling, or behavior):
     1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
