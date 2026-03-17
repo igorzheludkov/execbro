@@ -4,6 +4,8 @@ import { executeInApp } from "./executor.js";
 import { pressElement } from "./executor.js";
 import { iosTap, iosFindElement, iosScreenshot } from "./ios.js";
 import { androidTap, androidFindElement } from "./android.js";
+import { scanMetroPorts, fetchDevices, selectMainDevice } from "./metro.js";
+import { connectToDevice, clearReconnectionSuppression } from "./connection.js";
 
 // --- Types ---
 
@@ -25,6 +27,7 @@ export interface TapOptions {
     x?: number;
     y?: number;
     strategy?: TapStrategy;
+    maxTraversalDepth?: number;
 }
 
 export interface TapAttempt {
@@ -253,7 +256,8 @@ interface StrategyResult {
 
 async function tryFiberStrategy(
     query: TapQuery,
-    index?: number
+    index?: number,
+    maxTraversalDepth?: number
 ): Promise<StrategyResult> {
     try {
         const result = await pressElement({
@@ -261,6 +265,7 @@ async function tryFiberStrategy(
             testID: query.testID,
             component: query.component,
             index,
+            maxTraversalDepth,
         });
 
         if (!result.success) {
@@ -282,6 +287,15 @@ async function tryFiberStrategy(
                 strategyResult.matches = parsed.matches;
             }
             return strategyResult;
+        }
+
+        // Input elements found via fiber can't be pressed — need native tap
+        // Return as failure so orchestrator falls through to accessibility/coordinate
+        if (parsed.needsNativeTap) {
+            return {
+                success: false,
+                reason: `Found ${parsed.pressed} (input element) but it requires native tap — falling through to next strategy`,
+            };
         }
 
         return {
@@ -306,12 +320,17 @@ async function tryAccessibilityStrategy(
     platform: "ios" | "android"
 ): Promise<StrategyResult> {
     try {
-        const searchText = query.text || query.testID;
-        if (!searchText) {
+        const hasTestID = !!query.testID;
+        const hasText = !!query.text;
+
+        if (!hasTestID && !hasText) {
             return { success: false, reason: "No text or testID for accessibility search" };
         }
 
         if (platform === "ios") {
+            // iOS: IDB does not expose accessibilityIdentifier (testID),
+            // so search by labelContains as best-effort fallback
+            const searchText = query.text || query.testID;
             const result = await iosFindElement({
                 labelContains: searchText,
                 index,
@@ -337,10 +356,31 @@ async function tryAccessibilityStrategy(
                 convertedTo: { x: match.center.x, y: match.center.y, unit: "points" },
             };
         } else {
-            const result = await androidFindElement({
-                textContains: searchText,
-                index,
-            });
+            // Android: testID maps to resource-id, text maps to text content
+            const searchOptions: {
+                textContains?: string;
+                resourceId?: string;
+                contentDescContains?: string;
+                index?: number;
+            } = { index };
+
+            if (hasTestID && !hasText) {
+                searchOptions.resourceId = query.testID;
+            } else if (hasText) {
+                searchOptions.textContains = query.text;
+            }
+
+            let result = await androidFindElement(searchOptions);
+
+            // If testID search via resourceId failed, try contentDescContains
+            // (older RN versions map testID to content-description)
+            if (hasTestID && !hasText &&
+                (!result.success || !result.allMatches || result.allMatches.length === 0)) {
+                result = await androidFindElement({
+                    contentDescContains: query.testID,
+                    index,
+                });
+            }
 
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                 return { success: false, reason: result.error ?? "No Android accessibility match" };
@@ -516,6 +556,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const query = buildQuery(options);
     const strategy = options.strategy || "auto";
     const index = options.index;
+    const maxTraversalDepth = options.maxTraversalDepth;
 
     // Validate inputs
     const hasSearchParam = query.text || query.testID || query.component;
@@ -537,13 +578,31 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         };
     }
 
-    // Get connected app
-    const apps = Array.from(connectedApps.values());
+    // Get connected app — auto-connect if none
+    let apps = Array.from(connectedApps.values());
+    if (apps.length === 0) {
+        try {
+            clearReconnectionSuppression();
+            const openPorts = await scanMetroPorts();
+            for (const port of openPorts) {
+                const devices = await fetchDevices(port);
+                const mainDevice = selectMainDevice(devices);
+                if (mainDevice) {
+                    await connectToDevice(mainDevice, port);
+                    break;
+                }
+            }
+            apps = Array.from(connectedApps.values());
+        } catch {
+            // Auto-connect failed, will fall through to error below
+        }
+    }
+
     if (apps.length === 0) {
         return {
             success: false,
             query,
-            error: "No connected app. Use connect_metro first.",
+            error: "No connected app. Auto-connect failed — no Metro servers found. Run scan_metro manually.",
         };
     }
 
@@ -560,7 +619,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
         switch (strat) {
             case "fiber":
-                result = await tryFiberStrategy(query, index);
+                result = await tryFiberStrategy(query, index, maxTraversalDepth);
                 break;
             case "accessibility":
                 result = await tryAccessibilityStrategy(query, index, platform);
@@ -627,8 +686,26 @@ function buildSuggestion(
         suggestions.push("Try strategy='ocr' to find text visually on screen");
     }
 
+    if (query.text && query.text.length <= 2) {
+        suggestions.push(
+            "Very short text is unreliable for OCR — use testID or coordinates instead"
+        );
+    }
+
     if (query.text && isNonAscii(query.text)) {
         suggestions.push("Non-ASCII text cannot use fiber strategy — use testID or coordinates instead");
+    }
+
+    if (query.component && triedStrategies.includes("fiber")) {
+        suggestions.push(
+            "Component not found or has no onPress handler — use find_components to discover exact component names, or use text/coordinates instead"
+        );
+    }
+
+    if (query.testID && !triedStrategies.includes("ocr")) {
+        suggestions.push(
+            "testID not found in fiber/accessibility tree — verify the element is on the current screen with a screenshot"
+        );
     }
 
     suggestions.push(

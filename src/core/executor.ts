@@ -1479,8 +1479,9 @@ export async function pressElement(options: {
     testID?: string;
     component?: string;
     index?: number;
+    maxTraversalDepth?: number;
 }): Promise<ExecutionResult> {
-    const { text, testID, component, index = 0 } = options;
+    const { text, testID, component, index = 0, maxTraversalDepth = 15 } = options;
 
     if (!text && !testID && !component) {
         return { success: false, error: "At least one of text, testID, or component must be provided." };
@@ -1552,8 +1553,20 @@ export async function pressElement(options: {
                 // Skip off-screen subtrees — React Navigation marks hidden screens with aria-hidden
                 if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
 
-                if (props && typeof props.onPress === 'function') {
-                    var text = extractText(fiber, 0);
+                var isPressable = props && typeof props.onPress === 'function';
+                var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
+
+                if (isPressable || isInput) {
+                    var text = '';
+                    if (isPressable) {
+                        text = extractText(fiber, 0);
+                    } else {
+                        // For inputs: use child text, value, defaultValue, or placeholder
+                        var val = typeof props.value === 'string' ? props.value : '';
+                        var defVal = typeof props.defaultValue === 'string' ? props.defaultValue : '';
+                        var ph = typeof props.placeholder === 'string' ? props.placeholder : '';
+                        text = extractText(fiber, 0) || val || defVal || ph;
+                    }
                     var tid = props.testID || props.nativeID || null;
                     var matched = true;
 
@@ -1573,7 +1586,8 @@ export async function pressElement(options: {
                             name: name || '(anonymous)',
                             text: text.substring(0, 100),
                             testID: tid,
-                            path: path.join(' > ')
+                            path: path.join(' > '),
+                            isInput: isInput
                         });
                     }
                 }
@@ -1590,12 +1604,63 @@ export async function pressElement(options: {
                 walkFiber(roots[ri].current, []);
             }
 
+            // Phase 2: If searching by component and no match found,
+            // look for the component by name and walk UP to find nearest pressable ancestor
+            if (matches.length === 0 && searchComponent !== null) {
+                var componentCandidates = [];
+
+                function findByName(fiber, path) {
+                    if (!fiber) return;
+                    var name = getComponentName(fiber);
+                    var props = fiber.memoizedProps;
+                    if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+
+                    if (name && name.toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1) {
+                        componentCandidates.push({ fiber: fiber, name: name, path: path.join(' > ') });
+                    }
+                    var child = fiber.child;
+                    while (child) {
+                        var childName = getComponentName(child);
+                        findByName(child, childName ? path.concat([childName]) : path);
+                        child = child.sibling;
+                    }
+                }
+
+                for (var ri2 = 0; ri2 < roots.length; ri2++) {
+                    findByName(roots[ri2].current, []);
+                }
+
+                // For each candidate, walk up to find pressable ancestor
+                var maxDepth = ${maxTraversalDepth};
+                for (var ci = 0; ci < componentCandidates.length; ci++) {
+                    var candidate = componentCandidates[ci];
+                    var parent = candidate.fiber.return;
+                    var depth = 0;
+                    while (parent && depth < maxDepth) {
+                        var parentProps = parent.memoizedProps;
+                        if (parentProps && typeof parentProps.onPress === 'function') {
+                            var text = extractText(parent, 0);
+                            matches.push({
+                                fiber: parent,
+                                name: candidate.name,
+                                text: text.substring(0, 100),
+                                testID: parentProps.testID || parentProps.nativeID || null,
+                                path: candidate.path
+                            });
+                            break;
+                        }
+                        parent = parent.return;
+                        depth++;
+                    }
+                }
+            }
+
             if (matches.length === 0) {
                 var criteria = [];
                 if (searchText !== null) criteria.push('text="' + searchText + '"');
                 if (searchTestID !== null) criteria.push('testID="' + searchTestID + '"');
                 if (searchComponent !== null) criteria.push('component="' + searchComponent + '"');
-                return { error: 'No pressable elements found matching: ' + criteria.join(', ') };
+                return { error: 'No pressable or focusable elements found matching: ' + criteria.join(', ') };
             }
 
             if (targetIndex >= matches.length) {
@@ -1609,6 +1674,27 @@ export async function pressElement(options: {
 
             var target = matches[targetIndex];
             try {
+                if (target.isInput) {
+                    // Input elements can't be pressed via fiber — return match info
+                    // so the orchestrator can fall through to accessibility/coordinate tap
+                    var result = {
+                        success: true,
+                        pressed: target.name,
+                        matchIndex: targetIndex,
+                        totalMatches: matches.length,
+                        text: target.text,
+                        testID: target.testID,
+                        path: target.path,
+                        isInput: true,
+                        needsNativeTap: true
+                    };
+                    if (matches.length > 1) {
+                        result.allMatches = matches.map(function(m, i) {
+                            return { index: i, component: m.name, text: m.text, testID: m.testID };
+                        });
+                    }
+                    return result;
+                }
                 target.fiber.memoizedProps.onPress();
                 var result = {
                     success: true,
@@ -1626,7 +1712,7 @@ export async function pressElement(options: {
                 }
                 return result;
             } catch (e) {
-                return { error: 'onPress() threw: ' + (e.message || String(e)), component: target.name };
+                return { error: 'Handler threw: ' + (e.message || String(e)), component: target.name };
             }
         })()
     `;

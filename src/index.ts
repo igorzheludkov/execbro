@@ -1409,6 +1409,13 @@ registerToolWithTelemetry(
                 .describe(
                     '"auto" (default) tries fiber -> accessibility -> OCR. Set explicitly to skip strategies you know will fail.'
                 ),
+            maxTraversalDepth: z.coerce
+                .number()
+                .optional()
+                .describe(
+                    "Max parent levels to traverse when searching by component name (default: 15). " +
+                    "Increase if your component is deeply wrapped (e.g. inside multiple HOCs/animation wrappers)."
+                ),
         },
     },
     async (args: any) => {
@@ -1420,6 +1427,7 @@ registerToolWithTelemetry(
             x: args.x,
             y: args.y,
             strategy: args.strategy,
+            maxTraversalDepth: args.maxTraversalDepth,
         });
 
         const text = JSON.stringify(result, null, 2);
