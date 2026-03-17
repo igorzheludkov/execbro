@@ -507,6 +507,12 @@
                 <canvas id="userActivityChart"></canvas>
             </div>
         </div>
+        <div class="stat-card stat-card-chart">
+            <div class="label">Platform</div>
+            <div class="mini-chart-container">
+                <canvas id="platformChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <div class="charts-grid">
@@ -721,6 +727,7 @@
         let toolUsageChart = null;
         let timelineChart = null;
         let userActivityChart = null;
+        let platformChart = null;
         let retentionChart = null;
         let dailyUserActivityChart = null;
         let selectedDays = 0;
@@ -898,6 +905,9 @@
 
             // Update user activity pie chart
             updateUserActivityChart(userActivity);
+
+            // Update platform distribution chart
+            updatePlatformChart(data.platformDistribution);
 
             // Update retention chart
             updateRetentionChart(data.retention);
@@ -1077,6 +1087,59 @@
                     datasets: [{
                         data: [active, inactive],
                         backgroundColor: ['#4ade80', '#f87171'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '60%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => `${ctx.label}: ${ctx.raw}`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updatePlatformChart(platformData) {
+            const ctx = document.getElementById('platformChart').getContext('2d');
+
+            if (platformChart) {
+                platformChart.destroy();
+            }
+
+            const ios = platformData?.ios || 0;
+            const android = platformData?.android || 0;
+            const both = platformData?.both || 0;
+
+            if (ios === 0 && android === 0 && both === 0) {
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#94a3b8';
+                ctx.textAlign = 'center';
+                ctx.fillText('No data yet', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+
+            const labels = [];
+            const values = [];
+            const colors = [];
+
+            if (ios > 0) { labels.push('iOS'); values.push(ios); colors.push('#60a5fa'); }
+            if (android > 0) { labels.push('Android'); values.push(android); colors.push('#4ade80'); }
+            if (both > 0) { labels.push('Both'); values.push(both); colors.push('#fbbf24'); }
+
+            platformChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: colors,
                         borderWidth: 0
                     }]
                 },
