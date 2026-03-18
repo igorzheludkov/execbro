@@ -7,6 +7,7 @@ import { createServer as createHttpServer } from "node:http";
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
+import { initLicense, getLicenseStatus, getDashboardUrl } from "./core/license.js";
 import { tap, type TapResult } from "./pro/tap.js";
 
 import {
@@ -509,6 +510,42 @@ registerToolWithTelemetry(
 
         return {
             content: [{ type: "text", text: lines.join("\n") }]
+        };
+    }
+);
+
+// Tool: License status
+registerToolWithTelemetry(
+    "get_license_status",
+    {
+        description:
+            "Get your installation ID and license status. Shows your unique Installation ID (needed to activate Pro in the dashboard), current license tier, and cache validity.",
+        inputSchema: {},
+    },
+    async () => {
+        const status = getLicenseStatus();
+        const lines: string[] = [];
+
+        lines.push(`Installation ID: ${status.installationId}`);
+        lines.push(`License: ${status.status.charAt(0).toUpperCase() + status.status.slice(1)}`);
+
+        if (status.plan) {
+            lines.push(`Plan expires: ${status.plan.expiresAt}`);
+        }
+
+        lines.push(`Cache valid until: ${status.cacheExpiresAt}`);
+
+        if (status.status === "free") {
+            const dashboardUrl = getDashboardUrl();
+            lines.push("");
+            if (dashboardUrl) {
+                lines.push(`Activate Pro at: ${dashboardUrl}`);
+            }
+            lines.push("Enter your Installation ID in the dashboard to unlock Pro features.");
+        }
+
+        return {
+            content: [{ type: "text" as const, text: lines.join("\n") }],
         };
     }
 );
@@ -3636,6 +3673,9 @@ async function autoConnectToMetro(): Promise<void> {
 async function main() {
     // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
     initTelemetry();
+
+    // Initialize license validation (checks cache, calls API if stale)
+    await initLicense();
 
     // Start debug HTTP server in-process (shares state with MCP server)
     // Note: Child process mode doesn't work because state (logs, network, apps) isn't shared

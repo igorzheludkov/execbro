@@ -172,7 +172,7 @@ function loadOrCreateConfig(): TelemetryConfig {
     }
 }
 
-function getInstallationId(): string {
+export function getInstallationId(): string {
     return loadOrCreateConfig().installationId;
 }
 
