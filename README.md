@@ -4,6 +4,10 @@ An MCP server that gives AI assistants real-time access to a running React Nativ
 
 **Positioning:** This is not a debugger. This is not a QA tool. This is a Runtime AI Bridge — the missing layer between AI coding assistants and live mobile applications. Without it, your AI assistant is blind. With it, the AI sees everything happening in your app in real time.
 
+## Feedback & Feature Requests
+
+Have an idea or found something that could be better? Head over to [GitHub Discussions](https://github.com/igorzheludkov/react-native-ai-devtools/discussions) to share feedback, request features, and vote on what gets built next.
+
 ## Features
 
 ### Runtime Interaction
