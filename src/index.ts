@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
 import { initLicense, getLicenseStatus, getDashboardUrl } from "./core/license.js";
+import { isSDKInstalled, readSDKNetworkRequests, readSDKNetworkRequest, readSDKNetworkStats, clearSDKNetwork } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 
 import {
@@ -1764,6 +1765,52 @@ registerToolWithTelemetry(
         }
     },
     async ({ maxRequests, method, urlPattern, status, format, summary }) => {
+        // Check if SDK is installed — prefer SDK data over CDP/interceptor buffer
+        const sdkAvailable = await isSDKInstalled();
+
+        if (sdkAvailable) {
+            if (summary) {
+                const sdkStats = await readSDKNetworkStats();
+                if (sdkStats.success) {
+                    const s = sdkStats.data;
+                    const lines: string[] = [];
+                    lines.push(`Total requests: ${s.total}`);
+                    lines.push(`Completed: ${s.completed}`);
+                    lines.push(`Errors: ${s.errors}`);
+                    if (s.avgDuration != null) lines.push(`Avg duration: ${s.avgDuration}ms`);
+                    if (s.byMethod && Object.keys(s.byMethod).length > 0) {
+                        lines.push("\nBy Method:");
+                        for (const [m, c] of Object.entries(s.byMethod)) lines.push(`  ${m}: ${c}`);
+                    }
+                    if (s.byStatus && Object.keys(s.byStatus).length > 0) {
+                        lines.push("\nBy Status:");
+                        for (const [st, c] of Object.entries(s.byStatus)) lines.push(`  ${st}: ${c}`);
+                    }
+                    if (s.byDomain && Object.keys(s.byDomain).length > 0) {
+                        lines.push("\nBy Domain:");
+                        for (const [d, c] of Object.entries(s.byDomain).sort((a: any, b: any) => b[1] - a[1]).slice(0, 10)) lines.push(`  ${d}: ${c}`);
+                    }
+                    return { content: [{ type: "text" as const, text: `Network Summary (SDK):\n\n${lines.join("\n")}` }] };
+                }
+            }
+
+            const sdkResult = await readSDKNetworkRequests({ count: maxRequests, method, urlPattern, status });
+            if (sdkResult.success && sdkResult.data) {
+                const entries = sdkResult.data as Array<any>;
+                if (entries.length === 0) {
+                    return { content: [{ type: "text" as const, text: "No network requests captured yet." }] };
+                }
+                const lines = entries.map((r: any) => {
+                    const time = new Date(r.timestamp).toLocaleTimeString();
+                    const st = r.status ?? "pending";
+                    const dur = r.duration != null ? `${r.duration}ms` : "-";
+                    return `[${r.id}] ${time} ${r.method} ${st} ${dur} ${r.url}`;
+                });
+                return { content: [{ type: "text" as const, text: `Network Requests (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
+            }
+        }
+
+        // Fallback: read from in-process buffer (CDP/interceptor)
         // Return summary if requested
         if (summary) {
             const stats = getNetworkStats(networkBuffer);
@@ -1771,6 +1818,9 @@ registerToolWithTelemetry(
             if (networkBuffer.size === 0) {
                 const connStatus = await checkAndEnsureConnection();
                 connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
+                if (!sdkAvailable) {
+                    connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
+                }
             }
             return {
                 content: [
@@ -1794,6 +1844,9 @@ registerToolWithTelemetry(
         if (count === 0) {
             const connStatus = await checkAndEnsureConnection();
             connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
+            if (!sdkAvailable) {
+                connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
+            }
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected
@@ -1921,6 +1974,49 @@ registerToolWithTelemetry(
         }
     },
     async ({ requestId, maxBodyLength, verbose }) => {
+        // Check SDK first — it has full headers and body
+        const sdkAvailable = await isSDKInstalled();
+        if (sdkAvailable) {
+            const sdkResult = await readSDKNetworkRequest(requestId);
+            if (sdkResult.success && sdkResult.data) {
+                const r = sdkResult.data;
+                const lines: string[] = [];
+                lines.push(`=== ${r.method} ${r.url} ===`);
+                lines.push(`Request ID: ${r.id}`);
+                lines.push(`Time: ${new Date(r.timestamp).toISOString()}`);
+                lines.push(`Status: ${r.status ?? "pending"} ${r.statusText ?? ""}`);
+                if (r.duration != null) lines.push(`Duration: ${r.duration}ms`);
+                if (r.mimeType) lines.push(`Content-Type: ${r.mimeType}`);
+                if (r.error) lines.push(`Error: ${r.error}`);
+                if (r.requestHeaders && Object.keys(r.requestHeaders).length > 0) {
+                    lines.push("\n--- Request Headers ---");
+                    for (const [k, v] of Object.entries(r.requestHeaders)) lines.push(`${k}: ${v}`);
+                }
+                if (r.requestBody) {
+                    lines.push("\n--- Request Body ---");
+                    let body = r.requestBody;
+                    if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
+                        body = body.slice(0, maxBodyLength) + `... [truncated: ${r.requestBody.length} chars]`;
+                    }
+                    lines.push(body);
+                }
+                if (r.responseHeaders && Object.keys(r.responseHeaders).length > 0) {
+                    lines.push("\n--- Response Headers ---");
+                    for (const [k, v] of Object.entries(r.responseHeaders)) lines.push(`${k}: ${v}`);
+                }
+                if (r.responseBody) {
+                    lines.push("\n--- Response Body ---");
+                    let body = r.responseBody;
+                    if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
+                        body = body.slice(0, maxBodyLength) + `... [truncated: ${r.responseBody.length} chars]`;
+                    }
+                    lines.push(body);
+                }
+                return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+            }
+        }
+
+        // Fallback: read from in-process buffer
         const request = networkBuffer.get(requestId);
 
         if (!request) {
@@ -1991,13 +2087,22 @@ registerToolWithTelemetry(
         inputSchema: {}
     },
     async () => {
-        const count = networkBuffer.clear();
+        let totalCleared = networkBuffer.clear();
+
+        // Also clear SDK buffer if available
+        const sdkAvailable = await isSDKInstalled();
+        if (sdkAvailable) {
+            const sdkResult = await clearSDKNetwork();
+            if (sdkResult.success && sdkResult.count) {
+                totalCleared += sdkResult.count;
+            }
+        }
 
         return {
             content: [
                 {
                     type: "text",
-                    text: `Cleared ${count} network requests from buffer.`
+                    text: `Cleared ${totalCleared} network requests from buffer.`
                 }
             ]
         };
