@@ -2,6 +2,7 @@ import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
 import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime } from "./state.js";
 import { mapConsoleType } from "./logs.js";
+import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import {
@@ -27,6 +28,9 @@ import {
 
 // Connection locks to prevent concurrent connection attempts to the same device
 const connectionLocks: Set<string> = new Set();
+
+// Track Network.enable message IDs to detect CDP network support
+const pendingNetworkEnableIds: Set<number> = new Set();
 
 // Suppress auto-reconnection for intentionally disconnected devices
 const reconnectionSuppressed: Set<string> = new Set();
@@ -420,6 +424,23 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
 
             pending.resolve({ success: true, result: "undefined" });
         }
+        // Track Network.enable responses to detect CDP network support
+        if (pendingNetworkEnableIds.has(message.id as number)) {
+            pendingNetworkEnableIds.delete(message.id as number);
+            const nAppKey = findAppKeyForDevice(_device);
+            if (nAppKey) {
+                const app = connectedApps.get(nAppKey);
+                if (app) {
+                    if (message.error) {
+                        app.cdpNetworkSupported = false;
+                        console.error(`[rn-ai-debugger] CDP Network domain not supported, using JS interceptor`);
+                    } else {
+                        app.cdpNetworkSupported = true;
+                        console.error(`[rn-ai-debugger] CDP Network domain supported`);
+                    }
+                }
+            }
+        }
         return;
     }
 
@@ -436,6 +457,17 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
         const type = params.type || "log";
         const level = mapConsoleType(type);
         const args = params.args || [];
+
+        // Check for network interceptor events before processing as logs
+        const interceptorJson = isInterceptorEvent(args);
+        if (interceptorJson !== null) {
+            const iAppKey = findAppKeyForDevice(_device);
+            const iApp = iAppKey ? connectedApps.get(iAppKey) : null;
+            if (!iApp?.cdpNetworkSupported) {
+                applyInterceptedEvent(interceptorJson, networkBuffer);
+            }
+            return;
+        }
 
         // Check if any args need async object resolution
         const hasObjectArgs = ws && args.some((a) => a.type === "object" && a.objectId && !a.preview?.properties);
@@ -600,6 +632,14 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             const params = message.params as { context: { id: number; name?: string } };
             markContextHealthy(appKey, params.context.id);
             console.error(`[rn-ai-debugger] Context created: ${params.context.id}`);
+
+            // Re-inject network interceptor and re-check CDP Network support
+            const ctxApp = connectedApps.get(appKey);
+            if (ctxApp?.ws?.readyState === WebSocket.OPEN) {
+                injectNetworkInterceptor(ctxApp.ws);
+                const nEnableId = sendNetworkEnable(ctxApp.ws);
+                pendingNetworkEnableIds.add(nEnableId);
+            }
         }
 
         // Handle Runtime.executionContextDestroyed
@@ -700,13 +740,12 @@ export async function connectToDevice(
                     })
                 );
 
-                // Enable Network domain to track requests
-                ws.send(
-                    JSON.stringify({
-                        id: getNextMessageId(),
-                        method: "Network.enable"
-                    })
-                );
+                // Inject JS network interceptor (immediate capture, may fail if context not ready)
+                injectNetworkInterceptor(ws);
+
+                // Also try CDP Network.enable (takes priority if supported)
+                const networkEnableId = sendNetworkEnable(ws);
+                pendingNetworkEnableIds.add(networkEnableId);
 
                 // Try to resolve iOS simulator UDID from device name
                 // This enables automatic device scoping for iOS tools

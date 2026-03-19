@@ -30,6 +30,7 @@ export interface ConnectedApp {
         originalHeight: number;
         scaleFactor: number;
     };
+    cdpNetworkSupported?: boolean;
 }
 
 // CDP RemoteObject type (result of Runtime.evaluate)
