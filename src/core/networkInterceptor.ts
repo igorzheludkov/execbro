@@ -9,8 +9,9 @@ import { getNextMessageId } from "./state.js";
  * where CDP Network.enable is unsupported.
  */
 export function getInterceptorScript(): string {
-    return `(function() {
-  try {
+    // Delayed injection: RN modules overwrite fetch/XHR during init,
+    // so we wait for the event loop to settle before patching.
+    return `setTimeout(function() { try {
     if (globalThis.__RN_NET_INJECTED__) return;
     globalThis.__RN_NET_INJECTED__ = true;
 
@@ -27,70 +28,9 @@ export function getInterceptorScript(): string {
       } catch(e) {}
     }
 
-    // Patch XMLHttpRequest
-    try {
-      var _origOpen = XMLHttpRequest.prototype.open;
-      var _origSend = XMLHttpRequest.prototype.send;
-
-      XMLHttpRequest.prototype.open = function(method, url) {
-        this.__rn_net_id__ = _genId();
-        this.__rn_net_method__ = method;
-        this.__rn_net_url__ = String(url);
-        return _origOpen.apply(this, arguments);
-      };
-
-      XMLHttpRequest.prototype.send = function(body) {
-        var id = this.__rn_net_id__;
-        var method = this.__rn_net_method__ || 'GET';
-        var url = this.__rn_net_url__ || '';
-        var startTime = Date.now();
-
-        if (id) {
-          _report({type: 'request', id: id, method: method, url: url, timestamp: startTime});
-        }
-
-        var xhr = this;
-        var origHandler = xhr.onreadystatechange;
-
-        xhr.onreadystatechange = function() {
-          try {
-            if (xhr.readyState === 4 && id) {
-              var duration = Date.now() - startTime;
-              if (xhr.status > 0) {
-                _report({type: 'response', id: id, status: xhr.status, statusText: xhr.statusText || '', duration: duration});
-              } else {
-                _report({type: 'error', id: id, error: 'Network request failed', duration: duration});
-              }
-            }
-          } catch(e) {}
-          if (typeof origHandler === 'function') {
-            origHandler.apply(this, arguments);
-          }
-        };
-
-        xhr.addEventListener('error', function() {
-          try {
-            if (id) {
-              var duration = Date.now() - startTime;
-              _report({type: 'error', id: id, error: 'XHR error', duration: duration});
-            }
-          } catch(e) {}
-        });
-
-        xhr.addEventListener('timeout', function() {
-          try {
-            if (id) {
-              var duration = Date.now() - startTime;
-              _report({type: 'error', id: id, error: 'XHR timeout', duration: duration});
-            }
-          } catch(e) {}
-        });
-
-        return _origSend.apply(this, arguments);
-      };
-    } catch(e) {}
-
-    // Patch fetch
+    // Patch fetch — Hermes Bridgeless has native XHR bindings that can't be
+    // patched via prototype, so we only intercept fetch (which is the standard
+    // API used by React Native apps and libraries like Apollo, Axios, etc.)
     try {
       if (typeof globalThis.fetch === 'function') {
         var _origFetch = globalThis.fetch;
@@ -138,8 +78,7 @@ export function getInterceptorScript(): string {
       }
     } catch(e) {}
 
-  } catch(e) {}
-})();`;
+  } catch(e) {} }, 0);`;
 }
 
 /**

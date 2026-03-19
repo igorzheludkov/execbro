@@ -100,7 +100,10 @@ describe("executeInApp (integration)", () => {
     it("sends expression with global polyfill prepended", async () => {
         server.respondWithValue(true, "boolean");
         await executeInApp("__DEV__", false, { timeoutMs: 5000 });
-        const evalMsg = server.receivedMessages.find((m) => m.method === "Runtime.evaluate");
+        const evalMsg = server.receivedMessages.find((m) =>
+            m.method === "Runtime.evaluate" &&
+            (m.params as { expression: string }).expression.includes("__DEV__")
+        );
         expect(evalMsg).toBeDefined();
         const expr = (evalMsg!.params as { expression: string }).expression;
         expect(expr).toContain("var global");
