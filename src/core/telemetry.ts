@@ -48,6 +48,7 @@ interface TelemetryEvent {
     inputTokens?: number;
     outputTokens?: number;
     targetPlatform?: string;
+    emptyResult?: boolean;
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -268,7 +269,8 @@ export function trackToolInvocation(
     errorContext?: string,
     inputTokens?: number,
     outputTokens?: number,
-    targetPlatform?: string
+    targetPlatform?: string,
+    emptyResult?: boolean
 ): void {
     if (!telemetryEnabled) return;
 
@@ -293,6 +295,7 @@ export function trackToolInvocation(
     if (inputTokens !== undefined && inputTokens > 0) event.inputTokens = inputTokens;
     if (outputTokens !== undefined && outputTokens > 0) event.outputTokens = outputTokens;
     if (targetPlatform) event.targetPlatform = targetPlatform;
+    if (emptyResult !== undefined) event.emptyResult = emptyResult;
 
     eventQueue.push(event);
 

@@ -211,7 +211,7 @@ function estimateImageTokens(base64Data: string): number {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const toolRegistry = new Map<string, { config: any; handler: (args: any) => Promise<any> }>();
 
-function registerToolWithTelemetry(toolName: string, config: any, handler: (args: any) => Promise<any>): void {
+function registerToolWithTelemetry(toolName: string, config: any, handler: (args: any) => Promise<any>, emptyResultDetector?: (result: any) => boolean): void {
     toolRegistry.set(toolName, { config, handler });
     server.registerTool(toolName, config, async (args: any) => {
         const startTime = Date.now();
@@ -220,6 +220,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         let errorContext: string | undefined;
         let inputTokens: number | undefined;
         let outputTokens: number | undefined;
+        let emptyResult: boolean | undefined;
 
         try {
             inputTokens = Math.ceil(JSON.stringify(args).length / 4);
@@ -235,6 +236,14 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                 errorMessage = result.content?.[0]?.text || "Unknown error";
                 // Extract error context if provided (e.g., the expression that caused a syntax error)
                 errorContext = result._errorContext;
+            }
+            // Check for empty result (only on success, only if detector provided)
+            if (success && emptyResultDetector) {
+                try {
+                    emptyResult = emptyResultDetector(result);
+                } catch {
+                    // Detector failure should never affect tool execution
+                }
             }
             if (Array.isArray(result?.content)) {
                 let totalTokens = 0;
@@ -254,7 +263,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform());
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult);
         }
     });
 }
@@ -738,7 +747,9 @@ registerToolWithTelemetry(
                 }
             ]
         };
-    }
+    },
+    // Empty result detector: buffer has no entries at all
+    () => logBuffer.size === 0
 );
 
 // Tool: Search logs
@@ -1032,6 +1043,12 @@ registerToolWithTelemetry(
                 }
             ]
         };
+    },
+    // Empty result detector: successful execution but no meaningful output
+    (result) => {
+        if (result?.isError) return false;
+        const text = result?.content?.[0]?.text;
+        return text === undefined || text === "" || text === "undefined" || text === "null";
     }
 );
 
@@ -1822,7 +1839,9 @@ registerToolWithTelemetry(
                 }
             ]
         };
-    }
+    },
+    // Empty result detector: buffer has no entries at all
+    () => networkBuffer.size === 0
 );
 
 // Tool: Search network requests
@@ -1959,7 +1978,9 @@ registerToolWithTelemetry(
                 }
             ]
         };
-    }
+    },
+    // Empty result detector: buffer has no entries at all
+    () => networkBuffer.size === 0
 );
 
 // Tool: Clear network requests
