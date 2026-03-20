@@ -74,7 +74,10 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
     - Any React Native (excluding Reanimated/Experimental)
 3. **CDP Connection**: Connects via WebSocket to device's debugger URL
 4. **Log Capture**: Enables `Runtime.enable` and `Log.enable` CDP domains to receive console events
-5. **Network Tracking**: Enables `Network.enable` CDP domain to capture HTTP requests/responses
+5. **Network Tracking**: Three capture strategies (auto-selected):
+   - **SDK mode** (best): If `react-native-ai-devtools-sdk` is installed in the app, reads from its in-app buffer via `Runtime.evaluate`. Captures all requests from startup with full headers and bodies.
+   - **CDP mode**: `Network.enable` CDP domain — works on RN 0.73-0.75 (Hermes + Bridge) and future RN 0.83+. Not supported on Bridgeless targets (Expo SDK 52-54).
+   - **JS interceptor fallback**: Injects a fetch patch via `Runtime.evaluate` on Bridgeless targets. May miss early startup requests due to injection timing.
 6. **Code Execution**: Uses `Runtime.evaluate` CDP method for REPL-style JavaScript execution
 
 ### Key Components

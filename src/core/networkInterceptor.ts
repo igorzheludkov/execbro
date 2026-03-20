@@ -9,9 +9,12 @@ import { getNextMessageId } from "./state.js";
  * where CDP Network.enable is unsupported.
  */
 export function getInterceptorScript(): string {
-    // Delayed injection: RN modules overwrite fetch/XHR during init,
-    // so we wait for the event loop to settle before patching.
-    return `setTimeout(function() { try {
+    // Two-phase injection to capture both early and late requests:
+    // Phase 1 (sync): Set __RN_NET_INJECTED__ flag and define helper functions.
+    //   Install defineProperty setter trap on fetch — may or may not work on Hermes.
+    // Phase 2 (setTimeout 0): After RN modules finish initializing, wrap fetch.
+    //   This is the reliable path that always works.
+    return `(function() { try {
     if (globalThis.__RN_NET_INJECTED__) return;
     globalThis.__RN_NET_INJECTED__ = true;
 
@@ -28,57 +31,78 @@ export function getInterceptorScript(): string {
       } catch(e) {}
     }
 
-    // Patch fetch — Hermes Bridgeless has native XHR bindings that can't be
-    // patched via prototype, so we only intercept fetch (which is the standard
-    // API used by React Native apps and libraries like Apollo, Axios, etc.)
+    function _wrapFetch(origFetch) {
+      if (typeof origFetch !== 'function') return origFetch;
+      if (origFetch.__rn_net_wrapped__) return origFetch;
+
+      var wrapped = function(input, init) {
+        var id = _genId();
+        var method = (init && init.method) ? init.method : 'GET';
+        var url = '';
+        if (typeof input === 'string') {
+          url = input;
+        } else if (input && typeof input === 'object' && input.url) {
+          url = String(input.url);
+        } else {
+          url = String(input);
+        }
+        var startTime = Date.now();
+
+        _report({type: 'request', id: id, method: method, url: url, timestamp: startTime});
+
+        try {
+          return origFetch.apply(globalThis, arguments).then(
+            function(response) {
+              try {
+                var duration = Date.now() - startTime;
+                _report({type: 'response', id: id, status: response.status, statusText: response.statusText || '', duration: duration});
+              } catch(e) {}
+              return response;
+            },
+            function(err) {
+              try {
+                var duration = Date.now() - startTime;
+                _report({type: 'error', id: id, error: (err && err.message) ? err.message : 'Fetch failed', duration: duration});
+              } catch(e) {}
+              throw err;
+            }
+          );
+        } catch(e) {
+          try {
+            var duration = Date.now() - startTime;
+            _report({type: 'error', id: id, error: (e && e.message) ? e.message : 'Fetch failed', duration: duration});
+          } catch(e2) {}
+          throw e;
+        }
+      };
+      wrapped.__rn_net_wrapped__ = true;
+      return wrapped;
+    }
+
+    // Phase 1: try to trap fetch assignment via defineProperty (best-effort)
     try {
       if (typeof globalThis.fetch === 'function') {
-        var _origFetch = globalThis.fetch;
-
-        globalThis.fetch = function(input, init) {
-          var id = _genId();
-          var method = (init && init.method) ? init.method : 'GET';
-          var url = '';
-          if (typeof input === 'string') {
-            url = input;
-          } else if (input && typeof input === 'object' && input.url) {
-            url = String(input.url);
-          } else {
-            url = String(input);
-          }
-          var startTime = Date.now();
-
-          _report({type: 'request', id: id, method: method, url: url, timestamp: startTime});
-
-          try {
-            return _origFetch.apply(globalThis, arguments).then(
-              function(response) {
-                try {
-                  var duration = Date.now() - startTime;
-                  _report({type: 'response', id: id, status: response.status, statusText: response.statusText || '', duration: duration});
-                } catch(e) {}
-                return response;
-              },
-              function(err) {
-                try {
-                  var duration = Date.now() - startTime;
-                  _report({type: 'error', id: id, error: (err && err.message) ? err.message : 'Fetch failed', duration: duration});
-                } catch(e) {}
-                throw err;
-              }
-            );
-          } catch(e) {
-            try {
-              var duration = Date.now() - startTime;
-              _report({type: 'error', id: id, error: (e && e.message) ? e.message : 'Fetch failed', duration: duration});
-            } catch(e2) {}
-            throw e;
-          }
-        };
+        globalThis.fetch = _wrapFetch(globalThis.fetch);
       }
+      var _storedFetch = globalThis.fetch;
+      Object.defineProperty(globalThis, 'fetch', {
+        configurable: true,
+        enumerable: true,
+        get: function() { return _storedFetch; },
+        set: function(v) { _storedFetch = _wrapFetch(v); }
+      });
     } catch(e) {}
 
-  } catch(e) {} }, 0);`;
+    // Phase 2: wrap fetch after module init completes (reliable fallback)
+    setTimeout(function() {
+      try {
+        if (typeof globalThis.fetch === 'function' && !globalThis.fetch.__rn_net_wrapped__) {
+          globalThis.fetch = _wrapFetch(globalThis.fetch);
+        }
+      } catch(e) {}
+    }, 0);
+
+  } catch(e) {} })();`;
 }
 
 /**
