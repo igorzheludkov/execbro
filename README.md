@@ -14,7 +14,7 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 -   **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search
 -   **React Component Inspection** - Inspect component tree, props, state/hooks, and layout styles at runtime
--   **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content
+-   **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) for full capture from app startup including request/response bodies
 -   **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
 -   **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals
 -   **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
@@ -486,6 +486,38 @@ TONL is also available for `search_logs`, `get_network_requests`, and `search_ne
 
 ## Network Tracking
 
+### SDK for Full Network Capture (Recommended)
+
+For complete network capture including **startup requests**, **full headers**, and **response bodies**, install the companion SDK in your React Native app:
+
+```bash
+npm install react-native-ai-devtools-sdk
+```
+
+Add to your app's entry file (e.g., `index.js` or `app/_layout.tsx`) — **must be the first import**:
+
+```js
+import { init } from 'react-native-ai-devtools-sdk';
+if (__DEV__) {
+  init();
+}
+```
+
+**What the SDK captures that basic mode doesn't:**
+
+| | Without SDK | With SDK |
+|---|---|---|
+| Startup requests (auth, config) | Missed | Captured |
+| Request/response headers | Partial | Full |
+| Request body (GraphQL queries) | No | Full |
+| Response body | No | Full |
+| Works on Bridgeless (Expo SDK 52+) | Partial | Full |
+| Setup required | None | One import |
+
+The SDK patches `fetch` at import time and stores data in an in-app buffer. The MCP tools automatically detect the SDK and read from it — no configuration needed.
+
+**Without the SDK**, network tracking still works via CDP (Chrome DevTools Protocol) on supported targets, but may miss early requests and won't include response bodies.
+
 ### View Recent Requests
 
 ```
@@ -517,15 +549,15 @@ search_network with urlPattern="api/auth"
 After finding a request ID from `get_network_requests`:
 
 ```
-get_request_details with requestId="123.45"
+get_request_details with requestId="sdk-abc-1"
 ```
 
-Shows full headers, request body, response headers, and timing.
+Shows full headers, request body, response headers, response body, and timing.
 
-Request body is truncated by default (500 chars). For full body:
+Body is truncated by default (500 chars). For full body:
 
 ```
-get_request_details with requestId="123.45" verbose=true
+get_request_details with requestId="sdk-abc-1" verbose=true
 ```
 
 ### Summary Mode (Recommended First Step)
@@ -1154,7 +1186,9 @@ tap with x=540 y=1200
 1. Fetches device list from Metro's `/json` endpoint
 2. Connects to the main JS runtime via CDP (Chrome DevTools Protocol) WebSocket
 3. Enables `Runtime.enable` to receive `Runtime.consoleAPICalled` events
-4. Enables `Network.enable` to receive network request/response events
+4. Network capture via two paths:
+   - **With SDK**: Reads from the SDK's in-app buffer via `Runtime.evaluate` — captures all requests from startup with full headers and bodies
+   - **Without SDK**: Enables CDP `Network.enable` (on supported targets) or injects a JS fetch interceptor as fallback
 5. Stores logs and network requests in circular buffers for retrieval
 
 ## Auto-Reconnection

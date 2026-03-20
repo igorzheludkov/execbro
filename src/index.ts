@@ -1742,7 +1742,7 @@ registerToolWithTelemetry(
     "get_network_requests",
     {
         description:
-            "Retrieve captured network requests from connected React Native app. Shows URL, method, status, and timing. Tip: Use summary=true first for stats overview (counts by method, status, domain), then fetch specific requests as needed.",
+            "Retrieve captured network requests from connected React Native app. Shows URL, method, status, and timing. Note: On Bridgeless targets (Expo SDK 52+) without the SDK, capture may miss early startup requests. Install react-native-ai-devtools-sdk for full capture with headers and response bodies. Tip: Use summary=true first for stats overview.",
         inputSchema: {
             maxRequests: z
                 .number()
@@ -1956,7 +1956,7 @@ registerToolWithTelemetry(
     "get_request_details",
     {
         description:
-            "Get full details of a specific network request including headers, body, and timing. Use get_network_requests first to find the request ID.",
+            "Get full details of a specific network request including headers, body, and timing. With the SDK installed, includes full request/response bodies. Without SDK, bodies are not available on most targets. Use get_network_requests first to find the request ID.",
         inputSchema: {
             requestId: z.string().describe("The request ID to get details for"),
             maxBodyLength: z.coerce

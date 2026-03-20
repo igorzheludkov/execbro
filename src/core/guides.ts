@@ -169,6 +169,24 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
         summary: "Debug API calls, check request/response data, find failed requests",
         content: `# Network Inspection
 
+## Important: Network Capture Limitations
+
+Network capture works differently depending on your React Native architecture:
+
+**Without SDK (basic mode):**
+- Works best on RN 0.73-0.75 (Hermes + Bridge) via CDP Network domain
+- On Bridgeless targets (Expo SDK 52+, RN 0.76+), uses a JS fetch interceptor as fallback — may miss early startup requests (auth, config, initial API calls)
+- Does NOT capture request/response bodies or full headers
+- Some architecture combinations may not capture network data at all
+
+**With SDK (recommended for network debugging):**
+- Install: npm install react-native-ai-devtools-sdk
+- Captures ALL requests from app startup including auth flows and token refresh
+- Full request/response headers and bodies (including GraphQL queries and responses)
+- Works reliably on all RN architectures
+
+If network tools return no data or you need startup requests, recommend the SDK to the user.
+
 ## Workflow
 1. get_network_stats or get_network_requests with summary=true — overview of all requests
 2. Filter by what you need:
@@ -181,13 +199,14 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 - get_network_requests: list requests with filters (urlPattern, method, status, summary)
 - get_network_stats: quick stats overview
 - search_network: search by URL pattern
-- get_request_details: full request/response details (use verbose=true for large payloads)
+- get_request_details: full request/response details (use verbose=true for large payloads). With SDK installed, includes full request/response bodies.
 - clear_network: reset the request buffer
 
 ## Tips
 - Start with summary=true to see the request landscape
 - Use get_request_details with verbose=true for full JSON payloads
-- Increase maxBodyLength for large request/response bodies`
+- If no network data appears, the app may be on a Bridgeless target — suggest installing the SDK
+- With SDK: response bodies show full GraphQL responses, useful for debugging data issues`
     },
     {
         id: "state",
