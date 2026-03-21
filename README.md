@@ -27,7 +27,7 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 -   **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots
 -   **UI Automation** - Swipe, long press, text input, and key events on both platforms
 -   **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
--   **OCR Text Extraction** - Extract visible text with tap-ready coordinates (works on any screen content)
+-   **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
 
 ### Under the Hood
 
@@ -87,7 +87,7 @@ Skills can also be triggered **automatically** — each skill file contains a "W
 -   Node.js 18+
 -   React Native app running with Metro bundler
 -   **Optional for iOS UI automation**: [Facebook IDB](https://fbidb.io/) - `brew install idb-companion`
--   **Optional for OCR**: Python 3.6+ (EasyOCR is installed automatically, see [OCR Setup](#ocr-text-extraction))
+-   **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
 
 ## Claude Code Setup
 
@@ -1092,11 +1092,11 @@ Returns all visible text with tap-ready coordinates:
 ```json
 {
   "platform": "ios",
-  "engine": "easyocr",
-  "processingTimeMs": 850,
+  "engine": "cloud",
+  "processingTimeMs": 550,
   "elementCount": 24,
   "elements": [
-    { "text": "Settings", "confidence": 98, "tapX": 195, "tapY": 52 },
+    { "text": "Settings", "confidence": 95, "tapX": 195, "tapY": 52 },
     { "text": "Login", "confidence": 95, "tapX": 187, "tapY": 420 }
   ]
 }
@@ -1110,11 +1110,13 @@ tap with x=187 y=420
 
 ### OCR Engine
 
-The tool uses EasyOCR (Python-based) for text recognition. It provides excellent accuracy on colored backgrounds and stylized text common in mobile UIs.
+OCR uses **Google Cloud Vision API** via a cloud proxy for fast, accurate text recognition (~97%+ accuracy, ~0.5s processing time). This works out of the box with no local dependencies.
 
-### EasyOCR Setup
+Screenshots are sent over HTTPS to our cloud endpoint for processing and immediately deleted after recognition — no images are stored.
 
-EasyOCR and all its Python dependencies (PyTorch, OpenCV, etc.) are installed automatically into an isolated virtual environment by the `node-easyocr` package — no need to run `pip install` manually. The only prerequisite is having Python 3.6+ available on your system:
+### Offline Fallback (EasyOCR)
+
+If the cloud endpoint is unreachable (no internet, timeout), OCR falls back to local EasyOCR (Python-based). This requires Python 3.6+:
 
 ```bash
 # macOS
@@ -1122,39 +1124,19 @@ brew install python@3.11
 
 # Ubuntu/Debian
 sudo apt install python3
-
-# Windows
-# Download from https://www.python.org/downloads/
 ```
 
-On the first OCR call, language models (~100MB for English) are downloaded automatically. This may take a moment, but subsequent calls use the cached models.
+EasyOCR and its Python dependencies are installed automatically by `node-easyocr`. The local fallback is slower (~2-3s) and less accurate (~85-90%) but works offline.
 
 ### OCR Language Configuration
 
-By default, OCR recognizes English text. To add more languages, set the `EASYOCR_LANGUAGES` environment variable. English is always included as a fallback.
+Google Cloud Vision automatically detects and recognizes text in most languages without configuration.
+
+For the offline EasyOCR fallback, set `EASYOCR_LANGUAGES` to add language support:
 
 ```bash
-# Add Spanish and French (English always included)
 EASYOCR_LANGUAGES=es,fr
 ```
-
-Add to your MCP configuration:
-
-```json
-{
-    "mcpServers": {
-        "rn-debugger": {
-            "command": "npx",
-            "args": ["react-native-ai-devtools"],
-            "env": {
-                "EASYOCR_LANGUAGES": "es,fr"
-            }
-        }
-    }
-}
-```
-
-See [EasyOCR supported languages](https://www.jaided.ai/easyocr/) for the full list of language codes.
 
 ### Recommended Workflow
 
