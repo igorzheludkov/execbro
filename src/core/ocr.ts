@@ -5,6 +5,15 @@ import { existsSync } from "fs";
 import { randomUUID } from "crypto";
 import { createRequire } from "module";
 import { spawn } from "child_process";
+import { getInstallationId } from "./telemetry.js";
+
+// ============================================================================
+// Cloud OCR Configuration
+// ============================================================================
+
+const OCR_ENDPOINT = "https://rn-debugger-ocr.500griven.workers.dev";
+const OCR_API_KEY = "4adf74c1f1afa5c4dc5eddcfc17787aea3b21b4a518bad27df152515d71f3d54";
+const OCR_TIMEOUT_MS = 5_000;
 
 export interface OCRWord {
     text: string;
@@ -62,7 +71,7 @@ export interface OCRResult {
     words: OCRWord[];
     lines: OCRLine[];
     processingTimeMs: number;
-    engine: "easyocr";
+    engine: "easyocr" | "cloud";
 }
 
 // EasyOCR types
@@ -217,11 +226,144 @@ function toTapCoord(
     return platform === "ios" ? Math.round(pixelCoord / devicePixelRatio) : Math.round(pixelCoord);
 }
 
+// ============================================================================
+// Cloud OCR Response Types
+// ============================================================================
+
+interface CloudOCRWord {
+    text: string;
+    confidence: number;
+    bbox: { x0: number; y0: number; x1: number; y1: number };
+}
+
+interface CloudOCRResponse {
+    success: boolean;
+    fullText: string;
+    confidence: number;
+    words: CloudOCRWord[];
+    processingTimeMs: number;
+}
+
 /**
- * Run OCR using EasyOCR
- * Requires Python 3.6+ on the system; easyocr is provided by node-easyocr's bundled venv.
+ * Run OCR via Cloudflare Worker → Google Cloud Vision.
+ * Returns null on failure (caller should fall back to local EasyOCR).
+ */
+async function recognizeTextCloud(
+    imageBuffer: Buffer,
+    options?: OCROptions
+): Promise<OCRResult | null> {
+    const scaleFactor = options?.scaleFactor ?? 1;
+    const platform = options?.platform ?? "ios";
+    const devicePixelRatio = options?.devicePixelRatio ?? 3;
+    const startTime = Date.now();
+
+    const body = new Uint8Array(imageBuffer);
+    const fetchOptions = {
+        method: "POST",
+        headers: {
+            "X-API-Key": OCR_API_KEY,
+            "X-Installation-Id": getInstallationId(),
+            "Content-Type": "image/png",
+        },
+        body,
+    };
+
+    let response: Response;
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), OCR_TIMEOUT_MS);
+
+        response = await fetch(`${OCR_ENDPOINT}/ocr`, {
+            ...fetchOptions,
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+    } catch {
+        return null; // Network error or timeout — fall back to local
+    }
+
+    // On 502, retry once after 500ms
+    if (response.status === 502) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), OCR_TIMEOUT_MS);
+
+            response = await fetch(`${OCR_ENDPOINT}/ocr`, {
+                ...fetchOptions,
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeout);
+        } catch {
+            return null;
+        }
+    }
+
+    // Any non-200 → fall back to local
+    if (!response.ok) {
+        return null;
+    }
+
+    let data: CloudOCRResponse;
+    try {
+        data = (await response.json()) as CloudOCRResponse;
+    } catch {
+        return null;
+    }
+
+    if (!data.success) {
+        return null;
+    }
+
+    // Map cloud response to OCRResult, computing center and tapCenter client-side
+    const words: OCRWord[] = data.words.map((w) => {
+        const centerX = Math.round((w.bbox.x0 + w.bbox.x1) / 2);
+        const centerY = Math.round((w.bbox.y0 + w.bbox.y1) / 2);
+
+        return {
+            text: w.text,
+            confidence: w.confidence,
+            bbox: w.bbox,
+            center: { x: centerX, y: centerY },
+            tapCenter: {
+                x: toTapCoord(centerX, scaleFactor, platform, devicePixelRatio),
+                y: toTapCoord(centerY, scaleFactor, platform, devicePixelRatio),
+            },
+        };
+    });
+
+    return {
+        success: true,
+        fullText: data.fullText,
+        confidence: data.confidence,
+        words,
+        lines: [],
+        processingTimeMs: Date.now() - startTime,
+        engine: "cloud",
+    };
+}
+
+/**
+ * Run OCR — tries cloud (Google Vision) first, falls back to local EasyOCR.
  */
 export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): Promise<OCRResult> {
+    // Try cloud OCR first
+    const cloudResult = await recognizeTextCloud(imageBuffer, options);
+    if (cloudResult) {
+        return cloudResult;
+    }
+
+    // Fall back to local EasyOCR
+    return recognizeTextLocal(imageBuffer, options);
+}
+
+/**
+ * Run OCR using local EasyOCR (fallback).
+ * Requires Python 3.6+ on the system; easyocr is provided by node-easyocr's bundled venv.
+ */
+async function recognizeTextLocal(imageBuffer: Buffer, options?: OCROptions): Promise<OCRResult> {
     const scaleFactor = options?.scaleFactor ?? 1;
     const platform = options?.platform ?? "ios";
     const devicePixelRatio = options?.devicePixelRatio ?? 3;
@@ -269,8 +411,8 @@ export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): 
                     center: { x: centerX, y: centerY },
                     tapCenter: {
                         x: toTapCoord(centerX, scaleFactor, platform, devicePixelRatio),
-                        y: toTapCoord(centerY, scaleFactor, platform, devicePixelRatio)
-                    }
+                        y: toTapCoord(centerY, scaleFactor, platform, devicePixelRatio),
+                    },
                 });
 
                 textParts.push(result.text.trim());
@@ -283,9 +425,9 @@ export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): 
             fullText: textParts.join(" "),
             confidence: results.length > 0 ? (totalConfidence / results.length) * 100 : 0,
             words,
-            lines: [], // EasyOCR returns words/phrases, not lines
+            lines: [],
             processingTimeMs: Date.now() - startTime,
-            engine: "easyocr"
+            engine: "easyocr",
         };
     } finally {
         // Clean up temp file
