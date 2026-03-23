@@ -7,7 +7,7 @@ import { createServer as createHttpServer } from "node:http";
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
-import { initLicense, getLicenseStatus, getDashboardUrl } from "./core/license.js";
+import { getLicenseStatus, getDashboardUrl } from "./core/license.js";
 import { isSDKInstalled, readSDKNetworkRequests, readSDKNetworkRequest, readSDKNetworkStats, clearSDKNetwork } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 
@@ -3798,10 +3798,8 @@ async function autoConnectToMetro(): Promise<void> {
 // Main function
 async function main() {
     // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
+    // License validation is lazy — runs on first tool use via ensureLicense()
     initTelemetry();
-
-    // Initialize license validation (checks cache, calls API if stale)
-    await initLicense();
 
     // Start debug HTTP server in-process (shares state with MCP server)
     // Note: Child process mode doesn't work because state (logs, network, apps) isn't shared

@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
-import { getInstallationId, trackToolInvocation } from "./telemetry.js";
+import { getInstallationId } from "./telemetry.js";
 
 // ============================================================================
 // Configuration
@@ -127,7 +127,26 @@ async function callValidationApi(installationId: string): Promise<ApiResponse | 
 // Public API
 // ============================================================================
 
-export async function initLicense(): Promise<LicenseStatus> {
+let licensePromise: Promise<LicenseResult> | null = null;
+
+interface LicenseResult {
+    status: LicenseStatus;
+    source: "cache" | "api" | "default";
+    durationMs: number;
+}
+
+/**
+ * Lazy, idempotent license check — called on first real tool use.
+ * Returns cached result on subsequent calls.
+ */
+export function ensureLicense(): Promise<LicenseResult> {
+    if (!licensePromise) {
+        licensePromise = resolveLicense();
+    }
+    return licensePromise;
+}
+
+async function resolveLicense(): Promise<LicenseResult> {
     const startTime = Date.now();
     const installationId = getInstallationId();
     const cache = readCache();
@@ -137,8 +156,7 @@ export async function initLicense(): Promise<LicenseStatus> {
     if (cache && isCacheFresh(cache, installationId)) {
         currentStatus = cache;
         source = "cache";
-        trackToolInvocation("_license_check", true, Date.now() - startTime, undefined, `${source}:${currentStatus.status}`);
-        return currentStatus;
+        return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
     // Cache stale or missing — try API
@@ -158,29 +176,25 @@ export async function initLicense(): Promise<LicenseStatus> {
 
         writeCache(currentStatus);
         source = "api";
-        trackToolInvocation("_license_check", true, Date.now() - startTime, undefined, `${source}:${currentStatus.status}`);
-        return currentStatus;
+        return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
     // API failed — fall back to stale cache (fail open)
     if (cache && cache.installationId === installationId) {
         currentStatus = cache;
         source = "cache";
-        trackToolInvocation("_license_check", true, Date.now() - startTime, undefined, `${source}:${currentStatus.status}`);
-        return currentStatus;
+        return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
     // No cache, no API — default to free
     currentStatus = createDefaultStatus(installationId);
     writeCache(currentStatus);
-    trackToolInvocation("_license_check", true, Date.now() - startTime, undefined, `${source}:${currentStatus.status}`);
-    return currentStatus;
+    return { status: currentStatus, source, durationMs: Date.now() - startTime };
 }
 
 export function getLicenseStatus(): LicenseStatus {
     if (!currentStatus) {
-        // Should not happen if initLicense() was called at startup
-        // But handle gracefully
+        // Called before ensureLicense() resolved — return default free tier
         const installationId = getInstallationId();
         currentStatus = createDefaultStatus(installationId);
     }

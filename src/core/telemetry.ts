@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { ensureLicense } from "./license.js";
 
 // ============================================================================
 // Configuration
@@ -293,6 +294,13 @@ export function trackToolInvocation(
             isFirstRun: isFirstRun(),
             firstTool: toolName
         });
+
+        // Lazy license check — runs once per session, tracked as tool_invocation for analytics
+        ensureLicense().then(({ source, status, durationMs }) => {
+            trackLicenseCheck(source, status.status, durationMs);
+        }).catch(() => {
+            // License check failed — not critical, don't break tool flow
+        });
     }
     lastToolTimestamp = now;
 
@@ -318,6 +326,30 @@ export function trackToolInvocation(
     if (outputTokens !== undefined && outputTokens > 0) event.outputTokens = outputTokens;
     if (targetPlatform) event.targetPlatform = targetPlatform;
     if (emptyResult !== undefined) event.emptyResult = emptyResult;
+
+    eventQueue.push(event);
+
+    if (eventQueue.length >= BATCH_SIZE) {
+        flush();
+    }
+}
+
+/**
+ * Records _license_check as a tool_invocation event without triggering session logic.
+ * Called from the ensureLicense() callback inside trackToolInvocation.
+ */
+function trackLicenseCheck(source: string, tier: string, durationMs: number): void {
+    if (!telemetryEnabled) return;
+
+    const event: TelemetryEvent = {
+        name: "tool_invocation",
+        timestamp: Date.now(),
+        toolName: "_license_check",
+        success: true,
+        duration: durationMs,
+        isFirstRun: isFirstRun(),
+        errorContext: `${source}:${tier}`
+    };
 
     eventQueue.push(event);
 
