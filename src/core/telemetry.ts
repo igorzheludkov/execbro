@@ -116,6 +116,9 @@ let batchTimer: NodeJS.Timeout | null = null;
 let sessionStartTime: number | null = null;
 let sessionId: string | null = null;
 let isFirstRunSession = false;
+let sessionStarted = false;
+let lastToolTimestamp: number | null = null;
+const SESSION_INACTIVITY_MS = 10 * 60 * 1000; // 10 minutes — matches dashboard SESSION_TIMEOUT_MS
 
 // ============================================================================
 // Configuration Management
@@ -204,11 +207,10 @@ export function initTelemetry(): void {
 
     // Load/create config (generates installation ID)
     loadOrCreateConfig();
-    sessionStartTime = Date.now();
     sessionId = randomUUID();
 
-    // Track session start
-    trackEvent("session_start", {
+    // Track that an AI agent session loaded our MCP server (regardless of tool usage)
+    trackEvent("agent_session_start", {
         isFirstRun: isFirstRun()
     });
 
@@ -222,7 +224,7 @@ export function initTelemetry(): void {
 
     // Track session end on SIGINT/SIGTERM
     const handleExit = () => {
-        if (sessionStartTime) {
+        if (sessionStarted && sessionStartTime) {
             trackEvent("session_end", {
                 duration: Date.now() - sessionStartTime
             });
@@ -274,9 +276,29 @@ export function trackToolInvocation(
 ): void {
     if (!telemetryEnabled) return;
 
+    const now = Date.now();
+
+    // Start a new session on first tool use or after inactivity gap
+    if (!sessionStarted || (lastToolTimestamp && (now - lastToolTimestamp) > SESSION_INACTIVITY_MS)) {
+        if (sessionStarted) {
+            // End previous session before starting a new one
+            trackEvent("session_end", {
+                duration: lastToolTimestamp! - sessionStartTime!
+            });
+            sessionId = randomUUID();
+        }
+        sessionStarted = true;
+        sessionStartTime = now;
+        trackEvent("session_start", {
+            isFirstRun: isFirstRun(),
+            firstTool: toolName
+        });
+    }
+    lastToolTimestamp = now;
+
     const event: TelemetryEvent = {
         name: "tool_invocation",
-        timestamp: Date.now(),
+        timestamp: now,
         toolName,
         success,
         duration: durationMs,
