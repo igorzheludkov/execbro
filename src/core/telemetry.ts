@@ -210,7 +210,7 @@ export function initTelemetry(): void {
     sessionId = randomUUID();
 
     // Track that an AI agent session loaded our MCP server (regardless of tool usage)
-    trackEvent("agent_session_start", {
+    trackEvent("session_start", {
         isFirstRun: isFirstRun()
     });
 
@@ -289,7 +289,7 @@ export function trackToolInvocation(
         }
         sessionStarted = true;
         sessionStartTime = now;
-        trackEvent("session_start", {
+        trackEvent("session_start_ai_devtools", {
             isFirstRun: isFirstRun(),
             firstTool: toolName
         });
