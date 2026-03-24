@@ -465,9 +465,14 @@ export async function iosLaunchApp(bundleId: string, udid?: string): Promise<iOS
             result: `Launched ${bundleId}`
         };
     } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        let hint = "";
+        if (msg.includes("FBSOpenApplicationErrorDomain")) {
+            hint = "\n\nCommon causes:\n- App is not installed on this simulator (install it first with ios_install_app)\n- Bundle ID is incorrect (check with: xcrun simctl listapps booted)";
+        }
         return {
             success: false,
-            error: `Failed to launch app: ${error instanceof Error ? error.message : String(error)}`
+            error: `Failed to launch app: ${msg}${hint}`
         };
     }
 }
@@ -503,9 +508,14 @@ export async function iosOpenUrl(url: string, udid?: string): Promise<iOSResult>
             result: `Opened URL: ${url}`
         };
     } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        let hint = "";
+        if (msg.includes("LSApplicationWorkspaceError") || msg.includes("OpenApplicationErrorDomain")) {
+            hint = "\n\nCommon causes:\n- Custom URL scheme not registered in the app's Info.plist\n- App that handles this URL scheme is not installed\n- For Expo apps, use the exp:// URL format";
+        }
         return {
             success: false,
-            error: `Failed to open URL: ${error instanceof Error ? error.message : String(error)}`
+            error: `Failed to open URL: ${msg}${hint}`
         };
     }
 }
