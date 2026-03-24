@@ -1399,30 +1399,44 @@ export async function findComponents(
             function search(fiber, path, depth) {
                 if (!fiber || results.length >= maxResults) return;
 
-                const name = getComponentName(fiber);
-                if (name && regex.test(name)) {
-                    const entry = {
-                        component: name,
-                        path: formatPath(path),
-                        depth
-                    };
+                try {
+                    var name = getComponentName(fiber);
+                    if (name && regex.test(name)) {
+                        var entry = {
+                            component: name,
+                            path: formatPath(path),
+                            depth
+                        };
 
-                    if (fiber.memoizedProps?.testID) entry.testID = fiber.memoizedProps.testID;
-                    if (fiber.key) entry.key = fiber.key;
+                        if (fiber.memoizedProps && fiber.memoizedProps.testID) entry.testID = fiber.memoizedProps.testID;
+                        if (fiber.key) entry.key = fiber.key;
 
-                    if (includeLayout && fiber.memoizedProps?.style) {
-                        const layout = extractLayoutStyles(fiber.memoizedProps.style);
-                        if (layout) entry.layout = layout;
+                        if (includeLayout && fiber.memoizedProps && fiber.memoizedProps.style) {
+                            try {
+                                var layout = extractLayoutStyles(fiber.memoizedProps.style);
+                                if (layout) entry.layout = layout;
+                            } catch(e) {}
+                        }
+
+                        results.push(entry);
                     }
 
-                    results.push(entry);
-                }
-
-                let child = fiber.child;
-                while (child && results.length < maxResults) {
-                    const childName = getComponentName(child);
-                    search(child, childName ? [...path, childName] : path, depth + 1);
-                    child = child.sibling;
+                    var child = fiber.child;
+                    while (child && results.length < maxResults) {
+                        var childName = getComponentName(child);
+                        search(child, childName ? path.concat([childName]) : path, depth + 1);
+                        child = child.sibling;
+                    }
+                } catch(e) {
+                    // Skip nodes that throw (e.g. Reanimated animated components)
+                    // Still try to traverse children if possible
+                    try {
+                        var child = fiber.child;
+                        while (child && results.length < maxResults) {
+                            search(child, path, depth + 1);
+                            child = child.sibling;
+                        }
+                    } catch(e2) {}
                 }
             }
 
