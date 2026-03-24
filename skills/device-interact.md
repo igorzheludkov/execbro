@@ -63,6 +63,13 @@ tap(component="MenuIcon")  # case-insensitive substring match
 tap(x=300, y=600)          # auto-converts pixels to points on iOS
 ```
 
+**Native mode (no React Native connection needed):**
+```
+tap(x=300, y=600, native=true)            # taps directly via ADB/simctl
+tap(x=300, y=600, native=true, platform="android")  # explicit platform
+```
+Use `native=true` when tapping system dialogs, non-RN apps, or before establishing a React Native connection. Requires x/y coordinates. Platform is auto-detected if not specified.
+
 **Force a specific strategy:**
 ```
 tap(text="Settings", strategy="ocr")           # skip fiber/accessibility
@@ -157,7 +164,7 @@ After interactions, verify the result:
 
 - Requires the rn-debugger-local MCP server to be running
 - iOS simulator interactions require IDB (`brew install idb-companion`)
-- **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically
+- **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically. Use `native=true` for system UI or non-RN apps
 - On failure, follow the `suggestion` field in the tap response — it tells you exactly what to try next
 - Use `wait_for_element` after navigation to ensure the next screen is ready before interacting
 - For Android, the Back button is available via `android_key_event` with key "BACK"

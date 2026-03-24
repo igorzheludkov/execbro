@@ -110,6 +110,7 @@ Use tap — it tries multiple strategies automatically:
 2. tap(text="Login") — text match via fiber tree, then accessibility, then OCR
 3. tap(component="IconName") — component name match with parent traversal (for icon-only buttons; use find_components to discover names first)
 4. tap(x=..., y=...) — coordinate-based tap from screenshot (last resort)
+5. tap(x=..., y=..., native=true) — taps directly via ADB/simctl without React Native connection (for system dialogs, non-RN apps)
 
 ## Best Practice: Use testID
 Set testID on all interactive elements (buttons, inputs, links) for reliable tapping:

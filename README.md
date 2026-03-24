@@ -271,7 +271,7 @@ toggle_element_inspector()
 
 | Tool             | Description                                                              |
 | ---------------- | ------------------------------------------------------------------------ |
-| `tap`            | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots |
+| `tap`            | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps) |
 | `ocr_screenshot` | Extract all visible text with tap-ready coordinates (works on iOS/Android) |
 
 **Examples:**
@@ -281,6 +281,7 @@ tap with testID="login-btn"               # Finds by testID prop
 tap with component="HamburgerIcon"        # Finds by React component name
 tap with x=300 y=600                      # Taps at pixel coordinates (auto-converts)
 tap with text="Menu" strategy="ocr"       # Forces OCR strategy only
+tap with x=300 y=600 native=true          # Taps directly via ADB/simctl (no RN connection needed)
 ```
 
 ### Android (ADB)
