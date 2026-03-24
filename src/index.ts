@@ -1422,7 +1422,8 @@ registerToolWithTelemetry(
             "- tap(testID=\"login-btn\") — finds by testID\n" +
             "- tap(component=\"HamburgerIcon\") — finds by React component name\n" +
             "- tap(x=300, y=600) — taps at pixel coordinates from screenshot\n" +
-            "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only",
+            "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only\n" +
+            "- tap(x=300, y=600, native=true) — taps directly via ADB/simctl without React Native connection (for native UI, system dialogs)",
         inputSchema: {
             text: z
                 .string()

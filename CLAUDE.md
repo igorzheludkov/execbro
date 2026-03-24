@@ -98,7 +98,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
-- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates.
+- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps).
 - `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
 - `get_inspector_selection`: Identify component at screen coordinates — returns clean hierarchy with file paths (e.g. `HomeScreen > SneakerCard > PulseActionButton`)
 - `inspect_at_point`: Layout debugging at coordinates — returns component props, frame (position/size), and path
@@ -124,8 +124,9 @@ When debugging React Native apps through this MCP server:
     2. `tap(text="Submit")` — matches visible text, tries fiber tree → accessibility → OCR automatically
     3. `tap(component="HamburgerIcon")` — matches by React component name, walks up fiber tree to find nearest pressable parent
     4. `tap(x=300, y=600)` — taps at pixel coordinates from screenshot (auto-converts to points)
-    5. Use `strategy` param to skip strategies you know will fail: `tap(text="≡", strategy="ocr")`
-    6. On failure, follow the `suggestion` field in the response — it tells you exactly what to try next
+    5. `tap(x=300, y=600, native=true)` — taps directly via ADB/simctl without React Native connection (for system dialogs, non-RN apps, or pre-connection UI)
+    6. Use `strategy` param to skip strategies you know will fail: `tap(text="≡", strategy="ocr")`
+    7. On failure, follow the `suggestion` field in the response — it tells you exactly what to try next
 - **Best practice — use testID**: Set `testID` on all interactive elements (buttons, inputs, links). It's more stable than text matching (doesn't break with translations), provides exact matching (no ambiguity), and works for TextInput focusing too.
 - **TextInput fields**: `tap` detects TextInput elements (`onChangeText`/`onFocus`) in the fiber tree and falls through to native tap for actual focus. `tap(testID="email-input")` works even though inputs don't have `onPress`.
 - **Icon-only buttons** (no text label inside the pressable): Use `tap(component="ComponentName")` to match by React component name — automatically walks up to the nearest pressable parent. Use `find_components` first to discover actual component names. Use `maxTraversalDepth` param to increase parent search depth for deeply wrapped components (default: 15).
