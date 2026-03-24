@@ -58,7 +58,7 @@ export async function listAndroidDevices(): Promise<AdbResult> {
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -157,7 +157,7 @@ export async function androidScreenshot(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -252,7 +252,7 @@ export async function androidInstallApp(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -320,7 +320,7 @@ export async function androidLaunchApp(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -380,7 +380,7 @@ export async function androidListPackages(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -474,7 +474,7 @@ export async function androidTap(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -519,7 +519,7 @@ export async function androidLongPress(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -571,7 +571,7 @@ export async function androidSwipe(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -623,7 +623,7 @@ export async function androidInputText(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -748,7 +748,7 @@ export async function androidKeyEvent(
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -964,7 +964,7 @@ export async function androidGetUITree(deviceId?: string): Promise<{
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -1149,7 +1149,7 @@ export async function androidGetScreenSize(deviceId?: string): Promise<{
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -1203,7 +1203,7 @@ export async function androidGetDensity(deviceId?: string): Promise<{
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
@@ -1529,7 +1529,7 @@ export async function androidDescribeAll(deviceId?: string): Promise<AndroidDesc
         if (!adbAvailable) {
             return {
                 success: false,
-                error: "ADB is not installed or not in PATH. Install Android SDK Platform Tools."
+                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
             };
         }
 
