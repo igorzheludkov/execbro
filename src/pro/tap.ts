@@ -2,8 +2,8 @@ import { connectedApps } from "../core/state.js";
 import { inferIOSDevicePixelRatio } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
-import { iosTap, iosFindElement, iosScreenshot } from "../core/ios.js";
-import { androidTap, androidFindElement } from "../core/android.js";
+import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid } from "../core/ios.js";
+import { androidTap, androidFindElement, getDefaultAndroidDevice } from "../core/android.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
 import { connectToDevice, clearReconnectionSuppression } from "../core/connection.js";
 
@@ -28,6 +28,8 @@ export interface TapOptions {
     y?: number;
     strategy?: TapStrategy;
     maxTraversalDepth?: number;
+    native?: boolean;
+    platform?: "ios" | "android";
 }
 
 export interface TapAttempt {
@@ -576,6 +578,46 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             query,
             error: "Both x and y coordinates must be provided",
         };
+    }
+
+    // Native mode: bypass React Native connection, tap directly via ADB/simctl
+    if (options.native && hasCoordinates) {
+        let platform = options.platform as "ios" | "android" | undefined;
+
+        // Auto-detect platform if not specified
+        if (!platform) {
+            const [androidDevice, iosSimulator] = await Promise.all([
+                getDefaultAndroidDevice().catch(() => null),
+                getActiveOrBootedSimulatorUdid().catch(() => null),
+            ]);
+            if (androidDevice) {
+                platform = "android";
+            } else if (iosSimulator) {
+                platform = "ios";
+            } else {
+                return {
+                    success: false,
+                    query,
+                    error: "No Android device or iOS simulator found. Connect a device or start a simulator.",
+                };
+            }
+        }
+
+        const result = await tryCoordinateStrategy(query.x!, query.y!, platform, undefined);
+        if (result.success) {
+            return formatTapSuccess({
+                method: "native-coordinate",
+                query,
+                pressed: result.pressed,
+                convertedTo: result.convertedTo,
+                platform,
+            });
+        }
+        return formatTapFailure({
+            query,
+            attempted: [{ strategy: "native-coordinate", reason: result.reason }],
+            suggestion: `Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) to verify coordinates.`,
+        });
     }
 
     // Get connected app — auto-connect if none

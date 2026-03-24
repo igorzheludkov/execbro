@@ -1472,6 +1472,20 @@ registerToolWithTelemetry(
                     "Max parent levels to traverse when searching by component name (default: 15). " +
                     "Increase if your component is deeply wrapped (e.g. inside multiple HOCs/animation wrappers)."
                 ),
+            native: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe(
+                    "When true, tap coordinates directly via ADB/simctl without requiring a React Native connection. " +
+                    "Useful for interacting with native UI, system dialogs, or non-RN apps. Requires x/y coordinates."
+                ),
+            platform: z
+                .enum(["ios", "android"])
+                .optional()
+                .describe(
+                    "Target platform for native mode. Auto-detected if not specified."
+                ),
         },
     },
     async (args: any) => {
@@ -1484,6 +1498,8 @@ registerToolWithTelemetry(
             y: args.y,
             strategy: args.strategy,
             maxTraversalDepth: args.maxTraversalDepth,
+            native: args.native,
+            platform: args.platform,
         });
 
         const text = JSON.stringify(result, null, 2);
