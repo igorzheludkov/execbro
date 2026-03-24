@@ -161,7 +161,6 @@ export async function androidScreenshot(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -170,6 +169,8 @@ export async function androidScreenshot(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         // Generate output path if not provided
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -263,7 +264,6 @@ export async function androidInstallApp(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -272,6 +272,8 @@ export async function androidInstallApp(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         // Build install flags
         const flags: string[] = [];
@@ -322,7 +324,6 @@ export async function androidLaunchApp(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -331,6 +332,8 @@ export async function androidLaunchApp(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         let command: string;
 
@@ -381,7 +384,6 @@ export async function androidListPackages(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -390,6 +392,8 @@ export async function androidListPackages(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         const { stdout } = await execAsync(`adb ${deviceArg} shell pm list packages`, {
             timeout: ADB_TIMEOUT
@@ -474,7 +478,6 @@ export async function androidTap(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -483,6 +486,8 @@ export async function androidTap(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         await execAsync(`adb ${deviceArg} shell input tap ${Math.round(x)} ${Math.round(y)}`, {
             timeout: ADB_TIMEOUT
@@ -518,7 +523,6 @@ export async function androidLongPress(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -527,6 +531,8 @@ export async function androidLongPress(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         // Long press is implemented as a swipe from the same point to the same point
         const xRounded = Math.round(x);
@@ -569,7 +575,6 @@ export async function androidSwipe(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -578,6 +583,8 @@ export async function androidSwipe(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         const x1 = Math.round(startX);
         const y1 = Math.round(startY);
@@ -620,7 +627,6 @@ export async function androidInputText(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -629,6 +635,8 @@ export async function androidInputText(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         // For complex strings with special characters, type character by character
         // using key events for reliability
@@ -739,7 +747,6 @@ export async function androidKeyEvent(
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -748,6 +755,8 @@ export async function androidKeyEvent(
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         // Resolve key code from name if needed
         const resolvedKeyCode =
@@ -954,7 +963,6 @@ export async function androidGetUITree(deviceId?: string): Promise<{
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -963,6 +971,8 @@ export async function androidGetUITree(deviceId?: string): Promise<{
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         // Dump UI hierarchy to device
         const remotePath = "/sdcard/ui_dump.xml";
@@ -1138,7 +1148,6 @@ export async function androidGetScreenSize(deviceId?: string): Promise<{
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -1147,6 +1156,8 @@ export async function androidGetScreenSize(deviceId?: string): Promise<{
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         const { stdout } = await execAsync(`adb ${deviceArg} shell wm size`, {
             timeout: ADB_TIMEOUT
@@ -1191,7 +1202,6 @@ export async function androidGetDensity(deviceId?: string): Promise<{
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -1200,6 +1210,8 @@ export async function androidGetDensity(deviceId?: string): Promise<{
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         const { stdout } = await execAsync(`adb ${deviceArg} shell wm density`, {
             timeout: ADB_TIMEOUT
@@ -1516,7 +1528,6 @@ export async function androidDescribeAll(deviceId?: string): Promise<AndroidDesc
             };
         }
 
-        const deviceArg = buildDeviceArg(deviceId);
         const device = deviceId || (await getDefaultAndroidDevice());
 
         if (!device) {
@@ -1525,6 +1536,8 @@ export async function androidDescribeAll(deviceId?: string): Promise<AndroidDesc
                 error: "No Android device connected. Connect a device or start an emulator."
             };
         }
+
+        const deviceArg = buildDeviceArg(device);
 
         // Use file-based approach (most reliable across devices)
         // /dev/tty doesn't work on most emulators/devices
