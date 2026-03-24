@@ -105,6 +105,18 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         };
     }
 
+    // Check for require() calls that don't work in Hermes Runtime.evaluate
+    if (/\brequire\s*\(/.test(trimmed)) {
+        return {
+            valid: false,
+            expression: cleaned,
+            error:
+                "require() is not available in Hermes Runtime.evaluate. " +
+                "Modules cannot be imported at runtime. Only pre-existing global variables are accessible. " +
+                "Use list_debug_globals to discover available globals, or add `globalThis.__MY_VAR__ = myModule;` in your app code."
+        };
+    }
+
     return {
         valid: true,
         expression: cleaned
