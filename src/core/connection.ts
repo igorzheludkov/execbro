@@ -1160,8 +1160,9 @@ export async function ensureConnection(options: {
         uptime = formatDuration(uptimeMs);
     }
 
+    const isConnected = app !== null && app.ws.readyState === WebSocket.OPEN;
     return {
-        connected: app !== null && app.ws.readyState === WebSocket.OPEN,
+        connected: isConnected,
         wasReconnected,
         healthCheckPassed,
         connectionInfo: app ? {
@@ -1170,6 +1171,11 @@ export async function ensureConnection(options: {
             uptime,
             contextId: contextHealth?.contextId ?? null,
         } : null,
+        ...(!isConnected && {
+            error: app
+                ? `Connection lost: WebSocket is in ${["CONNECTING", "OPEN", "CLOSING", "CLOSED"][app.ws.readyState] || "unknown"} state (expected OPEN). Health check ${healthCheckPassed ? "passed" : "failed"}. Try ensure_connection with forceRefresh=true.`
+                : "App became unavailable after reconnection attempt. Try running scan_metro then ensure_connection."
+        }),
     };
 }
 
