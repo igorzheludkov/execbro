@@ -602,7 +602,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return {
             success: false,
             query,
-            error: "No connected app. Auto-connect failed — no Metro servers found. Run scan_metro manually.",
+            error: "No connected app. Auto-connect failed — no Metro servers found.\n\nTo fix:\n1. Make sure your React Native app is running (check Metro bundler terminal)\n2. Run scan_metro to discover available Metro servers\n3. Run ensure_connection to connect to the app\n4. Then retry the tap command",
         };
     }
 
