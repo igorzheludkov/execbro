@@ -690,6 +690,11 @@ export async function androidInputText(
                     case "`":
                         keyCmd = `adb ${deviceArg} shell input text "\\\`"`;
                         break;
+                    case "#":
+                        // # is a shell comment character — single quotes don't prevent interpretation
+                        // on some Android shell versions, so use backslash escaping in double quotes
+                        keyCmd = `adb ${deviceArg} shell input text "\\#"`;
+                        break;
                     default:
                         // For most characters, wrap in single quotes to prevent shell interpretation
                         // Single quotes preserve literal meaning of all characters except single quote itself
