@@ -590,6 +590,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 getDefaultAndroidDevice().catch(() => null),
                 getActiveOrBootedSimulatorUdid().catch(() => null),
             ]);
+            if (androidDevice && iosSimulator) {
+                return {
+                    success: false,
+                    query,
+                    error: "Multiple platforms detected (both Android and iOS). Specify platform: \"android\" or platform: \"ios\" to target the correct device.",
+                };
+            }
             if (androidDevice) {
                 platform = "android";
             } else if (iosSimulator) {

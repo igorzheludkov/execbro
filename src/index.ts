@@ -1416,14 +1416,15 @@ registerToolWithTelemetry(
     {
         description:
             "Tap a UI element. Automatically tries multiple strategies: fiber tree (React), accessibility tree (native), and OCR (visual). " +
-            "Auto-detects platform (iOS/Android). For coordinates, accepts pixels from screenshot and converts internally.\n\n" +
+            "Auto-detects platform (iOS/Android). For coordinates, pass raw pixel values from screenshot — tap handles all coordinate conversion internally (iOS pixel-to-point, scale factor adjustments).\n\n" +
+            "IMPORTANT: When both iOS and Android devices are connected, specify platform explicitly to avoid tapping on the wrong device.\n\n" +
             "Examples:\n" +
             "- tap(text=\"Submit\") — finds and taps element with matching text\n" +
             "- tap(testID=\"login-btn\") — finds by testID\n" +
             "- tap(component=\"HamburgerIcon\") — finds by React component name\n" +
-            "- tap(x=300, y=600) — taps at pixel coordinates from screenshot\n" +
+            "- tap(x=300, y=600) — taps at pixel coordinates from screenshot (conversion handled internally)\n" +
             "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only\n" +
-            "- tap(x=300, y=600, native=true) — taps directly via ADB/simctl without React Native connection (for native UI, system dialogs)",
+            "- tap(x=300, y=600, native=true, platform=\"android\") — taps directly via ADB/simctl without React Native connection",
         inputSchema: {
             text: z
                 .string()
@@ -1485,7 +1486,7 @@ registerToolWithTelemetry(
                 .enum(["ios", "android"])
                 .optional()
                 .describe(
-                    "Target platform for native mode. Auto-detected if not specified."
+                    "Target platform. Required when both iOS and Android devices are connected. Auto-detected if only one platform is available."
                 ),
         },
     },
@@ -2463,17 +2464,22 @@ registerToolWithTelemetry(
                 // Use defaults
             }
 
-            infoText += `\n📱 Android uses PIXELS for tap coordinates (same as screenshot)`;
+            infoText += `\n📱 Android uses PIXELS for all coordinates`;
 
             if (result.scaleFactor && result.scaleFactor > 1) {
-                infoText += `\n⚠️ Image was scaled down to fit API limits. Scale factor: ${result.scaleFactor.toFixed(3)}`;
-                infoText += `\n📐 To convert image coords to tap coords: multiply by ${result.scaleFactor.toFixed(3)}`;
+                infoText += `\n🖼️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
+                infoText += `\n📐 tap() handles coordinate conversion automatically — pass pixel coords from this image directly`;
             } else {
                 infoText += `\n📐 Screenshot coords = tap coords (no conversion needed)`;
             }
 
             infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
             infoText += `\n📊 Display density: ${densityDpi}dpi`;
+            infoText += `\n\n💡 Next steps:`;
+            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+            infoText += `\n  • android_describe_all — get full UI tree with exact tap coordinates`;
+            infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
 
             return {
                 content: [
@@ -3119,15 +3125,17 @@ registerToolWithTelemetry(
             const safeAreaOffsetPixels = safeAreaTop * scaleFactor;
 
             let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
-            infoText += `\n📱 iOS tap coordinates use POINTS: ${pointWidth}x${pointHeight}`;
-            infoText += `\n📐 To convert screenshot coords to tap points:`;
-            infoText += `\n   tap_x = pixel_x / ${scaleFactor}`;
-            infoText += `\n   tap_y = pixel_y / ${scaleFactor}`;
+            infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
+            infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
             infoText += `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
             if (result.scaleFactor && result.scaleFactor > 1) {
                 infoText += `\n🖼️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
             }
-            infoText += `\n💡 Use ios_describe_all to get exact element coordinates`;
+            infoText += `\n\n💡 Next steps:`;
+            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+            infoText += `\n  • ios_describe_all — get full UI tree with exact tap coordinates`;
+            infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
 
             return {
                 content: [
