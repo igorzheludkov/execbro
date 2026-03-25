@@ -5,6 +5,7 @@ import { mapConsoleType } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
+import { scheduleAppDetection } from "./appDetection.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -761,6 +762,9 @@ export async function connectToDevice(
                         console.error(`[rn-ai-debugger] Linked to iOS simulator: ${simulatorUdid}`);
                     }
                 }
+
+                // Fire-and-forget app detection (500ms delayed, non-blocking)
+                scheduleAppDetection(connectedApps.get(appKey)!);
 
                 resolve(`Connected to ${device.title} (${device.deviceName})`);
             });
