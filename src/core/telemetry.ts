@@ -358,6 +358,40 @@ function trackLicenseCheck(source: string, tier: string, durationMs: number): vo
     }
 }
 
+/**
+ * Records app detection result as an app_detected event.
+ * Called from appDetection.ts after successful detection.
+ */
+export function trackAppDetection(detection: {
+    reactNativeVersion: string;
+    architecture: string;
+    jsEngine: string;
+    appPlatform: string;
+    osVersion: string;
+}): void {
+    if (!telemetryEnabled) return;
+
+    const event: TelemetryEvent = {
+        name: "app_detected",
+        timestamp: Date.now(),
+        isFirstRun: isFirstRun(),
+        errorContext: JSON.stringify({
+            rn: detection.reactNativeVersion,
+            arch: detection.architecture,
+            eng: detection.jsEngine,
+            plat: detection.appPlatform,
+            os: detection.osVersion,
+        }),
+        targetPlatform: detection.appPlatform,
+    };
+
+    eventQueue.push(event);
+
+    if (eventQueue.length >= BATCH_SIZE) {
+        flush();
+    }
+}
+
 // ============================================================================
 // Batch Sending
 // ============================================================================
