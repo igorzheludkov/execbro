@@ -31,6 +31,15 @@ export interface ConnectedApp {
         scaleFactor: number;
     };
     cdpNetworkSupported?: boolean;
+    appDetection?: AppDetectionResult;
+}
+
+export interface AppDetectionResult {
+    reactNativeVersion: string;
+    architecture: "new" | "old";
+    jsEngine: "hermes" | "jsc";
+    appPlatform: "ios" | "android";
+    osVersion: string;
 }
 
 // CDP RemoteObject type (result of Runtime.evaluate)
