@@ -12,8 +12,15 @@ import { isSDKInstalled, readSDKNetworkRequests, readSDKNetworkRequest, readSDKN
 import { tap, type TapResult } from "./pro/tap.js";
 
 import {
-    logBuffer,
-    networkBuffer,
+    logBuffers,
+    networkBuffers,
+    getLogBuffer,
+    getNetworkBuffer,
+    getAllLogs,
+    getTotalLogCount,
+    getConnectedAppByDevice,
+    LogBuffer,
+    NetworkBuffer,
     bundleErrorBuffer,
     connectedApps,
     getActiveSimulatorUdid,
@@ -126,6 +133,42 @@ import {
     formatLogsAsTonl,
     formatNetworkAsTonl
 } from "./core/index.js";
+
+// Helper: resolve log buffer for a device (or create a merged buffer from all devices)
+function resolveLogBuffer(device?: string): LogBuffer {
+    if (device) {
+        const app = getConnectedAppByDevice(device);
+        if (!app) throw new Error(`No connected device matches "${device}"`);
+        const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+        return getLogBuffer(deviceName);
+    }
+    // Merge all logs into a temporary buffer for read operations
+    const merged = new LogBuffer(5000);
+    for (const buffer of logBuffers.values()) {
+        for (const entry of buffer.getAll()) {
+            merged.add(entry);
+        }
+    }
+    return merged;
+}
+
+// Helper: resolve network buffer for a device (or create a merged buffer from all devices)
+function resolveNetworkBuffer(device?: string): NetworkBuffer {
+    if (device) {
+        const app = getConnectedAppByDevice(device);
+        if (!app) throw new Error(`No connected device matches "${device}"`);
+        const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+        return getNetworkBuffer(deviceName);
+    }
+    // Merge all network requests into a temporary buffer for read operations
+    const merged = new NetworkBuffer(5000);
+    for (const buffer of networkBuffers.values()) {
+        for (const req of buffer.getAll({})) {
+            merged.set(`${Math.random()}`, req);
+        }
+    }
+    return merged;
+}
 
 // Create MCP server
 const server = new McpServer(
@@ -395,37 +438,38 @@ registerToolWithTelemetry(
         inputSchema: {}
     },
     async () => {
-        const connections = getConnectedApps();
+        const apps = getConnectedApps();
 
-        if (connections.length === 0) {
+        if (apps.length === 0) {
             return {
                 content: [
                     {
                         type: "text",
-                        text: 'No apps connected. Run "scan_metro" first to discover and connect to running apps.'
+                        text: "No connected devices. Run scan_metro to discover and connect to Metro servers."
                     }
                 ]
             };
         }
 
-        const status = connections.map(({ app, isConnected }) => {
-            const state = isConnected ? "Connected" : "Disconnected";
-            return `${app.deviceInfo.title} (${app.deviceInfo.deviceName}): ${state}`;
-        });
+        const deviceLines = apps
+            .filter(({ isConnected }) => isConnected)
+            .map(({ app }, i) => {
+                const name = app.deviceInfo.deviceName || app.deviceInfo.title;
+                const appId = app.deviceInfo.appId || app.deviceInfo.title.split(" (")[0] || "unknown";
+                return `  ${i + 1}. ${name} — ${appId} (${app.platform}, port ${app.port})`;
+            });
 
-        // Include active iOS simulator info if available
-        const activeSimulatorUdid = getActiveSimulatorUdid();
-        const simulatorInfo = activeSimulatorUdid
-            ? `\nActive iOS Simulator (auto-scoped): ${activeSimulatorUdid}`
-            : "\nNo iOS simulator linked (iOS tools will use first booted simulator)";
+        const text = [
+            `Connected devices:`,
+            ...deviceLines,
+            ``,
+            `Use device="${apps[0].app.deviceInfo.deviceName}" to target a specific device.`,
+            ``,
+            `Total logs in buffer: ${getTotalLogCount()}`
+        ].join("\n");
 
         return {
-            content: [
-                {
-                    type: "text",
-                    text: `Connected apps:\n${status.join("\n")}${simulatorInfo}\n\nTotal logs in buffer: ${logBuffer.size}`
-                }
-            ]
+            content: [{ type: "text", text }]
         };
     }
 );
@@ -672,15 +716,16 @@ registerToolWithTelemetry(
                 .default(false)
                 .describe(
                     "Return summary statistics instead of full logs (count by level + last 5 messages). Use for quick overview."
-                )
+                ),
+            device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
         }
     },
-    async ({ maxLogs, level, startFromText, maxMessageLength, verbose, format, summary }) => {
+    async ({ maxLogs, level, startFromText, maxMessageLength, verbose, format, summary, device }) => {
         // Return summary if requested
         if (summary) {
-            const summaryText = getLogSummary(logBuffer, { lastN: 5, maxMessageLength: 100 });
+            const summaryText = getLogSummary(resolveLogBuffer(device), { lastN: 5, maxMessageLength: 100 });
             let connectionWarning = "";
-            if (logBuffer.size === 0) {
+            if (getTotalLogCount() === 0) {
                 const status = await checkAndEnsureConnection();
                 connectionWarning = status.message ? `\n\n${status.message}` : "";
             }
@@ -694,7 +739,7 @@ registerToolWithTelemetry(
             };
         }
 
-        const { logs, count, formatted } = getLogs(logBuffer, {
+        const { logs, count, formatted } = getLogs(resolveLogBuffer(device), {
             maxLogs,
             level,
             startFromText,
@@ -756,7 +801,7 @@ registerToolWithTelemetry(
         };
     },
     // Empty result detector: buffer has no entries at all
-    () => logBuffer.size === 0
+    () => getTotalLogCount() === 0
 );
 
 // Tool: Search logs
@@ -781,11 +826,12 @@ registerToolWithTelemetry(
                 .enum(["text", "tonl"])
                 .optional()
                 .default("tonl")
-                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)"),
+            device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
         }
     },
-    async ({ text, maxResults, maxMessageLength, verbose, format }) => {
-        const { logs, count, formatted } = searchLogs(logBuffer, text, { maxResults, maxMessageLength, verbose });
+    async ({ text, maxResults, maxMessageLength, verbose, format, device }) => {
+        const { logs, count, formatted } = searchLogs(resolveLogBuffer(device), text, { maxResults, maxMessageLength, verbose });
 
         // Check connection health
         let connectionWarning = "";
@@ -828,19 +874,24 @@ registerToolWithTelemetry(
     "clear_logs",
     {
         description: "Clear the log buffer",
-        inputSchema: {}
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit to clear all devices. Run get_apps to see connected devices.")
+        }
     },
-    async () => {
-        const count = logBuffer.clear();
-
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: `Cleared ${count} log entries from buffer.`
-                }
-            ]
-        };
+    async ({ device }) => {
+        if (device) {
+            const app = getConnectedAppByDevice(device);
+            if (!app) throw new Error(`No connected device matches "${device}"`);
+            const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+            const count = getLogBuffer(deviceName).clear();
+            return { content: [{ type: "text", text: `Cleared ${count} log entries from ${deviceName}.` }] };
+        }
+        // Clear all
+        let total = 0;
+        for (const buffer of logBuffers.values()) {
+            total += buffer.clear();
+        }
+        return { content: [{ type: "text", text: `Cleared ${total} log entries from all devices.` }] };
     }
 );
 
@@ -1785,10 +1836,11 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Return statistics only (count, methods, domains, status codes). Use for quick overview.")
+                .describe("Return statistics only (count, methods, domains, status codes). Use for quick overview."),
+            device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
         }
     },
-    async ({ maxRequests, method, urlPattern, status, format, summary }) => {
+    async ({ maxRequests, method, urlPattern, status, format, summary, device }) => {
         // Check if SDK is installed — prefer SDK data over CDP/interceptor buffer
         const sdkAvailable = await isSDKInstalled();
 
@@ -1837,9 +1889,9 @@ registerToolWithTelemetry(
         // Fallback: read from in-process buffer (CDP/interceptor)
         // Return summary if requested
         if (summary) {
-            const stats = getNetworkStats(networkBuffer);
+            const stats = getNetworkStats(resolveNetworkBuffer(device));
             let connectionWarning = "";
-            if (networkBuffer.size === 0) {
+            if (resolveNetworkBuffer(device).size === 0) {
                 const connStatus = await checkAndEnsureConnection();
                 connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
                 if (!sdkAvailable) {
@@ -1856,7 +1908,7 @@ registerToolWithTelemetry(
             };
         }
 
-        const { requests, count, formatted } = getNetworkRequests(networkBuffer, {
+        const { requests, count, formatted } = getNetworkRequests(resolveNetworkBuffer(device), {
             maxRequests,
             method,
             urlPattern,
@@ -1918,7 +1970,7 @@ registerToolWithTelemetry(
         };
     },
     // Empty result detector: buffer has no entries at all
-    () => networkBuffer.size === 0
+    () => { let total = 0; for (const b of networkBuffers.values()) total += b.size; return total === 0; }
 );
 
 // Tool: Search network requests
@@ -1933,11 +1985,12 @@ registerToolWithTelemetry(
                 .enum(["text", "tonl"])
                 .optional()
                 .default("tonl")
-                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)")
+                .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)"),
+            device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
         }
     },
-    async ({ urlPattern, maxResults, format }) => {
-        const { requests, count, formatted } = searchNetworkRequests(networkBuffer, urlPattern, maxResults);
+    async ({ urlPattern, maxResults, format, device }) => {
+        const { requests, count, formatted } = searchNetworkRequests(resolveNetworkBuffer(device), urlPattern, maxResults);
 
         // Check connection health
         let connectionWarning = "";
@@ -1994,10 +2047,11 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Disable body truncation. Tip: Use when you need to inspect full JSON payloads.")
+                .describe("Disable body truncation. Tip: Use when you need to inspect full JSON payloads."),
+            device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
         }
     },
-    async ({ requestId, maxBodyLength, verbose }) => {
+    async ({ requestId, maxBodyLength, verbose, device }) => {
         // Check SDK first — it has full headers and body
         const sdkAvailable = await isSDKInstalled();
         if (sdkAvailable) {
@@ -2041,7 +2095,7 @@ registerToolWithTelemetry(
         }
 
         // Fallback: read from in-process buffer
-        const request = networkBuffer.get(requestId);
+        const request = resolveNetworkBuffer(device).get(requestId);
 
         if (!request) {
             const status = await checkAndEnsureConnection();
@@ -2073,14 +2127,16 @@ registerToolWithTelemetry(
     "get_network_stats",
     {
         description: "Get statistics about captured network requests: counts by method, status code, and domain.",
-        inputSchema: {}
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+        }
     },
-    async () => {
-        const stats = getNetworkStats(networkBuffer);
+    async ({ device }) => {
+        const stats = getNetworkStats(resolveNetworkBuffer(device));
 
         // Check connection health
         let connectionWarning = "";
-        if (networkBuffer.size === 0) {
+        if (resolveNetworkBuffer(device).size === 0) {
             const status = await checkAndEnsureConnection();
             connectionWarning = status.message ? `\n\n${status.message}` : "";
         } else {
@@ -2100,7 +2156,7 @@ registerToolWithTelemetry(
         };
     },
     // Empty result detector: buffer has no entries at all
-    () => networkBuffer.size === 0
+    () => { let total = 0; for (const b of networkBuffers.values()) total += b.size; return total === 0; }
 );
 
 // Tool: Clear network requests
@@ -2108,10 +2164,22 @@ registerToolWithTelemetry(
     "clear_network",
     {
         description: "Clear the network request buffer",
-        inputSchema: {}
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit to clear all devices. Run get_apps to see connected devices.")
+        }
     },
-    async () => {
-        let totalCleared = networkBuffer.clear();
+    async ({ device }) => {
+        let totalCleared = 0;
+        if (device) {
+            const app = getConnectedAppByDevice(device);
+            if (!app) throw new Error(`No connected device matches "${device}"`);
+            const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+            totalCleared = getNetworkBuffer(deviceName).clear();
+        } else {
+            for (const buffer of networkBuffers.values()) {
+                totalCleared += buffer.clear();
+            }
+        }
 
         // Also clear SDK buffer if available
         const sdkAvailable = await isSDKInstalled();
