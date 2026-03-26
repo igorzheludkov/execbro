@@ -45,7 +45,7 @@ A SessionStart hook can auto-launch the dev server (in `~/.claude/settings.json`
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "cd /path/to/react-native-ai-debugger && (lsof -ti:8600 > /dev/null 2>&1 || npm run dev:mcp > /tmp/rn-debugger-dev.log 2>&1 &)"
+        "command": "cd /path/to/react-native-ai-devtools && (lsof -ti:8600 > /dev/null 2>&1 || npm run dev:mcp > /tmp/rn-debugger-dev.log 2>&1 &)"
       }]
     }]
   }
