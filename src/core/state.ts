@@ -1,13 +1,54 @@
-import { ConnectedApp, PendingExecution } from "./types.js";
+import { ConnectedApp, PendingExecution, LogEntry } from "./types.js";
 import { LogBuffer } from "./logs.js";
 import { NetworkBuffer } from "./network.js";
 import { BundleErrorBuffer, initBundleErrorBuffer } from "./bundle.js";
 
-// Global log buffer
-export const logBuffer = new LogBuffer(500);
+// Per-device log buffers (keyed by deviceName)
+export const logBuffers = new Map<string, LogBuffer>();
+export const networkBuffers = new Map<string, NetworkBuffer>();
 
-// Global network buffer
-export const networkBuffer = new NetworkBuffer(200);
+// Helper: get or create a log buffer for a device
+export function getLogBuffer(deviceName: string): LogBuffer {
+    let buffer = logBuffers.get(deviceName);
+    if (!buffer) {
+        buffer = new LogBuffer(500);
+        logBuffers.set(deviceName, buffer);
+    }
+    return buffer;
+}
+
+// Helper: get or create a network buffer for a device
+export function getNetworkBuffer(deviceName: string): NetworkBuffer {
+    let buffer = networkBuffers.get(deviceName);
+    if (!buffer) {
+        buffer = new NetworkBuffer(200);
+        networkBuffers.set(deviceName, buffer);
+    }
+    return buffer;
+}
+
+// Helper: get merged logs from all devices
+export function getAllLogs(count?: number, level?: string): LogEntry[] {
+    const allEntries: LogEntry[] = [];
+    for (const buffer of logBuffers.values()) {
+        allEntries.push(...buffer.getAll());
+    }
+    allEntries.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    if (level) {
+        const filtered = allEntries.filter(e => e.level === level);
+        return count ? filtered.slice(-count) : filtered;
+    }
+    return count ? allEntries.slice(-count) : allEntries;
+}
+
+// Helper: total log count across all devices
+export function getTotalLogCount(): number {
+    let total = 0;
+    for (const buffer of logBuffers.values()) {
+        total += buffer.size;
+    }
+    return total;
+}
 
 // Global bundle error buffer
 export const bundleErrorBuffer = new BundleErrorBuffer(100);

@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
-import { connectedApps, pendingExecutions, getNextMessageId, logBuffer, networkBuffer, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime } from "./state.js";
+import { connectedApps, pendingExecutions, getNextMessageId, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
@@ -379,9 +379,10 @@ async function resolveConsoleArgs(ws: WebSocket, args: CDPConsoleArg[]): Promise
 }
 
 // Handle CDP messages
-export function handleCDPMessage(message: Record<string, unknown>, _device: DeviceInfo, ws?: WebSocket): void {
+export function handleCDPMessage(message: Record<string, unknown>, device: DeviceInfo, ws?: WebSocket): void {
     // Track last CDP activity for connection liveness detection
     updateLastCDPMessageTime(new Date());
+    const deviceName = device.deviceName || device.title || "unknown";
 
     // Handle responses to our requests (e.g., Runtime.evaluate)
     if (typeof message.id === "number") {
@@ -428,7 +429,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
         // Track Network.enable responses to detect CDP network support
         if (pendingNetworkEnableIds.has(message.id as number)) {
             pendingNetworkEnableIds.delete(message.id as number);
-            const nAppKey = findAppKeyForDevice(_device);
+            const nAppKey = findAppKeyForDevice(device);
             if (nAppKey) {
                 const app = connectedApps.get(nAppKey);
                 if (app) {
@@ -462,10 +463,10 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
         // Check for network interceptor events before processing as logs
         const interceptorJson = isInterceptorEvent(args);
         if (interceptorJson !== null) {
-            const iAppKey = findAppKeyForDevice(_device);
+            const iAppKey = findAppKeyForDevice(device);
             const iApp = iAppKey ? connectedApps.get(iAppKey) : null;
             if (!iApp?.cdpNetworkSupported) {
-                applyInterceptedEvent(interceptorJson, networkBuffer);
+                applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName));
             }
             return;
         }
@@ -477,7 +478,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             // Resolve object args asynchronously via CDP
             resolveConsoleArgs(ws, args).then((messageText) => {
                 if (messageText.trim()) {
-                    logBuffer.add({
+                    getLogBuffer(deviceName).add({
                         timestamp: new Date(),
                         level,
                         message: messageText,
@@ -488,7 +489,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
                 // Fallback to sync formatting on error
                 const messageText = args.map(formatConsoleArg).join(" ");
                 if (messageText.trim()) {
-                    logBuffer.add({
+                    getLogBuffer(deviceName).add({
                         timestamp: new Date(),
                         level,
                         message: messageText,
@@ -499,7 +500,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
         } else {
             const messageText = args.map(formatConsoleArg).join(" ");
             if (messageText.trim()) {
-                logBuffer.add({
+                getLogBuffer(deviceName).add({
                     timestamp: new Date(),
                     level,
                     message: messageText,
@@ -521,7 +522,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
 
         if (params.entry) {
             const level = mapConsoleType(params.entry.level || "log");
-            logBuffer.add({
+            getLogBuffer(deviceName).add({
                 timestamp: new Date(),
                 level,
                 message: params.entry.text || ""
@@ -555,7 +556,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             completed: false
         };
 
-        networkBuffer.set(params.requestId, request);
+        getNetworkBuffer(deviceName).set(params.requestId, request);
     }
 
     // Handle Network.responseReceived
@@ -572,7 +573,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             timestamp?: number;
         };
 
-        const existing = networkBuffer.get(params.requestId);
+        const existing = getNetworkBuffer(deviceName).get(params.requestId);
         if (existing) {
             existing.status = params.response.status;
             existing.statusText = params.response.statusText;
@@ -583,7 +584,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
                 existing.timing.responseTime = params.timestamp;
             }
 
-            networkBuffer.set(params.requestId, existing);
+            getNetworkBuffer(deviceName).set(params.requestId, existing);
         }
     }
 
@@ -595,7 +596,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             encodedDataLength?: number;
         };
 
-        const existing = networkBuffer.get(params.requestId);
+        const existing = getNetworkBuffer(deviceName).get(params.requestId);
         if (existing) {
             existing.completed = true;
             existing.contentLength = params.encodedDataLength;
@@ -604,7 +605,7 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
                 existing.timing.duration = Math.round((params.timestamp - existing.timing.requestTime) * 1000);
             }
 
-            networkBuffer.set(params.requestId, existing);
+            getNetworkBuffer(deviceName).set(params.requestId, existing);
         }
     }
 
@@ -616,17 +617,17 @@ export function handleCDPMessage(message: Record<string, unknown>, _device: Devi
             canceled?: boolean;
         };
 
-        const existing = networkBuffer.get(params.requestId);
+        const existing = getNetworkBuffer(deviceName).get(params.requestId);
         if (existing) {
             existing.completed = true;
             existing.error = params.canceled ? "Canceled" : (params.errorText || "Request failed");
 
-            networkBuffer.set(params.requestId, existing);
+            getNetworkBuffer(deviceName).set(params.requestId, existing);
         }
     }
 
     // Handle Runtime context lifecycle events for health tracking
-    const appKey = findAppKeyForDevice(_device);
+    const appKey = findAppKeyForDevice(device);
     if (appKey) {
         // Handle Runtime.executionContextCreated
         if (method === "Runtime.executionContextCreated") {
@@ -785,6 +786,11 @@ export async function connectToDevice(
                 connectedApps.delete(appKey);
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
+
+                // Clean up per-device buffers
+                const closedDeviceName = device.deviceName || device.title || "unknown";
+                logBuffers.delete(closedDeviceName);
+                networkBuffers.delete(closedDeviceName);
 
                 // Check if connection was stable before resetting attempts
                 const state = getConnectionState(appKey);
