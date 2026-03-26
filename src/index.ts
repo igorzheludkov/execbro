@@ -11,6 +11,7 @@ import { getLicenseStatus, getDashboardUrl } from "./core/license.js";
 import { isSDKInstalled, readSDKNetworkRequests, readSDKNetworkRequest, readSDKNetworkStats, clearSDKNetwork } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 
+import type { DeviceInfo } from "./core/index.js";
 import {
     logBuffers,
     networkBuffers,
@@ -58,8 +59,10 @@ import {
     formatDuration,
     ConnectionGap,
     cancelAllReconnectionTimers,
+    cancelReconnectionTimer,
     clearAllConnectionState,
     suppressReconnection,
+    suppressReconnectionForKey,
     clearReconnectionSuppression,
     // Context health tracking
     getContextHealth,
@@ -383,29 +386,76 @@ registerToolWithTelemetry(
             };
         }
 
-        // Fetch devices from each port and connect
-        const results: string[] = [];
+        // Phase 1: Fetch devices from all ports first
+        const portDevices = new Map<number, DeviceInfo[]>();
         for (const port of openPorts) {
             const devices = await fetchDevices(port);
-            if (devices.length === 0) {
-                results.push(`Port ${port}: No devices found`);
-                continue;
+            const bridgeless = filterBridgelessDevices(devices);
+            if (bridgeless.length > 0) {
+                portDevices.set(port, bridgeless);
             }
+        }
 
-            const bridgelessDevices = filterBridgelessDevices(devices);
-            if (bridgelessDevices.length === 0) {
+        // Phase 2: Assign each device to the best port
+        // If a device appears on multiple ports, prefer the port where it has
+        // the fewest OTHER unique devices (i.e. its dedicated Metro server)
+        const devicePortAssignment = new Map<string, number>(); // deviceName -> best port
+        const allDeviceNames = new Map<string, { device: DeviceInfo; ports: number[] }>();
+
+        for (const [port, devices] of portDevices) {
+            for (const device of devices) {
+                const name = device.deviceName || device.title;
+                const entry = allDeviceNames.get(name);
+                if (entry) {
+                    entry.ports.push(port);
+                } else {
+                    allDeviceNames.set(name, { device, ports: [port] });
+                }
+            }
+        }
+
+        for (const [name, { ports }] of allDeviceNames) {
+            if (ports.length === 1) {
+                devicePortAssignment.set(name, ports[0]);
+            } else {
+                // Prefer the port with fewer OTHER unique devices (the dedicated Metro)
+                let bestPort = ports[0];
+                let fewestOthers = Infinity;
+                for (const port of ports) {
+                    const othersOnPort = (portDevices.get(port) || [])
+                        .filter(d => (d.deviceName || d.title) !== name).length;
+                    if (othersOnPort < fewestOthers) {
+                        fewestOthers = othersOnPort;
+                        bestPort = port;
+                    }
+                }
+                devicePortAssignment.set(name, bestPort);
+            }
+        }
+
+        // Phase 3: Connect devices to their assigned ports
+        const results: string[] = [];
+        for (const port of openPorts) {
+            const devices = portDevices.get(port);
+            if (!devices) {
                 results.push(`Port ${port}: No debuggable devices found`);
                 continue;
             }
 
-            results.push(`Port ${port}: Found ${bridgelessDevices.length} device(s)`);
+            results.push(`Port ${port}: Found ${devices.length} device(s)`);
 
-            for (const device of bridgelessDevices) {
+            for (const device of devices) {
+                const name = device.deviceName || device.title;
+                const assignedPort = devicePortAssignment.get(name);
+                if (assignedPort !== port) {
+                    results.push(`  - ${name}: Skipped (assigned to port ${assignedPort})`);
+                    continue;
+                }
                 try {
                     const connectionResult = await connectToDevice(device, port);
                     results.push(`  - ${connectionResult}`);
                 } catch (error) {
-                    results.push(`  - ${device.deviceName || device.title}: Failed - ${error}`);
+                    results.push(`  - ${name}: Failed - ${error}`);
                 }
             }
 
@@ -964,10 +1014,12 @@ registerToolWithTelemetry(
     "disconnect_metro",
     {
         description:
-            "Disconnect from all Metro servers and stop auto-reconnection. Use this when you want to switch to the built-in React Native debugger (which requires the CDP slot to be free). Log and network buffers are preserved. Reconnect later with scan_metro.",
-        inputSchema: {}
+            "Disconnect from Metro servers and stop auto-reconnection. Without device param: disconnects ALL devices. With device param: disconnects only the matching device. Use this to remove stale connections or free the CDP slot for the built-in debugger. Log and network buffers are preserved. Reconnect later with scan_metro.",
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match) to disconnect. Omit to disconnect all devices. Run get_apps to see connected devices.")
+        }
     },
-    async () => {
+    async ({ device }) => {
         const connections = getConnectedApps();
 
         if (connections.length === 0) {
@@ -981,6 +1033,38 @@ registerToolWithTelemetry(
             };
         }
 
+        // Targeted disconnect: only disconnect a specific device
+        if (device) {
+            const app = getConnectedAppByDevice(device);
+            if (!app) {
+                return {
+                    content: [{ type: "text", text: `No connected device matches "${device}". Run get_apps to see connected devices.` }],
+                    isError: true
+                };
+            }
+
+            // Find and close the matching connection
+            for (const [key, connectedApp] of connectedApps.entries()) {
+                if (connectedApp.ws === app.ws) {
+                    // Suppress reconnection for this specific device
+                    suppressReconnectionForKey(key);
+                    cancelReconnectionTimer(key);
+                    try {
+                        connectedApp.ws.close();
+                    } catch {
+                        // Ignore close errors
+                    }
+                    connectedApps.delete(key);
+
+                    const name = connectedApp.deviceInfo.deviceName || connectedApp.deviceInfo.title;
+                    return {
+                        content: [{ type: "text", text: `Disconnected from ${name} (port ${connectedApp.port}). Buffers preserved. Use scan_metro to reconnect.` }]
+                    };
+                }
+            }
+        }
+
+        // Disconnect all
         const disconnected: string[] = [];
 
         // Suppress reconnection BEFORE closing sockets
