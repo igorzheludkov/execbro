@@ -345,7 +345,7 @@ export async function executeInApp(
 }
 
 // List globally available debugging objects in the app
-export async function listDebugGlobals(): Promise<ExecutionResult> {
+export async function listDebugGlobals(device?: string): Promise<ExecutionResult> {
     const expression = `
         (function() {
             const globals = Object.keys(globalThis);
@@ -362,11 +362,11 @@ export async function listDebugGlobals(): Promise<ExecutionResult> {
         })()
     `;
 
-    return executeInApp(expression, false);
+    return executeInApp(expression, false, {}, device);
 }
 
 // Inspect a global object to see its properties and types
-export async function inspectGlobal(objectName: string): Promise<ExecutionResult> {
+export async function inspectGlobal(objectName: string, device?: string): Promise<ExecutionResult> {
     const expression = `
         (function() {
             const obj = ${objectName};
@@ -387,7 +387,7 @@ export async function inspectGlobal(objectName: string): Promise<ExecutionResult
         })()
     `;
 
-    return executeInApp(expression, false);
+    return executeInApp(expression, false, {}, device);
 }
 
 // Reload the React Native app using __ReactRefresh (Page.reload is not supported by Hermes)
@@ -662,6 +662,7 @@ export async function getComponentTree(
         format?: "json" | "tonl";
         structureOnly?: boolean;
         focusedOnly?: boolean;
+        device?: string;
     } = {}
 ): Promise<ExecutionResult> {
     const {
@@ -670,7 +671,8 @@ export async function getComponentTree(
         hideInternals = true,
         format = "tonl",
         structureOnly = false,
-        focusedOnly = false
+        focusedOnly = false,
+        device
     } = options;
     // Use lower default depth for structureOnly to keep output compact (~2-5KB)
     // Full mode uses higher depth since TONL format handles it better
@@ -872,7 +874,7 @@ export async function getComponentTree(
     `;
 
     // Use a longer timeout for component tree traversal — large apps can exceed 10s
-    const result = await executeInApp(expression, false, { timeoutMs: 30000 });
+    const result = await executeInApp(expression, false, { timeoutMs: 30000 }, device);
 
     // Apply formatting if requested
     if (result.success && result.result) {
@@ -911,9 +913,10 @@ export async function getScreenLayout(
         shortPath?: boolean;
         summary?: boolean;
         format?: "json" | "tonl";
+        device?: string;
     } = {}
 ): Promise<ExecutionResult> {
-    const { maxDepth = 65, componentsOnly = false, shortPath = true, summary = false, format = "tonl" } = options;
+    const { maxDepth = 65, componentsOnly = false, shortPath = true, summary = false, format = "tonl", device } = options;
 
     const expression = `
         (function() {
@@ -1069,7 +1072,7 @@ export async function getScreenLayout(
     `;
 
     // Use a longer timeout for layout traversal — large component trees can exceed 10s
-    const result = await executeInApp(expression, false, { timeoutMs: 30000 });
+    const result = await executeInApp(expression, false, { timeoutMs: 30000 }, device);
 
     // Apply TONL formatting if requested
     if (format === "tonl" && result.success && result.result) {
@@ -1104,6 +1107,7 @@ export async function inspectComponent(
         childrenDepth?: number;
         shortPath?: boolean;
         simplifyHooks?: boolean;
+        device?: string;
     } = {}
 ): Promise<ExecutionResult> {
     const {
@@ -1112,7 +1116,8 @@ export async function inspectComponent(
         includeChildren = false,
         childrenDepth = 1,
         shortPath = true,
-        simplifyHooks = true
+        simplifyHooks = true,
+        device
     } = options;
     const escapedName = componentName.replace(/'/g, "\\'");
 
@@ -1321,7 +1326,7 @@ export async function inspectComponent(
         })()
     `;
 
-    return executeInApp(expression, false);
+    return executeInApp(expression, false, {}, device);
 }
 
 /**
@@ -1335,9 +1340,10 @@ export async function findComponents(
         shortPath?: boolean;
         summary?: boolean;
         format?: "json" | "tonl";
+        device?: string;
     } = {}
 ): Promise<ExecutionResult> {
-    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl" } = options;
+    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl", device } = options;
     const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
     const expression = `
@@ -1468,7 +1474,7 @@ export async function findComponents(
         })()
     `;
 
-    const result = await executeInApp(expression, false);
+    const result = await executeInApp(expression, false, {}, device);
 
     // Apply TONL formatting if requested
     if (format === "tonl" && result.success && result.result) {
@@ -1949,7 +1955,7 @@ export async function pressElement(options: {
  * Toggle the Element Inspector via DevSettings native module.
  * This enables the inspector overlay programmatically.
  */
-export async function toggleElementInspector(): Promise<ExecutionResult> {
+export async function toggleElementInspector(device?: string): Promise<ExecutionResult> {
     const expression = `
         (function() {
             const ds = globalThis.nativeModuleProxy?.DevSettings;
@@ -1969,13 +1975,13 @@ export async function toggleElementInspector(): Promise<ExecutionResult> {
         })()
     `;
 
-    return executeInApp(expression, false);
+    return executeInApp(expression, false, {}, device);
 }
 
 /**
  * Check if the Element Inspector overlay is currently active.
  */
-export async function isInspectorActive(): Promise<boolean> {
+export async function isInspectorActive(device?: string): Promise<boolean> {
     const expression = `
         (function() {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
@@ -2007,7 +2013,7 @@ export async function isInspectorActive(): Promise<boolean> {
         })()
     `;
 
-    const result = await executeInApp(expression, false);
+    const result = await executeInApp(expression, false, {}, device);
     if (result.success && result.result) {
         return result.result === "true";
     }
@@ -2019,7 +2025,7 @@ export async function isInspectorActive(): Promise<boolean> {
  * This reads the InspectorPanel component's props to get the hierarchy, frame, and style.
  * Requires the Element Inspector to be enabled and an element to be selected.
  */
-export async function getInspectorSelection(): Promise<ExecutionResult> {
+export async function getInspectorSelection(device?: string): Promise<ExecutionResult> {
     const expression = `
         (function() {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
@@ -2093,7 +2099,7 @@ export async function getInspectorSelection(): Promise<ExecutionResult> {
         })()
     `;
 
-    return executeInApp(expression, false);
+    return executeInApp(expression, false, {}, device);
 }
 
 /**
@@ -2114,9 +2120,10 @@ export async function inspectAtPoint(
     options: {
         includeProps?: boolean;
         includeFrame?: boolean;
+        device?: string;
     } = {}
 ): Promise<ExecutionResult> {
-    const { includeProps = true, includeFrame = true } = options;
+    const { includeProps = true, includeFrame = true, device } = options;
 
     // --- Step 1: walk fiber tree + dispatch measureInWindow calls ---
     const dispatchExpression = `
@@ -2180,7 +2187,7 @@ export async function inspectAtPoint(
         })()
     `;
 
-    const dispatchResult = await executeInApp(dispatchExpression, false);
+    const dispatchResult = await executeInApp(dispatchExpression, false, {}, device);
     if (!dispatchResult.success) return dispatchResult;
 
     try {
@@ -2317,5 +2324,5 @@ export async function inspectAtPoint(
         })()
     `;
 
-    return executeInApp(resolveExpression, false);
+    return executeInApp(resolveExpression, false, {}, device);
 }

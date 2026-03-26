@@ -1056,11 +1056,12 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Disable result truncation. Tip: Be cautious - Redux stores or large state can return 10KB+.")
+                .describe("Disable result truncation. Tip: Be cautious - Redux stores or large state can return 10KB+."),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ expression, awaitPromise, maxResultLength, verbose }) => {
-        const result = await executeInApp(expression, awaitPromise);
+    async ({ expression, awaitPromise, maxResultLength, verbose, device }) => {
+        const result = await executeInApp(expression, awaitPromise, {}, device);
 
         if (!result.success) {
             let errorText = `Error: ${result.error}`;
@@ -1116,10 +1117,12 @@ registerToolWithTelemetry(
     {
         description:
             "List globally available debugging objects in the connected React Native app (Apollo Client, Redux store, React DevTools, etc.). Use this to discover what state management and debugging tools are available.",
-        inputSchema: {}
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+        }
     },
-    async () => {
-        const result = await listDebugGlobals();
+    async ({ device }) => {
+        const result = await listDebugGlobals(device);
 
         if (!result.success) {
             return {
@@ -1153,11 +1156,12 @@ registerToolWithTelemetry(
         inputSchema: {
             objectName: z
                 .string()
-                .describe("Name of the global object to inspect (e.g., '__EXPO_ROUTER__', '__APOLLO_CLIENT__')")
+                .describe("Name of the global object to inspect (e.g., '__EXPO_ROUTER__', '__APOLLO_CLIENT__')"),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ objectName }) => {
-        const result = await inspectGlobal(objectName);
+    async ({ objectName, device }) => {
+        const result = await inspectGlobal(objectName, device);
 
         if (!result.success) {
             let errorText = `Error: ${result.error}`;
@@ -1244,10 +1248,11 @@ registerToolWithTelemetry(
                 .default("tonl")
                 .describe(
                     "Output format: 'json' or 'tonl' (default, compact indented tree). Ignored if structureOnly=true."
-                )
+                ),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ focusedOnly, structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format }) => {
+    async ({ focusedOnly, structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format, device }) => {
         const result = await getComponentTree({
             focusedOnly,
             structureOnly,
@@ -1255,7 +1260,8 @@ registerToolWithTelemetry(
             includeProps,
             includeStyles,
             hideInternals,
-            format
+            format,
+            device
         });
 
         if (!result.success) {
@@ -1312,11 +1318,12 @@ registerToolWithTelemetry(
                 .enum(["json", "tonl"])
                 .optional()
                 .default("tonl")
-                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)")
+                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)"),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ maxDepth, componentsOnly, shortPath, summary, format }) => {
-        const result = await getScreenLayout({ maxDepth, componentsOnly, shortPath, summary, format });
+    async ({ maxDepth, componentsOnly, shortPath, summary, format, device }) => {
+        const result = await getScreenLayout({ maxDepth, componentsOnly, shortPath, summary, format, device });
 
         if (!result.success) {
             return {
@@ -1374,17 +1381,19 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(true)
-                .describe("Simplify hooks output by hiding effects and reducing depth (default: true)")
+                .describe("Simplify hooks output by hiding effects and reducing depth (default: true)"),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ componentName, index, includeState, includeChildren, childrenDepth, shortPath, simplifyHooks }) => {
+    async ({ componentName, index, includeState, includeChildren, childrenDepth, shortPath, simplifyHooks, device }) => {
         const result = await inspectComponent(componentName, {
             index,
             includeState,
             includeChildren,
             childrenDepth,
             shortPath,
-            simplifyHooks
+            simplifyHooks,
+            device
         });
 
         if (!result.success) {
@@ -1438,11 +1447,12 @@ registerToolWithTelemetry(
                 .enum(["json", "tonl"])
                 .optional()
                 .default("tonl")
-                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)")
+                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)"),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ pattern, maxResults, includeLayout, shortPath, summary, format }) => {
-        const result = await findComponents(pattern, { maxResults, includeLayout, shortPath, summary, format });
+    async ({ pattern, maxResults, includeLayout, shortPath, summary, format, device }) => {
+        const result = await findComponents(pattern, { maxResults, includeLayout, shortPath, summary, format, device });
 
         if (!result.success) {
             return {
@@ -1575,10 +1585,12 @@ registerToolWithTelemetry(
     {
         description:
             "Toggle React Native's Element Inspector overlay on/off. Rarely needed directly — get_inspector_selection auto-enables the inspector when called with coordinates. Use this only when you need manual control over the overlay visibility.",
-        inputSchema: {}
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+        }
     },
-    async () => {
-        const result = await toggleElementInspector();
+    async ({ device }) => {
+        const result = await toggleElementInspector(device);
 
         if (!result.success) {
             return {
@@ -1640,24 +1652,25 @@ registerToolWithTelemetry(
             y: z
                 .number()
                 .optional()
-                .describe("Y coordinate (in points). If provided with x, auto-taps at this location.")
+                .describe("Y coordinate (in points). If provided with x, auto-taps at this location."),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ x, y }) => {
+    async ({ x, y, device }) => {
         // If coordinates provided, do the full flow: enable inspector -> tap -> read
         if (x !== undefined && y !== undefined) {
             // Check if inspector is active
-            const inspectorActive = await isInspectorActive();
+            const inspectorActive = await isInspectorActive(device);
 
             // Enable inspector if not active
             if (!inspectorActive) {
-                await toggleElementInspector();
+                await toggleElementInspector(device);
                 // Wait for inspector to initialize
                 await new Promise((resolve) => setTimeout(resolve, 300));
             }
 
             // Detect platform from connected app
-            const app = getFirstConnectedApp();
+            const app = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
             if (!app) {
                 return {
                     content: [{ type: "text", text: "No app connected. Run scan_metro first." }],
@@ -1695,7 +1708,7 @@ registerToolWithTelemetry(
         }
 
         // Read the current selection
-        const result = await getInspectorSelection();
+        const result = await getInspectorSelection(device);
 
         if (!result.success) {
             return {
@@ -1761,11 +1774,12 @@ registerToolWithTelemetry(
                 .boolean()
                 .optional()
                 .default(true)
-                .describe("Include position/dimensions (frame) in the output (default: true)")
+                .describe("Include position/dimensions (frame) in the output (default: true)"),
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ x, y, includeProps, includeFrame }) => {
-        const result = await inspectAtPoint(x, y, { includeProps, includeFrame });
+    async ({ x, y, includeProps, includeFrame, device }) => {
+        const result = await inspectAtPoint(x, y, { includeProps, includeFrame, device });
 
         if (!result.success) {
             return {
@@ -2207,10 +2221,12 @@ registerToolWithTelemetry(
     {
         description:
             "Reload the React Native app (triggers JavaScript bundle reload like pressing 'r' in Metro). Will auto-connect to Metro if no connection exists. Note: After reload, the app may take a few seconds to fully restart and become responsive — wait before running other tools. IMPORTANT: React Native has Fast Refresh enabled by default - code changes are automatically applied without needing reload. Only use when: (1) logs/behavior don't reflect code changes after a few seconds, (2) app is in broken/error state, or (3) need to reset app state completely (navigation stack, context, etc.).",
-        inputSchema: {}
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+        }
     },
-    async () => {
-        const result = await reloadApp();
+    async ({ device }) => {
+        const result = await reloadApp(device);
 
         if (!result.success) {
             return {
