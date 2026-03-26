@@ -292,8 +292,24 @@ async function tryFiberStrategy(
         }
 
         // Input elements found via fiber can't be pressed (no onPress) —
-        // return as failure so orchestrator falls through to accessibility/coordinate
+        // if fiber measured the layout, return coordinates for a direct native tap;
+        // otherwise fall through to accessibility/coordinate strategy
         if (parsed.needsNativeTap) {
+            if (parsed.nativeTapTarget && parsed.nativeTapTarget.x && parsed.nativeTapTarget.y) {
+                return {
+                    success: false,
+                    reason: `Found ${parsed.pressed} (input element) — measured coordinates for native tap`,
+                    pressed: parsed.pressed,
+                    text: parsed.text,
+                    path: parsed.path || null,
+                    component: parsed.pressed || null,
+                    convertedTo: {
+                        x: parsed.nativeTapTarget.x,
+                        y: parsed.nativeTapTarget.y,
+                        unit: parsed.nativeTapTarget.unit || "points",
+                    },
+                };
+            }
             return {
                 success: false,
                 reason: `Found ${parsed.pressed} (input element) but it requires native tap — falling through to next strategy`,
@@ -726,6 +742,30 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         attempted.push({ strategy: strat, reason: result.reason });
+
+        // If fiber found an input with measured coordinates, do a native tap directly
+        if (strat === "fiber" && result.convertedTo && result.pressed) {
+            try {
+                const coords = result.convertedTo;
+                if (platform === "ios") {
+                    await iosTap(coords.x, coords.y);
+                } else {
+                    await androidTap(coords.x, coords.y);
+                }
+                return formatTapSuccess({
+                    method: "fiber+native",
+                    query,
+                    pressed: result.pressed,
+                    text: result.text,
+                    path: result.path,
+                    component: result.component,
+                    convertedTo: coords,
+                    platform,
+                });
+            } catch {
+                // Native tap at fiber coordinates failed — continue to next strategy
+            }
+        }
 
         // If we got match suggestions from fiber, carry them forward
         if (result.matches) {

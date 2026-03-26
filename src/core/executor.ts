@@ -1790,9 +1790,9 @@ export async function pressElement(options: {
             try {
                 if (target.isInput) {
                     // Input elements can't be pressed via fiber (no onPress) —
-                    // signal needsNativeTap so the orchestrator falls through
-                    // to accessibility or coordinate strategy for a native tap
-                    var result = {
+                    // try to measure the element's screen position for a coordinate tap.
+                    // Uses Promise + UIManager.measureInWindow so CDP can await the result.
+                    var baseResult = {
                         success: true,
                         pressed: target.name,
                         matchIndex: targetIndex,
@@ -1801,14 +1801,118 @@ export async function pressElement(options: {
                         testID: target.testID,
                         path: target.path,
                         isInput: true,
-                        needsNativeTap: true
+                        needsNativeTap: true,
+                        nativeTapTarget: null
                     };
                     if (matches.length > 1) {
-                        result.allMatches = matches.map(function(m, i) {
+                        baseResult.allMatches = matches.map(function(m, i) {
                             return { index: i, component: m.name, text: m.text, testID: m.testID };
                         });
                     }
-                    return result;
+
+                    // Try to measure screen coordinates for a native tap.
+                    // Walk down from the matched fiber to find the TextInput host component.
+                    // Prefer input-specific hosts (TextInput, RCTSinglelineTextInputView, etc.)
+                    // over generic RCTView wrappers.
+                    var hostFiber = null;
+                    var fallbackHost = null;
+                    function findHostChild(fiber, depth) {
+                        if (!fiber || depth > 15 || hostFiber) return;
+                        if (fiber.tag === 5 && fiber.stateNode) {
+                            var hostType = typeof fiber.type === 'string' ? fiber.type : '';
+                            if (hostType.indexOf('TextInput') !== -1 || hostType.indexOf('textinput') !== -1) {
+                                hostFiber = fiber;
+                                return;
+                            }
+                            if (!fallbackHost) fallbackHost = fiber;
+                        }
+                        var child = fiber.child;
+                        while (child) { findHostChild(child, depth + 1); child = child.sibling; }
+                    }
+                    if (target.fiber.tag === 5 && target.fiber.stateNode) {
+                        hostFiber = target.fiber;
+                    } else {
+                        findHostChild(target.fiber, 0);
+                        if (!hostFiber) hostFiber = fallbackHost;
+                    }
+
+                    if (hostFiber && hostFiber.stateNode) {
+                        var sn = hostFiber.stateNode;
+
+                        // Fabric (New Architecture): stateNode.node is the shadow node.
+                        // nativeFabricUIManager.measure callback fires synchronously.
+                        var fabricUI = globalThis.nativeFabricUIManager;
+                        if (sn.node && fabricUI && typeof fabricUI.measure === 'function') {
+                            try {
+                                fabricUI.measure(sn.node, function(x, y, width, height, pageX, pageY) {
+                                    if (width > 0 && height > 0) {
+                                        baseResult.nativeTapTarget = {
+                                            x: Math.round(pageX + width / 2),
+                                            y: Math.round(pageY + height / 2),
+                                            unit: 'points'
+                                        };
+                                    }
+                                });
+
+                                // Modal offset correction: if the element is inside a native modal
+                                // (RNSModalScreen), measureInWindow returns coordinates relative to
+                                // the modal's window, not the screen. Detect and add the offset.
+                                if (baseResult.nativeTapTarget) {
+                                    var modalNode = null;
+                                    var screenStackNode = null;
+                                    var ancestor = target.fiber.return;
+                                    var walkCount = 0;
+                                    while (ancestor && walkCount < 200) {
+                                        var aType = typeof ancestor.type === 'string' ? ancestor.type : '';
+                                        if (ancestor.tag === 5 && ancestor.stateNode && ancestor.stateNode.node) {
+                                            if (aType === 'RNSModalScreen' && !modalNode) modalNode = ancestor.stateNode.node;
+                                            if (aType === 'RNSScreenStack') screenStackNode = ancestor.stateNode.node;
+                                        }
+                                        ancestor = ancestor.return;
+                                        walkCount++;
+                                    }
+                                    if (modalNode && screenStackNode) {
+                                        var modalH = 0, stackH = 0;
+                                        fabricUI.measureInWindow(modalNode, function(mx, my, mw, mh) { modalH = mh; });
+                                        fabricUI.measureInWindow(screenStackNode, function(sx, sy, sw, sh) { stackH = sh; });
+                                        if (stackH > modalH && modalH > 0) {
+                                            baseResult.nativeTapTarget.y += (stackH - modalH);
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                // Measurement failed — fall through without coordinates
+                            }
+                        }
+
+                        // Old Architecture (Bridge): stateNode._nativeTag
+                        if (!baseResult.nativeTapTarget) {
+                            var nativeTag = sn._nativeTag || sn.__nativeTag;
+                            if (!nativeTag && typeof sn.getNativeTag === 'function') {
+                                nativeTag = sn.getNativeTag();
+                            }
+                            if (nativeTag) {
+                                var UIManager = globalThis.nativeModuleProxy && globalThis.nativeModuleProxy.UIManager;
+                                if (UIManager && typeof UIManager.measureInWindow === 'function') {
+                                    try {
+                                        UIManager.measureInWindow(nativeTag, function(x, y, width, height) {
+                                            if (width > 0 && height > 0) {
+                                                baseResult.nativeTapTarget = {
+                                                    x: Math.round(x + width / 2),
+                                                    y: Math.round(y + height / 2),
+                                                    unit: 'points'
+                                                };
+                                            }
+                                        });
+                                    } catch (e) {
+                                        // Measurement failed
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    return baseResult;
                 }
                 target.fiber.memoizedProps.onPress();
                 var result = {
