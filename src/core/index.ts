@@ -70,6 +70,7 @@ export {
     connectToDevice,
     getConnectedApps,
     getFirstConnectedApp,
+    getConnectedAppByDevice,
     hasConnectedApp,
     runQuickHealthCheck,
     ensureConnection,
