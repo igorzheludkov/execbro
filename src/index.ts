@@ -20,6 +20,7 @@ import {
     scanMetroPorts,
     fetchDevices,
     selectMainDevice,
+    filterBridgelessDevices,
     connectToDevice,
     getConnectedApps,
     executeInApp,
@@ -348,24 +349,29 @@ registerToolWithTelemetry(
                 continue;
             }
 
-            results.push(`Port ${port}: Found ${devices.length} device(s)`);
+            const bridgelessDevices = filterBridgelessDevices(devices);
+            if (bridgelessDevices.length === 0) {
+                results.push(`Port ${port}: No debuggable devices found`);
+                continue;
+            }
 
-            const mainDevice = selectMainDevice(devices);
-            if (mainDevice) {
+            results.push(`Port ${port}: Found ${bridgelessDevices.length} device(s)`);
+
+            for (const device of bridgelessDevices) {
                 try {
-                    const connectionResult = await connectToDevice(mainDevice, port);
+                    const connectionResult = await connectToDevice(device, port);
                     results.push(`  - ${connectionResult}`);
-
-                    // Also connect to Metro build events for this port
-                    try {
-                        await connectMetroBuildEvents(port);
-                        results.push(`  - Connected to Metro build events`);
-                    } catch {
-                        // Build events connection is optional, don't fail the scan
-                    }
                 } catch (error) {
-                    results.push(`  - Failed: ${error}`);
+                    results.push(`  - ${device.deviceName || device.title}: Failed - ${error}`);
                 }
+            }
+
+            // Connect to Metro build events for this port
+            try {
+                await connectMetroBuildEvents(port);
+                results.push(`  - Connected to Metro build events`);
+            } catch {
+                // Build events connection is optional
             }
         }
 

@@ -86,6 +86,10 @@ export function selectMainDevice(devices: DeviceInfo[]): DeviceInfo | null {
     );
 }
 
+export function filterBridgelessDevices(devices: DeviceInfo[]): DeviceInfo[] {
+    return devices.filter(d => d.description.includes("React Native Bridgeless"));
+}
+
 // Scan for Metro and return all devices grouped by port
 export async function discoverMetroDevices(
     startPort: number = 8081,
