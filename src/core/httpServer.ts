@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from "http";
-import { logBuffer, networkBuffer, bundleErrorBuffer, connectedApps } from "./state.js";
+import { logBuffers, networkBuffers, getTotalLogCount, bundleErrorBuffer, connectedApps } from "./state.js";
 import {
     listAndroidDevices,
     androidScreenshot,
@@ -282,8 +282,8 @@ function escapeHtml(str: string): string {
 }
 
 function renderDashboard(): string {
-    const logs = logBuffer.size;
-    const network = networkBuffer.size;
+    const logs = getTotalLogCount();
+    const network = Array.from(networkBuffers.values()).reduce((t, b) => t + b.size, 0);
     const errors = bundleErrorBuffer.get().length;
     const apps = connectedApps.size;
     const status = bundleErrorBuffer.getStatus();
@@ -314,7 +314,7 @@ function renderDashboard(): string {
 }
 
 function renderLogs(): string {
-    const logs = logBuffer.getAll();
+    const logs = Array.from(logBuffers.values()).flatMap(b => b.getAll()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
     if (logs.length === 0) {
         return htmlTemplate('Logs', '<div class="empty">No logs captured yet. Connect to a Metro server and interact with your app.</div>');
@@ -402,7 +402,7 @@ function formatVariablesCompact(variables: Record<string, unknown> | undefined):
 }
 
 function renderNetwork(): string {
-    const requests = networkBuffer.getAll({});
+    const requests = Array.from(networkBuffers.values()).flatMap(b => b.getAll({})).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
     if (requests.length === 0) {
         return htmlTemplate('Network', '<div class="empty">No network requests captured yet. Connect to a Metro server and interact with your app.</div>');
@@ -2131,10 +2131,10 @@ function createRequestHandler() {
             res.setHeader("Content-Type", "application/json");
 
             if (url === "/api/logs" || url === "/api/logs/") {
-                const logs = logBuffer.getAll();
+                const logs = Array.from(logBuffers.values()).flatMap(b => b.getAll()).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
                 res.end(JSON.stringify({ count: logs.length, logs }, null, 2));
             } else if (url === "/api/network" || url === "/api/network/") {
-                const requests = networkBuffer.getAll({});
+                const requests = Array.from(networkBuffers.values()).flatMap(b => b.getAll({})).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
                 res.end(JSON.stringify({ count: requests.length, requests }, null, 2));
             } else if (url === "/api/bundle-errors" || url === "/api/bundle-errors/") {
                 const errors = bundleErrorBuffer.get();
@@ -2150,8 +2150,8 @@ function createRequestHandler() {
                 res.end(JSON.stringify({ count: apps.length, apps }, null, 2));
             } else if (url === "/api/status" || url === "/api/status/") {
                 const status = {
-                    logs: logBuffer.size,
-                    networkRequests: networkBuffer.size,
+                    logs: getTotalLogCount(),
+                    networkRequests: Array.from(networkBuffers.values()).reduce((t, b) => t + b.size, 0),
                     bundleErrors: bundleErrorBuffer.get().length,
                     connectedApps: connectedApps.size,
                     bundleStatus: bundleErrorBuffer.getStatus()
