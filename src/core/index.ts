@@ -78,6 +78,7 @@ export {
     getPassiveConnectionStatus,
     checkAndEnsureConnection,
     suppressReconnection,
+    suppressReconnectionForKey,
     clearReconnectionSuppression,
 } from "./connection.js";
 

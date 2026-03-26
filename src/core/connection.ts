@@ -47,6 +47,14 @@ export function suppressReconnection(): void {
 }
 
 /**
+ * Suppress auto-reconnection for a specific connection key.
+ * Used by disconnect_metro with device targeting.
+ */
+export function suppressReconnectionForKey(appKey: string): void {
+    reconnectionSuppressed.add(appKey);
+}
+
+/**
  * Clear reconnection suppression (called when user explicitly reconnects via scan_metro).
  */
 export function clearReconnectionSuppression(): void {
@@ -679,6 +687,19 @@ export async function connectToDevice(
             // WebSocket exists but not OPEN - clean up stale entry
             console.error(`[rn-ai-debugger] Cleaning up stale connection for ${device.title} (state: ${getWebSocketStateName(existingApp.ws.readyState)})`);
             connectedApps.delete(appKey);
+        }
+
+        // Skip if this device is already connected on a different port
+        // (Metro's /json advertises all devices it can see, even ones built by other Metro servers)
+        const deviceName = device.deviceName || device.title;
+        for (const [existingKey, existingApp] of connectedApps.entries()) {
+            if (existingKey !== appKey && existingApp.ws.readyState === WebSocket.OPEN) {
+                const existingName = existingApp.deviceInfo.deviceName || existingApp.deviceInfo.title;
+                if (existingName === deviceName) {
+                    resolve(`Skipped ${deviceName} (already connected on port ${existingApp.port})`);
+                    return;
+                }
+            }
         }
 
         // Prevent concurrent connection attempts to the same device
