@@ -748,9 +748,18 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             try {
                 const coords = result.convertedTo;
                 if (platform === "ios") {
+                    // Fabric returns points — iosTap expects points
                     await iosTap(coords.x, coords.y);
                 } else {
-                    await androidTap(coords.x, coords.y);
+                    // Fabric returns dp — androidTap expects pixels
+                    // Convert dp to pixels using device density
+                    const { androidGetDensity } = await import("../core/android.js");
+                    const densityResult = await androidGetDensity();
+                    const densityScale = (densityResult.density || 420) / 160;
+                    await androidTap(
+                        Math.round(coords.x * densityScale),
+                        Math.round(coords.y * densityScale)
+                    );
                 }
                 return formatTapSuccess({
                     method: "fiber+native",
