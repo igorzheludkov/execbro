@@ -484,11 +484,10 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
         // Wait for app to reload (give it time to restart JS context)
         await delay(2000);
 
-        // Close existing connections to this port and cancel any pending auto-reconnections
-        // This prevents the dual-reconnection bug where both auto-reconnect and manual reconnect compete
+        // Find and close only the targeted device's connection (not all devices on this port)
+        const targetDeviceId = app.deviceInfo.id;
         for (const [key, connectedApp] of connectedApps.entries()) {
-            if (connectedApp.port === port) {
-                // Cancel any pending reconnection timer BEFORE closing
+            if (connectedApp.deviceInfo.id === targetDeviceId) {
                 cancelReconnectionTimer(key);
                 try {
                     connectedApp.ws.close();
@@ -496,26 +495,26 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
                     // Ignore close errors
                 }
                 connectedApps.delete(key);
+                break;
             }
         }
 
         // Small delay to ensure cleanup
         await delay(500);
 
-        // Reconnect to Metro on the same port with auto-reconnection DISABLED
-        // We're doing a manual reconnection here, so we don't want the auto-reconnect
-        // system to also try reconnecting and compete with us
+        // Reconnect only the reloaded device (not all devices on the port)
         const devices = await fetchDevices(port);
-        const mainDevice = selectMainDevice(devices);
+        const targetDevice = devices.find(d => d.id === targetDeviceId)
+            || devices.find(d => d.deviceName === app.deviceInfo.deviceName);
 
-        if (mainDevice) {
-            await connectToDevice(mainDevice, port, {
+        if (targetDevice) {
+            await connectToDevice(targetDevice, port, {
                 isReconnection: false,
                 reconnectionConfig: { ...DEFAULT_RECONNECTION_CONFIG, enabled: false }
             });
             return {
                 success: true,
-                result: `App reloaded and reconnected to ${mainDevice.title}`
+                result: `App reloaded and reconnected to ${targetDevice.deviceName || targetDevice.title}`
             };
         } else {
             return {
