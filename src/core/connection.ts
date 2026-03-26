@@ -958,6 +958,35 @@ export function getFirstConnectedApp(): ConnectedApp | null {
     return null;
 }
 
+export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
+    if (!device) {
+        return getFirstConnectedApp();
+    }
+
+    const lowerDevice = device.toLowerCase();
+    const matches: ConnectedApp[] = [];
+
+    for (const [key, app] of connectedApps.entries()) {
+        if (app.ws.readyState !== WebSocket.OPEN) {
+            connectedApps.delete(key);
+            continue;
+        }
+        const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "";
+        if (deviceName.toLowerCase().includes(lowerDevice)) {
+            matches.push(app);
+        }
+    }
+
+    if (matches.length === 1) {
+        return matches[0];
+    }
+    if (matches.length > 1) {
+        const names = matches.map(a => a.deviceInfo.deviceName || a.deviceInfo.title).join(", ");
+        throw new Error(`Multiple devices match "${device}": ${names}. Be more specific.`);
+    }
+    throw new Error(`No connected device matches "${device}". Run get_apps to see available devices.`);
+}
+
 // Check if any app is connected with an OPEN WebSocket
 export function hasConnectedApp(): boolean {
     for (const [, app] of connectedApps.entries()) {
