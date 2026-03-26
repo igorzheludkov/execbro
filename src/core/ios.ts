@@ -1207,6 +1207,7 @@ export interface IOSUIElement {
     label: string;
     value: string;
     type: string;
+    identifier: string;
     frame: {
         x: number;
         y: number;
@@ -1247,6 +1248,8 @@ export interface IOSFindElementOptions {
     value?: string;
     valueContains?: string;
     type?: string;
+    identifier?: string;
+    identifierContains?: string;
     index?: number;
 }
 
@@ -1267,6 +1270,7 @@ function parseIdbAccessibilityForFindElement(output: string): IOSUIElement[] {
                     label: (node.AXLabel as string) || (node.label as string) || "",
                     value: (node.AXValue as string) || (node.value as string) || "",
                     type: (node.type as string) || (node.AXType as string) || "",
+                    identifier: (node.AXIdentifier as string) || (node.identifier as string) || (node.AXUniqueId as string) || "",
                     frame: {
                         x: frame.x || 0,
                         y: frame.y || 0,
@@ -1281,7 +1285,7 @@ function parseIdbAccessibilityForFindElement(output: string): IOSUIElement[] {
                     traits: (node.traits as string[]) || []
                 };
 
-                if (element.label || element.value || element.type) {
+                if (element.label || element.value || element.type || element.identifier) {
                     elements.push(element);
                 }
             }
@@ -1326,6 +1330,12 @@ function matchesIOSFindElement(element: IOSUIElement, options: IOSFindElementOpt
     }
     if (options.type !== undefined) {
         if (!element.type.toLowerCase().includes(options.type.toLowerCase())) return false;
+    }
+    if (options.identifier !== undefined) {
+        if (element.identifier !== options.identifier) return false;
+    }
+    if (options.identifierContains !== undefined) {
+        if (!element.identifier.toLowerCase().includes(options.identifierContains.toLowerCase())) return false;
     }
     return true;
 }
@@ -1386,11 +1396,11 @@ export async function iosFindElement(
 ): Promise<IOSFindElementResult> {
     try {
         if (!options.label && !options.labelContains && !options.value &&
-            !options.valueContains && !options.type) {
+            !options.valueContains && !options.type && !options.identifier && !options.identifierContains) {
             return {
                 success: false,
                 found: false,
-                error: "At least one search criteria (label, labelContains, value, valueContains, or type) must be provided"
+                error: "At least one search criteria (label, labelContains, value, valueContains, identifier, identifierContains, or type) must be provided"
             };
         }
 

@@ -85,7 +85,7 @@ export function getAvailableStrategies(
         return ["fiber"];
     }
     if (query.testID && !query.text) {
-        return ["fiber", "accessibility"];
+        return ["accessibility", "fiber"];
     }
     if (query.text) {
         const strategies: string[] = [];
@@ -291,8 +291,8 @@ async function tryFiberStrategy(
             return strategyResult;
         }
 
-        // Input elements found via fiber can't be pressed — need native tap
-        // Return as failure so orchestrator falls through to accessibility/coordinate
+        // Input elements found via fiber can't be pressed (no onPress) —
+        // return as failure so orchestrator falls through to accessibility/coordinate
         if (parsed.needsNativeTap) {
             return {
                 success: false,
@@ -330,13 +330,36 @@ async function tryAccessibilityStrategy(
         }
 
         if (platform === "ios") {
-            // iOS: IDB does not expose accessibilityIdentifier (testID),
-            // so search by labelContains as best-effort fallback
-            const searchText = query.text || query.testID;
-            const result = await iosFindElement({
-                labelContains: searchText,
-                index,
-            });
+            // iOS: testID maps to accessibilityIdentifier — search by identifier first,
+            // then fall back to labelContains for text-based searches
+            let result;
+            if (hasTestID && !hasText) {
+                // Try exact identifier match first (testID → accessibilityIdentifier)
+                result = await iosFindElement({
+                    identifier: query.testID,
+                    index,
+                });
+                // Fall back to identifierContains if exact match fails
+                if (!result.success || !result.allMatches || result.allMatches.length === 0) {
+                    result = await iosFindElement({
+                        identifierContains: query.testID,
+                        index,
+                    });
+                }
+                // Last resort: try labelContains in case testID is reflected in label
+                if (!result.success || !result.allMatches || result.allMatches.length === 0) {
+                    result = await iosFindElement({
+                        labelContains: query.testID,
+                        index,
+                    });
+                }
+            } else {
+                const searchText = query.text!;
+                result = await iosFindElement({
+                    labelContains: searchText,
+                    index,
+                });
+            }
 
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                 return { success: false, reason: result.error ?? "No iOS accessibility match" };
