@@ -173,7 +173,7 @@ function resolveNetworkBuffer(device?: string): NetworkBuffer {
 // Create MCP server
 const server = new McpServer(
     {
-        name: "react-native-ai-debugger",
+        name: "react-native-ai-devtools",
         version: "1.0.0"
     },
     {
