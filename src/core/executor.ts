@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { ExecutionResult, ExecuteOptions } from "./types.js";
 import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
-import { getFirstConnectedApp, connectToDevice } from "./connection.js";
+import { getFirstConnectedApp, getConnectedAppByDevice, connectToDevice } from "./connection.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 
@@ -242,7 +242,8 @@ async function executeExpressionCore(
 export async function executeInApp(
     expression: string,
     awaitPromise: boolean = true,
-    options: ExecuteOptions = {}
+    options: ExecuteOptions = {},
+    device?: string
 ): Promise<ExecutionResult> {
     const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true, timeoutMs = 10000 } = options;
 
@@ -250,13 +251,13 @@ export async function executeInApp(
     let preferredPort: number | undefined;
 
     // Get preferred port from current connection if available
-    const currentApp = getFirstConnectedApp();
+    const currentApp = getConnectedAppByDevice(device);
     if (currentApp) {
         preferredPort = currentApp.port;
     }
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        const app = getFirstConnectedApp();
+        const app = getConnectedAppByDevice(device);
 
         // No connection - try to reconnect if enabled
         if (!app) {
@@ -392,9 +393,9 @@ export async function inspectGlobal(objectName: string): Promise<ExecutionResult
 // Reload the React Native app using __ReactRefresh (Page.reload is not supported by Hermes)
 // Uses fire-and-forget: sends the reload command without waiting for a response,
 // since the JS context is destroyed during reload and would always timeout.
-export async function reloadApp(): Promise<ExecutionResult> {
+export async function reloadApp(device?: string): Promise<ExecutionResult> {
     // Get current connection info before reload
-    let app = getFirstConnectedApp();
+    let app = getConnectedAppByDevice(device);
 
     // Auto-connect if no connection exists
     if (!app) {
@@ -417,7 +418,7 @@ export async function reloadApp(): Promise<ExecutionResult> {
                 try {
                     await connectToDevice(mainDevice, port);
                     console.error(`[rn-ai-debugger] Auto-connected to ${mainDevice.title} on port ${port}`);
-                    app = getFirstConnectedApp();
+                    app = getConnectedAppByDevice(device);
                     break;
                 } catch (error) {
                     console.error(`[rn-ai-debugger] Failed to connect to port ${port}: ${error}`);
@@ -1506,6 +1507,7 @@ export async function pressElement(options: {
     component?: string;
     index?: number;
     maxTraversalDepth?: number;
+    device?: string;
 }): Promise<ExecutionResult> {
     const { text, testID, component, index = 0, maxTraversalDepth = 15 } = options;
 
@@ -1936,7 +1938,7 @@ export async function pressElement(options: {
         })()
     `;
 
-    return executeInApp(expression, false);
+    return executeInApp(expression, false, {}, options.device);
 }
 
 // ============================================================================
