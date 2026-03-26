@@ -1630,7 +1630,95 @@ export async function pressElement(options: {
                 walkFiber(roots[ri].current, []);
             }
 
-            // Phase 2: If searching by component and no match found,
+            // Phase 2a: If searching by testID and no match found,
+            // the testID may be on a non-pressable/non-input wrapper — search ALL nodes
+            // for the testID and walk UP to find nearest pressable or input ancestor
+            if (matches.length === 0 && searchTestID !== null) {
+                var testIDCandidates = [];
+
+                function findByTestID(fiber, path) {
+                    if (!fiber) return;
+                    var name = getComponentName(fiber);
+                    var props = fiber.memoizedProps;
+                    if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+
+                    var tid = props && (props.testID || props.nativeID || null);
+                    if (tid === searchTestID) {
+                        testIDCandidates.push({ fiber: fiber, name: name || '(anonymous)', path: path.join(' > ') });
+                    }
+                    var child = fiber.child;
+                    while (child) {
+                        var childName = getComponentName(child);
+                        findByTestID(child, childName ? path.concat([childName]) : path);
+                        child = child.sibling;
+                    }
+                }
+
+                for (var ri3 = 0; ri3 < roots.length; ri3++) {
+                    findByTestID(roots[ri3].current, []);
+                }
+
+                // For each candidate, first check if the node itself is pressable/input,
+                // then walk UP to find nearest pressable/input ancestor
+                var maxDepthTID = ${maxTraversalDepth};
+                for (var ti = 0; ti < testIDCandidates.length; ti++) {
+                    var tCandidate = testIDCandidates[ti];
+                    var tProps = tCandidate.fiber.memoizedProps;
+                    var tIsPressable = tProps && typeof tProps.onPress === 'function';
+                    var tIsInput = !tIsPressable && tProps && (typeof tProps.onChangeText === 'function' || typeof tProps.onFocus === 'function');
+
+                    if (tIsPressable || tIsInput) {
+                        var text = extractText(tCandidate.fiber, 0);
+                        if (tIsInput) {
+                            var val = typeof tProps.value === 'string' ? tProps.value : '';
+                            var defVal = typeof tProps.defaultValue === 'string' ? tProps.defaultValue : '';
+                            var ph = typeof tProps.placeholder === 'string' ? tProps.placeholder : '';
+                            text = text || val || defVal || ph;
+                        }
+                        matches.push({
+                            fiber: tCandidate.fiber,
+                            name: tCandidate.name,
+                            text: text.substring(0, 100),
+                            testID: searchTestID,
+                            path: tCandidate.path,
+                            isInput: tIsInput
+                        });
+                        continue;
+                    }
+
+                    // Walk up to find pressable/input ancestor
+                    var tParent = tCandidate.fiber.return;
+                    var tDepth = 0;
+                    while (tParent && tDepth < maxDepthTID) {
+                        var tParentProps = tParent.memoizedProps;
+                        var parentIsPressable = tParentProps && typeof tParentProps.onPress === 'function';
+                        var parentIsInput = !parentIsPressable && tParentProps && (typeof tParentProps.onChangeText === 'function' || typeof tParentProps.onFocus === 'function');
+
+                        if (parentIsPressable || parentIsInput) {
+                            var text = extractText(tParent, 0);
+                            if (parentIsInput) {
+                                var val = typeof tParentProps.value === 'string' ? tParentProps.value : '';
+                                var defVal = typeof tParentProps.defaultValue === 'string' ? tParentProps.defaultValue : '';
+                                var ph = typeof tParentProps.placeholder === 'string' ? tParentProps.placeholder : '';
+                                text = text || val || defVal || ph;
+                            }
+                            matches.push({
+                                fiber: tParent,
+                                name: tCandidate.name,
+                                text: text.substring(0, 100),
+                                testID: tParentProps.testID || tParentProps.nativeID || searchTestID,
+                                path: tCandidate.path,
+                                isInput: parentIsInput
+                            });
+                            break;
+                        }
+                        tParent = tParent.return;
+                        tDepth++;
+                    }
+                }
+            }
+
+            // Phase 2b: If searching by component and no match found,
             // look for the component by name and walk UP to find nearest pressable ancestor
             if (matches.length === 0 && searchComponent !== null) {
                 var componentCandidates = [];
@@ -1701,8 +1789,9 @@ export async function pressElement(options: {
             var target = matches[targetIndex];
             try {
                 if (target.isInput) {
-                    // Input elements can't be pressed via fiber — return match info
-                    // so the orchestrator can fall through to accessibility/coordinate tap
+                    // Input elements can't be pressed via fiber (no onPress) —
+                    // signal needsNativeTap so the orchestrator falls through
+                    // to accessibility or coordinate strategy for a native tap
                     var result = {
                         success: true,
                         pressed: target.name,
