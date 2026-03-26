@@ -28,3 +28,6 @@ Thumbs.db
 
 # OCR trained data files (legacy, no longer used)
 *.traineddata
+
+# Git worktrees
+.worktrees/
