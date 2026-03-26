@@ -29,10 +29,17 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 -   **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
 -   **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
 
+### Multi-Device Debugging
+
+-   **Connect All Devices** - `scan_metro` automatically discovers and connects to all Bridgeless targets on each Metro port
+-   **Device Targeting** - Every tool accepts an optional `device` parameter for targeting specific devices by name (case-insensitive substring match)
+-   **Per-Device Buffers** - Logs and network requests are captured separately per device for clean debugging
+-   **Cross-Platform Comparison** - Debug iOS and Android side-by-side, comparing logs, network traffic, and component trees
+
 ### Under the Hood
 
 -   **Auto-Discovery** - Scans Metro on ports 8081, 8082, 19000-19002 automatically
--   **Smart Device Selection** - Prioritizes Bridgeless > Hermes > standard React Native targets
+-   **Multi-Device Support** - Connects to all Bridgeless targets simultaneously, with per-device log and network buffers
 -   **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
 -   **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
 -   **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
