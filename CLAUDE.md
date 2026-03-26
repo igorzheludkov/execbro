@@ -141,6 +141,12 @@ When debugging React Native apps through this MCP server:
     - `get_inspector_selection` → finding component names and screen structure (returns hierarchy like RN's Element Inspector overlay)
     - `inspect_at_point` → layout debugging with props and exact frame measurements
     - `find_components` → searching for components by name pattern across the entire fiber tree
+- **Multi-Device Debugging**: When multiple devices are connected:
+    1. Use `get_apps` to see all connected devices and their names
+    2. Use `device="iPhone"` or `device="sdk_gphone"` to target specific devices (case-insensitive substring match)
+    3. Omitting `device` uses the first connected device for execution tools, or merges data from all devices for log/network tools
+    4. Example workflow: `ios_screenshot` on iPhone, `android_screenshot` on Android, compare layouts
+    5. `scan_metro` now connects ALL Bridgeless targets instead of picking one — no manual `connect_metro` needed
 
 ## Telemetry System
 
