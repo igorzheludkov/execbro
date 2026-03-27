@@ -62,6 +62,7 @@ export function clearReconnectionSuppression(): void {
 }
 
 const STALE_ACTIVITY_THRESHOLD_MS = 30_000;
+const PING_INTERVAL_MS = 1_000; // WebSocket ping/pong keepalive interval
 const RECONNECT_SETTLE_MS = 500;
 
 // Helper to find appKey from device info by searching connectedApps
@@ -788,6 +789,28 @@ export async function connectToDevice(
                 // Fire-and-forget app detection (500ms delayed, non-blocking)
                 scheduleAppDetection(connectedApps.get(appKey)!);
 
+                // Start WebSocket ping/pong keepalive to detect dead connections
+                // (especially important for physical devices over Wi-Fi)
+                let pongReceived = true;
+                const pingInterval = setInterval(() => {
+                    if (!pongReceived) {
+                        console.error(`[rn-ai-debugger] No pong from ${device.title}, terminating connection`);
+                        clearInterval(pingInterval);
+                        ws.terminate();
+                        return;
+                    }
+                    pongReceived = false;
+                    ws.ping();
+                }, PING_INTERVAL_MS);
+
+                ws.on("pong", () => {
+                    pongReceived = true;
+                });
+
+                ws.on("close", () => {
+                    clearInterval(pingInterval);
+                });
+
                 resolve(`Connected to ${device.title} (${device.deviceName})`);
             });
 
@@ -808,10 +831,8 @@ export async function connectToDevice(
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
 
-                // Clean up per-device buffers
-                const closedDeviceName = device.deviceName || device.title || "unknown";
-                logBuffers.delete(closedDeviceName);
-                networkBuffers.delete(closedDeviceName);
+                // Keep log and network buffers across reconnections
+                // They are only cleared on demand via clear_logs / clear_network tools
 
                 // Check if connection was stable before resetting attempts
                 const state = getConnectionState(appKey);
