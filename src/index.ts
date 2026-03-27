@@ -10,6 +10,12 @@ import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/gu
 import { getLicenseStatus, getDashboardUrl } from "./core/license.js";
 import { isSDKInstalled, readSDKNetworkRequests, readSDKNetworkRequest, readSDKNetworkStats, clearSDKNetwork } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
+import {
+    getActivateLicenseConfig,
+    handleActivateLicense,
+    getDeleteAccountConfig,
+    handleDeleteAccount,
+} from "./tools/accountTools.js";
 
 import type { DeviceInfo } from "./core/index.js";
 import {
@@ -3952,6 +3958,20 @@ registerToolWithTelemetry(
             ]
         };
     }
+);
+
+// Tool: Activate Pro license
+registerToolWithTelemetry(
+    "activate_license",
+    getActivateLicenseConfig(),
+    handleActivateLicense,
+);
+
+// Tool: Delete account
+registerToolWithTelemetry(
+    "delete_account",
+    getDeleteAccountConfig(),
+    handleDeleteAccount,
 );
 
 /**
