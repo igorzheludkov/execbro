@@ -1,17 +1,21 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { homedir } from "os";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
+import { homedir, platform, hostname, release } from "os";
 import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { getInstallationId } from "./telemetry.js";
+import { getDeviceFingerprint, getFingerprintVersion } from "./fingerprint.js";
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const VALIDATION_ENDPOINT = ""; // Placeholder — set when backend is built
+const VALIDATION_ENDPOINT = process.env.RN_DEBUGGER_API_URL || "";
+const REGISTRATION_ENDPOINT = process.env.RN_DEBUGGER_API_URL || "";
+const ACCOUNTS_API_KEY = process.env.RN_DEBUGGER_API_KEY || "";
 const API_TIMEOUT_MS = 5_000;
 const LICENSE_FILE = join(homedir(), ".rn-ai-debugger", "license.json");
-const DASHBOARD_URL = ""; // Placeholder — set when dashboard is built
+const DASHBOARD_URL = process.env.RN_DEBUGGER_DASHBOARD_URL || "";
 
 // ============================================================================
 // Types
@@ -21,7 +25,8 @@ export type LicenseTier = "free" | "pro" | "team";
 
 export interface LicenseStatus {
     installationId: string;
-    status: LicenseTier;
+    tier: LicenseTier;
+    accountStatus: "anonymous" | "linked";
     validatedAt: string;
     cacheExpiresAt: string;
     plan?: {
@@ -31,11 +36,14 @@ export interface LicenseStatus {
 }
 
 interface ApiResponse {
-    status: LicenseTier;
+    tier: LicenseTier;
+    error?: string;
     plan?: {
         name: string;
         expiresAt: string;
-    };
+    } | null;
+    validatedAt: string;
+    cacheExpiresAt: string;
 }
 
 // ============================================================================
@@ -54,7 +62,7 @@ function readCache(): LicenseStatus | null {
         const data = readFileSync(LICENSE_FILE, "utf-8");
         const parsed = JSON.parse(data) as LicenseStatus;
         // Validate required fields
-        if (!parsed.installationId || !parsed.status || !parsed.cacheExpiresAt) {
+        if (!parsed.installationId || !parsed.tier || !parsed.cacheExpiresAt) {
             return null;
         }
         return parsed;
@@ -84,10 +92,60 @@ function createDefaultStatus(installationId: string): LicenseStatus {
     const now = new Date().toISOString();
     return {
         installationId,
-        status: "free",
+        tier: "free",
+        accountStatus: "anonymous",
         validatedAt: now,
         cacheExpiresAt: now, // Already expired — will trigger API call next startup
     };
+}
+
+// ============================================================================
+// Registration
+// ============================================================================
+
+let registrationAttempted = false;
+
+async function registerInstallation(installationId: string): Promise<void> {
+    if (registrationAttempted || !REGISTRATION_ENDPOINT) return;
+    registrationAttempted = true;
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+        await fetch(`${REGISTRATION_ENDPOINT}/api/accounts/register`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-API-Key": ACCOUNTS_API_KEY,
+            },
+            body: JSON.stringify({
+                installationId,
+                fingerprint: getDeviceFingerprint(),
+                fingerprintVersion: getFingerprintVersion(),
+                platform: platform(),
+                serverVersion: getServerVersion(),
+                hostname: hostname(),
+                osVersion: `${platform()} ${release()}`,
+            }),
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+    } catch {
+        registrationAttempted = false;
+    }
+}
+
+function getServerVersion(): string {
+    try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const pkgPath = join(__dirname, "..", "..", "package.json");
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        return pkg.version || "unknown";
+    } catch {
+        return "unknown";
+    }
 }
 
 // ============================================================================
@@ -95,31 +153,34 @@ function createDefaultStatus(installationId: string): LicenseStatus {
 // ============================================================================
 
 async function callValidationApi(installationId: string): Promise<ApiResponse | null> {
-    // Skip if endpoint not configured
     if (!VALIDATION_ENDPOINT) return null;
 
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-        const response = await fetch(
-            `${VALIDATION_ENDPOINT}/validate?installationId=${encodeURIComponent(installationId)}`,
-            { signal: controller.signal }
-        );
+        const response = await fetch(`${VALIDATION_ENDPOINT}/api/license/validate`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-API-Key": ACCOUNTS_API_KEY,
+            },
+            body: JSON.stringify({
+                installationId,
+                fingerprint: getDeviceFingerprint(),
+            }),
+            signal: controller.signal,
+        });
 
         clearTimeout(timeout);
 
-        if (response.status === 404) {
-            return { status: "free" };
-        }
-
-        if (!response.ok) {
-            return null; // 5xx or unexpected — fail open
+        if (!response.ok && response.status !== 200) {
+            return null;
         }
 
         return (await response.json()) as ApiResponse;
     } catch {
-        return null; // Network error, timeout — fail open
+        return null;
     }
 }
 
@@ -149,6 +210,10 @@ export function ensureLicense(): Promise<LicenseResult> {
 async function resolveLicense(): Promise<LicenseResult> {
     const startTime = Date.now();
     const installationId = getInstallationId();
+
+    // Fire-and-forget registration on first run
+    registerInstallation(installationId);
+
     const cache = readCache();
     let source: "cache" | "api" | "default" = "default";
 
@@ -168,10 +233,11 @@ async function resolveLicense(): Promise<LicenseResult> {
 
         currentStatus = {
             installationId,
-            status: apiResponse.status,
-            validatedAt: now.toISOString(),
-            cacheExpiresAt: expiresAt.toISOString(),
-            plan: apiResponse.plan,
+            tier: apiResponse.tier,
+            accountStatus: "anonymous",
+            validatedAt: apiResponse.validatedAt || now.toISOString(),
+            cacheExpiresAt: apiResponse.cacheExpiresAt || expiresAt.toISOString(),
+            plan: apiResponse.plan || undefined,
         };
 
         writeCache(currentStatus);
@@ -203,4 +269,17 @@ export function getLicenseStatus(): LicenseStatus {
 
 export function getDashboardUrl(): string {
     return DASHBOARD_URL;
+}
+
+export function resetLicense(): void {
+    currentStatus = null;
+    licensePromise = null;
+    registrationAttempted = false;
+    try {
+        if (existsSync(LICENSE_FILE)) {
+            unlinkSync(LICENSE_FILE);
+        }
+    } catch {
+        // Best-effort cleanup
+    }
 }

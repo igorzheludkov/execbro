@@ -297,7 +297,7 @@ export function trackToolInvocation(
 
         // Lazy license check — runs once per session, tracked as tool_invocation for analytics
         ensureLicense().then(({ source, status, durationMs }) => {
-            trackLicenseCheck(source, status.status, durationMs);
+            trackLicenseCheck(source, status.tier, durationMs);
         }).catch(() => {
             // License check failed — not critical, don't break tool flow
         });
