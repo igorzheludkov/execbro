@@ -6,8 +6,8 @@ import { existsSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
-const API_URL = process.env.RN_DEBUGGER_API_URL || "";
-const API_KEY = process.env.RN_DEBUGGER_API_KEY || "";
+const API_URL = "https://mobile-ai-devtools.link";
+const API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 10_000;
 
 const CONFIG_DIR = join(homedir(), ".rn-ai-debugger");

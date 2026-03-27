@@ -10,12 +10,12 @@ import { getDeviceFingerprint, getFingerprintVersion } from "./fingerprint.js";
 // ============================================================================
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const VALIDATION_ENDPOINT = process.env.RN_DEBUGGER_API_URL || "";
-const REGISTRATION_ENDPOINT = process.env.RN_DEBUGGER_API_URL || "";
-const ACCOUNTS_API_KEY = process.env.RN_DEBUGGER_API_KEY || "";
+const VALIDATION_ENDPOINT = "https://mobile-ai-devtools.link";
+const REGISTRATION_ENDPOINT = "https://mobile-ai-devtools.link";
+const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 5_000;
 const LICENSE_FILE = join(homedir(), ".rn-ai-debugger", "license.json");
-const DASHBOARD_URL = process.env.RN_DEBUGGER_DASHBOARD_URL || "";
+const DASHBOARD_URL = "https://mobile-ai-devtools.link";
 
 // ============================================================================
 // Types
