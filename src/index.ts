@@ -637,7 +637,7 @@ registerToolWithTelemetry(
         const lines: string[] = [];
 
         lines.push(`Installation ID: ${status.installationId}`);
-        lines.push(`License: ${status.status.charAt(0).toUpperCase() + status.status.slice(1)}`);
+        lines.push(`License: ${status.tier.charAt(0).toUpperCase() + status.tier.slice(1)}`);
 
         if (status.plan) {
             lines.push(`Plan expires: ${status.plan.expiresAt}`);
@@ -645,7 +645,7 @@ registerToolWithTelemetry(
 
         lines.push(`Cache valid until: ${status.cacheExpiresAt}`);
 
-        if (status.status === "free") {
+        if (status.tier === "free") {
             const dashboardUrl = getDashboardUrl();
             lines.push("");
             if (dashboardUrl) {
