@@ -655,9 +655,8 @@ registerToolWithTelemetry(
             const dashboardUrl = getDashboardUrl();
             lines.push("");
             if (dashboardUrl) {
-                lines.push(`Activate Pro at: ${dashboardUrl}`);
+                lines.push(`Link your account: ${dashboardUrl}/link?id=${status.installationId}`);
             }
-            lines.push("Enter your Installation ID in the dashboard to unlock Pro features.");
         }
 
         return {
