@@ -6,8 +6,9 @@ import { existsSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
-const IS_DEV = process.argv.includes("--http");
-const API_URL = IS_DEV ? "http://localhost:3000" : "https://mobile-ai-devtools.link";
+import { API_BASE_URL } from "../core/config.js";
+
+const API_URL = API_BASE_URL;
 const API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 10_000;
 

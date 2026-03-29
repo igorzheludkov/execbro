@@ -9,15 +9,16 @@ import { getDeviceFingerprint, getFingerprintVersion } from "./fingerprint.js";
 // Configuration
 // ============================================================================
 
+import { API_BASE_URL } from "./config.js";
+
 const IS_DEV = process.argv.includes("--http");
 const CACHE_TTL_MS = IS_DEV ? 0 : 24 * 60 * 60 * 1000; // No cache in dev, 24h in prod
-const BASE_URL = IS_DEV ? "http://localhost:3000" : "https://mobile-ai-devtools.link";
-const VALIDATION_ENDPOINT = BASE_URL;
-const REGISTRATION_ENDPOINT = BASE_URL;
+const VALIDATION_ENDPOINT = API_BASE_URL;
+const REGISTRATION_ENDPOINT = API_BASE_URL;
 const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 5_000;
 const LICENSE_FILE = join(homedir(), ".rn-ai-debugger", "license.json");
-const DASHBOARD_URL = BASE_URL;
+const DASHBOARD_URL = API_BASE_URL;
 
 // ============================================================================
 // Types
