@@ -1242,7 +1242,7 @@ The server prioritizes devices in this order:
 -   Try `clear_logs` then trigger some actions in the app
 -   Check `get_apps` to verify connection status
 
-## Telemetry
+## Telemetry & Data Collection
 
 This package collects anonymous usage telemetry to help improve the product. No personal information is collected.
 
@@ -1259,9 +1259,19 @@ This package collects anonymous usage telemetry to help improve the product. No 
 
 **Not collected**: No file paths, code content, network data, or personally identifiable information.
 
+### Auto-registration
+
+On first tool use, the package registers your installation with our backend to enable license validation and optional account linking. This sends:
+
+- A random installation ID (UUID)
+- A device fingerprint (one-way SHA-256 hash — cannot be reversed)
+- Platform, hostname, OS version, and server version
+
+No account or login is required. See [PRIVACY.md](./PRIVACY.md) for full details on data handling, storage, and your rights.
+
 ### Opt-out
 
-To disable telemetry, set the environment variable:
+To disable telemetry and auto-registration, set the environment variable:
 
 ```bash
 export RN_DEBUGGER_TELEMETRY=false
@@ -1272,6 +1282,8 @@ Or inline:
 ```bash
 RN_DEBUGGER_TELEMETRY=false npx react-native-ai-devtools
 ```
+
+All debugging tools work normally with telemetry disabled. For the complete privacy policy, see [PRIVACY.md](./PRIVACY.md).
 
 ## License
 
