@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** March 27, 2026
+**Last updated:** March 29, 2026
 
 React Native AI DevTools ("the Tool") is an MCP server for AI-powered React Native debugging. This document explains what data the Tool collects, how it is used, and how you can control it.
 
@@ -9,8 +9,10 @@ React Native AI DevTools ("the Tool") is an MCP server for AI-powered React Nati
 | Data type | What is sent | When | Opt-out |
 |-----------|-------------|------|---------|
 | **Telemetry** | Anonymous usage metrics (tool names, success/failure, duration) | Automatically on every session | `RN_DEBUGGER_TELEMETRY=false` |
+| **Auto-registration** | Installation ID, device fingerprint, platform, hostname, OS version, server version | Once on first tool use per session | `RN_DEBUGGER_TELEMETRY=false` |
+| **License validation** | Installation ID, device fingerprint | Once per session (cached 24 hours) | Cannot be disabled (required for license check) |
 | **OCR screenshots** | Screenshot image for text recognition | Only when `ocr_screenshot` tool is called | Don't use the tool, or use local fallback |
-| **Installation ID** | Random UUID (not linked to your identity) | With telemetry and OCR requests | Delete `~/.rn-ai-debugger/` |
+| **Installation ID** | Random UUID (not linked to your identity) | With telemetry, registration, and OCR requests | Delete `~/.rn-ai-debugger/` |
 
 ## 1. Anonymous Telemetry
 
@@ -51,7 +53,49 @@ export RN_DEBUGGER_TELEMETRY=false
 
 Also accepts `0` or `off`. Telemetry is fully disabled before any data is sent.
 
-## 2. OCR Screenshot Processing
+## 2. Auto-Registration & Device Fingerprinting
+
+### What happens
+
+On the first tool use in each session, the Tool automatically registers your installation with our backend. This is required for license validation and enables optional account linking (e.g., upgrading to a Pro plan).
+
+### What is sent
+
+| Data | Purpose |
+|------|---------|
+| Installation ID | Random UUID — identifies this installation |
+| Device fingerprint | SHA-256 hash of (OS username + CPU model + machine hardware UUID) — prevents installation hijacking |
+| Platform | macOS, Linux, or Windows |
+| Hostname | Your machine's hostname |
+| OS version | Operating system name and release version |
+| Server version | The installed version of react-native-ai-devtools |
+
+### How the fingerprint works
+
+The device fingerprint is a **one-way hash** — it cannot be reversed to recover your username, CPU model, or hardware UUID individually. It is used solely to verify that license activations and account links come from the same physical machine.
+
+The raw components (username, CPU, hardware UUID) are never sent to our servers. Only the resulting SHA-256 hash is transmitted.
+
+### Where data is stored
+
+Registration data is stored in **Google Firebase Firestore**. Each installation creates a document with:
+
+- Status: `"anonymous"` (default) or `"linked"` (if you connect a web account)
+- Tier: `"free"` (default) or `"pro"`/`"team"` (if upgraded)
+- The data listed above (fingerprint, platform, hostname, OS version, server version)
+- Timestamps: when the installation was created and last seen
+
+### How to opt out
+
+Auto-registration is tied to telemetry. To disable both:
+
+```bash
+export RN_DEBUGGER_TELEMETRY=false
+```
+
+With telemetry disabled, registration does not occur. License validation will still check the local cache but will not create remote records. The Tool defaults to the free tier if no cached license exists.
+
+## 3. OCR Screenshot Processing
 
 ### What happens
 
@@ -83,7 +127,7 @@ If the cloud OCR service is unavailable (timeout, network error), the Tool autom
 - Use `ios_screenshot` or `android_screenshot` instead of `ocr_screenshot`
 - If cloud OCR fails, the local fallback processes everything on your machine
 
-## 3. Local Storage
+## 4. Local Storage
 
 The Tool creates the following files on your machine:
 
@@ -100,46 +144,92 @@ rm -rf ~/.rn-ai-debugger/
 
 A new installation ID will be generated on the next server startup.
 
-## 4. No Account or Authentication
+## 5. Accounts & Authentication
 
-The Tool does not require user accounts, login, or any form of authentication. There are no cookies, session tokens, or tracking across services.
+### Free tier (no account required)
 
-## 5. Data Retention
+The Tool works without any account or login. Anonymous installations are registered automatically (see Section 2) and default to the free tier.
 
-- **Telemetry**: Usage metrics are stored in Cloudflare Analytics Engine. Data is retained for analytics purposes and is not linked to any personal identity.
-- **OCR images**: Not retained. Images are processed in memory and discarded immediately.
-- **Local files**: Remain on your machine until you delete them.
+### Optional account linking
 
-## 6. Infrastructure
+You can optionally create a web account at `mobile-ai-devtools.link` to:
 
-All external services run on **Cloudflare Workers** (serverless edge compute):
+- Upgrade to a Pro or Team plan
+- Manage multiple installations from a dashboard
+- Generate activation tokens for linking devices
 
-- Telemetry endpoint: `rn-debugger-telemetry.500griven.workers.dev`
-- OCR endpoint: `rn-debugger-ocr.500griven.workers.dev`
+Account creation uses **Google sign-in via Firebase Authentication**. When you sign in, the following is stored:
+
+| Data | Source |
+|------|--------|
+| Email address | Your Google account |
+| Display name | Your Google account |
+| Sign-in provider | `"google.com"` |
+| Linked installation IDs | From your MCP installations |
+
+### Activation tokens
+
+Activation tokens are one-time codes (valid for 24 hours) that link an MCP installation to your web account. The raw token is shown once in the dashboard; only a SHA-256 hash is stored server-side.
+
+### Account deletion
+
+You can delete your account and all associated data using the `delete_account` MCP tool (requires typing `confirm: "DELETE"`). This removes:
+
+- Your account record and all activation tokens from Firestore
+- Your local license cache and installation ID files
+
+You can also delete local data manually:
+
+```bash
+rm -rf ~/.rn-ai-debugger/
+```
+
+## 6. Data Retention
+
+| Data | Retention |
+|------|-----------|
+| **Telemetry** | Stored in Cloudflare Analytics Engine. Retained for analytics purposes. Not linked to personal identity. |
+| **Installation records** | Stored in Firebase Firestore. Retained while the installation is active. Deleted when you use the `delete_account` tool. |
+| **Account records** | Stored in Firebase Firestore. Retained while the account exists. Deleted on account deletion. |
+| **Activation tokens** | Stored in Firebase Firestore. Expired tokens (24h) are cleaned up lazily on new token creation. |
+| **OCR images** | Not retained. Processed in memory and discarded immediately. |
+| **Local files** | Remain on your machine until you delete them. |
+
+## 7. Infrastructure
+
+External services used by the Tool:
+
+| Service | Provider | Purpose |
+|---------|----------|---------|
+| Telemetry endpoint | Cloudflare Workers | Anonymous usage metrics |
+| OCR endpoint | Cloudflare Workers → Google Cloud Vision | Screenshot text recognition |
+| Registration & license API | Firebase (Google Cloud) | Installation registration, license validation |
+| Account storage | Firebase Firestore (Google Cloud) | Installation records, account data, activation tokens |
+| Authentication | Firebase Authentication (Google Cloud) | Optional Google sign-in for web dashboard |
 
 API keys embedded in the source code are **write-only tokens** — they cannot be used to read or access any stored data.
 
-## 7. Disabling All External Communication
+## 8. Disabling All External Communication
 
 To run the Tool with zero external data transmission:
 
 ```bash
-# Disable telemetry
+# Disable telemetry and auto-registration
 export RN_DEBUGGER_TELEMETRY=false
 
 # Avoid using ocr_screenshot (or let it fall back to local OCR)
 ```
 
-All tools will continue to work normally — external calls are never required for core functionality.
+All debugging tools will continue to work normally — external calls are never required for core functionality. License validation falls back to local cache, then defaults to the free tier.
 
-## 8. Children's Privacy
+## 9. Children's Privacy
 
 The Tool is a developer tool and is not directed at children under 13. We do not knowingly collect data from children.
 
-## 9. Changes to This Policy
+## 10. Changes to This Policy
 
 We may update this privacy policy from time to time. Changes will be reflected in the "Last updated" date at the top of this document and committed to the repository.
 
-## 10. Contact
+## 11. Contact
 
 If you have questions about this privacy policy or data practices, please open an issue on [GitHub](https://github.com/igorzheludkov/react-native-ai-devtools/issues).
