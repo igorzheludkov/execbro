@@ -1261,13 +1261,19 @@ This package collects anonymous usage telemetry to help improve the product. No 
 
 ### Auto-registration
 
-On first tool use, the package registers your installation with our backend to enable license validation and optional account linking. This sends:
+On first tool use, the package automatically registers your installation with our backend. No account or login is required — the Tool works fully out of the box.
+
+**Why we do this:** The product roadmap includes features that build on installation identity — project memory (your AI assistant gets smarter with every session by remembering navigation maps, element signatures, and debug patterns), cloud sync across machines, team collaboration with shared debugging context, and a Pro dashboard for managing installations and subscriptions. Auto-registration lays the groundwork so these features work seamlessly when they ship, without requiring a disruptive setup step later.
+
+**What is sent:**
 
 - A random installation ID (UUID)
-- A device fingerprint (one-way SHA-256 hash — cannot be reversed)
+- A device fingerprint (one-way SHA-256 hash — cannot be reversed to recover its components)
 - Platform, hostname, OS version, and server version
 
-No account or login is required. See [PRIVACY.md](./PRIVACY.md) for full details on data handling, storage, and your rights.
+**What is NOT sent:** No source code, file paths, console logs, network data, component names, or any content from your app. The fingerprint exists solely to prevent installation hijacking — it ties your installation to your physical machine so no one else can claim it.
+
+Registration is fire-and-forget — it never blocks your work, fails silently if the network is unavailable, and can be disabled entirely (see Opt-out below). See [PRIVACY.md](./PRIVACY.md) for full details on data handling, storage, and your rights.
 
 ### Opt-out
 
