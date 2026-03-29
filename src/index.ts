@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
 import { getLicenseStatus, getDashboardUrl } from "./core/license.js";
-import { isSDKInstalled, readSDKNetworkRequests, readSDKNetworkRequest, readSDKNetworkStats, clearSDKNetwork } from "./core/sdkBridge.js";
+import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 import {
     getActivateLicenseConfig,
@@ -776,6 +776,53 @@ registerToolWithTelemetry(
         }
     },
     async ({ maxLogs, level, startFromText, maxMessageLength, verbose, format, summary, device }) => {
+        // Check if SDK is installed — prefer SDK data for richer logs
+        const sdkAvailable = await isSDKInstalled();
+
+        if (sdkAvailable) {
+            if (summary) {
+                const sdkStats = await getSDKConsoleStats();
+                if (sdkStats.success) {
+                    const s = sdkStats.data;
+                    const lines: string[] = [];
+                    lines.push(`Total logs: ${s.total}`);
+                    if (s.byLevel && Object.keys(s.byLevel).length > 0) {
+                        lines.push("\nBy Level:");
+                        for (const [lvl, cnt] of Object.entries(s.byLevel)) lines.push(`  ${lvl}: ${cnt}`);
+                    }
+                    return { content: [{ type: "text" as const, text: `Log Summary (SDK):\n\n${lines.join("\n")}` }] };
+                }
+            }
+
+            const sdkResult = await querySDKConsole({ count: maxLogs, level, text: startFromText });
+            if (sdkResult.success) {
+                const entries = sdkResult.data;
+                if (entries.length === 0) {
+                    return { content: [{ type: "text" as const, text: "No console logs captured yet." }] };
+                }
+                if (format === "tonl") {
+                    const tonlLines = entries.map((e) => {
+                        const time = new Date(e.timestamp).toLocaleTimeString();
+                        let msg = e.message;
+                        if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
+                            msg = msg.slice(0, maxMessageLength) + "...";
+                        }
+                        return `${time} [${e.level}] ${msg}`;
+                    });
+                    return { content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${tonlLines.join("\n")}` }] };
+                }
+                const lines = entries.map((e) => {
+                    const time = new Date(e.timestamp).toLocaleTimeString();
+                    let msg = e.message;
+                    if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
+                        msg = msg.slice(0, maxMessageLength) + "...";
+                    }
+                    return `[${time}] [${e.level.toUpperCase()}] ${msg}`;
+                });
+                return { content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
+            }
+        }
+
         // Return summary if requested
         if (summary) {
             const summaryText = getLogSummary(resolveLogBuffer(device), { lastN: 5, maxMessageLength: 100 });
@@ -886,6 +933,39 @@ registerToolWithTelemetry(
         }
     },
     async ({ text, maxResults, maxMessageLength, verbose, format, device }) => {
+        // Check if SDK is installed — prefer SDK data
+        const sdkAvailable = await isSDKInstalled();
+
+        if (sdkAvailable) {
+            const sdkResult = await querySDKConsole({ count: maxResults, text });
+            if (sdkResult.success) {
+                const entries = sdkResult.data;
+                if (entries.length === 0) {
+                    return { content: [{ type: "text" as const, text: `No logs matching "${text}" found.` }] };
+                }
+                if (format === "tonl") {
+                    const tonlLines = entries.map((e) => {
+                        const time = new Date(e.timestamp).toLocaleTimeString();
+                        let msg = e.message;
+                        if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
+                            msg = msg.slice(0, maxMessageLength) + "...";
+                        }
+                        return `${time} [${e.level}] ${msg}`;
+                    });
+                    return { content: [{ type: "text" as const, text: `Search results for "${text}" (${entries.length} matches, SDK):\n\n${tonlLines.join("\n")}` }] };
+                }
+                const lines = entries.map((e) => {
+                    const time = new Date(e.timestamp).toLocaleTimeString();
+                    let msg = e.message;
+                    if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
+                        msg = msg.slice(0, maxMessageLength) + "...";
+                    }
+                    return `[${time}] [${e.level.toUpperCase()}] ${msg}`;
+                });
+                return { content: [{ type: "text" as const, text: `Search results for "${text}" (${entries.length} matches, SDK):\n\n${lines.join("\n")}` }] };
+            }
+        }
+
         const { logs, count, formatted } = searchLogs(resolveLogBuffer(device), text, { maxResults, maxMessageLength, verbose });
 
         // Check connection health
@@ -946,6 +1026,16 @@ registerToolWithTelemetry(
         for (const buffer of logBuffers.values()) {
             total += buffer.clear();
         }
+
+        // Also clear SDK buffer if available
+        const sdkAvailable = await isSDKInstalled();
+        if (sdkAvailable) {
+            const sdkResult = await clearSDKConsole();
+            if (sdkResult.success && sdkResult.count) {
+                total += sdkResult.count;
+            }
+        }
+
         return { content: [{ type: "text", text: `Cleared ${total} log entries from all devices.` }] };
     }
 );
@@ -1949,7 +2039,7 @@ registerToolWithTelemetry(
 
         if (sdkAvailable) {
             if (summary) {
-                const sdkStats = await readSDKNetworkStats();
+                const sdkStats = await getSDKNetworkStats();
                 if (sdkStats.success) {
                     const s = sdkStats.data;
                     const lines: string[] = [];
@@ -1973,13 +2063,13 @@ registerToolWithTelemetry(
                 }
             }
 
-            const sdkResult = await readSDKNetworkRequests({ count: maxRequests, method, urlPattern, status });
-            if (sdkResult.success && sdkResult.data) {
-                const entries = sdkResult.data as Array<any>;
+            const sdkResult = await querySDKNetwork({ count: maxRequests, method, urlPattern, status });
+            if (sdkResult.success) {
+                const entries = sdkResult.data;
                 if (entries.length === 0) {
                     return { content: [{ type: "text" as const, text: "No network requests captured yet." }] };
                 }
-                const lines = entries.map((r: any) => {
+                const lines = entries.map((r) => {
                     const time = new Date(r.timestamp).toLocaleTimeString();
                     const st = r.status ?? "pending";
                     const dur = r.duration != null ? `${r.duration}ms` : "-";
@@ -2093,6 +2183,29 @@ registerToolWithTelemetry(
         }
     },
     async ({ urlPattern, maxResults, format, device }) => {
+        // Check if SDK is installed — prefer SDK data
+        const sdkAvailable = await isSDKInstalled();
+
+        if (sdkAvailable) {
+            const sdkResult = await querySDKNetwork({ count: maxResults, urlPattern });
+            if (sdkResult.success) {
+                const entries = sdkResult.data;
+                if (entries.length === 0) {
+                    return { content: [{ type: "text" as const, text: `No network requests matching "${urlPattern}" found.` }] };
+                }
+                const lines = entries.map((r) => {
+                    const time = new Date(r.timestamp).toLocaleTimeString();
+                    const st = r.status ?? "pending";
+                    const dur = r.duration != null ? `${r.duration}ms` : "-";
+                    return `[${r.id}] ${time} ${r.method} ${st} ${dur} ${r.url}`;
+                });
+                if (format === "tonl") {
+                    return { content: [{ type: "text" as const, text: `Network search results for "${urlPattern}" (${entries.length} matches, SDK):\n\n${lines.join("\n")}` }] };
+                }
+                return { content: [{ type: "text" as const, text: `Network search results for "${urlPattern}" (${entries.length} matches, SDK):\n\n${lines.join("\n")}` }] };
+            }
+        }
+
         const { requests, count, formatted } = searchNetworkRequests(resolveNetworkBuffer(device), urlPattern, maxResults);
 
         // Check connection health
@@ -2158,7 +2271,7 @@ registerToolWithTelemetry(
         // Check SDK first — it has full headers and body
         const sdkAvailable = await isSDKInstalled();
         if (sdkAvailable) {
-            const sdkResult = await readSDKNetworkRequest(requestId);
+            const sdkResult = await getSDKNetworkEntry(requestId);
             if (sdkResult.success && sdkResult.data) {
                 const r = sdkResult.data;
                 const lines: string[] = [];
@@ -2235,6 +2348,34 @@ registerToolWithTelemetry(
         }
     },
     async ({ device }) => {
+        // Check if SDK is installed — prefer SDK data
+        const sdkAvailable = await isSDKInstalled();
+
+        if (sdkAvailable) {
+            const sdkStats = await getSDKNetworkStats();
+            if (sdkStats.success) {
+                const s = sdkStats.data;
+                const lines: string[] = [];
+                lines.push(`Total requests: ${s.total}`);
+                lines.push(`Completed: ${s.completed}`);
+                lines.push(`Errors: ${s.errors}`);
+                if (s.avgDuration != null) lines.push(`Avg duration: ${s.avgDuration}ms`);
+                if (s.byMethod && Object.keys(s.byMethod).length > 0) {
+                    lines.push("\nBy Method:");
+                    for (const [m, c] of Object.entries(s.byMethod)) lines.push(`  ${m}: ${c}`);
+                }
+                if (s.byStatus && Object.keys(s.byStatus).length > 0) {
+                    lines.push("\nBy Status:");
+                    for (const [st, c] of Object.entries(s.byStatus)) lines.push(`  ${st}: ${c}`);
+                }
+                if (s.byDomain && Object.keys(s.byDomain).length > 0) {
+                    lines.push("\nBy Domain:");
+                    for (const [d, c] of Object.entries(s.byDomain).sort((a: any, b: any) => b[1] - a[1]).slice(0, 10)) lines.push(`  ${d}: ${c}`);
+                }
+                return { content: [{ type: "text" as const, text: `Network Statistics (SDK):\n\n${lines.join("\n")}` }] };
+            }
+        }
+
         const stats = getNetworkStats(resolveNetworkBuffer(device));
 
         // Check connection health
