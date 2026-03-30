@@ -79,6 +79,10 @@ export function getAvailableStrategies(
         return ["coordinate"];
     }
     if (strategy !== "auto") {
+        // Always fallback to OCR for text queries — explicit strategy may miss visible text
+        if (query.text && strategy !== "ocr" && strategy !== "coordinate") {
+            return [strategy, "ocr"];
+        }
         return [strategy];
     }
     if (query.component && !query.text && !query.testID) {
@@ -260,6 +264,34 @@ async function tryFiberStrategy(
     query: TapQuery,
     index?: number,
     maxTraversalDepth?: number
+): Promise<StrategyResult> {
+    // Retry with increasing depth if the initial traversal finds nothing
+    const baseDepth = maxTraversalDepth ?? 15;
+    const depthAttempts = [baseDepth];
+    // Only add deeper retries if user didn't explicitly set a high depth
+    if (baseDepth <= 15) {
+        depthAttempts.push(30, 45);
+    } else if (baseDepth <= 30) {
+        depthAttempts.push(baseDepth * 2);
+    }
+
+    let lastResult: StrategyResult | null = null;
+
+    for (const depth of depthAttempts) {
+        const result = await tryFiberAtDepth(query, index, depth);
+        if (result.success || result.matches) {
+            return result;
+        }
+        lastResult = result;
+    }
+
+    return lastResult!;
+}
+
+async function tryFiberAtDepth(
+    query: TapQuery,
+    index: number | undefined,
+    maxTraversalDepth: number
 ): Promise<StrategyResult> {
     try {
         const result = await pressElement({

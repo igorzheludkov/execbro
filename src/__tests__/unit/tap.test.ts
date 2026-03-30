@@ -91,8 +91,8 @@ describe("getAvailableStrategies", () => {
     it("skips fiber for non-ASCII text", () => {
         expect(getAvailableStrategies({ text: "Отправить" }, "auto")).toEqual(["accessibility", "ocr"]);
     });
-    it("returns fiber+accessibility for testID", () => {
-        expect(getAvailableStrategies({ testID: "btn" }, "auto")).toEqual(["fiber", "accessibility"]);
+    it("returns accessibility+fiber for testID", () => {
+        expect(getAvailableStrategies({ testID: "btn" }, "auto")).toEqual(["accessibility", "fiber"]);
     });
     it("returns only fiber for component", () => {
         expect(getAvailableStrategies({ component: "Button" }, "auto")).toEqual(["fiber"]);
@@ -100,8 +100,15 @@ describe("getAvailableStrategies", () => {
     it("returns coordinate for x,y", () => {
         expect(getAvailableStrategies({ x: 100, y: 200 }, "auto")).toEqual(["coordinate"]);
     });
-    it("returns single strategy when explicitly set", () => {
+    it("returns explicit strategy with OCR fallback for text query", () => {
+        expect(getAvailableStrategies({ text: "Submit" }, "fiber")).toEqual(["fiber", "ocr"]);
+        expect(getAvailableStrategies({ text: "Submit" }, "accessibility")).toEqual(["accessibility", "ocr"]);
+    });
+    it("returns only OCR when explicitly set with text query", () => {
         expect(getAvailableStrategies({ text: "Submit" }, "ocr")).toEqual(["ocr"]);
+    });
+    it("returns single strategy when explicitly set without text", () => {
+        expect(getAvailableStrategies({ testID: "btn" }, "fiber")).toEqual(["fiber"]);
     });
 });
 

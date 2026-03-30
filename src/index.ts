@@ -287,7 +287,8 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             // Check if result indicates an error
             if (result?.isError) {
                 success = false;
-                errorMessage = result.content?.[0]?.text || "Unknown error";
+                // Prefer concise _errorMessage over full response text (which may be large JSON)
+                errorMessage = result._errorMessage || result.content?.[0]?.text || "Unknown error";
                 // Extract error context if provided (e.g., the expression that caused a syntax error)
                 errorContext = result._errorContext;
             }
@@ -1751,9 +1752,17 @@ registerToolWithTelemetry(
         });
 
         const text = JSON.stringify(result, null, 2);
+        // Pack strategy mode + attempted strategies into errorContext for telemetry
+        // e.g. "s=ocr|fiber:no_pressable|ocr:no_match" or "s=auto|fiber:no_pressable|accessibility:not_found|ocr:no_match"
+        const stratPrefix = args.strategy && args.strategy !== "auto" ? `s=${args.strategy}|` : "";
+        const errorContext = result.attempted?.length
+            ? stratPrefix + result.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|")
+            : undefined;
         return {
             content: [{ type: "text", text }],
             isError: !result.success,
+            _errorMessage: result.error,
+            _errorContext: errorContext,
         };
     }
 );
