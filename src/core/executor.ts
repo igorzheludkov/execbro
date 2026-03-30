@@ -208,7 +208,34 @@ async function executeExpressionCore(
     return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
             pendingExecutions.delete(currentMessageId);
-            resolve({ success: false, error: "Timeout: Expression took too long to evaluate" });
+
+            const wsState = app.ws.readyState === WebSocket.OPEN ? "OPEN"
+                : app.ws.readyState === WebSocket.CLOSED ? "CLOSED"
+                : app.ws.readyState === WebSocket.CLOSING ? "CLOSING"
+                : "CONNECTING";
+            const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+            const pageId = app.deviceInfo.id || "unknown";
+            const truncatedExpr = cleanedExpression.length > 100
+                ? cleanedExpression.substring(0, 100) + "..."
+                : cleanedExpression;
+
+            const errorMessage = [
+                "Timeout: Expression took too long to evaluate.",
+                "",
+                `Connection state: ws=${wsState}, device="${deviceName}", platform=${app.platform}, pageId=${pageId}`,
+                `Expression (truncated): ${truncatedExpr}`,
+                "",
+                "This usually means the JavaScript execution context became unresponsive or the CDP page is stale.",
+                "",
+                "Recovery steps (try in order):",
+                "1. Call scan_metro to re-establish a fresh CDP connection",
+                "2. If scan_metro doesn't help, force-restart the app:",
+                "   - iOS: ios_terminate_app then ios_launch_app",
+                "   - Android: android_launch_app (restarts automatically)",
+                "3. After restarting, call scan_metro again to reconnect",
+            ].join("\n");
+
+            resolve({ success: false, error: errorMessage });
         }, TIMEOUT_MS);
 
         pendingExecutions.set(currentMessageId, { resolve, timeoutId });
@@ -340,7 +367,16 @@ export async function executeInApp(
 
     return {
         success: false,
-        error: lastError ?? "Execution failed after all retries. Connection may be stale."
+        error: lastError ?? [
+            "Execution failed after all retries. Connection may be stale.",
+            "",
+            "Recovery steps (try in order):",
+            "1. Call scan_metro to re-establish a fresh CDP connection",
+            "2. If scan_metro doesn't help, force-restart the app:",
+            "   - iOS: ios_terminate_app then ios_launch_app",
+            "   - Android: android_launch_app (restarts automatically)",
+            "3. After restarting, call scan_metro again to reconnect",
+        ].join("\n")
     };
 }
 
@@ -390,7 +426,8 @@ export async function inspectGlobal(objectName: string, device?: string): Promis
     return executeInApp(expression, false, {}, device);
 }
 
-// Reload the React Native app using __ReactRefresh (Page.reload is not supported by Hermes)
+// Reload the React Native app using __ReactRefresh
+// Note: Page.reload CDP method may work on Bridgeless targets (via HostAgent) — not yet tested
 // Uses fire-and-forget: sends the reload command without waiting for a response,
 // since the JS context is destroyed during reload and would always timeout.
 export async function reloadApp(device?: string): Promise<ExecutionResult> {
@@ -455,7 +492,21 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
 
     try {
         if (app.ws.readyState !== WebSocket.OPEN) {
-            return { success: false, error: "WebSocket connection is not open." };
+            const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+            return {
+                success: false,
+                error: [
+                    `WebSocket connection is not open (device="${deviceName}", platform=${app.platform}).`,
+                    "The CDP page may be stale or the app has crashed.",
+                    "",
+                    "Recovery steps (try in order):",
+                    "1. Call scan_metro to re-establish a fresh CDP connection",
+                    "2. If scan_metro doesn't help, force-restart the app:",
+                    "   - iOS: ios_terminate_app then ios_launch_app",
+                    "   - Android: android_launch_app (restarts automatically)",
+                    "3. After restarting, call scan_metro again to reconnect",
+                ].join("\n")
+            };
         }
 
         // Send without registering a pending execution — fire and forget
