@@ -676,7 +676,10 @@ registerToolWithTelemetry(
                 lines.push(`Monthly usage: ${usage.used} / ${usage.limit}`);
             }
             lines.push(`Month: ${usage.monthKey}`);
-            lines.push(`Status: ${usage.canUse ? "Active" : "Limit reached"}`);
+            const statusLabel = usage.promotionalPeriod
+                ? "Active (promotional period — no limits applied)"
+                : usage.canUse ? "Active" : "Limit reached";
+            lines.push(`Status: ${statusLabel}`);
         }
 
         if (status.tier === "free") {
