@@ -4181,23 +4181,25 @@ async function main() {
     const usageInfo = getUsageInfo();
 
     if (usageInfo && !usageInfo.canUse) {
-        // Clear all module-level tool registrations
-        (server as any)._registeredTools = {};
+        // Override all tool handlers to return the limit message
+        // Tools stay registered (visible to the MCP client) but every call returns the upgrade prompt
+        const isCredits = usageInfo.creditsRemaining !== null;
+        const dashboardUrl = `${API_BASE_URL}/dashboard/usage`;
+        const limitMessage = isCredits
+            ? `Credits depleted. Purchase more at ${dashboardUrl}`
+            : `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Purchase a credits pack for unlimited usage at ${dashboardUrl}`;
 
-        // Register only an informational tool
-        server.registerTool("get_usage_status", {
-            description: "Check current usage status and limits",
-        }, async () => {
-            const isCredits = usageInfo.creditsRemaining !== null;
-            const dashboardUrl = `${API_BASE_URL}/dashboard/usage`;
-            const message = isCredits
-                ? `Credits depleted. Purchase more at ${dashboardUrl}`
-                : `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Purchase a credits pack for unlimited usage at ${dashboardUrl}`;
+        const registeredTools = (server as any)._registeredTools as Record<string, any>;
+        for (const toolName of Object.keys(registeredTools)) {
+            const tool = registeredTools[toolName];
+            if (tool && typeof tool === "object" && typeof tool.handler === "function") {
+                tool.handler = async () => ({
+                    content: [{ type: "text" as const, text: limitMessage }],
+                });
+            }
+        }
 
-            return { content: [{ type: "text" as const, text: message }] };
-        });
-
-        console.error("[rn-ai-debugger] Usage limit reached — only get_usage_status tool registered");
+        console.error("[rn-ai-debugger] Usage limit reached — all tools return upgrade prompt");
     }
 
     const useHttp = process.argv.includes("--http");
