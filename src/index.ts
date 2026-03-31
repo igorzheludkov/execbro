@@ -664,6 +664,21 @@ registerToolWithTelemetry(
 
         lines.push(`Cache valid until: ${status.cacheExpiresAt}`);
 
+        // Usage limits
+        const usage = getUsageInfo();
+        if (usage) {
+            lines.push("");
+            lines.push("--- Usage ---");
+            if (usage.creditsRemaining !== null) {
+                lines.push(`Credits remaining: ${usage.creditsRemaining.toLocaleString()}`);
+                lines.push(`Used this month: ${usage.used.toLocaleString()}`);
+            } else {
+                lines.push(`Monthly usage: ${usage.used} / ${usage.limit}`);
+            }
+            lines.push(`Month: ${usage.monthKey}`);
+            lines.push(`Status: ${usage.canUse ? "Active" : "Limit reached"}`);
+        }
+
         if (status.tier === "free") {
             const dashboardUrl = getDashboardUrl();
             lines.push("");
