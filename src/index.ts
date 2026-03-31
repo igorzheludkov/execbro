@@ -269,6 +269,17 @@ const toolRegistry = new Map<string, { config: any; handler: (args: any) => Prom
 function registerToolWithTelemetry(toolName: string, config: any, handler: (args: any) => Promise<any>, emptyResultDetector?: (result: any) => boolean): void {
     toolRegistry.set(toolName, { config, handler });
     server.registerTool(toolName, config, async (args: any) => {
+        // --- Usage limit check (runs on every tool call) ---
+        const usageInfo = getUsageInfo();
+        if (usageInfo && !usageInfo.canUse) {
+            const isCredits = usageInfo.creditsRemaining !== null;
+            const dashboardUrl = `${API_BASE_URL}/dashboard/usage`;
+            const message = isCredits
+                ? `Credits depleted. Purchase more at ${dashboardUrl}`
+                : `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Purchase a credits pack for unlimited usage at ${dashboardUrl}`;
+            return { content: [{ type: "text" as const, text: message }] };
+        }
+
         const startTime = Date.now();
         let success = true;
         let errorMessage: string | undefined;
@@ -4175,32 +4186,9 @@ async function main() {
     await startDebugHttpServer();
     console.error("[rn-ai-debugger] HTTP server started in-process");
 
-    // --- Usage limit check ---
+    // --- Eager usage check (pre-loads usage cache for tool-level gate) ---
     const { ensureLicense } = await import("./core/license.js");
-    const licenseResult = await ensureLicense();
-    const usageInfo = getUsageInfo();
-
-    if (usageInfo && !usageInfo.canUse) {
-        // Override all tool handlers to return the limit message
-        // Tools stay registered (visible to the MCP client) but every call returns the upgrade prompt
-        const isCredits = usageInfo.creditsRemaining !== null;
-        const dashboardUrl = `${API_BASE_URL}/dashboard/usage`;
-        const limitMessage = isCredits
-            ? `Credits depleted. Purchase more at ${dashboardUrl}`
-            : `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Purchase a credits pack for unlimited usage at ${dashboardUrl}`;
-
-        const registeredTools = (server as any)._registeredTools as Record<string, any>;
-        for (const toolName of Object.keys(registeredTools)) {
-            const tool = registeredTools[toolName];
-            if (tool && typeof tool === "object" && typeof tool.handler === "function") {
-                tool.handler = async () => ({
-                    content: [{ type: "text" as const, text: limitMessage }],
-                });
-            }
-        }
-
-        console.error("[rn-ai-debugger] Usage limit reached — all tools return upgrade prompt");
-    }
+    await ensureLicense();
 
     const useHttp = process.argv.includes("--http");
     const httpPort = parseInt(process.env.MCP_HTTP_PORT || "8600", 10);
