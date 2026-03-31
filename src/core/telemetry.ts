@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { ensureLicense } from "./license.js";
+import { ensureLicense, incrementLocalUsage } from "./license.js";
 
 // ============================================================================
 // Configuration
@@ -328,6 +328,9 @@ export function trackToolInvocation(
     if (emptyResult !== undefined) event.emptyResult = emptyResult;
 
     eventQueue.push(event);
+
+    // Increment local usage counter
+    incrementLocalUsage();
 
     if (eventQueue.length >= BATCH_SIZE) {
         flush();
