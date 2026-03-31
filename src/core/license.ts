@@ -256,17 +256,7 @@ async function resolveLicense(): Promise<LicenseResult> {
     const cache = readCache();
     let source: "cache" | "api" | "default" = "default";
 
-    // Check if cache is fresh and matches current installation
-    if (cache && isCacheFresh(cache, installationId)) {
-        currentStatus = cache;
-        source = "cache";
-        if (!currentUsage) {
-            currentUsage = readUsageCache();
-        }
-        return { status: currentStatus, source, durationMs: Date.now() - startTime };
-    }
-
-    // Cache stale or missing — try API
+    // Always call API for fresh usage data (even if license cache is fresh)
     const apiResponse = await callValidationApi(installationId);
 
     if (apiResponse) {
