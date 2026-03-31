@@ -211,6 +211,10 @@ export {
     isHttpServerProcessRunning
 } from "./httpServerProcess.js";
 
+// License & Usage
+export { ensureLicense, getLicenseStatus, getUsageInfo, incrementLocalUsage } from "./license.js";
+export type { LicenseTier, LicenseStatus, UsageInfo } from "./license.js";
+
 // Telemetry
 export { initTelemetry, isTelemetryEnabled, trackToolInvocation } from "./telemetry.js";
 
