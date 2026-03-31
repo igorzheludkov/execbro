@@ -45,6 +45,7 @@ export interface UsageInfo {
     creditsRemaining: number | null;
     canUse: boolean;
     promotionalPeriod?: boolean;
+    promotionalPeriodEndsAt?: string | null;
 }
 
 interface ApiResponse {

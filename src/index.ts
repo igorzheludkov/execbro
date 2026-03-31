@@ -676,10 +676,14 @@ registerToolWithTelemetry(
                 lines.push(`Monthly usage: ${usage.used} / ${usage.limit}`);
             }
             lines.push(`Month: ${usage.monthKey}`);
-            const statusLabel = usage.promotionalPeriod
-                ? "Active (promotional period — no limits applied)"
-                : usage.canUse ? "Active" : "Limit reached";
-            lines.push(`Status: ${statusLabel}`);
+            if (usage.promotionalPeriod) {
+                const endsAt = usage.promotionalPeriodEndsAt
+                    ? new Date(usage.promotionalPeriodEndsAt).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
+                    : "unknown";
+                lines.push(`Status: Active (promotional period — no limits until ${endsAt})`);
+            } else {
+                lines.push(`Status: ${usage.canUse ? "Active" : "Limit reached"}`);
+            }
         }
 
         if (status.tier === "free") {
