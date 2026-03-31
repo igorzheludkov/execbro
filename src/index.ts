@@ -7,7 +7,8 @@ import { createServer as createHttpServer } from "node:http";
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
-import { getLicenseStatus, getDashboardUrl } from "./core/license.js";
+import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
+import { API_BASE_URL } from "./core/config.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 import {
@@ -4173,6 +4174,31 @@ async function main() {
     // Note: Child process mode doesn't work because state (logs, network, apps) isn't shared
     await startDebugHttpServer();
     console.error("[rn-ai-debugger] HTTP server started in-process");
+
+    // --- Usage limit check ---
+    const { ensureLicense } = await import("./core/license.js");
+    const licenseResult = await ensureLicense();
+    const usageInfo = getUsageInfo();
+
+    if (usageInfo && !usageInfo.canUse) {
+        // Clear all module-level tool registrations
+        (server as any)._registeredTools = {};
+
+        // Register only an informational tool
+        server.registerTool("get_usage_status", {
+            description: "Check current usage status and limits",
+        }, async () => {
+            const isCredits = usageInfo.creditsRemaining !== null;
+            const dashboardUrl = `${API_BASE_URL}/dashboard/usage`;
+            const message = isCredits
+                ? `Credits depleted. Purchase more at ${dashboardUrl}`
+                : `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Purchase a credits pack for unlimited usage at ${dashboardUrl}`;
+
+            return { content: [{ type: "text" as const, text: message }] };
+        });
+
+        console.error("[rn-ai-debugger] Usage limit reached — only get_usage_status tool registered");
+    }
 
     const useHttp = process.argv.includes("--http");
     const httpPort = parseInt(process.env.MCP_HTTP_PORT || "8600", 10);
