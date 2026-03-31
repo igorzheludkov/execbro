@@ -38,6 +38,14 @@ export interface LicenseStatus {
     };
 }
 
+export interface UsageInfo {
+    used: number;
+    limit: number | null;
+    monthKey: string;
+    creditsRemaining: number | null;
+    canUse: boolean;
+}
+
 interface ApiResponse {
     tier: LicenseTier;
     error?: string;
@@ -54,6 +62,33 @@ interface ApiResponse {
 // ============================================================================
 
 let currentStatus: LicenseStatus | null = null;
+
+const USAGE_FILE = join(homedir(), ".rn-ai-debugger", "usage.json");
+
+let currentUsage: UsageInfo | null = null;
+
+export function getUsageInfo(): UsageInfo | null {
+    return currentUsage;
+}
+
+function readUsageCache(): UsageInfo | null {
+    try {
+        if (!existsSync(USAGE_FILE)) return null;
+        return JSON.parse(readFileSync(USAGE_FILE, "utf-8"));
+    } catch {
+        return null;
+    }
+}
+
+function writeUsageCache(usage: UsageInfo): void {
+    try {
+        const dir = dirname(USAGE_FILE);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(USAGE_FILE, JSON.stringify(usage, null, 2));
+    } catch {
+        // Silent fail
+    }
+}
 
 // ============================================================================
 // Cache Management
@@ -245,6 +280,14 @@ async function resolveLicense(): Promise<LicenseResult> {
 
         writeCache(currentStatus);
         source = "api";
+
+        // Parse usage info from API response
+        if ((apiResponse as any).usage) {
+            const usageData = (apiResponse as any).usage as UsageInfo;
+            currentUsage = usageData;
+            writeUsageCache(usageData);
+        }
+
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
@@ -252,12 +295,18 @@ async function resolveLicense(): Promise<LicenseResult> {
     if (cache && cache.installationId === installationId) {
         currentStatus = cache;
         source = "cache";
+        if (!currentUsage) {
+            currentUsage = readUsageCache();
+        }
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
     // No cache, no API — default to free
     currentStatus = createDefaultStatus(installationId);
     writeCache(currentStatus);
+    if (!currentUsage) {
+        currentUsage = readUsageCache();
+    }
     return { status: currentStatus, source, durationMs: Date.now() - startTime };
 }
 
@@ -268,6 +317,15 @@ export function getLicenseStatus(): LicenseStatus {
         currentStatus = createDefaultStatus(installationId);
     }
     return currentStatus;
+}
+
+export function incrementLocalUsage(): void {
+    if (!currentUsage) return;
+    currentUsage.used += 1;
+    // Write periodically, not on every call (write every 10 increments)
+    if (currentUsage.used % 10 === 0) {
+        writeUsageCache(currentUsage);
+    }
 }
 
 export function getDashboardUrl(): string {
