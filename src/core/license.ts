@@ -259,6 +259,9 @@ async function resolveLicense(): Promise<LicenseResult> {
     if (cache && isCacheFresh(cache, installationId)) {
         currentStatus = cache;
         source = "cache";
+        if (!currentUsage) {
+            currentUsage = readUsageCache();
+        }
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
