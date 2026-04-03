@@ -95,6 +95,7 @@ interface TelemetryConfig {
     installationId: string;
     firstRunTimestamp: number;
     isFirstRun: boolean;
+    devMode?: boolean;
 }
 
 interface TelemetryPayload {
@@ -196,6 +197,13 @@ export function initTelemetry(): void {
     if (envValue === "false" || envValue === "0" || envValue === "off") {
         telemetryEnabled = false;
         console.error("[rn-ai-debugger] Telemetry disabled via RN_DEBUGGER_TELEMETRY");
+        return;
+    }
+
+    // Check if dev mode is enabled in config (for local development)
+    const cfg = loadOrCreateConfig();
+    if (cfg.devMode) {
+        telemetryEnabled = false;
         return;
     }
 
