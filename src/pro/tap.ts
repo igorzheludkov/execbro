@@ -100,10 +100,11 @@ export function getAvailableStrategies(
     }
     if (query.text) {
         const strategies: string[] = [];
+        strategies.push("accessibility");
         if (!hasProblematicUnicode(query.text)) {
             strategies.push("fiber");
         }
-        strategies.push("accessibility", "ocr");
+        strategies.push("ocr");
         return strategies;
     }
     return ["fiber", "accessibility", "ocr"];

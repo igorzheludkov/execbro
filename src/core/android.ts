@@ -929,6 +929,28 @@ function parseUIAutomatorXML(xml: string): AndroidUIElement[] {
 /**
  * Match element against find options
  */
+/**
+ * Check if an element's center is within the screen viewport.
+ * Filters out off-screen elements in scroll views, pagers, etc.
+ */
+function isAndroidElementInViewport(element: AndroidUIElement, screenWidth: number, screenHeight: number): boolean {
+    const { center } = element;
+    return center.x >= 0 && center.x <= screenWidth && center.y >= 0 && center.y <= screenHeight;
+}
+
+/**
+ * Extract screen dimensions from the uiautomator XML.
+ * The root hierarchy node's bounds represent the screen size.
+ */
+function extractAndroidScreenSize(rawXml: string): { width: number; height: number } | null {
+    // Match the first node's bounds (root element = screen)
+    const match = rawXml.match(/<(?:hierarchy|node)[^>]*bounds="\[0,0\]\[(\d+),(\d+)\]"/);
+    if (match) {
+        return { width: parseInt(match[1], 10), height: parseInt(match[2], 10) };
+    }
+    return null;
+}
+
 function matchesElement(element: AndroidUIElement, options: FindElementOptions): boolean {
     if (options.text !== undefined) {
         if (element.text !== options.text) return false;
@@ -1037,8 +1059,20 @@ export async function androidFindElement(
             };
         }
 
-        // Find matching elements
-        const matches = treeResult.elements.filter(el => matchesElement(el, options));
+        // Filter to viewport-visible elements first, then match criteria.
+        // This prevents selecting off-screen duplicates in scroll views / pagers.
+        const screenSize = treeResult.rawXml ? extractAndroidScreenSize(treeResult.rawXml) : null;
+        const visibleElements = screenSize
+            ? treeResult.elements.filter(el => isAndroidElementInViewport(el, screenSize.width, screenSize.height))
+            : treeResult.elements;
+
+        let matches = visibleElements.filter(el => matchesElement(el, options));
+
+        // If no visible matches, fall back to all elements (element may be partially visible
+        // or the screen size extraction failed)
+        if (matches.length === 0) {
+            matches = treeResult.elements.filter(el => matchesElement(el, options));
+        }
 
         if (matches.length === 0) {
             return {
