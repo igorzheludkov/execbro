@@ -7,7 +7,7 @@ import {
     type TapStrategy,
     buildQuery,
     getAvailableStrategies,
-    isNonAscii,
+    hasProblematicUnicode,
     convertPixelsToPoints,
     formatTapSuccess,
     formatTapFailure,
@@ -72,15 +72,45 @@ describe("buildQuery", () => {
     });
 });
 
-describe("isNonAscii", () => {
+describe("hasProblematicUnicode", () => {
     it("returns false for ASCII text", () => {
-        expect(isNonAscii("Submit")).toBe(false);
+        expect(hasProblematicUnicode("Submit")).toBe(false);
     });
-    it("returns true for Cyrillic", () => {
-        expect(isNonAscii("Отправить")).toBe(true);
+    it("returns false for Polish accented text", () => {
+        expect(hasProblematicUnicode("Potwierdź")).toBe(false);
+    });
+    it("returns false for Vietnamese accented text", () => {
+        expect(hasProblematicUnicode("Tin nhắn")).toBe(false);
+    });
+    it("returns false for German umlauts", () => {
+        expect(hasProblematicUnicode("Übersicht")).toBe(false);
+    });
+    it("returns false for French accented text", () => {
+        expect(hasProblematicUnicode("Paramètres")).toBe(false);
+    });
+    it("returns false for Cyrillic text", () => {
+        expect(hasProblematicUnicode("Отправить")).toBe(false);
+    });
+    it("returns false for Chinese text", () => {
+        expect(hasProblematicUnicode("提交")).toBe(false);
+    });
+    it("returns false for Japanese text", () => {
+        expect(hasProblematicUnicode("送信")).toBe(false);
     });
     it("returns true for emoji", () => {
-        expect(isNonAscii("🔥")).toBe(true);
+        expect(hasProblematicUnicode("🔥")).toBe(true);
+    });
+    it("returns true for mixed text with emoji", () => {
+        expect(hasProblematicUnicode("Save 🔥")).toBe(true);
+    });
+    it("returns true for flag emoji", () => {
+        expect(hasProblematicUnicode("🇺🇸")).toBe(true);
+    });
+    it("returns true for zero-width joiner sequences", () => {
+        expect(hasProblematicUnicode("👨‍👩‍👧")).toBe(true);
+    });
+    it("returns true for weather symbols", () => {
+        expect(hasProblematicUnicode("☀")).toBe(true);
     });
 });
 
@@ -88,8 +118,17 @@ describe("getAvailableStrategies", () => {
     it("returns all strategies for text query", () => {
         expect(getAvailableStrategies({ text: "Submit" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
     });
-    it("skips fiber for non-ASCII text", () => {
-        expect(getAvailableStrategies({ text: "Отправить" }, "auto")).toEqual(["accessibility", "ocr"]);
+    it("includes fiber for non-ASCII accented text", () => {
+        expect(getAvailableStrategies({ text: "Отправить" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
+    });
+    it("includes fiber for Polish text", () => {
+        expect(getAvailableStrategies({ text: "Potwierdź" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
+    });
+    it("includes fiber for Vietnamese text", () => {
+        expect(getAvailableStrategies({ text: "Tin nhắn" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
+    });
+    it("skips fiber for emoji text", () => {
+        expect(getAvailableStrategies({ text: "🔥 Fire" }, "auto")).toEqual(["accessibility", "ocr"]);
     });
     it("returns accessibility+fiber for testID", () => {
         expect(getAvailableStrategies({ testID: "btn" }, "auto")).toEqual(["accessibility", "fiber"]);

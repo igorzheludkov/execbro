@@ -67,8 +67,15 @@ export function buildQuery(options: TapOptions): TapQuery {
     return query;
 }
 
-export function isNonAscii(text: string): boolean {
-    return /[^\x00-\x7F]/.test(text);
+/**
+ * Check if text contains characters that break Hermes Runtime.evaluate.
+ * Standard accented Latin characters (Polish, Vietnamese, French, German, etc.)
+ * and Cyrillic work fine in Hermes. Only emoji and special Unicode ranges cause issues.
+ */
+export function hasProblematicUnicode(text: string): boolean {
+    const emojiPattern =
+        /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{1F900}-\u{1F9FF}]|[\u{200D}]|[\u{20E3}]|[\u{E0020}-\u{E007F}]/u;
+    return emojiPattern.test(text);
 }
 
 export function getAvailableStrategies(
@@ -93,7 +100,7 @@ export function getAvailableStrategies(
     }
     if (query.text) {
         const strategies: string[] = [];
-        if (!isNonAscii(query.text)) {
+        if (!hasProblematicUnicode(query.text)) {
             strategies.push("fiber");
         }
         strategies.push("accessibility", "ocr");
@@ -845,8 +852,8 @@ function buildSuggestion(
         );
     }
 
-    if (query.text && isNonAscii(query.text)) {
-        suggestions.push("Non-ASCII text cannot use fiber strategy — use testID or coordinates instead");
+    if (query.text && hasProblematicUnicode(query.text)) {
+        suggestions.push("Emoji text cannot use fiber strategy — use testID or coordinates instead");
     }
 
     if (query.component && triedStrategies.includes("fiber")) {
