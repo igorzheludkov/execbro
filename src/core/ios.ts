@@ -1313,6 +1313,33 @@ function parseIdbAccessibilityForFindElement(output: string): IOSUIElement[] {
 }
 
 /**
+ * Check if an element's center is within the screen viewport.
+ * Filters out off-screen elements in scroll views, horizontal pagers, etc.
+ */
+function isIOSElementInViewport(element: IOSUIElement, screenWidth: number, screenHeight: number): boolean {
+    const { center } = element;
+    return center.x >= 0 && center.x <= screenWidth && center.y >= 0 && center.y <= screenHeight;
+}
+
+/**
+ * Extract screen dimensions from the parsed UI tree.
+ * The root Application element's frame represents the screen size.
+ */
+function extractIOSScreenSize(rawOutput: string): { width: number; height: number } | null {
+    try {
+        const data = JSON.parse(rawOutput);
+        const root = Array.isArray(data) ? data[0] : data;
+        const frame = root?.frame as { width?: number; height?: number } | undefined;
+        if (frame?.width && frame?.height) {
+            return { width: frame.width, height: frame.height };
+        }
+    } catch {
+        // Fall through
+    }
+    return null;
+}
+
+/**
  * Match iOS element against find options
  */
 function matchesIOSFindElement(element: IOSUIElement, options: IOSFindElementOptions): boolean {
@@ -1413,7 +1440,20 @@ export async function iosFindElement(
             };
         }
 
-        const matches = treeResult.elements.filter(el => matchesIOSFindElement(el, options));
+        // Filter to viewport-visible elements first, then match criteria.
+        // This prevents selecting off-screen duplicates in scroll views / pagers.
+        const screenSize = treeResult.rawOutput ? extractIOSScreenSize(treeResult.rawOutput) : null;
+        const visibleElements = screenSize
+            ? treeResult.elements.filter(el => isIOSElementInViewport(el, screenSize.width, screenSize.height))
+            : treeResult.elements;
+
+        let matches = visibleElements.filter(el => matchesIOSFindElement(el, options));
+
+        // If no visible matches, fall back to all elements (element may be partially visible
+        // or the screen size extraction failed)
+        if (matches.length === 0) {
+            matches = treeResult.elements.filter(el => matchesIOSFindElement(el, options));
+        }
 
         if (matches.length === 0) {
             return {

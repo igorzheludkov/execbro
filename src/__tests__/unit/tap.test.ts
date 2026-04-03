@@ -115,17 +115,17 @@ describe("hasProblematicUnicode", () => {
 });
 
 describe("getAvailableStrategies", () => {
-    it("returns all strategies for text query", () => {
-        expect(getAvailableStrategies({ text: "Submit" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
+    it("returns accessibility-first for text query", () => {
+        expect(getAvailableStrategies({ text: "Submit" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
     });
     it("includes fiber for non-ASCII accented text", () => {
-        expect(getAvailableStrategies({ text: "Отправить" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
+        expect(getAvailableStrategies({ text: "Отправить" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
     });
     it("includes fiber for Polish text", () => {
-        expect(getAvailableStrategies({ text: "Potwierdź" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
+        expect(getAvailableStrategies({ text: "Potwierdź" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
     });
     it("includes fiber for Vietnamese text", () => {
-        expect(getAvailableStrategies({ text: "Tin nhắn" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
+        expect(getAvailableStrategies({ text: "Tin nhắn" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
     });
     it("skips fiber for emoji text", () => {
         expect(getAvailableStrategies({ text: "🔥 Fire" }, "auto")).toEqual(["accessibility", "ocr"]);
