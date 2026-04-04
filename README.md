@@ -24,7 +24,7 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 -   **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
 -   **Android Devices** - Screenshots, app install/launch, package management (via ADB)
--   **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots
+-   **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots. Returns post-tap screenshot and verifies visual change by default
 -   **UI Automation** - Swipe, long press, text input, and key events on both platforms
 -   **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
 -   **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
@@ -278,7 +278,7 @@ toggle_element_inspector()
 
 | Tool             | Description                                                              |
 | ---------------- | ------------------------------------------------------------------------ |
-| `tap`            | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps) |
+| `tap`            | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots. Returns a post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps) |
 | `ocr_screenshot` | Extract all visible text with tap-ready coordinates (works on iOS/Android) |
 
 **Examples:**
@@ -1051,6 +1051,8 @@ tap with text="Menu" strategy="ocr"
 **Fallback chain:** fiber tree (direct `onPress`) → accessibility tree → OCR → error with suggestion.
 
 On failure, the response includes an actionable `suggestion` telling the agent exactly what to try next.
+
+**Screenshot & verification:** By default, `tap` captures and returns a post-tap screenshot (`screenshot=true`). For coordinate, accessibility, and OCR strategies, it also runs a before/after screenshot diff to verify the tap had a meaningful visual effect (`verify=true` by default for these strategies, `false` for fiber). Set `screenshot=false` to skip screenshots entirely for fastest execution, or `verify=false` to skip the diff check.
 
 ### Platform-Specific Tools
 

@@ -1725,7 +1725,9 @@ registerToolWithTelemetry(
             "- tap(component=\"HamburgerIcon\") — finds by React component name\n" +
             "- tap(x=300, y=600) — taps at pixel coordinates from screenshot (conversion handled internally)\n" +
             "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only\n" +
-            "- tap(x=300, y=600, native=true, platform=\"android\") — taps directly via ADB/simctl without React Native connection",
+            "- tap(x=300, y=600, native=true, platform=\"android\") — taps directly via ADB/simctl without React Native connection\n\n" +
+            "Returns a post-tap screenshot by default (set screenshot=false to disable). " +
+            "For coordinate/accessibility/OCR taps, automatically verifies the tap had a visual effect via before/after screenshot diff (set verify=false to disable).",
         inputSchema: {
             text: z
                 .string()
