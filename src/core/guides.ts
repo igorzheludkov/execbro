@@ -94,6 +94,7 @@ const guides: Guide[] = [
 
 ## Key Tools
 - ios_screenshot / android_screenshot: visual capture
+- tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - ocr_screenshot: screenshot with text recognition and tap coordinates
 - inspect_at_point: frame measurements, props, styles
 - get_inspector_selection: component names and source files`
@@ -105,12 +106,15 @@ const guides: Guide[] = [
         content: `# Device Interaction
 
 ## Tapping Elements
-Use tap — it tries multiple strategies automatically:
+Use tap — it tries multiple strategies automatically and returns a post-tap screenshot:
 1. tap(testID="login-btn") — most reliable, works via fiber tree (both platforms) and accessibility (Android)
 2. tap(text="Login") — text match via fiber tree, then accessibility, then OCR
 3. tap(component="IconName") — component name match with parent traversal (for icon-only buttons; use find_components to discover names first)
 4. tap(x=..., y=...) — coordinate-based tap from screenshot (last resort)
 5. tap(x=..., y=..., native=true) — taps directly via ADB/simctl without React Native connection (for system dialogs, non-RN apps)
+
+tap returns a screenshot after every action (screenshot=true by default) — no need to call ios_screenshot/android_screenshot after tapping.
+For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visual change (verify=true by default). Set screenshot=false for fastest execution.
 
 ## Best Practice: Use testID
 Set testID on all interactive elements (buttons, inputs, links) for reliable tapping:
