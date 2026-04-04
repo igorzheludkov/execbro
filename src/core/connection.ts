@@ -787,7 +787,10 @@ export async function connectToDevice(
                 }
 
                 // Fire-and-forget app detection (500ms delayed, non-blocking)
-                scheduleAppDetection(connectedApps.get(appKey)!);
+                const appForDetection = connectedApps.get(appKey);
+                if (appForDetection) {
+                    scheduleAppDetection(appForDetection);
+                }
 
                 // Start WebSocket ping/pong keepalive to detect dead connections
                 // (especially important for physical devices over Wi-Fi)
