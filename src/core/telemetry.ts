@@ -50,6 +50,8 @@ interface TelemetryEvent {
     outputTokens?: number;
     targetPlatform?: string;
     emptyResult?: boolean;
+    meaningful?: boolean; // tap verification: did the tap cause visual change?
+    changeRate?: number; // tap verification: percentage of pixels changed (0-1)
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -282,7 +284,9 @@ export function trackToolInvocation(
     inputTokens?: number,
     outputTokens?: number,
     targetPlatform?: string,
-    emptyResult?: boolean
+    emptyResult?: boolean,
+    meaningful?: boolean,
+    changeRate?: number
 ): void {
     if (!telemetryEnabled) return;
 
@@ -335,6 +339,8 @@ export function trackToolInvocation(
     if (outputTokens !== undefined && outputTokens > 0) event.outputTokens = outputTokens;
     if (targetPlatform) event.targetPlatform = targetPlatform;
     if (emptyResult !== undefined) event.emptyResult = emptyResult;
+    if (meaningful !== undefined) event.meaningful = meaningful;
+    if (changeRate !== undefined) event.changeRate = changeRate;
 
     eventQueue.push(event);
 
