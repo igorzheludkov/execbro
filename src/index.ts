@@ -1784,6 +1784,20 @@ registerToolWithTelemetry(
                 .describe(
                     "Target platform. Required when both iOS and Android devices are connected. Auto-detected if only one platform is available."
                 ),
+            screenshot: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe(
+                    "Capture and return a post-tap screenshot. Enabled by default. Set to false for fastest execution (no screenshots)."
+                ),
+            verify: z
+                .boolean()
+                .optional()
+                .describe(
+                    "Run before/after screenshot diff to detect if the tap had a meaningful visual effect. " +
+                    "Default: true for coordinate/accessibility/ocr strategies, false for fiber. Requires screenshot=true."
+                ),
         },
     },
     async (args: any) => {
@@ -1798,17 +1812,33 @@ registerToolWithTelemetry(
             maxTraversalDepth: args.maxTraversalDepth,
             native: args.native,
             platform: args.platform,
+            screenshot: args.screenshot,
+            verify: args.verify,
         });
 
-        const text = JSON.stringify(result, null, 2);
+        const { screenshot: screenshotData, ...resultWithoutScreenshot } = result;
+        const text = JSON.stringify(resultWithoutScreenshot, null, 2);
         // Pack strategy mode + attempted strategies into errorContext for telemetry
         // e.g. "s=ocr|fiber:no_pressable|ocr:no_match" or "s=auto|fiber:no_pressable|accessibility:not_found|ocr:no_match"
         const stratPrefix = args.strategy && args.strategy !== "auto" ? `s=${args.strategy}|` : "";
         const errorContext = result.attempted?.length
             ? stratPrefix + result.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|")
             : undefined;
+
+        const content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [
+            { type: "text" as const, text },
+        ];
+
+        if (screenshotData) {
+            content.push({
+                type: "image" as const,
+                data: screenshotData.image,
+                mimeType: "image/jpeg",
+            });
+        }
+
         return {
-            content: [{ type: "text", text }],
+            content,
             isError: !result.success,
             _errorMessage: result.error,
             _errorContext: errorContext,
