@@ -3,7 +3,8 @@ import { inferIOSDevicePixelRatio } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
 import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid } from "../core/ios.js";
-import { androidTap, androidFindElement, getDefaultAndroidDevice } from "../core/android.js";
+import { androidTap, androidFindElement, getDefaultAndroidDevice, androidScreenshot } from "../core/android.js";
+import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
 import { connectToDevice, clearReconnectionSuppression } from "../core/connection.js";
 
@@ -664,6 +665,68 @@ async function tryCoordinateStrategy(
     }
 }
 
+const SETTLE_DELAY_MS = 500;
+
+async function captureScreenshot(
+    platform: "ios" | "android"
+): Promise<{ buffer: Buffer; width: number; height: number; scaleFactor: number } | null> {
+    try {
+        const result =
+            platform === "ios" ? await iosScreenshot() : await androidScreenshot();
+        if (!result.success || !result.data) return null;
+        return {
+            buffer: result.data,
+            width: result.originalWidth || 0,
+            height: result.originalHeight || 0,
+            scaleFactor: result.scaleFactor || 1,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function screenshotToBase64(buffer: Buffer): string {
+    return buffer.toString("base64");
+}
+
+async function verifyAndCapture(
+    platform: "ios" | "android",
+    shouldVerify: boolean,
+    shouldScreenshot: boolean,
+    beforeBuffer: Buffer | null
+): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
+    if (!shouldScreenshot) return {};
+
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+
+    const after = await captureScreenshot(platform);
+    if (!after) return {};
+
+    const screenshot: TapScreenshot = {
+        image: screenshotToBase64(after.buffer),
+        width: after.width,
+        height: after.height,
+        scaleFactor: after.scaleFactor,
+    };
+
+    let verification: TapVerification | undefined;
+    if (shouldVerify && beforeBuffer) {
+        try {
+            const diff = await compareScreenshots(beforeBuffer, after.buffer);
+            verification = {
+                meaningful: diff.changed,
+                changeRate: diff.changeRate,
+                changedPixels: diff.changedPixels,
+                totalPixels: diff.totalPixels,
+            };
+        } catch {
+            // Diff failed — still return the screenshot
+        }
+    }
+
+    return { screenshot, verification };
+}
+
 // --- Orchestrator ---
 
 export async function tap(options: TapOptions): Promise<TapResult> {
@@ -722,14 +785,30 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             }
         }
 
+        const nativeShouldScreenshot = options.screenshot !== false;
+        const nativeShouldVerify = nativeShouldScreenshot && options.verify !== false;
+        let nativeBeforeBuffer: Buffer | null = null;
+        if (nativeShouldVerify) {
+            const before = await captureScreenshot(platform);
+            nativeBeforeBuffer = before?.buffer || null;
+        }
+
         const result = await tryCoordinateStrategy(query.x!, query.y!, platform, undefined);
         if (result.success) {
+            const { screenshot, verification } = await verifyAndCapture(
+                platform,
+                nativeShouldVerify,
+                nativeShouldScreenshot,
+                nativeBeforeBuffer
+            );
             return formatTapSuccess({
                 method: "native-coordinate",
                 query,
                 pressed: result.pressed,
                 convertedTo: result.convertedTo,
                 platform,
+                screenshot,
+                verification,
             });
         }
         return formatTapFailure({
@@ -774,6 +853,21 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const strategies = getAvailableStrategies(query, strategy);
     const attempted: TapAttempt[] = [];
 
+    // Determine screenshot and verification behavior
+    const shouldScreenshot = options.screenshot !== false;
+    const effectiveStrategy = strategies[0] || "auto";
+    const shouldVerify =
+        shouldScreenshot &&
+        (options.verify === true ||
+            (options.verify !== false && effectiveStrategy !== "fiber"));
+
+    // Capture "before" screenshot for verification
+    let beforeBuffer: Buffer | null = null;
+    if (shouldVerify) {
+        const before = await captureScreenshot(platform);
+        beforeBuffer = before?.buffer || null;
+    }
+
     // Execute strategies in order
     for (const strat of strategies) {
         let result: StrategyResult;
@@ -801,6 +895,19 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         if (result.success) {
+            const { screenshot, verification } = await verifyAndCapture(
+                platform,
+                shouldVerify,
+                shouldScreenshot,
+                beforeBuffer
+            );
+            if (screenshot) {
+                app.lastScreenshot = {
+                    originalWidth: screenshot.width,
+                    originalHeight: screenshot.height,
+                    scaleFactor: screenshot.scaleFactor,
+                };
+            }
             return formatTapSuccess({
                 method: strat,
                 query,
@@ -811,6 +918,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 component: result.component,
                 convertedTo: result.convertedTo,
                 platform,
+                screenshot,
+                verification,
             });
         }
 
@@ -834,6 +943,19 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         Math.round(coords.y * densityScale)
                     );
                 }
+                const { screenshot, verification } = await verifyAndCapture(
+                    platform,
+                    shouldVerify,
+                    shouldScreenshot,
+                    beforeBuffer
+                );
+                if (screenshot) {
+                    app.lastScreenshot = {
+                        originalWidth: screenshot.width,
+                        originalHeight: screenshot.height,
+                        scaleFactor: screenshot.scaleFactor,
+                    };
+                }
                 return formatTapSuccess({
                     method: "fiber+native",
                     query,
@@ -843,6 +965,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     component: result.component,
                     convertedTo: coords,
                     platform,
+                    screenshot,
+                    verification,
                 });
             } catch {
                 // Native tap at fiber coordinates failed — continue to next strategy
@@ -851,21 +975,43 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
         // If we got match suggestions from fiber, carry them forward
         if (result.matches) {
+            const { screenshot: matchScreenshot } = shouldScreenshot
+                ? await verifyAndCapture(platform, false, true, null)
+                : { screenshot: undefined };
+            if (matchScreenshot) {
+                app.lastScreenshot = {
+                    originalWidth: matchScreenshot.width,
+                    originalHeight: matchScreenshot.height,
+                    scaleFactor: matchScreenshot.scaleFactor,
+                };
+            }
             return formatTapFailure({
                 query,
                 attempted,
                 suggestion: `Found ${result.matches.length} match(es) — specify index to select one`,
                 matches: result.matches,
+                screenshot: matchScreenshot,
             });
         }
     }
 
     // All strategies failed
     const suggestion = buildSuggestion(query, strategies, platform);
+    const { screenshot: failScreenshot } = shouldScreenshot
+        ? await verifyAndCapture(platform, false, true, null)
+        : { screenshot: undefined };
+    if (failScreenshot) {
+        app.lastScreenshot = {
+            originalWidth: failScreenshot.width,
+            originalHeight: failScreenshot.height,
+            scaleFactor: failScreenshot.scaleFactor,
+        };
+    }
     return formatTapFailure({
         query,
         attempted,
         suggestion,
+        screenshot: failScreenshot,
     });
 }
 
