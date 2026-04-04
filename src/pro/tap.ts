@@ -30,11 +30,27 @@ export interface TapOptions {
     maxTraversalDepth?: number;
     native?: boolean;
     platform?: "ios" | "android";
+    screenshot?: boolean;
+    verify?: boolean;
 }
 
 export interface TapAttempt {
     strategy: string;
     reason: string;
+}
+
+export interface TapScreenshot {
+    image: string;
+    width: number;
+    height: number;
+    scaleFactor: number;
+}
+
+export interface TapVerification {
+    meaningful: boolean;
+    changeRate: number;
+    changedPixels: number;
+    totalPixels: number;
 }
 
 export interface TapResult {
@@ -53,6 +69,9 @@ export interface TapResult {
     attempted?: TapAttempt[];
     matches?: Array<{ index: number; component: string; text: string }>;
     suggestion?: string;
+    screenshot?: TapScreenshot;
+    verification?: TapVerification;
+    warning?: string;
 }
 
 // --- Helpers ---
@@ -217,10 +236,15 @@ export function formatTapSuccess(data: {
     tappedAt?: { x: number; y: number };
     convertedTo?: { x: number; y: number; unit: string };
     platform?: string;
+    screenshot?: TapScreenshot;
+    verification?: TapVerification;
 }): TapResult {
+    const { screenshot, verification, ...rest } = data;
     return {
         success: true,
-        ...data,
+        ...rest,
+        ...(verification && { verification }),
+        ...(screenshot && { screenshot }),
     };
 }
 
@@ -231,8 +255,14 @@ export function formatTapFailure(data: {
     attempted: TapAttempt[];
     suggestion: string;
     matches?: Array<{ index: number; component: string; text: string }>;
+    screenshot?: TapScreenshot;
+    verification?: TapVerification;
 }): TapResult {
     const errorMsg = data.error || buildErrorMessage(data.query);
+    const warning =
+        data.verification && !data.verification.meaningful
+            ? "Tap executed but no visual change detected. The element may not exist at these coordinates. Examine the screenshot to verify and retry with adjusted coordinates."
+            : undefined;
     return {
         success: false,
         query: data.query,
@@ -241,6 +271,9 @@ export function formatTapFailure(data: {
         attempted: data.attempted,
         suggestion: data.suggestion,
         matches: data.matches,
+        ...(data.verification && { verification: data.verification }),
+        ...(data.screenshot && { screenshot: data.screenshot }),
+        ...(warning && { warning }),
     };
 }
 
