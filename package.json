@@ -46,6 +46,7 @@
     "@modelcontextprotocol/sdk": "^1.25.1",
     "fast-xml-parser": "^5.3.3",
     "node-easyocr": "^1.0.9",
+    "pixelmatch": "^7.1.0",
     "posthog-node": "^5.28.11",
     "sharp": "^0.34.5",
     "tonl": "^2.5.2",
