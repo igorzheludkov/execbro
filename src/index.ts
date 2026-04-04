@@ -9,6 +9,8 @@ import { z } from "zod";
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
 import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
+import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
+import { getInstallationId } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 import {
@@ -327,10 +329,21 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         } catch (error) {
             success = false;
             errorMessage = error instanceof Error ? error.message : String(error);
+            getPostHogClient()?.captureException(error, getInstallationId(), { tool: toolName });
             throw error;
         } finally {
             const duration = Date.now() - startTime;
             trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult);
+            getPostHogClient()?.capture({
+                distinctId: getInstallationId(),
+                event: toolName,
+                properties: {
+                    success,
+                    duration,
+                    ...(errorMessage && { error: errorMessage.substring(0, 200) }),
+                    ...(getTargetPlatform() && { platform: getTargetPlatform() }),
+                },
+            });
         }
     });
 }
@@ -1308,6 +1321,7 @@ registerToolWithTelemetry(
                 resultText.slice(0, maxResultLength) + `... [truncated: ${result.result?.length ?? 0} chars total]`;
         }
 
+
         return {
             content: [
                 {
@@ -1680,6 +1694,7 @@ registerToolWithTelemetry(
             };
         }
 
+
         return {
             content: [
                 {
@@ -1958,6 +1973,8 @@ registerToolWithTelemetry(
             if (parsed.style) {
                 output += `Style: ${JSON.stringify(parsed.style, null, 2)}\n`;
             }
+
+
 
             return {
                 content: [{ type: "text", text: output }]
@@ -2844,6 +2861,7 @@ registerToolWithTelemetry(
             infoText += `\n  • android_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
 
+
             return {
                 content: [
                     {
@@ -3499,6 +3517,7 @@ registerToolWithTelemetry(
             infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
             infoText += `\n  • ios_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
+
 
             return {
                 content: [
@@ -4202,6 +4221,7 @@ async function main() {
     // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
     // License validation is lazy — runs on first tool use via ensureLicense()
     initTelemetry();
+    identifyIfDevMode(getInstallationId());
 
     // Start debug HTTP server in-process (shares state with MCP server)
     // Note: Child process mode doesn't work because state (logs, network, apps) isn't shared
@@ -4307,4 +4327,8 @@ async function main() {
 main().catch((error) => {
     console.error("[rn-ai-debugger] Fatal error:", error);
     process.exit(1);
+});
+
+process.on("beforeExit", () => {
+    shutdownPostHog().catch(() => {});
 });

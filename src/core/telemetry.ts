@@ -96,6 +96,7 @@ interface TelemetryConfig {
     firstRunTimestamp: number;
     isFirstRun: boolean;
     devMode?: boolean;
+    internal?: boolean;
 }
 
 interface TelemetryPayload {

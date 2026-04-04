@@ -5,6 +5,7 @@ import { resetLicense, getDashboardUrl, ensureLicense } from "../core/license.js
 import { existsSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { getPostHogClient } from "../core/posthog.js";
 
 import { API_BASE_URL } from "../core/config.js";
 
@@ -59,6 +60,23 @@ export async function handleActivateLicense({ token }: { token: string }) {
         if (response.ok) {
             resetLicense();
             await ensureLicense();
+            const distinctId = getInstallationId();
+            const posthog = getPostHogClient();
+            if (posthog) {
+                posthog.identify({
+                    distinctId,
+                    properties: {
+                        $set: { plan: data.tier },
+                    },
+                });
+                posthog.capture({
+                    distinctId,
+                    event: "license activated",
+                    properties: {
+                        tier: data.tier,
+                    },
+                });
+            }
             return {
                 content: [{
                     type: "text" as const,
@@ -164,6 +182,13 @@ export async function handleDeleteAccount({ confirm }: { confirm?: string }) {
         cleanupLocalFiles();
 
         if (response.ok || response.status === 404) {
+            const posthog = getPostHogClient();
+            if (posthog) {
+                posthog.capture({
+                    distinctId: getInstallationId(),
+                    event: "account deleted",
+                });
+            }
             return {
                 content: [{
                     type: "text" as const,
