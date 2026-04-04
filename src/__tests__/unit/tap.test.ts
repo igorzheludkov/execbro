@@ -5,6 +5,8 @@ import {
     type TapQuery,
     type TapResult,
     type TapStrategy,
+    type TapScreenshot,
+    type TapVerification,
     buildQuery,
     getAvailableStrategies,
     hasProblematicUnicode,
@@ -193,6 +195,89 @@ describe("formatTapFailure", () => {
         expect(result.success).toBe(false);
         expect(result.attempted).toHaveLength(1);
         expect(result.suggestion).toBe("Use screenshot");
+    });
+});
+
+describe("formatTapSuccess with screenshot and verification", () => {
+    it("includes screenshot field when provided", () => {
+        const result = formatTapSuccess({
+            method: "fiber",
+            query: { text: "Submit" },
+            pressed: "Button",
+            screenshot: {
+                image: "data:image/jpeg;base64,abc123",
+                width: 1170,
+                height: 2532,
+                scaleFactor: 1.0,
+            },
+        });
+        expect(result.success).toBe(true);
+        expect(result.screenshot).toEqual({
+            image: "data:image/jpeg;base64,abc123",
+            width: 1170,
+            height: 2532,
+            scaleFactor: 1.0,
+        });
+    });
+
+    it("includes verification field when provided", () => {
+        const result = formatTapSuccess({
+            method: "coordinate",
+            query: { x: 300, y: 600 },
+            verification: {
+                meaningful: true,
+                changeRate: 0.12,
+                changedPixels: 48210,
+                totalPixels: 2961720,
+            },
+            screenshot: {
+                image: "data:image/jpeg;base64,abc123",
+                width: 1170,
+                height: 2532,
+                scaleFactor: 1.0,
+            },
+        });
+        expect(result.verification).toEqual({
+            meaningful: true,
+            changeRate: 0.12,
+            changedPixels: 48210,
+            totalPixels: 2961720,
+        });
+        expect(result.screenshot).toBeDefined();
+    });
+
+    it("omits screenshot and verification when not provided", () => {
+        const result = formatTapSuccess({
+            method: "fiber",
+            query: { text: "Submit" },
+        });
+        expect(result.screenshot).toBeUndefined();
+        expect(result.verification).toBeUndefined();
+    });
+});
+
+describe("formatTapFailure with screenshot and verification", () => {
+    it("includes warning when verification shows not meaningful", () => {
+        const result = formatTapFailure({
+            query: { x: 300, y: 600 },
+            attempted: [{ strategy: "coordinate", reason: "executed" }],
+            suggestion: "Retry with adjusted coordinates",
+            verification: {
+                meaningful: false,
+                changeRate: 0.001,
+                changedPixels: 312,
+                totalPixels: 2961720,
+            },
+            screenshot: {
+                image: "data:image/jpeg;base64,abc123",
+                width: 1170,
+                height: 2532,
+                scaleFactor: 1.0,
+            },
+        });
+        expect(result.verification?.meaningful).toBe(false);
+        expect(result.screenshot).toBeDefined();
+        expect(result.warning).toContain("no visual change detected");
     });
 });
 
