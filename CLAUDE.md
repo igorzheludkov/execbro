@@ -98,7 +98,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
-- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps).
+- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `screenshot=false` to disable screenshots, `verify=false` to skip verification.
 - `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
 - `get_inspector_selection`: Identify component at screen coordinates — returns clean hierarchy with file paths (e.g. `HomeScreen > SneakerCard > PulseActionButton`)
 - `inspect_at_point`: Layout debugging at coordinates — returns component props, frame (position/size), and path
