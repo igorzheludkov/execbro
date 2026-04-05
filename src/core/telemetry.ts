@@ -19,7 +19,7 @@ const CONFIG_DIR = join(homedir(), ".rn-ai-debugger");
 const CONFIG_FILE = join(CONFIG_DIR, "telemetry.json");
 
 // Read version from package.json dynamically
-function getServerVersion(): string {
+export function getServerVersion(): string {
     try {
         const __dirname = dirname(fileURLToPath(import.meta.url));
         const pkgPath = join(__dirname, "..", "..", "package.json");
