@@ -50,3 +50,11 @@ Quick reference for all available React Native debugging skills. Use this to pic
 - `/layout-check` auto-triggers after any style/layout code change — no need to invoke it manually in that case.
 - Most skills accept optional arguments to narrow scope (e.g., `/debug-logs error`, `/network-inspect 500`). See individual skill files for details.
 - To switch to the built-in React Native debugger, use `disconnect_metro` to free the CDP connection. Use `scan_metro` to reconnect afterward.
+
+## Multi-Device Debugging
+
+When multiple devices are connected (e.g., iPhone + Android emulator):
+- Use `get_apps` to see all connected devices and their names
+- Most tools accept a `device` param (case-insensitive substring match, e.g., `device="iPhone"` or `device="sdk_gphone"`)
+- Omitting `device` uses the first connected device for execution tools, or merges data from all devices for log/network tools
+- `scan_metro` connects ALL Bridgeless targets automatically — no manual `connect_metro` needed
