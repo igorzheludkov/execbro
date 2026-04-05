@@ -90,22 +90,70 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 ### MCP Tools Exposed
 
+**Connection & Setup:**
 - `get_usage_guide`: Get recommended workflows and best practices for all tools (call without params for overview, with topic for full guide)
 - `scan_metro` / `connect_metro`: Discover and connect to Metro servers
 - `disconnect_metro`: Disconnect from all Metro servers, free CDP slot for native debugger. Reconnect with `scan_metro`
+- `ensure_connection`: Health check with `healthCheck=true`, force refresh with `forceRefresh=true`
 - `get_apps`: List connected devices
-- `get_logs` / `search_logs` / `clear_logs`: Log management
-- `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking
+- `get_connection_status`: Check connection health — uptime, recent disconnects/reconnects, and connection gaps
+
+**Logs & Network:**
+- `get_logs` / `search_logs` / `clear_logs`: Log management with level filtering, text search, summary mode, and `device` targeting
+- `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking with URL/method/status filtering
+
+**App State & Execution:**
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
+- `reload_app`: Reload the React Native app (triggers JS bundle reload)
+
+**UI Interaction:**
 - `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `screenshot=false` to disable screenshots, `verify=false` to skip verification.
-- `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
+- `ios_swipe` / `android_swipe`: Swipe/scroll gestures with start/end coordinates
+- `ios_input_text` / `android_input_text`: Type text into the focused input field
+- `ios_button`: Press iOS hardware buttons (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
+- `android_key_event`: Send Android key events (HOME, BACK, ENTER, DEL, MENU, etc.)
+- `ios_key_event` / `ios_key_sequence`: Send key events by keycode to iOS simulator
+- `android_long_press`: Long press at coordinates on Android
+- `ios_open_url`: Open deep links or universal links on iOS simulator
+
+**Screenshots & OCR:**
+- `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
+- `ocr_screenshot`: Screenshot with OCR text recognition and tap-ready coordinates
+
+**Component Inspection:**
+- `get_component_tree`: Get React component hierarchy. Use `focusedOnly=true` + `structureOnly=true` for compact active-screen view
+- `inspect_component`: Deep dive into a specific component's props, state, hooks, and children
+- `find_components`: Search the React fiber tree for components by name regex pattern
+- `get_screen_layout`: Full layout data for all screen components with frame measurements
 - `get_inspector_selection`: Identify component at screen coordinates — returns clean hierarchy with file paths (e.g. `HomeScreen > SneakerCard > PulseActionButton`)
 - `inspect_at_point`: Layout debugging at coordinates — returns component props, frame (position/size), and path
-- `reload_app`: Reload the React Native app (triggers JS bundle reload)
-- `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
-- `ocr_screenshot`: Screenshot with OCR text recognition and tap coordinates
-- `find_components`: Search the React fiber tree for components by name pattern
+- `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
+
+**Device Management:**
+- `list_ios_simulators` / `list_android_devices`: Find available simulators and devices
+- `ios_boot_simulator`: Boot an iOS simulator by UDID
+- `ios_install_app` / `android_install_app`: Install app on device
+- `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name
+- `ios_terminate_app`: Terminate app on iOS simulator
+- `android_list_packages`: List installed packages on Android device
+
+**Accessibility Tree (native UI inspection):**
+- `ios_describe_all` / `android_describe_all`: Full UI accessibility tree from device
+- `ios_describe_point` / `android_describe_point`: UI element info at specific coordinates
+- `ios_find_element` / `android_find_element`: Find element by text, label, resource ID
+- `ios_wait_for_element` / `android_wait_for_element`: Wait for element to appear (polling)
+- `android_get_screen_size`: Get device pixel resolution
+
+**Bundle & Errors:**
+- `get_bundle_status`: Check Metro build state
+- `get_bundle_errors` / `clear_bundle_errors`: Compilation/bundling errors with screenshot+OCR fallback
+
+**Account:**
+- `get_license_status`: Installation ID and license tier
+- `activate_license` / `delete_account`: License and account management
+
+**Dev Mode:**
 - `dev`: (dev mode only) Meta-tool for hot-reload testing — list all tools or call any tool by name using latest code
 
 ## Agent Usage Guidelines

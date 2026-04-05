@@ -97,3 +97,4 @@ For ad-hoc debugging:
 - Hermes engine limitations: no `require()`, no `async/await`, no emoji/non-ASCII in string literals
 - Use `inspect_global` before calling methods on unfamiliar objects to avoid errors
 - For large state objects, use `verbose=true` with caution - Redux stores can return 10KB+
+- Use `device` param on any tool to target a specific device when multiple are connected (e.g., `device="iPhone"`)

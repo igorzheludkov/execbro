@@ -35,6 +35,10 @@ Based on what's running, capture screenshots:
 **For Android Devices:**
 - Use `mcp__rn-debugger-local__android_screenshot` with the device serial
 
+**Screenshot with OCR (when you need tap coordinates):**
+- Use `mcp__rn-debugger-local__ocr_screenshot` to capture a screenshot and extract all visible text with tap-ready coordinates
+- Recommended when you need to identify tappable elements — returns ready-to-use tapX/tapY coordinates
+
 ### 3. Present Results
 
 - Display all captured screenshots to the user
@@ -72,6 +76,7 @@ If the user provides a Figma URL or design reference:
 - `mcp__rn-debugger-local__ios_screenshot`
 - `mcp__rn-debugger-local__android_screenshot`
 - `mcp__rn-debugger-local__inspect_at_point` (optional: layout detail drill-down)
+- `mcp__rn-debugger-local__ocr_screenshot` (screenshot + OCR text with tap coordinates)
 - `mcp__rn-debugger-local__get_inspector_selection` (optional: identify component name/source file)
 
 ## Notes

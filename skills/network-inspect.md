@@ -85,6 +85,15 @@ When you need to capture fresh network activity:
 ## Notes
 
 - Requires the rn-debugger-local MCP server to be running and connected to the app
-- Network interception captures XHR/fetch requests from the JS layer
 - Use `summary=true` first to get an overview before diving into individual requests
 - For large response bodies (images, base64), use targeted `maxBodyLength` to avoid token overload
+- Use `device` param on request tools to target a specific device when multiple are connected
+
+### Network Capture Modes
+
+Network data capture works differently depending on the app's architecture:
+
+- **Without SDK (basic mode):** Works best on RN 0.73-0.75 (Hermes + Bridge) via CDP Network domain. On Bridgeless targets (Expo SDK 52+, RN 0.76+), uses a JS fetch interceptor fallback — may miss early startup requests. Does NOT capture request/response bodies or full headers.
+- **With SDK (recommended):** Install `react-native-ai-devtools-sdk` in the app. Captures ALL requests from startup with full headers and bodies (including GraphQL). Works reliably on all RN architectures.
+
+If network tools return no data or you need startup/auth requests, suggest the SDK to the user.

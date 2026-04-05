@@ -81,3 +81,4 @@ If the app isn't responding:
 - Bundle errors are different from runtime errors - they prevent the JS bundle from loading
 - Fast Refresh handles most code changes automatically - only use reload for specific scenarios
 - The screenshot+OCR fallback for errors requires specifying the `platform` parameter ("ios" or "android")
+- Use `device` param on `reload_app` to target a specific device when multiple are connected

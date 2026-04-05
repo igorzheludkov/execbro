@@ -61,6 +61,7 @@ tap(component="MenuIcon")  # case-insensitive substring match
 **By pixel coordinates (from screenshot):**
 ```
 tap(x=300, y=600)          # auto-converts pixels to points on iOS
+tap(x=300, y=600, platform="android")  # explicit platform when both are connected
 ```
 
 **Native mode (no React Native connection needed):**
@@ -80,6 +81,20 @@ tap(text="Submit", strategy="accessibility")   # skip fiber
 ```
 tap(text="Button", index=2)   # tap the 3rd match (0-based)
 ```
+
+**Control screenshots and verification:**
+```
+tap(text="Submit", screenshot=false)       # skip post-tap screenshot for faster execution
+tap(x=300, y=600, verify=true)             # before/after diff to confirm tap had visual effect
+tap(text="Login", verify=false)            # skip verification (default for fiber strategy)
+```
+`screenshot` (default: true) controls whether a post-tap screenshot is returned. `verify` (default: true for coordinate/accessibility/ocr, false for fiber) runs a before/after screenshot diff to detect if the tap caused a meaningful visual change.
+
+**Deeply wrapped components — increase traversal depth:**
+```
+tap(component="CartIcon", maxTraversalDepth=25)   # default is 15
+```
+Use `maxTraversalDepth` when `tap(component=...)` fails because the component is deeply wrapped in HOCs or animation wrappers.
 
 **On failure**, the response includes a `suggestion` field telling you exactly what to try next. Follow it.
 

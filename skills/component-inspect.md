@@ -25,6 +25,8 @@ First, verify the debugger is connected:
 Start with a lightweight structure view:
 - Use `mcp__rn-debugger-local__get_component_tree` with `focusedOnly=true` and `structureOnly=true`
 - This gives a compact view (~1-2KB) of just the active screen, skipping navigation wrappers
+- Use `hideInternals=true` (default) to filter out RN internal components (RCTView, RNS*, Animated)
+- Output format defaults to `tonl` (compact, ~40% smaller than JSON); use `format="json"` if you need structured data
 
 ### 3. Drill Down into Specific Components
 
@@ -99,3 +101,4 @@ For layout debugging:
 - `inspect_at_point` returns the nearest user-defined component (skipping RN primitives and common library wrappers like Expo, SVG, gesture handler components)
 - `get_inspector_selection` returns the most complete hierarchy with source file paths — prefer it when you need to find the exact component name to edit
 - Layout data can be large for complex screens - use `find_components` with `includeLayout=true` for targeted queries
+- Use `device` param on any tool to target a specific device when multiple are connected (case-insensitive substring match, e.g. `device="iPhone"`)
