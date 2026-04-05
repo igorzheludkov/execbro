@@ -10,7 +10,7 @@ import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/gu
 import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
-import { getInstallationId } from "./core/telemetry.js";
+import { getInstallationId, getServerVersion } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 import {
@@ -334,7 +334,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         } catch (error) {
             success = false;
             errorMessage = error instanceof Error ? error.message : String(error);
-            getPostHogClient()?.captureException(error, getInstallationId(), { tool: toolName });
+            getPostHogClient()?.captureException(error, getInstallationId(), { tool: toolName, server_version: getServerVersion() });
             throw error;
         } finally {
             const duration = Date.now() - startTime;
@@ -345,6 +345,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                 properties: {
                     success,
                     duration,
+                    server_version: getServerVersion(),
                     ...(errorMessage && { error: errorMessage.substring(0, 200) }),
                     ...(getTargetPlatform() && { platform: getTargetPlatform() }),
                 },

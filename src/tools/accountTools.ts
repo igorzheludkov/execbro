@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getInstallationId } from "../core/telemetry.js";
+import { getInstallationId, getServerVersion } from "../core/telemetry.js";
 import { getDeviceFingerprint } from "../core/fingerprint.js";
 import { resetLicense, getDashboardUrl, ensureLicense } from "../core/license.js";
 import { existsSync, unlinkSync } from "fs";
@@ -74,6 +74,7 @@ export async function handleActivateLicense({ token }: { token: string }) {
                     event: "license activated",
                     properties: {
                         tier: data.tier,
+                        server_version: getServerVersion(),
                     },
                 });
             }
@@ -187,6 +188,9 @@ export async function handleDeleteAccount({ confirm }: { confirm?: string }) {
                 posthog.capture({
                     distinctId: getInstallationId(),
                     event: "account deleted",
+                    properties: {
+                        server_version: getServerVersion(),
+                    },
                 });
             }
             return {
