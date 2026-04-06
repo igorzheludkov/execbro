@@ -893,8 +893,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         if (result.success) {
-            // Verify based on the strategy that actually succeeded
-            const shouldVerify = canVerify && (options.verify === true || strat !== "fiber");
+            const shouldVerify = canVerify;
             const { screenshot, verification } = await verifyAndCapture(
                 platform,
                 shouldVerify,
