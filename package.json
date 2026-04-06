@@ -15,7 +15,8 @@
     "http-server": "node build/httpServerStandalone.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/unit'",
-    "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'"
+    "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
+    "test:tap": "node --experimental-vm-modules node_modules/.bin/jest --testPathPatterns='tap-strategies' --no-coverage --testTimeout=30000"
   },
   "keywords": [
     "mcp",
