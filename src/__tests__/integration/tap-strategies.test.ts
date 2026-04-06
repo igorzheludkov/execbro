@@ -61,8 +61,9 @@ describe("Category 1: RN Fiber & JS Strategies", () => {
     it("focus TextInput by testID", async () => {
         const result = await tap({ testID: "name-input" });
         expect(result.success).toBe(true);
-        // Verify input is focused by checking if keyboard appeared or component state
-        // The fiber strategy detects onChangeText and falls through to native tap
+        // TextInput has onChangeText, not onPress — fiber detects this and falls
+        // through to native tap for focus. No tap counter increment expected since
+        // the test app only counts onPress handlers, not input focus events.
         expect(result.method).toBeDefined();
     }, 30000);
 
@@ -79,7 +80,10 @@ describe("Category 1: RN Fiber & JS Strategies", () => {
 
 describe("Category 2: RN Coordinates & Verification", () => {
     it("tap by pixel coordinates", async () => {
-        // First, tap by testID to find the element's coordinates
+        // First, tap by testID to find the element's coordinates.
+        // tappedAt returns coordinates in the native unit used by the platform
+        // (points on iOS, pixels on Android). tap({ x, y }) treats these as
+        // screenshot pixel coordinates and applies conversion internally.
         const findResult = await tap({ testID: "submit-btn", screenshot: true });
         expect(findResult.success).toBe(true);
         expect(findResult.tappedAt).toBeDefined();
@@ -87,7 +91,6 @@ describe("Category 2: RN Coordinates & Verification", () => {
         await resetTestState();
         await sleep(500);
 
-        // Now tap at those exact coordinates
         const { x, y } = findResult.tappedAt!;
         const result = await tap({ x, y });
         await assertTapWorked(result, "submit-btn");
@@ -180,80 +183,82 @@ describe("Category 3: Non-RN Native App (System Apps)", () => {
     const IOS_SETTINGS_BUNDLE = "com.apple.Preferences";
     const ANDROID_SETTINGS_PACKAGE = "com.android.settings";
 
-    const describeIOS = () => platform === "ios" ? describe : describe.skip;
-    const describeAndroid = () => platform === "android" ? describe : describe.skip;
+    // Platform checks are inside it() bodies because platform is set in beforeAll,
+    // which runs after Jest collects describe blocks synchronously.
 
-    describeIOS()("iOS native app tests", () => {
-        it("tap Settings item by text (iOS)", async () => {
-            const { iosLaunchApp } = await import("../../core/ios.js");
-            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
-            await sleep(2000);
+    it("tap Settings item by text (iOS)", async () => {
+        if (platform !== "ios") return;
+        const { iosLaunchApp } = await import("../../core/ios.js");
+        await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+        await sleep(2000);
 
-            const result = await tap({ text: "General", native: true });
-            expect(result.success).toBe(true);
-        }, 30000);
+        const result = await tap({ text: "General", native: true });
+        expect(result.success).toBe(true);
+    }, 30000);
 
-        it("tap by OCR on native app (iOS)", async () => {
-            const { iosLaunchApp } = await import("../../core/ios.js");
-            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
-            await sleep(2000);
+    it("tap by OCR on native app (iOS)", async () => {
+        if (platform !== "ios") return;
+        const { iosLaunchApp } = await import("../../core/ios.js");
+        await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+        await sleep(2000);
 
-            const result = await tap({ text: "General", strategy: "ocr", native: true });
-            expect(result.success).toBe(true);
-            expect(result.method).toBe("ocr");
-        }, 30000);
+        const result = await tap({ text: "General", strategy: "ocr", native: true });
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("ocr");
+    }, 30000);
 
-        it("find and tap via iOS accessibility tree", async () => {
-            const { iosLaunchApp, iosFindElement } = await import("../../core/ios.js");
-            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
-            await sleep(2000);
+    it("find and tap via iOS accessibility tree", async () => {
+        if (platform !== "ios") return;
+        const { iosLaunchApp, iosFindElement } = await import("../../core/ios.js");
+        await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+        await sleep(2000);
 
-            const findResult = await iosFindElement({ labelContains: "General" });
-            expect(findResult.success).toBe(true);
-            expect(findResult.found).toBe(true);
-            expect(findResult.element).toBeDefined();
+        const findResult = await iosFindElement({ labelContains: "General" });
+        expect(findResult.success).toBe(true);
+        expect(findResult.found).toBe(true);
+        expect(findResult.element).toBeDefined();
 
-            const { x, y } = findResult.element!.center;
-            const tapResult = await tap({ x, y, native: true });
-            expect(tapResult.success).toBe(true);
-        }, 30000);
-    });
+        const { x, y } = findResult.element!.center;
+        const tapResult = await tap({ x, y, native: true });
+        expect(tapResult.success).toBe(true);
+    }, 30000);
 
-    describeAndroid()("Android native app tests", () => {
-        it("tap Settings item by text (Android)", async () => {
-            const { androidLaunchApp } = await import("../../core/android.js");
-            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
-            await sleep(2000);
+    it("tap Settings item by text (Android)", async () => {
+        if (platform !== "android") return;
+        const { androidLaunchApp } = await import("../../core/android.js");
+        await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+        await sleep(2000);
 
-            const result = await tap({ text: "Network", native: true });
-            expect(result.success).toBe(true);
-        }, 30000);
+        const result = await tap({ text: "Network", native: true });
+        expect(result.success).toBe(true);
+    }, 30000);
 
-        it("tap by OCR on native app (Android)", async () => {
-            const { androidLaunchApp } = await import("../../core/android.js");
-            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
-            await sleep(2000);
+    it("tap by OCR on native app (Android)", async () => {
+        if (platform !== "android") return;
+        const { androidLaunchApp } = await import("../../core/android.js");
+        await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+        await sleep(2000);
 
-            const result = await tap({ text: "Network", strategy: "ocr", native: true });
-            expect(result.success).toBe(true);
-            expect(result.method).toBe("ocr");
-        }, 30000);
+        const result = await tap({ text: "Network", strategy: "ocr", native: true });
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("ocr");
+    }, 30000);
 
-        it("find and tap via Android accessibility tree", async () => {
-            const { androidLaunchApp, androidFindElement } = await import("../../core/android.js");
-            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
-            await sleep(2000);
+    it("find and tap via Android accessibility tree", async () => {
+        if (platform !== "android") return;
+        const { androidLaunchApp, androidFindElement } = await import("../../core/android.js");
+        await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+        await sleep(2000);
 
-            const findResult = await androidFindElement({ textContains: "Network" });
-            expect(findResult.success).toBe(true);
-            expect(findResult.found).toBe(true);
-            expect(findResult.element).toBeDefined();
+        const findResult = await androidFindElement({ textContains: "Network" });
+        expect(findResult.success).toBe(true);
+        expect(findResult.found).toBe(true);
+        expect(findResult.element).toBeDefined();
 
-            const { x, y } = findResult.element!.center;
-            const tapResult = await tap({ x, y, native: true });
-            expect(tapResult.success).toBe(true);
-        }, 30000);
-    });
+        const { x, y } = findResult.element!.center;
+        const tapResult = await tap({ x, y, native: true });
+        expect(tapResult.success).toBe(true);
+    }, 30000);
 
     it("tap by coordinates on native app", async () => {
         if (platform === "ios") {
