@@ -291,6 +291,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         let emptyResult: boolean | undefined;
         let meaningful: boolean | undefined;
         let changeRate: number | undefined;
+        let tapStrategy: string | undefined;
 
         try {
             inputTokens = Math.ceil(JSON.stringify(args).length / 4);
@@ -319,6 +320,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             // Extract meaningfulness data if provided (tap tool verification)
             if (result?._meaningful !== undefined) meaningful = result._meaningful;
             if (result?._changeRate !== undefined) changeRate = result._changeRate;
+            if (result?._tapStrategy) tapStrategy = result._tapStrategy;
             if (Array.isArray(result?.content)) {
                 let totalTokens = 0;
                 for (const item of result.content) {
@@ -338,7 +340,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy);
             getPostHogClient()?.capture({
                 distinctId: getInstallationId(),
                 event: toolName,
@@ -1852,6 +1854,7 @@ registerToolWithTelemetry(
             _errorContext: errorContext,
             _meaningful: result.verification?.meaningful,
             _changeRate: result.verification?.changeRate,
+            _tapStrategy: result.method,
         };
     }
 );
