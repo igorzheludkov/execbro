@@ -175,3 +175,119 @@ describe("Category 2: RN Coordinates & Verification", () => {
         await sleep(500);
     }, 60000);
 });
+
+describe("Category 3: Non-RN Native App (System Apps)", () => {
+    const IOS_SETTINGS_BUNDLE = "com.apple.Preferences";
+    const ANDROID_SETTINGS_PACKAGE = "com.android.settings";
+
+    const describeIOS = () => platform === "ios" ? describe : describe.skip;
+    const describeAndroid = () => platform === "android" ? describe : describe.skip;
+
+    describeIOS()("iOS native app tests", () => {
+        it("tap Settings item by text (iOS)", async () => {
+            const { iosLaunchApp } = await import("../../core/ios.js");
+            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+            await sleep(2000);
+
+            const result = await tap({ text: "General", native: true });
+            expect(result.success).toBe(true);
+        }, 30000);
+
+        it("tap by OCR on native app (iOS)", async () => {
+            const { iosLaunchApp } = await import("../../core/ios.js");
+            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+            await sleep(2000);
+
+            const result = await tap({ text: "General", strategy: "ocr", native: true });
+            expect(result.success).toBe(true);
+            expect(result.method).toBe("ocr");
+        }, 30000);
+
+        it("find and tap via iOS accessibility tree", async () => {
+            const { iosLaunchApp, iosFindElement } = await import("../../core/ios.js");
+            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+            await sleep(2000);
+
+            const findResult = await iosFindElement({ labelContains: "General" });
+            expect(findResult.success).toBe(true);
+            expect(findResult.found).toBe(true);
+            expect(findResult.element).toBeDefined();
+
+            const { x, y } = findResult.element!.center;
+            const tapResult = await tap({ x, y, native: true });
+            expect(tapResult.success).toBe(true);
+        }, 30000);
+    });
+
+    describeAndroid()("Android native app tests", () => {
+        it("tap Settings item by text (Android)", async () => {
+            const { androidLaunchApp } = await import("../../core/android.js");
+            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+            await sleep(2000);
+
+            const result = await tap({ text: "Network", native: true });
+            expect(result.success).toBe(true);
+        }, 30000);
+
+        it("tap by OCR on native app (Android)", async () => {
+            const { androidLaunchApp } = await import("../../core/android.js");
+            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+            await sleep(2000);
+
+            const result = await tap({ text: "Network", strategy: "ocr", native: true });
+            expect(result.success).toBe(true);
+            expect(result.method).toBe("ocr");
+        }, 30000);
+
+        it("find and tap via Android accessibility tree", async () => {
+            const { androidLaunchApp, androidFindElement } = await import("../../core/android.js");
+            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+            await sleep(2000);
+
+            const findResult = await androidFindElement({ textContains: "Network" });
+            expect(findResult.success).toBe(true);
+            expect(findResult.found).toBe(true);
+            expect(findResult.element).toBeDefined();
+
+            const { x, y } = findResult.element!.center;
+            const tapResult = await tap({ x, y, native: true });
+            expect(tapResult.success).toBe(true);
+        }, 30000);
+    });
+
+    it("tap by coordinates on native app", async () => {
+        if (platform === "ios") {
+            const { iosLaunchApp } = await import("../../core/ios.js");
+            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+        } else {
+            const { androidLaunchApp } = await import("../../core/android.js");
+            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+        }
+        await sleep(2000);
+
+        const targetText = platform === "ios" ? "General" : "Network";
+        const ocrResult = await tap({ text: targetText, strategy: "ocr", native: true });
+        expect(ocrResult.success).toBe(true);
+        expect(ocrResult.tappedAt).toBeDefined();
+    }, 30000);
+
+    it("tap without Metro connection (native only)", async () => {
+        await disconnectAll();
+        await sleep(1000);
+
+        if (platform === "ios") {
+            const { iosLaunchApp } = await import("../../core/ios.js");
+            await iosLaunchApp(IOS_SETTINGS_BUNDLE);
+        } else {
+            const { androidLaunchApp } = await import("../../core/android.js");
+            await androidLaunchApp(ANDROID_SETTINGS_PACKAGE);
+        }
+        await sleep(2000);
+
+        const result = await tap({ x: 200, y: 400, native: true, platform });
+        expect(result.success).toBe(true);
+
+        // Reconnect for any subsequent test runs
+        await connectToMetro();
+    }, 30000);
+});
