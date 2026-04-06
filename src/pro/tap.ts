@@ -665,7 +665,7 @@ async function tryCoordinateStrategy(
     }
 }
 
-const SETTLE_DELAY_MS = 500;
+const SETTLE_DELAY_MS = 800;
 
 async function captureScreenshot(
     platform: "ios" | "android"
@@ -855,15 +855,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
     // Determine screenshot and verification behavior
     const shouldScreenshot = options.screenshot !== false;
-    const effectiveStrategy = strategies[0] || "auto";
-    const shouldVerify =
-        shouldScreenshot &&
-        (options.verify === true ||
-            (options.verify !== false && effectiveStrategy !== "fiber"));
+    // Always capture before screenshot when screenshots are enabled and verify isn't explicitly off
+    // Verification decision is deferred until we know which strategy actually succeeded
+    const canVerify = shouldScreenshot && options.verify !== false;
 
     // Capture "before" screenshot for verification
     let beforeBuffer: Buffer | null = null;
-    if (shouldVerify) {
+    if (canVerify) {
         const before = await captureScreenshot(platform);
         beforeBuffer = before?.buffer || null;
     }
@@ -895,6 +893,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         if (result.success) {
+            // Verify based on the strategy that actually succeeded
+            const shouldVerify = canVerify && (options.verify === true || strat !== "fiber");
             const { screenshot, verification } = await verifyAndCapture(
                 platform,
                 shouldVerify,
@@ -943,9 +943,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         Math.round(coords.y * densityScale)
                     );
                 }
+                // fiber+native uses native tap — always verify
                 const { screenshot, verification } = await verifyAndCapture(
                     platform,
-                    shouldVerify,
+                    canVerify,
                     shouldScreenshot,
                     beforeBuffer
                 );
