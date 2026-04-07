@@ -100,7 +100,7 @@ ${READ_LOGBOX_STATE}
 
 // ── Push & Ignore Expression Builders ──
 
-function buildPushExpression(message: string, level: "error" | "warning"): string {
+function buildPushExpression(message: string, level: "error" | "warning", expanded: boolean): string {
     const escapedMessage = message.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
     return `(function() {
 ${FIND_LOGBOX_DATA}
@@ -110,7 +110,16 @@ ${FIND_LOGBOX_DATA}
       message: { content: '${escapedMessage}', substitutions: [] },
       category: 'rn-ai-devtools-push-' + Date.now(),
       componentStack: []
-    });
+    });${expanded ? `
+    var state = null;
+    var sub = LogBoxData.observe(function(data) { state = data; });
+    if (sub && sub.unsubscribe) sub.unsubscribe();
+    if (state && state.logs) {
+      var lastIndex = 0;
+      var i = 0;
+      state.logs.forEach(function() { lastIndex = i; i++; });
+      LogBoxData.setSelectedLog(lastIndex);
+    }` : ""}
     return JSON.stringify({ success: true });
   } catch(e) {
     return JSON.stringify({ success: false, error: e.message });
@@ -176,10 +185,11 @@ export async function dismissLogBox(device?: string): Promise<LogBoxDismissResul
 export async function pushLogBox(
     message: string,
     level: "error" | "warning" = "error",
+    expanded: boolean = false,
     device?: string
 ): Promise<boolean> {
     try {
-        const result = await executeInApp(buildPushExpression(message, level), true, { timeoutMs: 5000 }, device);
+        const result = await executeInApp(buildPushExpression(message, level, expanded), true, { timeoutMs: 5000 }, device);
         if (!result.success || !result.result) return false;
         const parsed = JSON.parse(result.result);
         return parsed.success === true;
