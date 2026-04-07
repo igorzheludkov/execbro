@@ -757,8 +757,14 @@ async function tryCoordinateStrategy(
 }
 
 const SETTLE_DELAY_MS = 800;
-const TAP_TIMEOUT_MS = 10000;
+const TAP_TIMEOUT_MS = 20000;
 const MIN_STRATEGY_BUDGET_MS = 500;
+const MAX_STRATEGY_MS: Record<string, number> = {
+    fiber: 5000,
+    accessibility: 3000,
+    ocr: 5000,
+    coordinate: 3000,
+};
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -1110,13 +1116,16 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         beforeBuffer = before?.buffer || null;
     }
 
-    // Execute strategies in order with timeout budget
+    // Execute strategies in order with per-strategy caps and overall budget
     for (const strat of strategies) {
-        const budget = remainingMs();
-        if (budget < MIN_STRATEGY_BUDGET_MS) {
-            attempted.push({ strategy: strat, reason: `Skipped — only ${budget}ms remaining (timeout ${TAP_TIMEOUT_MS}ms)` });
+        const remaining = remainingMs();
+        if (remaining < MIN_STRATEGY_BUDGET_MS) {
+            attempted.push({ strategy: strat, reason: `Skipped — only ${remaining}ms remaining (budget ${TAP_TIMEOUT_MS}ms)` });
             continue;
         }
+
+        const cap = MAX_STRATEGY_MS[strat] ?? 5000;
+        const budget = Math.min(cap, remaining);
 
         let result: StrategyResult;
 

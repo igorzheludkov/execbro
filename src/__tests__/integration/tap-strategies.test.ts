@@ -143,8 +143,8 @@ describe("Category 2: RN Coordinates & Verification", () => {
         const elapsed = Date.now() - start;
 
         expect(result.success).toBe(true);
-        // Successful tap should complete well under the 10s timeout
-        expect(elapsed).toBeLessThan(10000);
+        // Successful tap should complete well under the 20s timeout
+        expect(elapsed).toBeLessThan(20000);
     }, 30000);
 
     it("failed tap respects timeout and does not hang", async () => {
@@ -153,8 +153,8 @@ describe("Category 2: RN Coordinates & Verification", () => {
         const elapsed = Date.now() - start;
 
         expect(result.success).toBe(false);
-        // Failed tap should not exceed ~10s budget (with some margin for cleanup)
-        expect(elapsed).toBeLessThan(15000);
+        // Failed tap should not exceed ~20s budget (with some margin for cleanup)
+        expect(elapsed).toBeLessThan(25000);
         // Check that attempted strategies report timeout/skip info
         expect(result.attempted).toBeDefined();
         expect(result.attempted!.length).toBeGreaterThan(0);
