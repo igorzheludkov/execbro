@@ -1,4 +1,4 @@
-import { connectedApps } from "../core/state.js";
+import { connectedApps, imageBuffer } from "../core/state.js";
 import { inferIOSDevicePixelRatio } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
@@ -33,6 +33,7 @@ export interface TapOptions {
     platform?: "ios" | "android";
     screenshot?: boolean;
     verify?: boolean;
+    burst?: boolean;
 }
 
 export interface TapAttempt {
@@ -52,6 +53,100 @@ export interface TapVerification {
     changeRate: number;
     changedPixels: number;
     totalPixels: number;
+    transientChangeDetected?: boolean;
+    peakChangeRate?: number;
+    peakFrame?: number;
+    burstGroupId?: string;
+    explanation: string;
+}
+
+export function buildVerificationExplanation(v: {
+    meaningful: boolean;
+    changeRate: number;
+    changedPixels: number;
+    totalPixels: number;
+    transientChangeDetected?: boolean;
+    peakChangeRate?: number;
+    peakFrame?: number;
+}): string {
+    const pct = (rate: number) => (rate * 100).toFixed(1) + "%";
+
+    if (v.meaningful && !v.transientChangeDetected) {
+        return `Tap caused a visible UI change (${pct(v.changeRate)} pixel diff). The screen updated as expected.`;
+    }
+
+    if (v.meaningful && v.transientChangeDetected) {
+        return (
+            `No persistent change, but transient visual feedback detected ` +
+            `(frame ${v.peakFrame} peak ${pct(v.peakChangeRate || 0)} diff). ` +
+            `Tap triggered a press animation that settled back to original state.`
+        );
+    }
+
+    if (v.transientChangeDetected === false) {
+        return (
+            `No visual change detected — neither persistent nor transient across burst frames. ` +
+            `The element may not respond visually or the tap may have missed.`
+        );
+    }
+
+    return (
+        `No visual change detected between before and after screenshots. ` +
+        `The element may not respond visually or the tap may have missed.`
+    );
+}
+
+export interface BurstAnalysis {
+    meaningful: boolean;
+    persistentChangeRate: number;
+    transientChangeDetected: boolean;
+    peakChangeRate: number;
+    peakFrame: number;
+    framesWithChange: number[];
+}
+
+const BURST_CHANGE_THRESHOLD = 0.005;
+
+export async function analyzeBurstFrames(frames: Buffer[]): Promise<BurstAnalysis> {
+    if (frames.length < 2) {
+        return {
+            meaningful: false,
+            persistentChangeRate: 0,
+            transientChangeDetected: false,
+            peakChangeRate: 0,
+            peakFrame: 0,
+            framesWithChange: [],
+        };
+    }
+
+    let peakChangeRate = 0;
+    let peakFrame = 0;
+    const framesWithChange: number[] = [];
+
+    for (let i = 1; i < frames.length; i++) {
+        const diff = await compareScreenshots(frames[i - 1], frames[i]);
+        if (diff.changeRate > BURST_CHANGE_THRESHOLD) {
+            framesWithChange.push(i);
+        }
+        if (diff.changeRate > peakChangeRate) {
+            peakChangeRate = diff.changeRate;
+            peakFrame = i;
+        }
+    }
+
+    const persistentDiff = await compareScreenshots(frames[0], frames[frames.length - 1]);
+    const persistentChangeRate = persistentDiff.changeRate;
+    const transientChangeDetected = !persistentDiff.changed && framesWithChange.length > 0;
+    const meaningful = persistentDiff.changed || transientChangeDetected;
+
+    return {
+        meaningful,
+        persistentChangeRate,
+        transientChangeDetected,
+        peakChangeRate,
+        peakFrame,
+        framesWithChange,
+    };
 }
 
 export interface TapResult {
@@ -729,11 +824,126 @@ async function verifyAndCapture(
                 changeRate: diff.changeRate,
                 changedPixels: diff.changedPixels,
                 totalPixels: diff.totalPixels,
+                explanation: buildVerificationExplanation({
+                    meaningful: diff.changed,
+                    changeRate: diff.changeRate,
+                    changedPixels: diff.changedPixels,
+                    totalPixels: diff.totalPixels,
+                }),
             };
         } catch {
             // Diff failed — still return the screenshot
         }
     }
+
+    const verifyGroupId = `verify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (beforeBuffer) {
+        imageBuffer.add({
+            id: `${verifyGroupId}-before`,
+            image: beforeBuffer,
+            timestamp: Date.now(),
+            source: "tap-verify",
+            groupId: verifyGroupId,
+            metadata: { phase: "before" },
+        });
+    }
+    imageBuffer.add({
+        id: `${verifyGroupId}-after`,
+        image: after.buffer,
+        timestamp: Date.now(),
+        source: "tap-verify",
+        groupId: verifyGroupId,
+        metadata: { phase: "after", changeRate: verification?.changeRate },
+    });
+
+    return { screenshot, verification };
+}
+
+// --- Burst Capture ---
+
+const BURST_FRAME_COUNT = 4;
+const BURST_FRAME_INTERVAL_MS = 150;
+
+async function burstCaptureAndVerify(
+    platform: "ios" | "android",
+    beforeBuffer: Buffer | null
+): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
+    if (!beforeBuffer) return {};
+
+    const frames: Buffer[] = [beforeBuffer];
+
+    for (let i = 0; i < BURST_FRAME_COUNT; i++) {
+        await new Promise((resolve) => setTimeout(resolve, BURST_FRAME_INTERVAL_MS));
+        const capture = await captureScreenshot(platform);
+        if (capture) {
+            frames.push(capture.buffer);
+        }
+    }
+
+    if (frames.length < 2) return {};
+
+    const analysis = await analyzeBurstFrames(frames);
+
+    const groupId = `burst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    for (let i = 0; i < frames.length; i++) {
+        imageBuffer.add({
+            id: `${groupId}-f${i}`,
+            image: frames[i],
+            timestamp: Date.now(),
+            source: "tap-burst",
+            groupId,
+            metadata: {
+                frameIndex: i,
+                isBefore: i === 0,
+                changeRate: i === 0 ? 0 : (analysis.framesWithChange.includes(i) ? analysis.peakChangeRate : 0),
+            },
+        });
+    }
+
+    imageBuffer.addGroup({
+        groupId,
+        intent: "tap-verification",
+        source: "tap-burst",
+        timestamp: Date.now(),
+        frameCount: frames.length,
+        summary: {
+            peakChangeRate: analysis.peakChangeRate,
+            peakFrame: analysis.peakFrame,
+            framesWithChange: analysis.framesWithChange,
+            transientChangeDetected: analysis.transientChangeDetected,
+            persistentChangeRate: analysis.persistentChangeRate,
+        },
+    });
+
+    // Get dimensions from the last frame using sharp
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(frames[frames.length - 1]).metadata();
+    const screenshot: TapScreenshot = {
+        image: screenshotToBase64(frames[frames.length - 1]),
+        width: meta.width || 0,
+        height: meta.height || 0,
+        scaleFactor: 1,
+    };
+
+    const verification: TapVerification = {
+        meaningful: analysis.meaningful,
+        changeRate: analysis.persistentChangeRate,
+        changedPixels: 0,
+        totalPixels: 0,
+        transientChangeDetected: analysis.transientChangeDetected,
+        peakChangeRate: analysis.peakChangeRate,
+        peakFrame: analysis.peakFrame,
+        burstGroupId: groupId,
+        explanation: buildVerificationExplanation({
+            meaningful: analysis.meaningful,
+            changeRate: analysis.persistentChangeRate,
+            changedPixels: 0,
+            totalPixels: 0,
+            transientChangeDetected: analysis.transientChangeDetected,
+            peakChangeRate: analysis.peakChangeRate,
+            peakFrame: analysis.peakFrame,
+        }),
+    };
 
     return { screenshot, verification };
 }
@@ -821,12 +1031,18 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             });
         }
         if (result.success) {
-            const { screenshot, verification } = await verifyAndCapture(
-                platform,
-                nativeShouldVerify,
-                nativeShouldScreenshot,
-                nativeBeforeBuffer
-            );
+            let screenshot: TapScreenshot | undefined;
+            let verification: TapVerification | undefined;
+            if (options.burst && nativeShouldVerify && nativeBeforeBuffer) {
+                ({ screenshot, verification } = await burstCaptureAndVerify(platform, nativeBeforeBuffer));
+            } else {
+                ({ screenshot, verification } = await verifyAndCapture(
+                    platform,
+                    nativeShouldVerify,
+                    nativeShouldScreenshot,
+                    nativeBeforeBuffer
+                ));
+            }
             return formatTapSuccess({
                 method: "native-coordinate",
                 query,
@@ -931,13 +1147,18 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         if (result.success) {
-            const shouldVerify = canVerify;
-            const { screenshot, verification } = await verifyAndCapture(
-                platform,
-                shouldVerify,
-                shouldScreenshot,
-                beforeBuffer
-            );
+            let screenshot: TapScreenshot | undefined;
+            let verification: TapVerification | undefined;
+            if (options.burst && canVerify && beforeBuffer) {
+                ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer));
+            } else {
+                ({ screenshot, verification } = await verifyAndCapture(
+                    platform,
+                    canVerify,
+                    shouldScreenshot,
+                    beforeBuffer
+                ));
+            }
             if (screenshot) {
                 app.lastScreenshot = {
                     originalWidth: screenshot.width,
@@ -981,12 +1202,18 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     );
                 }
                 // fiber+native uses native tap — always verify
-                const { screenshot, verification } = await verifyAndCapture(
-                    platform,
-                    canVerify,
-                    shouldScreenshot,
-                    beforeBuffer
-                );
+                let screenshot: TapScreenshot | undefined;
+                let verification: TapVerification | undefined;
+                if (options.burst && canVerify && beforeBuffer) {
+                    ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer));
+                } else {
+                    ({ screenshot, verification } = await verifyAndCapture(
+                        platform,
+                        canVerify,
+                        shouldScreenshot,
+                        beforeBuffer
+                    ));
+                }
                 if (screenshot) {
                     app.lastScreenshot = {
                         originalWidth: screenshot.width,
