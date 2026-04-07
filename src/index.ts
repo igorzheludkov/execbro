@@ -1809,6 +1809,17 @@ registerToolWithTelemetry(
                     "Run before/after screenshot diff to detect if the tap had a meaningful visual effect. " +
                     "Default: true for coordinate/accessibility/ocr strategies, false for fiber. Requires screenshot=true."
                 ),
+            burst: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe(
+                    "Enable burst screenshot capture for enhanced verification. " +
+                    "Captures 4 rapid screenshots (~150ms intervals) after the tap to detect transient visual feedback " +
+                    "(press animations, highlights, ripples) that may settle before a standard after-screenshot. " +
+                    "Results are stored in the image buffer (use get_images to inspect individual frames). " +
+                    "Default: false."
+                ),
         },
     },
     async (args: any) => {
@@ -1825,6 +1836,7 @@ registerToolWithTelemetry(
             platform: args.platform,
             screenshot: args.screenshot,
             verify: args.verify,
+            burst: args.burst,
         });
 
         const { screenshot: screenshotData, ...resultWithoutScreenshot } = result;

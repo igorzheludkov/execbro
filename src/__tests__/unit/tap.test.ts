@@ -13,6 +13,7 @@ import {
     convertPixelsToPoints,
     formatTapSuccess,
     formatTapFailure,
+    buildVerificationExplanation,
 } from "../../pro/tap.js";
 
 describe("ConnectedApp type", () => {
@@ -229,6 +230,7 @@ describe("formatTapSuccess with screenshot and verification", () => {
                 changeRate: 0.12,
                 changedPixels: 48210,
                 totalPixels: 2961720,
+                explanation: "Tap caused a visible UI change (12.0% pixel diff). The screen updated as expected.",
             },
             screenshot: {
                 image: "data:image/jpeg;base64,abc123",
@@ -242,6 +244,7 @@ describe("formatTapSuccess with screenshot and verification", () => {
             changeRate: 0.12,
             changedPixels: 48210,
             totalPixels: 2961720,
+            explanation: "Tap caused a visible UI change (12.0% pixel diff). The screen updated as expected.",
         });
         expect(result.screenshot).toBeDefined();
     });
@@ -299,6 +302,7 @@ describe("formatTapFailure with screenshot and verification", () => {
                 changeRate: 0.001,
                 changedPixels: 312,
                 totalPixels: 2961720,
+                explanation: "No visual change detected between before and after screenshots. The element may not respond visually or the tap may have missed.",
             },
             screenshot: {
                 image: "data:image/jpeg;base64,abc123",
@@ -310,6 +314,43 @@ describe("formatTapFailure with screenshot and verification", () => {
         expect(result.verification?.meaningful).toBe(false);
         expect(result.screenshot).toBeDefined();
         expect(result.warning).toContain("no visual change detected");
+    });
+});
+
+describe("buildVerificationExplanation", () => {
+    it("explains persistent visual change", () => {
+        const explanation = buildVerificationExplanation({
+            meaningful: true, changeRate: 0.032, changedPixels: 32000, totalPixels: 1000000,
+        });
+        expect(explanation).toContain("visible UI change");
+        expect(explanation).toContain("3.2%");
+    });
+
+    it("explains transient change from burst", () => {
+        const explanation = buildVerificationExplanation({
+            meaningful: true, changeRate: 0.001, changedPixels: 1000, totalPixels: 1000000,
+            transientChangeDetected: true, peakChangeRate: 0.041, peakFrame: 2,
+        });
+        expect(explanation).toContain("transient visual feedback");
+        expect(explanation).toContain("frame 2");
+        expect(explanation).toContain("4.1%");
+    });
+
+    it("explains no change in standard mode", () => {
+        const explanation = buildVerificationExplanation({
+            meaningful: false, changeRate: 0.0, changedPixels: 0, totalPixels: 1000000,
+        });
+        expect(explanation).toContain("No visual change");
+        expect(explanation).toContain("before and after");
+    });
+
+    it("explains no change in burst mode", () => {
+        const explanation = buildVerificationExplanation({
+            meaningful: false, changeRate: 0.0, changedPixels: 0, totalPixels: 1000000,
+            transientChangeDetected: false, peakChangeRate: 0.001, peakFrame: 0,
+        });
+        expect(explanation).toContain("No visual change");
+        expect(explanation).toContain("burst frames");
     });
 });
 
