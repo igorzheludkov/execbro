@@ -52,9 +52,17 @@ const FIND_LOGBOX_DATA = `
 
 const READ_LOGBOX_STATE = `
   var state = null;
-  var sub = LogBoxData.observe(function(data) { state = data; });
-  if (sub && sub.unsubscribe) sub.unsubscribe();
-  if (!state || !state.logs) return JSON.stringify(null);
+  try {
+    var sub = LogBoxData.observe(function(data) { state = data; });
+    if (sub && sub.unsubscribe) sub.unsubscribe();
+  } catch(e) {
+    global.__RN_LOGBOX_DATA__ = undefined;
+    return JSON.stringify(null);
+  }
+  if (!state || !state.logs) {
+    global.__RN_LOGBOX_DATA__ = undefined;
+    return JSON.stringify(null);
+  }
   var summary = { error: 0, warning: 0, fatal: 0 };
   var entries = [];
   state.logs.forEach(function(log) {
