@@ -1850,7 +1850,9 @@ registerToolWithTelemetry(
         return {
             content,
             isError: !result.success,
-            _errorMessage: result.error,
+            _errorMessage: !result.success
+                ? `${JSON.stringify(result.query)}|${result.error || ""}`
+                : undefined,
             _errorContext: errorContext,
             _meaningful: result.verification?.meaningful,
             _changeRate: result.verification?.changeRate,
