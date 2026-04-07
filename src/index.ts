@@ -3044,7 +3044,7 @@ registerToolWithTelemetry(
             infoText += `\n  • android_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
 
-            // Check for LogBox overlay
+            // Check for LogBox overlay (uses default CDP device — native deviceId cannot be mapped to CDP device name)
             try {
                 const logBoxState = await detectLogBox();
                 if (logBoxState && logBoxState.total > 0) {
@@ -3723,7 +3723,7 @@ registerToolWithTelemetry(
             infoText += `\n  • ios_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
 
-            // Check for LogBox overlay
+            // Check for LogBox overlay (uses default CDP device — native UDID cannot be mapped to CDP device name)
             try {
                 const logBoxState = await detectLogBox();
                 if (logBoxState && logBoxState.total > 0) {
@@ -3833,7 +3833,7 @@ registerToolWithTelemetry(
                     tapY: w.tapCenter.y
                 }));
 
-            const result = {
+            const result: Record<string, unknown> = {
                 platform,
                 engine: ocrResult.engine || "unknown",
                 processingTimeMs: ocrResult.processingTimeMs,
@@ -3844,12 +3844,11 @@ registerToolWithTelemetry(
                 note: "tapX/tapY are ready to use with tap commands (already converted for platform)"
             };
 
-            // Check for LogBox overlay
-            let logBoxWarning = "";
+            // Check for LogBox overlay (uses default CDP device — native deviceId cannot be mapped to CDP device name)
             try {
                 const logBoxState = await detectLogBox();
                 if (logBoxState && logBoxState.total > 0) {
-                    logBoxWarning = formatLogBoxWarning(logBoxState);
+                    result.logBoxWarning = formatLogBoxWarning(logBoxState).trim();
                 }
             } catch {
                 // Non-fatal: LogBox detection failure should not break OCR
@@ -3882,7 +3881,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text" as const,
-                        text: JSON.stringify(result, null, 2) + logBoxWarning
+                        text: JSON.stringify(result, null, 2)
                     }
                 ]
             };
