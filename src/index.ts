@@ -145,11 +145,13 @@ import {
     // Format utilities (TONL)
     formatLogsAsTonl,
     formatNetworkAsTonl,
-    // LogBox detection
+    // LogBox detection & control
     detectLogBox,
     formatLogBoxWarning,
     dismissLogBox,
-    formatDismissedEntries
+    formatDismissedEntries,
+    pushLogBox,
+    addLogBoxIgnorePatterns
 } from "./core/index.js";
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
@@ -2675,39 +2677,173 @@ registerToolWithTelemetry(
     }
 );
 
-// Tool: Dismiss LogBox overlay
+// Tool: LogBox control (replaces dismiss_logbox)
 registerToolWithTelemetry(
-    "dismiss_logbox",
+    "logbox",
     {
         description:
-            "Dismiss the React Native LogBox error/warning overlay that appears at the bottom of the screen in development mode. " +
-            "Returns the content of all dismissed entries (level, message, count) so no information is lost. " +
-            "Use this when LogBox is obstructing bottom UI elements (tab bars, buttons) that you need to interact with. " +
+            "Interact with React Native's LogBox overlay (dev mode only). " +
+            'Actions: "dismiss" clears all entries and returns their content. ' +
+            '"push" displays a message in the LogBox error banner (visible to the developer watching the device). ' +
+            '"ignore" adds patterns to suppress future LogBox entries for this session. ' +
+            '"detect" reads current LogBox state without modifying it. ' +
             "Only works in __DEV__ mode — LogBox does not exist in production builds.",
         inputSchema: {
+            action: z.enum(["dismiss", "push", "ignore", "detect"]).describe('Action to perform: "dismiss", "push", "ignore", or "detect"'),
+            message: z.string().optional().describe('Message to push into LogBox (required when action="push")'),
+            level: z.enum(["error", "warning"]).optional().describe('LogBox level for push (default: "error"). Only "error" shows a visible bottom banner; "warning" is stored but not visually shown unless LogBox is already open'),
+            patterns: z.array(z.string()).optional().describe('Patterns to ignore (required when action="ignore"), e.g. ["[APOLLO]", "deprecated"]'),
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ device }) => {
-        const result = await dismissLogBox(device);
+    async ({ action, message, level, patterns, device }) => {
+        if (action === "dismiss") {
+            const result = await dismissLogBox(device);
 
-        if (result === null) {
+            if (result === null) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "LogBox not available. This can happen if: (1) the app is a production build (__DEV__ is false), (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                        }
+                    ]
+                };
+            }
+
+            if (result.totalDismissed === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "No LogBox entries to dismiss."
+                        }
+                    ]
+                };
+            }
+
             return {
                 content: [
                     {
                         type: "text" as const,
-                        text: "LogBox not available. This can happen if: (1) the app is a production build (__DEV__ is false), (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                        text: formatDismissedEntries(result)
                     }
                 ]
             };
         }
 
-        if (result.totalDismissed === 0) {
+        if (action === "push") {
+            if (!message) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: 'Error: "message" parameter is required when action is "push".'
+                        }
+                    ],
+                    isError: true
+                };
+            }
+
+            const success = await pushLogBox(message, level || "error", device);
+
+            if (!success) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Failed to push message to LogBox. This can happen if: (1) the app is a production build, (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                        }
+                    ]
+                };
+            }
+
             return {
                 content: [
                     {
                         type: "text" as const,
-                        text: "No LogBox entries to dismiss."
+                        text: `Message pushed to LogBox as ${level || "error"}: "${message}"`
+                    }
+                ]
+            };
+        }
+
+        if (action === "ignore") {
+            if (!patterns || patterns.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: 'Error: "patterns" parameter is required when action is "ignore" (non-empty array of strings).'
+                        }
+                    ],
+                    isError: true
+                };
+            }
+
+            const activePatterns = await addLogBoxIgnorePatterns(patterns, device);
+
+            if (activePatterns === null) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "Failed to add ignore patterns. This can happen if: (1) the app is a production build, (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                        }
+                    ]
+                };
+            }
+
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: `Added ignore patterns: ${patterns.map((p: string) => `"${p}"`).join(", ")}\n\nAll active ignore patterns: ${activePatterns.map((p: string) => `"${p}"`).join(", ")}`
+                    }
+                ]
+            };
+        }
+
+        if (action === "detect") {
+            const state = await detectLogBox(device);
+
+            if (state === null) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "LogBox not available. This can happen if: (1) the app is a production build (__DEV__ is false), (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                        }
+                    ]
+                };
+            }
+
+            if (state.total === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "No LogBox entries detected."
+                        }
+                    ]
+                };
+            }
+
+            const MAX_MSG_LENGTH = 150;
+            let output = `LogBox state: ${state.total} entr${state.total === 1 ? "y" : "ies"} (${state.errors} error${state.errors !== 1 ? "s" : ""}, ${state.warnings} warning${state.warnings !== 1 ? "s" : ""}, ${state.fatals} fatal${state.fatals !== 1 ? "s" : ""})\n`;
+
+            for (const entry of state.entries) {
+                const truncated =
+                    entry.message.length > MAX_MSG_LENGTH ? entry.message.substring(0, MAX_MSG_LENGTH) + "..." : entry.message;
+                const countStr = entry.count > 1 ? ` (x${entry.count})` : "";
+                output += `\n[${entry.level}] ${truncated}${countStr}`;
+            }
+
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: output
                     }
                 ]
             };
@@ -2717,9 +2853,10 @@ registerToolWithTelemetry(
             content: [
                 {
                     type: "text" as const,
-                    text: formatDismissedEntries(result)
+                    text: `Unknown action: "${action}". Use "dismiss", "push", "ignore", or "detect".`
                 }
-            ]
+            ],
+            isError: true
         };
     }
 );
@@ -3377,11 +3514,25 @@ server.registerTool(
     async ({ deviceId }) => {
         const result = await androidDescribeAll(deviceId);
 
+        let text = result.success ? result.formatted! : `Error: ${result.error}`;
+
+        // Check for LogBox overlay
+        if (result.success) {
+            try {
+                const logBoxState = await detectLogBox();
+                if (logBoxState && logBoxState.total > 0) {
+                    text += formatLogBoxWarning(logBoxState);
+                }
+            } catch {
+                // Non-fatal: LogBox detection failure should not break describe_all
+            }
+        }
+
         return {
             content: [
                 {
                     type: "text",
-                    text: result.success ? result.formatted! : `Error: ${result.error}`
+                    text
                 }
             ],
             isError: !result.success
@@ -4180,11 +4331,25 @@ server.registerTool(
     async ({ udid }) => {
         const result = await iosDescribeAll(udid);
 
+        let text = result.success ? result.result! : `Error: ${result.error}`;
+
+        // Check for LogBox overlay
+        if (result.success) {
+            try {
+                const logBoxState = await detectLogBox();
+                if (logBoxState && logBoxState.total > 0) {
+                    text += formatLogBoxWarning(logBoxState);
+                }
+            } catch {
+                // Non-fatal: LogBox detection failure should not break describe_all
+            }
+        }
+
         return {
             content: [
                 {
                     type: "text",
-                    text: result.success ? result.result! : `Error: ${result.error}`
+                    text
                 }
             ],
             isError: !result.success
