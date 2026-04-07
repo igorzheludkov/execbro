@@ -365,14 +365,16 @@ async function tryFiberAtDepth(
             return strategyResult;
         }
 
-        // Input elements found via fiber can't be pressed (no onPress) —
-        // if fiber measured the layout, return coordinates for a direct native tap;
-        // otherwise fall through to accessibility/coordinate strategy
+        // Fiber finds the element by text/testID/component, then measures its
+        // host component's screen position for a native tap. This ensures the tap
+        // goes through React's event pipeline, executing any onPress wrappers
+        // (analytics, debouncing, state tracking) inside the component.
         if (parsed.needsNativeTap) {
+            const elementType = parsed.isInput ? "input element" : "pressable element";
             if (parsed.nativeTapTarget && parsed.nativeTapTarget.x && parsed.nativeTapTarget.y) {
                 return {
                     success: false,
-                    reason: `Found ${parsed.pressed} (input element) — measured coordinates for native tap`,
+                    reason: `Found ${parsed.pressed} (${elementType}) — measured coordinates for native tap`,
                     pressed: parsed.pressed,
                     text: parsed.text,
                     path: parsed.path || null,
@@ -386,18 +388,12 @@ async function tryFiberAtDepth(
             }
             return {
                 success: false,
-                reason: `Found ${parsed.pressed} (input element) but it requires native tap — falling through to next strategy`,
+                reason: `Found ${parsed.pressed} (${elementType}) but could not measure coordinates — falling through to next strategy`,
             };
         }
 
-        return {
-            success: true,
-            reason: "Pressed via React fiber tree",
-            pressed: parsed.pressed,
-            text: parsed.text,
-            path: parsed.path || null,
-            component: parsed.pressed || null,
-        };
+        // All elements now use needsNativeTap — this shouldn't be reached
+        return { success: false, reason: "Unexpected: element did not request native tap" };
     } catch (err) {
         return {
             success: false,
@@ -666,6 +662,21 @@ async function tryCoordinateStrategy(
 }
 
 const SETTLE_DELAY_MS = 800;
+const TAP_TIMEOUT_MS = 10000;
+const MIN_STRATEGY_BUDGET_MS = 500;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(
+            () => reject(new Error(`${label} timed out after ${ms}ms`)),
+            ms
+        );
+        promise.then(
+            (val) => { clearTimeout(timer); resolve(val); },
+            (err) => { clearTimeout(timer); reject(err); }
+        );
+    });
+}
 
 async function captureScreenshot(
     platform: "ios" | "android"
@@ -734,6 +745,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const strategy = options.strategy || "auto";
     const index = options.index;
     const maxTraversalDepth = options.maxTraversalDepth;
+    const deadline = Date.now() + TAP_TIMEOUT_MS;
+    const remainingMs = () => Math.max(0, deadline - Date.now());
 
     // Validate inputs
     const hasSearchParam = query.text || query.testID || query.component;
@@ -793,7 +806,20 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             nativeBeforeBuffer = before?.buffer || null;
         }
 
-        const result = await tryCoordinateStrategy(query.x!, query.y!, platform, undefined);
+        let result: StrategyResult;
+        try {
+            result = await withTimeout(
+                tryCoordinateStrategy(query.x!, query.y!, platform, undefined),
+                remainingMs(),
+                "native-coordinate"
+            );
+        } catch (err) {
+            return formatTapFailure({
+                query,
+                attempted: [{ strategy: "native-coordinate", reason: err instanceof Error ? err.message : String(err) }],
+                suggestion: `Tap timed out. Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) and retry with coordinates.`,
+            });
+        }
         if (result.success) {
             const { screenshot, verification } = await verifyAndCapture(
                 platform,
@@ -822,19 +848,21 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     let apps = Array.from(connectedApps.values());
     if (apps.length === 0) {
         try {
-            clearReconnectionSuppression();
-            const openPorts = await scanMetroPorts();
-            for (const port of openPorts) {
-                const devices = await fetchDevices(port);
-                const mainDevice = selectMainDevice(devices);
-                if (mainDevice) {
-                    await connectToDevice(mainDevice, port);
-                    break;
+            await withTimeout((async () => {
+                clearReconnectionSuppression();
+                const openPorts = await scanMetroPorts();
+                for (const port of openPorts) {
+                    const devices = await fetchDevices(port);
+                    const mainDevice = selectMainDevice(devices);
+                    if (mainDevice) {
+                        await connectToDevice(mainDevice, port);
+                        break;
+                    }
                 }
-            }
+            })(), Math.min(remainingMs(), 3000), "auto-connect");
             apps = Array.from(connectedApps.values());
         } catch {
-            // Auto-connect failed, will fall through to error below
+            // Auto-connect failed or timed out, will fall through to error below
         }
     }
 
@@ -866,30 +894,40 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         beforeBuffer = before?.buffer || null;
     }
 
-    // Execute strategies in order
+    // Execute strategies in order with timeout budget
     for (const strat of strategies) {
+        const budget = remainingMs();
+        if (budget < MIN_STRATEGY_BUDGET_MS) {
+            attempted.push({ strategy: strat, reason: `Skipped — only ${budget}ms remaining (timeout ${TAP_TIMEOUT_MS}ms)` });
+            continue;
+        }
+
         let result: StrategyResult;
 
-        switch (strat) {
-            case "fiber":
-                result = await tryFiberStrategy(query, index, maxTraversalDepth);
-                break;
-            case "accessibility":
-                result = await tryAccessibilityStrategy(query, index, platform);
-                break;
-            case "ocr":
-                result = await tryOcrStrategy(query, platform);
-                break;
-            case "coordinate":
-                result = await tryCoordinateStrategy(
-                    query.x!,
-                    query.y!,
-                    platform,
-                    app.lastScreenshot
-                );
-                break;
-            default:
-                result = { success: false, reason: `Unknown strategy: ${strat}` };
+        try {
+            switch (strat) {
+                case "fiber":
+                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth), budget, `fiber`);
+                    break;
+                case "accessibility":
+                    result = await withTimeout(tryAccessibilityStrategy(query, index, platform), budget, `accessibility`);
+                    break;
+                case "ocr":
+                    result = await withTimeout(tryOcrStrategy(query, platform), budget, `ocr`);
+                    break;
+                case "coordinate":
+                    result = await withTimeout(
+                        tryCoordinateStrategy(query.x!, query.y!, platform, app.lastScreenshot),
+                        budget,
+                        `coordinate`
+                    );
+                    break;
+                default:
+                    result = { success: false, reason: `Unknown strategy: ${strat}` };
+            }
+        } catch (err) {
+            attempted.push({ strategy: strat, reason: err instanceof Error ? err.message : String(err) });
+            continue;
         }
 
         if (result.success) {
@@ -924,7 +962,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
         attempted.push({ strategy: strat, reason: result.reason });
 
-        // If fiber found an input with measured coordinates, do a native tap directly
+        // If fiber found an element with measured coordinates, do a native tap directly
         if (strat === "fiber" && result.convertedTo && result.pressed) {
             try {
                 const coords = result.convertedTo;
@@ -995,7 +1033,12 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
     }
 
-    // All strategies failed
+    // All strategies failed — check if timeout was the cause
+    const timedOut = attempted.some(a => a.reason.includes("timed out"));
+    const skipped = attempted.some(a => a.reason.includes("Skipped"));
+    const hitTimeout = timedOut || skipped;
+    const elapsed = TAP_TIMEOUT_MS - remainingMs();
+
     const suggestion = buildSuggestion(query, strategies, platform);
     const { screenshot: failScreenshot } = shouldScreenshot
         ? await verifyAndCapture(platform, false, true, null)
@@ -1010,6 +1053,9 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     return formatTapFailure({
         query,
         attempted,
+        error: hitTimeout
+            ? `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)`
+            : undefined,
         suggestion,
         screenshot: failScreenshot,
     });
