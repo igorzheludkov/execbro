@@ -137,6 +137,29 @@ describe("Category 2: RN Coordinates & Verification", () => {
         expect(result.attempted!.length).toBeGreaterThan(0);
     }, 30000);
 
+    it("tap completes within timeout budget", async () => {
+        const start = Date.now();
+        const result = await tap({ testID: "submit-btn" });
+        const elapsed = Date.now() - start;
+
+        expect(result.success).toBe(true);
+        // Successful tap should complete well under the 10s timeout
+        expect(elapsed).toBeLessThan(10000);
+    }, 30000);
+
+    it("failed tap respects timeout and does not hang", async () => {
+        const start = Date.now();
+        const result = await tap({ text: "DoesNotExist_Timeout_Test" });
+        const elapsed = Date.now() - start;
+
+        expect(result.success).toBe(false);
+        // Failed tap should not exceed ~10s budget (with some margin for cleanup)
+        expect(elapsed).toBeLessThan(15000);
+        // Check that attempted strategies report timeout/skip info
+        expect(result.attempted).toBeDefined();
+        expect(result.attempted!.length).toBeGreaterThan(0);
+    }, 30000);
+
     it("tap navigation button and verify screen change", async () => {
         const result = await tap({ testID: "nav-scroll-btn" });
         expect(result.success).toBe(true);

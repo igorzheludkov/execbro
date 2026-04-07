@@ -256,6 +256,38 @@ describe("formatTapSuccess with screenshot and verification", () => {
     });
 });
 
+describe("formatTapFailure with timeout error", () => {
+    it("includes error field when timeout info is provided", () => {
+        const result = formatTapFailure({
+            query: { text: "Submit" },
+            attempted: [
+                { strategy: "fiber", reason: "fiber timed out after 5000ms" },
+                { strategy: "accessibility", reason: "accessibility timed out after 3500ms" },
+                { strategy: "ocr", reason: "Skipped — only 200ms remaining (timeout 10000ms)" },
+            ],
+            error: "Tap timed out after 10000ms (budget 10000ms)",
+            suggestion: "Use screenshot and retry",
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("timed out");
+        expect(result.attempted).toHaveLength(3);
+        expect(result.attempted![0].reason).toContain("timed out after 5000ms");
+        expect(result.attempted![2].reason).toContain("Skipped");
+    });
+
+    it("uses default error message when no explicit error field", () => {
+        const result = formatTapFailure({
+            query: { text: "Submit" },
+            attempted: [{ strategy: "fiber", reason: "No match" }],
+            suggestion: "Try OCR",
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toBeDefined();
+        // Default error from buildErrorMessage, not timeout
+        expect(result.error).not.toContain("timed out");
+    });
+});
+
 describe("formatTapFailure with screenshot and verification", () => {
     it("includes warning when verification shows not meaningful", () => {
         const result = formatTapFailure({
