@@ -84,6 +84,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 - `LogBuffer`: Circular buffer (500 entries) storing captured logs with level filtering and text search
 - `NetworkBuffer`: Circular buffer (200 entries) storing captured network requests with filtering by method, URL, and status
+- `ImageBuffer`: Circular buffer (50 entries) storing screenshots from all image-producing tools (ios/android/ocr screenshots, tap verification frames). Supports grouping for burst frame sets.
 - `connectedApps`: Map tracking active WebSocket connections to devices
 - `pendingExecutions`: Map for tracking async `Runtime.evaluate` responses with timeout handling
 - MCP tools registered via `server.registerTool()` from `@modelcontextprotocol/sdk`
@@ -108,7 +109,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `reload_app`: Reload the React Native app (triggers JS bundle reload)
 
 **UI Interaction:**
-- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `screenshot=false` to disable screenshots, `verify=false` to skip verification.
+- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `screenshot=false` to disable screenshots, `verify=false` to skip verification. Use `burst=true` to capture rapid sequential screenshots for detecting transient visual feedback (press animations, highlights) — results stored in image buffer accessible via `get_images`.
 - `ios_swipe` / `android_swipe`: Swipe/scroll gestures with start/end coordinates
 - `ios_input_text` / `android_input_text`: Type text into the focused input field
 - `ios_button`: Press iOS hardware buttons (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
@@ -120,6 +121,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 **Screenshots & OCR:**
 - `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
 - `ocr_screenshot`: Screenshot with OCR text recognition and tap-ready coordinates
+- `get_images`: Access shared image buffer containing screenshots from all tools. Returns metadata by default; use `id` or `groupId`+`frameIndex` to retrieve specific images. Tap burst frames are stored here.
 
 **Component Inspection:**
 - `get_component_tree`: Get React component hierarchy. Use `focusedOnly=true` + `structureOnly=true` for compact active-screen view
@@ -195,6 +197,7 @@ When debugging React Native apps through this MCP server:
     3. Omitting `device` uses the first connected device for execution tools, or merges data from all devices for log/network tools
     4. Example workflow: `ios_screenshot` on iPhone, `android_screenshot` on Android, compare layouts
     5. `scan_metro` now connects ALL Bridgeless targets instead of picking one — no manual `connect_metro` needed
+- **Tap Verification — Burst Mode**: When `tap()` reports `meaningful: false` but you suspect the tap hit a real button (e.g., the handler may be buggy or the visual feedback is transient), retry with `burst=true`. This captures 4 rapid screenshots after the tap to detect momentary visual feedback (press animations, highlights) that settles before the standard after-screenshot. Check `verification.transientChangeDetected` and use `get_images(groupId=verification.burstGroupId)` to inspect individual frames.
 
 ## Telemetry System
 
