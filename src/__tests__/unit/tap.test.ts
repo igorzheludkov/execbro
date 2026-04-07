@@ -266,9 +266,9 @@ describe("formatTapFailure with timeout error", () => {
             attempted: [
                 { strategy: "fiber", reason: "fiber timed out after 5000ms" },
                 { strategy: "accessibility", reason: "accessibility timed out after 3500ms" },
-                { strategy: "ocr", reason: "Skipped — only 200ms remaining (timeout 10000ms)" },
+                { strategy: "ocr", reason: "Skipped — only 200ms remaining (budget 20000ms)" },
             ],
-            error: "Tap timed out after 10000ms (budget 10000ms)",
+            error: "Tap timed out after 20000ms (budget 20000ms)",
             suggestion: "Use screenshot and retry",
         });
         expect(result.success).toBe(false);
