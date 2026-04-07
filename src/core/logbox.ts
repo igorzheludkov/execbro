@@ -186,8 +186,20 @@ export async function pushLogBox(
     message: string,
     level: "error" | "warning" = "error",
     expanded: boolean = false,
+    target: "logbox" | "metro" = "logbox",
     device?: string
 ): Promise<boolean> {
+    if (target === "metro") {
+        try {
+            const escapedMessage = message.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
+            const result = await executeInApp(`(function() { console.log('${escapedMessage}'); return JSON.stringify({ success: true }); })()`, true, { timeoutMs: 5000 }, device);
+            if (!result.success || !result.result) return false;
+            const parsed = JSON.parse(result.result);
+            return parsed.success === true;
+        } catch {
+            return false;
+        }
+    }
     try {
         const result = await executeInApp(buildPushExpression(message, level, expanded), true, { timeoutMs: 5000 }, device);
         if (!result.success || !result.result) return false;

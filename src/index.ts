@@ -2693,11 +2693,12 @@ registerToolWithTelemetry(
             message: z.string().optional().describe('Message to push into LogBox (required when action="push")'),
             level: z.enum(["error", "warning"]).optional().describe('LogBox level for push (default: "error"). Only "error" shows a visible bottom banner; "warning" is stored but not visually shown unless LogBox is already open'),
             expanded: z.boolean().optional().describe('When true, opens the full-screen LogBox detail view instead of the minimized bottom banner. Useful for important messages with clickable URLs (default: false)'),
+            target: z.enum(["logbox", "metro"]).optional().describe('Where to push the message (default: "logbox"). "logbox" shows on device screen, "metro" outputs to Metro terminal via console.log'),
             patterns: z.array(z.string()).optional().describe('Patterns to ignore (required when action="ignore"), e.g. ["[APOLLO]", "deprecated"]'),
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ action, message, level, expanded, patterns, device }) => {
+    async ({ action, message, level, expanded, target, patterns, device }) => {
         if (action === "dismiss") {
             const result = await dismissLogBox(device);
 
@@ -2746,7 +2747,7 @@ registerToolWithTelemetry(
                 };
             }
 
-            const success = await pushLogBox(message, level || "error", expanded || false, device);
+            const success = await pushLogBox(message, level || "error", expanded || false, target || "logbox", device);
 
             if (!success) {
                 return {
@@ -2763,7 +2764,9 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text" as const,
-                        text: `Message pushed to LogBox as ${level || "error"}: "${message}"`
+                        text: target === "metro"
+                            ? `Message pushed to Metro terminal: "${message}"`
+                            : `Message pushed to LogBox as ${level || "error"}: "${message}"`
                     }
                 ]
             };
