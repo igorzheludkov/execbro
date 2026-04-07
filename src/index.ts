@@ -32,6 +32,7 @@ import {
     LogBuffer,
     NetworkBuffer,
     bundleErrorBuffer,
+    imageBuffer,
     connectedApps,
     getActiveSimulatorUdid,
     scanMetroPorts,
@@ -2544,6 +2545,77 @@ registerToolWithTelemetry(
                 {
                     type: "text",
                     text: `Cleared ${totalCleared} network requests from buffer.`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Get images from shared image buffer
+registerToolWithTelemetry(
+    "get_images",
+    {
+        description:
+            "Access the shared image buffer containing screenshots from all tools (ios_screenshot, android_screenshot, ocr_screenshot, tap verification). Returns metadata only by default — use id or groupId+frameIndex to retrieve actual image data. Tap burst verification stores frame groups here when burst=true is used.",
+        inputSchema: {
+            list: z.boolean().optional().describe("List all entries and groups (metadata only, no image data)"),
+            id: z.string().optional().describe("Retrieve a specific image by ID (returns image data)"),
+            groupId: z.string().optional().describe("List frames in a group (metadata only), or combine with frameIndex to retrieve a specific frame"),
+            frameIndex: z.coerce.number().optional().describe("Retrieve a specific frame from a group (requires groupId)"),
+            last: z.coerce.number().optional().describe("Return the N most recent entries (metadata only)"),
+            source: z.string().optional().describe("Filter entries by source"),
+            clear: z.boolean().optional().describe("Clear the buffer")
+        }
+    },
+    async ({ id, groupId, frameIndex, last, source, clear }) => {
+        if (clear) {
+            const count = imageBuffer.clear();
+            return {
+                content: [{ type: "text" as const, text: `Cleared ${count} images from buffer.` }]
+            };
+        }
+
+        if (id) {
+            const entry = imageBuffer.getById(id);
+            if (!entry) {
+                return {
+                    content: [{ type: "text" as const, text: `No image found with id "${id}".` }],
+                    isError: true
+                };
+            }
+            const { image, ...meta } = entry;
+            return {
+                content: [
+                    { type: "text" as const, text: JSON.stringify(meta, null, 2) },
+                    { type: "image" as const, data: image.toString("base64"), mimeType: "image/png" }
+                ]
+            };
+        }
+
+        if (groupId !== undefined && frameIndex !== undefined) {
+            const entry = imageBuffer.getByGroupFrame(groupId, frameIndex);
+            if (!entry) {
+                return {
+                    content: [{ type: "text" as const, text: `No frame ${frameIndex} found in group "${groupId}".` }],
+                    isError: true
+                };
+            }
+            const { image, ...meta } = entry;
+            return {
+                content: [
+                    { type: "text" as const, text: JSON.stringify(meta, null, 2) },
+                    { type: "image" as const, data: image.toString("base64"), mimeType: "image/png" }
+                ]
+            };
+        }
+
+        const entries = imageBuffer.listEntries({ source, groupId, last });
+        const groups = imageBuffer.listGroups();
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: JSON.stringify({ entries, groups, total: imageBuffer.size }, null, 2)
                 }
             ]
         };
