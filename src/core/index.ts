@@ -34,10 +34,14 @@ export {
 } from "./connectionState.js";
 
 // State
-export { logBuffers, networkBuffers, getLogBuffer, getNetworkBuffer, getAllLogs, getTotalLogCount, bundleErrorBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid, getLastCDPMessageTime, updateLastCDPMessageTime, getTargetPlatform } from "./state.js";
+export { logBuffers, networkBuffers, getLogBuffer, getNetworkBuffer, getAllLogs, getTotalLogCount, bundleErrorBuffer, imageBuffer, connectedApps, pendingExecutions, getNextMessageId, getActiveSimulatorUdid, getLastCDPMessageTime, updateLastCDPMessageTime, getTargetPlatform } from "./state.js";
 
 // Logs
 export { LogBuffer, mapConsoleType, formatLogs, getLogs, searchLogs, getLogSummary } from "./logs.js";
+
+// Image Buffer
+export { ImageBuffer } from "./imageBuffer.js";
+export type { ImageEntry, ImageGroup, ImageEntryMeta } from "./imageBuffer.js";
 
 // Network
 export {
