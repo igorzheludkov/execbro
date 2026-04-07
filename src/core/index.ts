@@ -231,7 +231,7 @@ export { parseErrorScreenText, formatParsedError } from "./errorScreenParser.js"
 export type { ParsedErrorScreen } from "./errorScreenParser.js";
 
 // LogBox detection & dismissal
-export { detectLogBox, dismissLogBox, formatLogBoxWarning, formatDismissedEntries } from "./logbox.js";
+export { detectLogBox, dismissLogBox, formatLogBoxWarning, formatDismissedEntries, pushLogBox, addLogBoxIgnorePatterns } from "./logbox.js";
 export type { LogBoxState, LogBoxEntry, LogBoxDismissResult } from "./logbox.js";
 
 // Format utilities (TONL)

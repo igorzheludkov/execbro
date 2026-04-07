@@ -107,7 +107,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
 - `reload_app`: Reload the React Native app (triggers JS bundle reload)
-- `dismiss_logbox`: Dismiss the LogBox error/warning overlay in dev mode and return dismissed entries. Screenshots/OCR tools automatically warn when LogBox is detected.
+- `logbox`: Interact with React Native's LogBox overlay (dev mode only). Actions: "dismiss" clears entries and returns content, "push" displays a message in the error banner, "ignore" adds patterns to suppress future entries, "detect" reads current state.
 
 **UI Interaction:**
 - `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `screenshot=false` to disable screenshots, `verify=false` to skip verification. Use `burst=true` to capture rapid sequential screenshots for detecting transient visual feedback (press animations, highlights) — results stored in image buffer accessible via `get_images`.
@@ -199,7 +199,7 @@ When debugging React Native apps through this MCP server:
     4. Example workflow: `ios_screenshot` on iPhone, `android_screenshot` on Android, compare layouts
     5. `scan_metro` now connects ALL Bridgeless targets instead of picking one — no manual `connect_metro` needed
 - **Tap Verification — Burst Mode**: When `tap()` reports `meaningful: false` but you suspect the tap hit a real button (e.g., the handler may be buggy or the visual feedback is transient), retry with `burst=true`. This captures 4 rapid screenshots after the tap to detect momentary visual feedback (press animations, highlights) that settles before the standard after-screenshot. Check `verification.transientChangeDetected` and use `get_images(groupId=verification.burstGroupId)` to inspect individual frames.
-- **LogBox Overlay**: In development mode, React Native's LogBox may display error/warning banners at the bottom of the screen, obstructing tab bars and bottom UI. Screenshot and OCR tools automatically detect this and append a warning. Use `dismiss_logbox` to clear the overlay — it returns the full error content so nothing is lost. LogBox does not exist in production builds.
+- **LogBox Overlay**: In development mode, React Native's LogBox may display error/warning banners at the bottom of the screen, obstructing tab bars and bottom UI. Screenshot, OCR, and describe_all tools automatically detect this and append a warning. Use `logbox` with action "dismiss" to clear the overlay — it returns the full error content so nothing is lost. Use action "ignore" to suppress known noisy warnings from reappearing. Use action "push" to display a message to the developer watching the device. LogBox does not exist in production builds.
 
 ## Telemetry System
 

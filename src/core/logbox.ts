@@ -98,6 +98,44 @@ ${READ_LOGBOX_STATE}
   });
 })()`;
 
+// ── Push & Ignore Expression Builders ──
+
+function buildPushExpression(message: string, level: "error" | "warning"): string {
+    const escapedMessage = message.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
+    return `(function() {
+${FIND_LOGBOX_DATA}
+  try {
+    LogBoxData.addLog({
+      level: '${level}',
+      message: { content: '${escapedMessage}', substitutions: [] },
+      category: 'rn-ai-devtools-push-' + Date.now(),
+      componentStack: []
+    });
+    return JSON.stringify({ success: true });
+  } catch(e) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+})()`;
+}
+
+function buildIgnoreExpression(patterns: string[]): string {
+    const patternsJson = JSON.stringify(patterns);
+    return `(function() {
+${FIND_LOGBOX_DATA}
+  try {
+    LogBoxData.addIgnorePatterns(${patternsJson});
+    var current = LogBoxData.getIgnorePatterns();
+    var result = [];
+    if (current && typeof current.forEach === 'function') {
+      current.forEach(function(p) { result.push(typeof p === 'string' ? p : String(p)); });
+    }
+    return JSON.stringify({ success: true, patterns: result });
+  } catch(e) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+})()`;
+}
+
 // ── Public API ──
 
 /**
@@ -131,6 +169,45 @@ export async function dismissLogBox(device?: string): Promise<LogBoxDismissResul
 }
 
 /**
+ * Push a message into LogBox via LogBoxData.addLog().
+ * Default level is "error" because only errors produce a visible bottom banner.
+ * Warnings are stored but not visually shown unless LogBox is already open.
+ */
+export async function pushLogBox(
+    message: string,
+    level: "error" | "warning" = "error",
+    device?: string
+): Promise<boolean> {
+    try {
+        const result = await executeInApp(buildPushExpression(message, level), true, { timeoutMs: 5000 }, device);
+        if (!result.success || !result.result) return false;
+        const parsed = JSON.parse(result.result);
+        return parsed.success === true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Add ignore patterns to suppress future LogBox entries.
+ * Returns the full list of active patterns after adding, or null if unavailable.
+ */
+export async function addLogBoxIgnorePatterns(
+    patterns: string[],
+    device?: string
+): Promise<string[] | null> {
+    try {
+        const result = await executeInApp(buildIgnoreExpression(patterns), true, { timeoutMs: 5000 }, device);
+        if (!result.success || !result.result) return null;
+        const parsed = JSON.parse(result.result);
+        if (parsed.success) return parsed.patterns;
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Build a warning string for appending to screenshot/OCR tool responses.
  * Returns empty string if no LogBox entries detected.
  */
@@ -144,12 +221,12 @@ export function formatLogBoxWarning(state: LogBoxState): string {
 
     return (
         `\n\nWarning: LogBox overlay detected (${parts.join(", ")}). Bottom UI may be obstructed.` +
-        `\nUse dismiss_logbox to clear (dismissed content will be returned).`
+        `\nUse logbox with action "dismiss" to clear (dismissed content will be returned).`
     );
 }
 
 /**
- * Format dismissed LogBox entries for the dismiss_logbox tool response.
+ * Format dismissed LogBox entries for the logbox tool response.
  * Full messages in raw data, truncated in display.
  */
 export function formatDismissedEntries(result: LogBoxDismissResult): string {
