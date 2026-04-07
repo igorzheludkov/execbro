@@ -100,26 +100,44 @@ ${READ_LOGBOX_STATE}
 
 // ── Push & Ignore Expression Builders ──
 
-function buildPushExpression(message: string, level: "error" | "warning", expanded: boolean): string {
+function buildPushExpression(message: string, level: "error" | "warning", expanded: boolean, subtitle?: string): string {
     const escapedMessage = message.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
+    const escapedSubtitle = subtitle ? subtitle.replace(/\\/g, "\\\\").replace(/'/g, "\\'") : "MCP Server";
     return `(function() {
 ${FIND_LOGBOX_DATA}
   try {
+    var pushCategory = 'rn-ai-devtools-push-' + Date.now();
     LogBoxData.addLog({
       level: '${level}',
       message: { content: '${escapedMessage}', substitutions: [] },
-      category: 'rn-ai-devtools-push-' + Date.now(),
+      category: pushCategory,
       componentStack: []
     });${expanded ? `
-    var state = null;
-    var sub = LogBoxData.observe(function(data) { state = data; });
-    if (sub && sub.unsubscribe) sub.unsubscribe();
-    if (state && state.logs) {
-      var lastIndex = 0;
-      var i = 0;
-      state.logs.forEach(function() { lastIndex = i; i++; });
-      LogBoxData.setSelectedLog(lastIndex);
-    }` : ""}
+    setTimeout(function() {
+      try {
+        var state = null;
+        var sub = LogBoxData.observe(function(data) { state = data; });
+        if (sub && sub.unsubscribe) sub.unsubscribe();
+        if (state && state.logs) {
+          var lastIndex = 0;
+          var i = 0;
+          state.logs.forEach(function(log) {
+            if (log.stack && log.category === pushCategory) {
+              log.stack.length = 0;
+              log.stack.push({
+                methodName: 'RN AI DevTools',
+                file: '${escapedSubtitle}',
+                lineNumber: 0,
+                column: 0
+              });
+            }
+            lastIndex = i;
+            i++;
+          });
+          LogBoxData.setSelectedLog(lastIndex);
+        }
+      } catch(e) {}
+    }, 100);` : ""}
     return JSON.stringify({ success: true });
   } catch(e) {
     return JSON.stringify({ success: false, error: e.message });
@@ -187,6 +205,7 @@ export async function pushLogBox(
     level: "error" | "warning" = "error",
     expanded: boolean = false,
     target: "logbox" | "metro" = "logbox",
+    subtitle?: string,
     device?: string
 ): Promise<boolean> {
     if (target === "metro") {
@@ -201,7 +220,7 @@ export async function pushLogBox(
         }
     }
     try {
-        const result = await executeInApp(buildPushExpression(message, level, expanded), true, { timeoutMs: 5000 }, device);
+        const result = await executeInApp(buildPushExpression(message, level, expanded, subtitle), true, { timeoutMs: 5000 }, device);
         if (!result.success || !result.result) return false;
         const parsed = JSON.parse(result.result);
         return parsed.success === true;
