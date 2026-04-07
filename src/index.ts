@@ -147,7 +147,9 @@ import {
     formatNetworkAsTonl,
     // LogBox detection
     detectLogBox,
-    formatLogBoxWarning
+    formatLogBoxWarning,
+    dismissLogBox,
+    formatDismissedEntries
 } from "./core/index.js";
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
@@ -2667,6 +2669,55 @@ registerToolWithTelemetry(
                 {
                     type: "text",
                     text: result.result ?? "App reload triggered"
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Dismiss LogBox overlay
+registerToolWithTelemetry(
+    "dismiss_logbox",
+    {
+        description:
+            "Dismiss the React Native LogBox error/warning overlay that appears at the bottom of the screen in development mode. " +
+            "Returns the content of all dismissed entries (level, message, count) so no information is lost. " +
+            "Use this when LogBox is obstructing bottom UI elements (tab bars, buttons) that you need to interact with. " +
+            "Only works in __DEV__ mode — LogBox does not exist in production builds.",
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+        }
+    },
+    async ({ device }) => {
+        const result = await dismissLogBox(device);
+
+        if (result === null) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: "LogBox not available. This can happen if: (1) the app is a production build (__DEV__ is false), (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                    }
+                ]
+            };
+        }
+
+        if (result.totalDismissed === 0) {
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text: "No LogBox entries to dismiss."
+                    }
+                ]
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: formatDismissedEntries(result)
                 }
             ]
         };
