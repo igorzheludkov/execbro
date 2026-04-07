@@ -230,6 +230,10 @@ export type { OCRResult, OCRWord, OCRLine, OCROptions } from "./ocr.js";
 export { parseErrorScreenText, formatParsedError } from "./errorScreenParser.js";
 export type { ParsedErrorScreen } from "./errorScreenParser.js";
 
+// LogBox detection & dismissal
+export { detectLogBox, dismissLogBox, formatLogBoxWarning, formatDismissedEntries } from "./logbox.js";
+export type { LogBoxState, LogBoxEntry, LogBoxDismissResult } from "./logbox.js";
+
 // Format utilities (TONL)
 export { formatLogsAsTonl, formatNetworkAsTonl } from "./format.js";
 export type { OutputFormat } from "./format.js";
