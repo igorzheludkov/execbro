@@ -2978,6 +2978,18 @@ registerToolWithTelemetry(
             infoText += `\n  • android_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
 
+            imageBuffer.add({
+                id: `android-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                image: result.data,
+                timestamp: Date.now(),
+                source: "android_screenshot",
+                metadata: {
+                    width: result.originalWidth || 0,
+                    height: result.originalHeight || 0,
+                    scaleFactor: result.scaleFactor || 1,
+                    platform: "android",
+                },
+            });
 
             return {
                 content: [
@@ -3635,6 +3647,18 @@ registerToolWithTelemetry(
             infoText += `\n  • ios_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
 
+            imageBuffer.add({
+                id: `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                image: result.data,
+                timestamp: Date.now(),
+                source: "ios_screenshot",
+                metadata: {
+                    width: result.originalWidth || 0,
+                    height: result.originalHeight || 0,
+                    scaleFactor: result.scaleFactor || 1,
+                    platform: "ios",
+                },
+            });
 
             return {
                 content: [
@@ -3733,6 +3757,29 @@ registerToolWithTelemetry(
                 elements,
                 note: "tapX/tapY are ready to use with tap commands (already converted for platform)"
             };
+
+            // Capture screenshot and store in image buffer
+            try {
+                const screenshotResult = platform === "android"
+                    ? await androidScreenshot(undefined, deviceId)
+                    : await iosScreenshot(undefined, deviceId);
+                if (screenshotResult.success && screenshotResult.data) {
+                    imageBuffer.add({
+                        id: `ocr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                        image: screenshotResult.data,
+                        timestamp: Date.now(),
+                        source: "ocr_screenshot",
+                        metadata: {
+                            width: screenshotResult.originalWidth || 0,
+                            height: screenshotResult.originalHeight || 0,
+                            scaleFactor: screenshotResult.scaleFactor || 1,
+                            platform,
+                        },
+                    });
+                }
+            } catch {
+                // Non-fatal: image buffer write failure should not break OCR response
+            }
 
             return {
                 content: [
