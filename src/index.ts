@@ -144,7 +144,10 @@ import {
     getTargetPlatform,
     // Format utilities (TONL)
     formatLogsAsTonl,
-    formatNetworkAsTonl
+    formatNetworkAsTonl,
+    // LogBox detection
+    detectLogBox,
+    formatLogBoxWarning
 } from "./core/index.js";
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
@@ -2990,6 +2993,16 @@ registerToolWithTelemetry(
             infoText += `\n  • android_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
 
+            // Check for LogBox overlay
+            try {
+                const logBoxState = await detectLogBox();
+                if (logBoxState && logBoxState.total > 0) {
+                    infoText += formatLogBoxWarning(logBoxState);
+                }
+            } catch {
+                // Non-fatal: LogBox detection failure should not break screenshot
+            }
+
             imageBuffer.add({
                 id: `android-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 image: result.data,
@@ -3659,6 +3672,16 @@ registerToolWithTelemetry(
             infoText += `\n  • ios_describe_all — get full UI tree with exact tap coordinates`;
             infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
 
+            // Check for LogBox overlay
+            try {
+                const logBoxState = await detectLogBox();
+                if (logBoxState && logBoxState.total > 0) {
+                    infoText += formatLogBoxWarning(logBoxState);
+                }
+            } catch {
+                // Non-fatal: LogBox detection failure should not break screenshot
+            }
+
             imageBuffer.add({
                 id: `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                 image: result.data,
@@ -3770,6 +3793,17 @@ registerToolWithTelemetry(
                 note: "tapX/tapY are ready to use with tap commands (already converted for platform)"
             };
 
+            // Check for LogBox overlay
+            let logBoxWarning = "";
+            try {
+                const logBoxState = await detectLogBox();
+                if (logBoxState && logBoxState.total > 0) {
+                    logBoxWarning = formatLogBoxWarning(logBoxState);
+                }
+            } catch {
+                // Non-fatal: LogBox detection failure should not break OCR
+            }
+
             // Capture screenshot and store in image buffer
             try {
                 const screenshotResult = platform === "android"
@@ -3797,7 +3831,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text" as const,
-                        text: JSON.stringify(result, null, 2)
+                        text: JSON.stringify(result, null, 2) + logBoxWarning
                     }
                 ]
             };
