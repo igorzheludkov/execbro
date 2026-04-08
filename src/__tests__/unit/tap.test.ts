@@ -390,14 +390,14 @@ describe("getIOSDevicePixelRatio", () => {
 });
 
 describe("tap orchestrator", () => {
-    it("returns error when no app is connected and auto-connect fails", async () => {
+    it("attempts strategies when no app is connected", async () => {
         const { tap } = await import("../../pro/tap.js");
         const { connectedApps } = await import("../../core/state.js");
         connectedApps.clear();
         const result = await tap({ text: "Submit" });
-        expect(result.success).toBe(false);
-        // Auto-connect will be attempted (scans ports) but may fail or succeed
-        // depending on whether Metro is running in the test environment
+        // With Metro decoupling, tap may succeed via accessibility/OCR even without
+        // a Metro connection, or it may fail if no devices are available.
+        // Either way, the result should be a valid TapResult.
         expect(result.error || result.method).toBeTruthy();
     }, 15000);
 
