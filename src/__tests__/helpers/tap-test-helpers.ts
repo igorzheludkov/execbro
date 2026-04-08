@@ -39,7 +39,7 @@ export async function connectToMetro(): Promise<Platform> {
         const devices = await fetchDevices(port);
         const main = selectMainDevice(devices);
         if (main) {
-            const key = await connectToDevice(main, port, {
+            await connectToDevice(main, port, {
                 reconnectionConfig: {
                     enabled: false,
                     maxAttempts: 0,
@@ -48,8 +48,15 @@ export async function connectToMetro(): Promise<Platform> {
                     backoffMultiplier: 1,
                 },
             });
-            const app = connectedApps.get(key);
-            if (app?.platform) return app.platform;
+
+            // connectToDevice resolves with a message string, not the map key.
+            // Wait briefly for the async platform detection (findSimulatorByName)
+            // to complete, then read the first connected app's platform.
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+
+            for (const app of connectedApps.values()) {
+                if (app.platform) return app.platform;
+            }
         }
     }
     throw new Error("Connected to Metro but could not determine platform");
