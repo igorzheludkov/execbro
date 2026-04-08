@@ -1003,10 +1003,11 @@ export async function iosDescribeAll(udid?: string): Promise<iOSDescribeResult> 
 
         // Format for human-readable output
         const formatted = formatAccessibilityTree(elements);
+        const header = "Note: All coordinates are in iOS points. Use tap(text=\"...\") for tapping — do not pass these coordinates to tap(x, y) directly.\n\n";
 
         return {
             success: true,
-            result: formatted || "No accessibility elements found",
+            result: header + (formatted || "No accessibility elements found"),
             elements
         };
     } catch (error) {
