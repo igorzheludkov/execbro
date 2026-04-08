@@ -415,6 +415,28 @@ describe("tap orchestrator", () => {
     });
 });
 
+describe("verification thresholds", () => {
+    it("buildVerificationExplanation describes meaningful change at 0.1%", () => {
+        const explanation = buildVerificationExplanation({
+            meaningful: true,
+            changeRate: 0.001,
+            changedPixels: 1842,
+            totalPixels: 1842000,
+        });
+        expect(explanation).toContain("visible UI change");
+    });
+
+    it("buildVerificationExplanation describes no change at 0.03%", () => {
+        const explanation = buildVerificationExplanation({
+            meaningful: false,
+            changeRate: 0.0003,
+            changedPixels: 553,
+            totalPixels: 1842000,
+        });
+        expect(explanation).toContain("No visual change");
+    });
+});
+
 describe("tap without Metro connection", () => {
     it("does not hard-fail when Metro is unavailable and strategy is accessibility", async () => {
         const { tap } = await import("../../pro/tap.js");

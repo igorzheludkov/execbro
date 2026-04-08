@@ -8,12 +8,13 @@ export interface ScreenshotDiffResult {
     totalPixels: number;
 }
 
-const CHANGE_THRESHOLD = 0.005; // 0.5% of pixels must change to be "meaningful"
-const PIXEL_THRESHOLD = 0.1; // pixelmatch per-pixel color tolerance (0-1)
+const POSSIBLE_CHANGE = 0.001;  // 0.1% — likely real (text updates, counter changes)
+const PIXEL_THRESHOLD = 0.1;    // pixelmatch per-pixel color tolerance (0-1)
 
 export async function compareScreenshots(
     before: Buffer,
-    after: Buffer
+    after: Buffer,
+    options?: { statusBarHeight?: number }
 ): Promise<ScreenshotDiffResult> {
     const [imgBefore, imgAfter] = await Promise.all([
         sharp(before).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
@@ -37,21 +38,35 @@ export async function compareScreenshots(
     }
 
     const { width, height } = imgBefore.info;
-    const totalPixels = width * height;
+
+    // Crop out status bar: skip the first statusBarPx rows of pixels
+    const statusBarPx = options?.statusBarHeight ?? 0;
+    const croppedHeight = height - statusBarPx;
+    const totalPixels = width * croppedHeight;
+
+    const rowBytes = width * 4; // RGBA
+    const skipBytes = statusBarPx * rowBytes;
+
+    const beforeData = new Uint8Array(
+        imgBefore.data.buffer, imgBefore.data.byteOffset + skipBytes, croppedHeight * rowBytes
+    );
+    const afterData = new Uint8Array(
+        imgAfter.data.buffer, imgAfter.data.byteOffset + skipBytes, croppedHeight * rowBytes
+    );
 
     const changedPixels = pixelmatch(
-        new Uint8Array(imgBefore.data.buffer, imgBefore.data.byteOffset, imgBefore.data.byteLength),
-        new Uint8Array(imgAfter.data.buffer, imgAfter.data.byteOffset, imgAfter.data.byteLength),
+        beforeData,
+        afterData,
         undefined,
         width,
-        height,
+        croppedHeight,
         { threshold: PIXEL_THRESHOLD }
     );
 
     const changeRate = changedPixels / totalPixels;
 
     return {
-        changed: changeRate > CHANGE_THRESHOLD,
+        changed: changeRate >= POSSIBLE_CHANGE,
         changeRate,
         changedPixels,
         totalPixels,

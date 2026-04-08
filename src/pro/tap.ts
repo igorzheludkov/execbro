@@ -107,7 +107,7 @@ export interface BurstAnalysis {
 
 const BURST_CHANGE_THRESHOLD = 0.005;
 
-export async function analyzeBurstFrames(frames: Buffer[]): Promise<BurstAnalysis> {
+export async function analyzeBurstFrames(frames: Buffer[], options?: { statusBarHeight?: number }): Promise<BurstAnalysis> {
     if (frames.length < 2) {
         return {
             meaningful: false,
@@ -124,7 +124,7 @@ export async function analyzeBurstFrames(frames: Buffer[]): Promise<BurstAnalysi
     const framesWithChange: number[] = [];
 
     for (let i = 1; i < frames.length; i++) {
-        const diff = await compareScreenshots(frames[i - 1], frames[i]);
+        const diff = await compareScreenshots(frames[i - 1], frames[i], options);
         if (diff.changeRate > BURST_CHANGE_THRESHOLD) {
             framesWithChange.push(i);
         }
@@ -134,7 +134,7 @@ export async function analyzeBurstFrames(frames: Buffer[]): Promise<BurstAnalysi
         }
     }
 
-    const persistentDiff = await compareScreenshots(frames[0], frames[frames.length - 1]);
+    const persistentDiff = await compareScreenshots(frames[0], frames[frames.length - 1], options);
     const persistentChangeRate = persistentDiff.changeRate;
     const transientChangeDetected = !persistentDiff.changed && framesWithChange.length > 0;
     const meaningful = persistentDiff.changed || transientChangeDetected;
@@ -830,7 +830,8 @@ async function verifyAndCapture(
     let verification: TapVerification | undefined;
     if (shouldVerify && beforeBuffer) {
         try {
-            const diff = await compareScreenshots(beforeBuffer, after.buffer);
+            const statusBarHeight = platform === "ios" ? 177 : 142; // pixels in screenshot space
+            const diff = await compareScreenshots(beforeBuffer, after.buffer, { statusBarHeight });
             verification = {
                 meaningful: diff.changed,
                 changeRate: diff.changeRate,
@@ -894,7 +895,8 @@ async function burstCaptureAndVerify(
 
     if (frames.length < 2) return {};
 
-    const analysis = await analyzeBurstFrames(frames);
+    const statusBarHeight = platform === "ios" ? 177 : 142; // pixels in screenshot space
+    const analysis = await analyzeBurstFrames(frames, { statusBarHeight });
 
     const groupId = `burst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     for (let i = 0; i < frames.length; i++) {
