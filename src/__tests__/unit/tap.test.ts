@@ -354,6 +354,18 @@ describe("buildVerificationExplanation", () => {
     });
 });
 
+describe("getIOSDevicePixelRatio", () => {
+    it("calculates DPR from screenshot width and accessibility root frame", async () => {
+        const { calculateDPR } = await import("../../core/ios.js");
+        // iPhone 3x: 1260px screenshot, 420pt root frame width
+        expect(calculateDPR(1260, 420)).toBe(3);
+        // iPad 2x: 2048px screenshot, 1024pt root frame width
+        expect(calculateDPR(2048, 1024)).toBe(2);
+        // iPhone SE 2x: 750px screenshot, 375pt root frame width
+        expect(calculateDPR(750, 375)).toBe(2);
+    });
+});
+
 describe("tap orchestrator", () => {
     it("returns error when no app is connected and auto-connect fails", async () => {
         const { tap } = await import("../../pro/tap.js");
