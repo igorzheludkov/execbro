@@ -4436,7 +4436,7 @@ server.registerTool(
             `  Value: "${el.value}"`,
             `  Type: ${el.type}`,
             `  Frame: {x: ${el.frame.x}, y: ${el.frame.y}, w: ${el.frame.width}, h: ${el.frame.height}}`,
-            `  Center (tap coords): (${el.center.x}, ${el.center.y})`,
+            `  Center (tap coords): (${el.center.x}, ${el.center.y}) — iOS points. Use tap(text="...") or tap(testID="...") for reliable targeting.`,
             `  Enabled: ${el.enabled}`
         ].join("\n");
 
@@ -4516,7 +4516,7 @@ server.registerTool(
             `  Label: "${el.label}"`,
             `  Value: "${el.value}"`,
             `  Type: ${el.type}`,
-            `  Center (tap coords): (${el.center.x}, ${el.center.y})`,
+            `  Center (tap coords): (${el.center.x}, ${el.center.y}) — iOS points. Use tap(text="...") or tap(testID="...") for reliable targeting.`,
             `  Enabled: ${el.enabled}`
         ].join("\n");
 
