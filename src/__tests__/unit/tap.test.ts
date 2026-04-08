@@ -10,7 +10,7 @@ import {
     buildQuery,
     getAvailableStrategies,
     hasProblematicUnicode,
-    convertPixelsToPoints,
+    convertScreenshotToTapCoords,
     formatTapSuccess,
     formatTapFailure,
     buildVerificationExplanation,
@@ -154,18 +154,24 @@ describe("getAvailableStrategies", () => {
     });
 });
 
-describe("convertPixelsToPoints", () => {
-    it("divides by pixel ratio for iOS", () => {
-        expect(convertPixelsToPoints(300, 600, "ios", 3)).toEqual({ x: 100, y: 200 });
+describe("convertScreenshotToTapCoords", () => {
+    it("converts iOS screenshot pixels to points (3x device)", () => {
+        expect(convertScreenshotToTapCoords(300, 600, "ios", 3)).toEqual({ x: 100, y: 200 });
     });
-    it("passes through for Android", () => {
-        expect(convertPixelsToPoints(300, 600, "android", 3)).toEqual({ x: 300, y: 600 });
+    it("converts iOS screenshot pixels to points (2x iPad)", () => {
+        expect(convertScreenshotToTapCoords(200, 400, "ios", 2)).toEqual({ x: 100, y: 200 });
     });
-    it("applies scaleFactor before conversion", () => {
-        expect(convertPixelsToPoints(150, 300, "ios", 3, 2)).toEqual({ x: 100, y: 200 });
+    it("undoes image downscaling before dividing by DPR", () => {
+        expect(convertScreenshotToTapCoords(219, 438, "ios", 3, 1.368)).toEqual({ x: 100, y: 200 });
+    });
+    it("passes through for Android with no downscaling", () => {
+        expect(convertScreenshotToTapCoords(300, 600, "android", 1)).toEqual({ x: 300, y: 600 });
+    });
+    it("undoes Android image downscaling", () => {
+        expect(convertScreenshotToTapCoords(250, 500, "android", 1, 1.2)).toEqual({ x: 300, y: 600 });
     });
     it("rounds to integers", () => {
-        expect(convertPixelsToPoints(301, 599, "ios", 3)).toEqual({ x: 100, y: 200 });
+        expect(convertScreenshotToTapCoords(301, 599, "ios", 3)).toEqual({ x: 100, y: 200 });
     });
 });
 
