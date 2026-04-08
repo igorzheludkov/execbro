@@ -161,6 +161,7 @@ export interface TapResult {
     tappedAt?: { x: number; y: number };
     convertedTo?: { x: number; y: number; unit: string };
     platform?: string;
+    device?: string;
     error?: string;
     attempted?: TapAttempt[];
     matches?: Array<{ index: number; component: string; text: string }>;
@@ -347,6 +348,7 @@ export function formatTapSuccess(data: {
     tappedAt?: { x: number; y: number };
     convertedTo?: { x: number; y: number; unit: string };
     platform?: string;
+    device?: string;
     screenshot?: TapScreenshot;
     verification?: TapVerification;
 }): TapResult {
@@ -365,6 +367,7 @@ export function formatTapFailure(data: {
     error?: string;
     attempted: TapAttempt[];
     suggestion: string;
+    device?: string;
     matches?: Array<{ index: number; component: string; text: string }>;
     screenshot?: TapScreenshot;
     verification?: TapVerification;
@@ -382,6 +385,7 @@ export function formatTapFailure(data: {
         attempted: data.attempted,
         suggestion: data.suggestion,
         matches: data.matches,
+        ...(data.device && { device: data.device }),
         ...(data.verification && { verification: data.verification }),
         ...(data.screenshot && { screenshot: data.screenshot }),
         ...(warning && { warning }),
@@ -535,27 +539,27 @@ async function tryAccessibilityStrategy(
                 result = await iosFindElement({
                     identifier: query.testID,
                     index,
-                });
+                }, udid);
                 // Fall back to identifierContains if exact match fails
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                     result = await iosFindElement({
                         identifierContains: query.testID,
                         index,
-                    });
+                    }, udid);
                 }
                 // Last resort: try labelContains in case testID is reflected in label
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                     result = await iosFindElement({
                         labelContains: query.testID,
                         index,
-                    });
+                    }, udid);
                 }
             } else {
                 const searchText = query.text!;
                 result = await iosFindElement({
                     labelContains: searchText,
                     index,
-                });
+                }, udid);
             }
 
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
@@ -647,7 +651,7 @@ async function tryOcrStrategy(
         let scaleFactor = 1;
 
         if (platform === "ios") {
-            const screenshot = await iosScreenshot();
+            const screenshot = await iosScreenshot(undefined, udid);
             if (!screenshot.success || !screenshot.data) {
                 return { success: false, reason: "Failed to capture iOS screenshot for OCR" };
             }
@@ -795,11 +799,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 async function captureScreenshot(
-    platform: "ios" | "android"
+    platform: "ios" | "android",
+    udid?: string
 ): Promise<{ buffer: Buffer; width: number; height: number; scaleFactor: number } | null> {
     try {
         const result =
-            platform === "ios" ? await iosScreenshot() : await androidScreenshot();
+            platform === "ios" ? await iosScreenshot(undefined, udid) : await androidScreenshot();
         if (!result.success || !result.data) return null;
         return {
             buffer: result.data,
@@ -820,13 +825,14 @@ async function verifyAndCapture(
     platform: "ios" | "android",
     shouldVerify: boolean,
     shouldScreenshot: boolean,
-    beforeBuffer: Buffer | null
+    beforeBuffer: Buffer | null,
+    udid?: string
 ): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
     if (!shouldScreenshot) return {};
 
     await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
 
-    const after = await captureScreenshot(platform);
+    const after = await captureScreenshot(platform, udid);
     if (!after) return {};
 
     const screenshot: TapScreenshot = {
@@ -888,7 +894,8 @@ const BURST_FRAME_INTERVAL_MS = 150;
 
 async function burstCaptureAndVerify(
     platform: "ios" | "android",
-    beforeBuffer: Buffer | null
+    beforeBuffer: Buffer | null,
+    udid?: string
 ): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
     if (!beforeBuffer) return {};
 
@@ -896,7 +903,7 @@ async function burstCaptureAndVerify(
 
     for (let i = 0; i < BURST_FRAME_COUNT; i++) {
         await new Promise((resolve) => setTimeout(resolve, BURST_FRAME_INTERVAL_MS));
-        const capture = await captureScreenshot(platform);
+        const capture = await captureScreenshot(platform, udid);
         if (capture) {
             frames.push(capture.buffer);
         }
@@ -1040,7 +1047,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         let nativeBeforeBuffer: Buffer | null = null;
         let nativeScreenshotMeta: { originalWidth: number; originalHeight: number; scaleFactor: number } | undefined;
         if (nativeShouldVerify) {
-            const before = await captureScreenshot(platform);
+            const before = await captureScreenshot(platform, nativeUdid);
             nativeBeforeBuffer = before?.buffer || null;
             if (before) {
                 nativeScreenshotMeta = {
@@ -1053,7 +1060,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
         // If no screenshot was taken for verification, take one just for scaleFactor
         if (!nativeScreenshotMeta) {
-            const ref = await captureScreenshot(platform);
+            const ref = await captureScreenshot(platform, nativeUdid);
             if (ref) {
                 nativeScreenshotMeta = {
                     originalWidth: ref.width,
@@ -1085,13 +1092,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             if (options.burst && nativeShouldVerify && nativeBeforeBuffer) {
-                ({ screenshot, verification } = await burstCaptureAndVerify(platform, nativeBeforeBuffer));
+                ({ screenshot, verification } = await burstCaptureAndVerify(platform, nativeBeforeBuffer, nativeUdid));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
                     platform,
                     nativeShouldVerify,
                     nativeShouldScreenshot,
-                    nativeBeforeBuffer
+                    nativeBeforeBuffer,
+                    nativeUdid
                 ));
             }
             return formatTapSuccess({
@@ -1173,12 +1181,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         };
     }
 
-    // Resolve target iOS simulator UDID from the connected app's device name
+    // Resolve target iOS simulator UDID from the connected app
     // This ensures taps go to the correct device when multiple simulators are booted
     let targetUdid: string | undefined;
-    if (platform === "ios" && app?.deviceInfo?.deviceName) {
-        targetUdid = (await findSimulatorByName(app.deviceInfo.deviceName)) ?? undefined;
+    if (platform === "ios") {
+        targetUdid = app?.simulatorUdid
+            ?? ((app?.deviceInfo?.deviceName ? (await findSimulatorByName(app.deviceInfo.deviceName)) : null) ?? undefined);
     }
+
+    const deviceName = app?.deviceInfo?.deviceName;
 
     // Determine strategies
     const strategies = getAvailableStrategies(query, strategy);
@@ -1211,7 +1222,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // Capture "before" screenshot for verification
     let beforeBuffer: Buffer | null = null;
     if (canVerify) {
-        const before = await captureScreenshot(platform);
+        const before = await captureScreenshot(platform, targetUdid);
         beforeBuffer = before?.buffer || null;
     }
 
@@ -1258,13 +1269,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             if (options.burst && canVerify && beforeBuffer) {
-                ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer));
+                ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
                     platform,
                     canVerify,
                     shouldScreenshot,
-                    beforeBuffer
+                    beforeBuffer,
+                    targetUdid
                 ));
             }
             if (screenshot && app) {
@@ -1284,6 +1296,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 component: result.component,
                 convertedTo: result.convertedTo,
                 platform,
+                device: deviceName,
                 screenshot,
                 verification,
             });
@@ -1313,13 +1326,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 let screenshot: TapScreenshot | undefined;
                 let verification: TapVerification | undefined;
                 if (options.burst && canVerify && beforeBuffer) {
-                    ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer));
+                    ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid));
                 } else {
                     ({ screenshot, verification } = await verifyAndCapture(
                         platform,
                         canVerify,
                         shouldScreenshot,
-                        beforeBuffer
+                        beforeBuffer,
+                        targetUdid
                     ));
                 }
                 if (screenshot && app) {
@@ -1338,6 +1352,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     component: result.component,
                     convertedTo: coords,
                     platform,
+                    device: deviceName,
                     screenshot,
                     verification,
                 });
@@ -1349,7 +1364,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         // If we got match suggestions from fiber, carry them forward
         if (result.matches) {
             const { screenshot: matchScreenshot } = shouldScreenshot
-                ? await verifyAndCapture(platform, false, true, null)
+                ? await verifyAndCapture(platform, false, true, null, targetUdid)
                 : { screenshot: undefined };
             if (matchScreenshot && app) {
                 app.lastScreenshot = {
@@ -1362,6 +1377,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 query,
                 attempted,
                 suggestion: `Found ${result.matches.length} match(es) — specify index to select one`,
+                device: deviceName,
                 matches: result.matches,
                 screenshot: matchScreenshot,
             });
@@ -1376,7 +1392,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
     const suggestion = buildSuggestion(query, strategies, platform);
     const { screenshot: failScreenshot } = shouldScreenshot
-        ? await verifyAndCapture(platform, false, true, null)
+        ? await verifyAndCapture(platform, false, true, null, targetUdid)
         : { screenshot: undefined };
     if (failScreenshot && app) {
         app.lastScreenshot = {
@@ -1392,6 +1408,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             ? `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)`
             : undefined,
         suggestion,
+        device: deviceName,
         screenshot: failScreenshot,
     });
 }

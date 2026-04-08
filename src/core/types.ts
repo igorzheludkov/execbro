@@ -25,6 +25,7 @@ export interface ConnectedApp {
     deviceInfo: DeviceInfo;
     port: number;
     platform: "ios" | "android";
+    simulatorUdid?: string;
     lastScreenshot?: {
         originalWidth: number;
         originalHeight: number;
