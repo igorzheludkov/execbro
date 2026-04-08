@@ -784,6 +784,7 @@ export async function connectToDevice(
                         const connectedApp = connectedApps.get(appKey);
                         if (connectedApp) {
                             connectedApp.platform = "ios";
+                            connectedApp.simulatorUdid = simulatorUdid;
                         }
                         console.error(`[rn-ai-debugger] Linked to iOS simulator: ${simulatorUdid}`);
                     }
