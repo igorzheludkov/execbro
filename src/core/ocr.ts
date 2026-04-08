@@ -212,12 +212,12 @@ export function inferIOSDevicePixelRatio(width: number, height: number): number 
 }
 
 /**
- * Convert OCR bounding box coordinate to device pixels.
- * Returns raw device pixels on all platforms — tap() handles
- * platform-specific conversion (iOS points, etc.) from there.
+ * Convert OCR bounding box coordinate to screenshot-image-pixel space.
+ * OCR runs on the downscaled image, so coordinates are already in image-pixel space.
+ * We return them as-is — tap() handles un-downscaling and platform conversion.
  */
-export function toTapCoord(ocrCoord: number, scaleFactor: number): number {
-    return Math.round(ocrCoord * scaleFactor);
+export function toTapCoord(ocrCoord: number, _scaleFactor: number): number {
+    return Math.round(ocrCoord);
 }
 
 // ============================================================================

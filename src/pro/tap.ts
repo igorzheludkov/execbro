@@ -679,14 +679,19 @@ async function tryOcrStrategy(
         }
 
         if (platform === "ios") {
+            // tapCenter is in image-pixel space (downscaled) — convert to points
             const { getDevicePixelRatio } = await import("../core/ios.js");
             const dpr = await getDevicePixelRatio();
             await iosTap(
-                Math.round(matchingWord.tapCenter.x / dpr),
-                Math.round(matchingWord.tapCenter.y / dpr)
+                Math.round((matchingWord.tapCenter.x * scaleFactor) / dpr),
+                Math.round((matchingWord.tapCenter.y * scaleFactor) / dpr)
             );
         } else {
-            await androidTap(matchingWord.tapCenter.x, matchingWord.tapCenter.y);
+            // Android: image-pixel → device-pixel (undo downscale), ADB accepts pixels
+            await androidTap(
+                Math.round(matchingWord.tapCenter.x * scaleFactor),
+                Math.round(matchingWord.tapCenter.y * scaleFactor)
+            );
         }
 
         return {
