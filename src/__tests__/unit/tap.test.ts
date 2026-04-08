@@ -414,3 +414,54 @@ describe("tap orchestrator", () => {
         expect(result.error).toContain("Both x and y");
     });
 });
+
+describe("tap without Metro connection", () => {
+    it("does not hard-fail when Metro is unavailable and strategy is accessibility", async () => {
+        const { tap } = await import("../../pro/tap.js");
+        const { connectedApps } = await import("../../core/state.js");
+        connectedApps.clear();
+
+        const result = await tap({
+            text: "Submit",
+            strategy: "accessibility",
+            platform: "ios",
+        });
+        // It may still fail (no simulator running in test env), but the error
+        // should NOT be "No connected app"
+        if (!result.success) {
+            expect(result.error).not.toContain("No connected app");
+        }
+    }, 15000);
+
+    it("does not hard-fail when Metro is unavailable and strategy is ocr", async () => {
+        const { tap } = await import("../../pro/tap.js");
+        const { connectedApps } = await import("../../core/state.js");
+        connectedApps.clear();
+
+        const result = await tap({
+            text: "Submit",
+            strategy: "ocr",
+            platform: "ios",
+        });
+        if (!result.success) {
+            expect(result.error).not.toContain("No connected app");
+        }
+    }, 15000);
+
+    it("still requires Metro for fiber strategy", async () => {
+        const { tap } = await import("../../pro/tap.js");
+        const { connectedApps } = await import("../../core/state.js");
+        connectedApps.clear();
+
+        const result = await tap({
+            text: "Submit",
+            strategy: "fiber",
+            platform: "ios",
+        });
+        // If Metro auto-connect succeeded, fiber may work — that's fine.
+        // But if it failed, the error should mention Metro, not be a generic failure.
+        if (!result.success) {
+            expect(result.error).toContain("Metro");
+        }
+    }, 15000);
+});

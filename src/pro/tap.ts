@@ -1,4 +1,5 @@
 import { connectedApps, imageBuffer } from "../core/state.js";
+import type { ConnectedApp } from "../core/types.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
 import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid } from "../core/ios.js";
@@ -1095,9 +1096,12 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         });
     }
 
-    // Get connected app — auto-connect if none
-    let apps = Array.from(connectedApps.values());
-    if (apps.length === 0) {
+    // Detect available capabilities
+    let hasMetro = Array.from(connectedApps.values()).length > 0;
+    let app: ConnectedApp | undefined = Array.from(connectedApps.values())[0];
+
+    // Try to auto-connect to Metro (for fiber strategy), but don't fail if it doesn't work
+    if (!hasMetro) {
         try {
             await withTimeout((async () => {
                 clearReconnectionSuppression();
@@ -1111,26 +1115,66 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     }
                 }
             })(), Math.min(remainingMs(), 3000), "auto-connect");
-            apps = Array.from(connectedApps.values());
+            const apps = Array.from(connectedApps.values());
+            hasMetro = apps.length > 0;
+            app = apps[0];
         } catch {
-            // Auto-connect failed or timed out, will fall through to error below
+            // Auto-connect failed — Metro-dependent strategies will be skipped
         }
     }
 
-    if (apps.length === 0) {
+    // Detect platform — from Metro connection or from available devices
+    let platform = options.platform as "ios" | "android" | undefined;
+    if (!platform) {
+        if (app) {
+            platform = app.platform;
+        } else {
+            // No Metro — detect from available devices
+            const [androidDevice, iosSimulator] = await Promise.all([
+                getDefaultAndroidDevice().catch(() => null),
+                getActiveOrBootedSimulatorUdid().catch(() => null),
+            ]);
+            if (androidDevice && iosSimulator) {
+                return {
+                    success: false,
+                    query,
+                    error: "Both iOS and Android devices detected but no Metro connection. Specify platform=\"ios\" or platform=\"android\".",
+                };
+            }
+            if (androidDevice) platform = "android";
+            else if (iosSimulator) platform = "ios";
+        }
+    }
+
+    if (!platform) {
         return {
             success: false,
             query,
-            error: "No connected app. Auto-connect failed — no Metro servers found.\n\nTo fix:\n1. Make sure your React Native app is running (check Metro bundler terminal)\n2. Run scan_metro to discover available Metro servers\n3. Run ensure_connection to connect to the app\n4. Then retry the tap command",
+            error: "No devices found. Boot a simulator or connect an Android device.",
         };
     }
-
-    const app = apps[0];
-    const platform = app.platform;
 
     // Determine strategies
     const strategies = getAvailableStrategies(query, strategy);
     const attempted: TapAttempt[] = [];
+
+    // Filter strategies by available capabilities
+    const filteredStrategies = strategies.filter((strat) => {
+        if (strat === "fiber" && !hasMetro) {
+            attempted.push({ strategy: "fiber", reason: "Skipped — no Metro connection (required for fiber)" });
+            return false;
+        }
+        return true;
+    });
+
+    if (filteredStrategies.length === 0) {
+        return {
+            success: false,
+            query,
+            attempted,
+            error: "All strategies require Metro connection, which is unavailable.\n\nTo fix:\n1. Make sure your React Native app is running\n2. Run scan_metro to connect\n3. Or use tap(x, y, native=true) for coordinate-based taps",
+        };
+    }
 
     // Determine screenshot and verification behavior
     const shouldScreenshot = options.screenshot !== false;
@@ -1146,7 +1190,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     }
 
     // Execute strategies in order with per-strategy caps and overall budget
-    for (const strat of strategies) {
+    for (const strat of filteredStrategies) {
         const remaining = remainingMs();
         if (remaining < MIN_STRATEGY_BUDGET_MS) {
             attempted.push({ strategy: strat, reason: `Skipped — only ${remaining}ms remaining (budget ${TAP_TIMEOUT_MS}ms)` });
@@ -1171,7 +1215,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     break;
                 case "coordinate":
                     result = await withTimeout(
-                        tryCoordinateStrategy(query.x!, query.y!, platform, app.lastScreenshot),
+                        tryCoordinateStrategy(query.x!, query.y!, platform, app?.lastScreenshot),
                         budget,
                         `coordinate`
                     );
@@ -1197,7 +1241,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     beforeBuffer
                 ));
             }
-            if (screenshot) {
+            if (screenshot && app) {
                 app.lastScreenshot = {
                     originalWidth: screenshot.width,
                     originalHeight: screenshot.height,
@@ -1252,7 +1296,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         beforeBuffer
                     ));
                 }
-                if (screenshot) {
+                if (screenshot && app) {
                     app.lastScreenshot = {
                         originalWidth: screenshot.width,
                         originalHeight: screenshot.height,
@@ -1281,7 +1325,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             const { screenshot: matchScreenshot } = shouldScreenshot
                 ? await verifyAndCapture(platform, false, true, null)
                 : { screenshot: undefined };
-            if (matchScreenshot) {
+            if (matchScreenshot && app) {
                 app.lastScreenshot = {
                     originalWidth: matchScreenshot.width,
                     originalHeight: matchScreenshot.height,
@@ -1308,7 +1352,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const { screenshot: failScreenshot } = shouldScreenshot
         ? await verifyAndCapture(platform, false, true, null)
         : { screenshot: undefined };
-    if (failScreenshot) {
+    if (failScreenshot && app) {
         app.lastScreenshot = {
             originalWidth: failScreenshot.width,
             originalHeight: failScreenshot.height,
