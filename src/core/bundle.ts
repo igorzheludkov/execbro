@@ -241,7 +241,8 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
 
         try {
             // Metro exposes build events via its main WebSocket or through /hot endpoint
-            const ws = new WebSocket(`ws://localhost:${port}/hot`);
+            const origin = `http://localhost:${port}`;
+            const ws = new WebSocket(`ws://localhost:${port}/hot`, { headers: { Origin: origin } });
 
             ws.on("open", () => {
                 metroEventWs = ws;

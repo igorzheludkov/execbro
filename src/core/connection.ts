@@ -721,7 +721,10 @@ export async function connectToDevice(
         });
 
         try {
-            const ws = new WebSocket(device.webSocketDebuggerUrl);
+            // Metro requires a valid Origin header matching the server's host
+            const wsUrl = new URL(device.webSocketDebuggerUrl);
+            const origin = `http://${wsUrl.hostname}:${wsUrl.port}`;
+            const ws = new WebSocket(device.webSocketDebuggerUrl, { headers: { Origin: origin } });
 
             ws.on("open", async () => {
                 // Release connection lock
