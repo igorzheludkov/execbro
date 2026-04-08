@@ -76,6 +76,34 @@ describe("Category 1: RN Fiber & JS Strategies", () => {
         const result = await tap({ text: "送信" });
         await assertTapWorked(result, "cjk-btn");
     }, 30000);
+
+    it("tap emoji text button (should skip fiber, use accessibility or OCR)", async () => {
+        const result = await tap({ text: "🔥 Fire" });
+        await assertTapWorked(result, "emoji-btn");
+        // Fiber can't handle emoji — should fall back to accessibility or OCR
+        expect(result.method).not.toBe("fiber");
+    }, 30000);
+
+    it("tap second duplicate-text button using index parameter", async () => {
+        const result = await tap({ text: "Action", index: 1 });
+        await assertTapWorked(result, "action-btn-2");
+    }, 30000);
+
+    it("tap first duplicate-text button using index=0", async () => {
+        const result = await tap({ text: "Action", index: 0 });
+        await assertTapWorked(result, "action-btn-1");
+    }, 30000);
+
+    it("focus email TextInput by testID", async () => {
+        const result = await tap({ testID: "email-input" });
+        expect(result.success).toBe(true);
+        expect(result.method).toBeDefined();
+    }, 30000);
+
+    it("tap button using testID + text combined", async () => {
+        const result = await tap({ testID: "submit-btn", text: "Submit" });
+        await assertTapWorked(result, "submit-btn");
+    }, 30000);
 });
 
 describe("Category 2: RN Coordinates & Verification", () => {
@@ -160,6 +188,27 @@ describe("Category 2: RN Coordinates & Verification", () => {
         expect(result.attempted!.length).toBeGreaterThan(0);
     }, 30000);
 
+    it("tap with burst verification mode", async () => {
+        const result = await tap({ testID: "submit-btn", verify: true, burst: true, screenshot: true });
+        expect(result.success).toBe(true);
+        expect(result.screenshot).toBeDefined();
+        expect(result.verification).toBeDefined();
+        // Burst mode should include transient detection fields
+        if (result.verification?.transientChangeDetected !== undefined) {
+            expect(typeof result.verification.transientChangeDetected).toBe("boolean");
+        }
+    }, 30000);
+
+    it("tap non-interactive area by testID returns failure or no state change", async () => {
+        // The disabled-area View has no onPress — fiber may find it but native
+        // tap won't trigger any handler. Verify test state doesn't change.
+        const stateBefore = await readTestState();
+        const result = await tap({ testID: "disabled-area" });
+        // Whether tap "succeeds" (accessibility finds it) or fails, test state shouldn't change
+        const stateAfter = await readTestState();
+        expect(stateAfter?.tapCount).toBe(stateBefore?.tapCount);
+    }, 30000);
+
     it("tap navigation button and verify screen change", async () => {
         const result = await tap({ testID: "nav-scroll-btn" });
         expect(result.success).toBe(true);
@@ -200,6 +249,34 @@ describe("Category 2: RN Coordinates & Verification", () => {
         await tap({ testID: "nav-back-btn" });
         await sleep(500);
     }, 60000);
+
+    it("tap list item on scroll screen by testID", async () => {
+        // Navigate to scroll screen
+        await tap({ testID: "nav-scroll-btn" });
+        await sleep(1000);
+
+        // Tap a visible list item
+        const result = await tap({ testID: "list-item-1" });
+        expect(result.success).toBe(true);
+
+        // Navigate back
+        await tap({ testID: "nav-back-btn" });
+        await sleep(500);
+    }, 30000);
+
+    it("tap list item on scroll screen by text", async () => {
+        // Navigate to scroll screen
+        await tap({ testID: "nav-scroll-btn" });
+        await sleep(1000);
+
+        // Tap by visible text
+        const result = await tap({ text: "Item 1" });
+        expect(result.success).toBe(true);
+
+        // Navigate back
+        await tap({ testID: "nav-back-btn" });
+        await sleep(500);
+    }, 30000);
 });
 
 describe("Category 3: Non-RN Native App (System Apps)", () => {

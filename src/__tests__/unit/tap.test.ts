@@ -73,6 +73,18 @@ describe("buildQuery", () => {
         const q = buildQuery({ text: "Submit", testID: "btn" });
         expect(q).toEqual({ text: "Submit", testID: "btn" });
     });
+    it("builds query from all search params combined", () => {
+        const q = buildQuery({ text: "Submit", testID: "btn", component: "Button" });
+        expect(q).toEqual({ text: "Submit", testID: "btn", component: "Button" });
+    });
+    it("ignores non-query options like strategy and native", () => {
+        const q = buildQuery({ text: "Submit", strategy: "fiber", native: true, verify: true });
+        expect(q).toEqual({ text: "Submit" });
+    });
+    it("builds empty query from empty options", () => {
+        const q = buildQuery({});
+        expect(q).toEqual({});
+    });
 });
 
 describe("hasProblematicUnicode", () => {
@@ -152,6 +164,26 @@ describe("getAvailableStrategies", () => {
     it("returns single strategy when explicitly set without text", () => {
         expect(getAvailableStrategies({ testID: "btn" }, "fiber")).toEqual(["fiber"]);
     });
+    it("returns accessibility+fiber+ocr for testID+text combo in auto mode", () => {
+        expect(getAvailableStrategies({ testID: "btn", text: "Submit" }, "auto")).toEqual([
+            "accessibility",
+            "fiber",
+            "ocr",
+        ]);
+    });
+    it("returns fallback chain for component+text in auto mode", () => {
+        expect(getAvailableStrategies({ component: "Button", text: "OK" }, "auto")).toEqual([
+            "accessibility",
+            "fiber",
+            "ocr",
+        ]);
+    });
+    it("returns coordinate only even when text is also provided", () => {
+        expect(getAvailableStrategies({ x: 100, y: 200, text: "Submit" }, "auto")).toEqual(["coordinate"]);
+    });
+    it("returns fiber+ocr for explicit fiber with emoji text", () => {
+        expect(getAvailableStrategies({ text: "🔥 Fire" }, "fiber")).toEqual(["fiber", "ocr"]);
+    });
 });
 
 describe("convertScreenshotToTapCoords", () => {
@@ -172,6 +204,18 @@ describe("convertScreenshotToTapCoords", () => {
     });
     it("rounds to integers", () => {
         expect(convertScreenshotToTapCoords(301, 599, "ios", 3)).toEqual({ x: 100, y: 200 });
+    });
+    it("handles origin coordinates (0, 0)", () => {
+        expect(convertScreenshotToTapCoords(0, 0, "ios", 3)).toEqual({ x: 0, y: 0 });
+        expect(convertScreenshotToTapCoords(0, 0, "android", 1)).toEqual({ x: 0, y: 0 });
+    });
+    it("handles large coordinates for high-res displays", () => {
+        const result = convertScreenshotToTapCoords(3840, 2160, "ios", 3);
+        expect(result.x).toBe(1280);
+        expect(result.y).toBe(720);
+    });
+    it("handles scaleFactor=1 as no-op for downscaling", () => {
+        expect(convertScreenshotToTapCoords(300, 600, "ios", 3, 1)).toEqual({ x: 100, y: 200 });
     });
 });
 
@@ -202,6 +246,32 @@ describe("formatTapFailure", () => {
         expect(result.success).toBe(false);
         expect(result.attempted).toHaveLength(1);
         expect(result.suggestion).toBe("Use screenshot");
+    });
+});
+
+describe("formatTapSuccess with coordinate conversion info", () => {
+    it("includes tappedAt and convertedTo when provided", () => {
+        const result = formatTapSuccess({
+            method: "fiber+native",
+            query: { text: "Submit" },
+            pressed: "PrimaryButton",
+            tappedAt: { x: 300, y: 600 },
+            convertedTo: { x: 100, y: 200, unit: "points" },
+            platform: "ios",
+        });
+        expect(result.tappedAt).toEqual({ x: 300, y: 600 });
+        expect(result.convertedTo).toEqual({ x: 100, y: 200, unit: "points" });
+        expect(result.platform).toBe("ios");
+    });
+
+    it("includes device name when provided", () => {
+        const result = formatTapSuccess({
+            method: "accessibility",
+            query: { testID: "btn" },
+            pressed: "Button",
+            device: "iPhone 16 Pro",
+        });
+        expect(result.device).toBe("iPhone 16 Pro");
     });
 });
 
@@ -435,6 +505,34 @@ describe("verification thresholds", () => {
             totalPixels: 1842000,
         });
         expect(explanation).toContain("No visual change");
+    });
+});
+
+describe("formatTapFailure with all strategies exhausted", () => {
+    it("includes all attempted strategies in order", () => {
+        const result = formatTapFailure({
+            query: { text: "Submit" },
+            attempted: [
+                { strategy: "accessibility", reason: "No iOS accessibility match" },
+                { strategy: "fiber", reason: "pressElement failed" },
+                { strategy: "ocr", reason: "OCR did not find text" },
+            ],
+            suggestion: "Take a screenshot and use coordinates",
+        });
+        expect(result.attempted).toHaveLength(3);
+        expect(result.attempted![0].strategy).toBe("accessibility");
+        expect(result.attempted![1].strategy).toBe("fiber");
+        expect(result.attempted![2].strategy).toBe("ocr");
+    });
+
+    it("includes device name in failure response", () => {
+        const result = formatTapFailure({
+            query: { text: "Submit" },
+            attempted: [{ strategy: "fiber", reason: "No match" }],
+            suggestion: "Try OCR",
+            device: "Pixel 7",
+        });
+        expect(result.device).toBe("Pixel 7");
     });
 });
 
