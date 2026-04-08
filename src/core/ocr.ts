@@ -212,18 +212,12 @@ export function inferIOSDevicePixelRatio(width: number, height: number): number 
 }
 
 /**
- * Convert OCR coordinates to tap-ready coordinates
- * iOS: (ocrCoord * scaleFactor) / devicePixelRatio (points)
- * Android: ocrCoord * scaleFactor (pixels)
+ * Convert OCR bounding box coordinate to device pixels.
+ * Returns raw device pixels on all platforms — tap() handles
+ * platform-specific conversion (iOS points, etc.) from there.
  */
-function toTapCoord(
-    ocrCoord: number,
-    scaleFactor: number,
-    platform: "ios" | "android",
-    devicePixelRatio: number = 3
-): number {
-    const pixelCoord = ocrCoord * scaleFactor;
-    return platform === "ios" ? Math.round(pixelCoord / devicePixelRatio) : Math.round(pixelCoord);
+export function toTapCoord(ocrCoord: number, scaleFactor: number): number {
+    return Math.round(ocrCoord * scaleFactor);
 }
 
 // ============================================================================
@@ -253,8 +247,6 @@ async function recognizeTextCloud(
     options?: OCROptions
 ): Promise<OCRResult | null> {
     const scaleFactor = options?.scaleFactor ?? 1;
-    const platform = options?.platform ?? "ios";
-    const devicePixelRatio = options?.devicePixelRatio ?? 3;
     const startTime = Date.now();
 
     const body = new Uint8Array(imageBuffer);
@@ -328,8 +320,8 @@ async function recognizeTextCloud(
             bbox: w.bbox,
             center: { x: centerX, y: centerY },
             tapCenter: {
-                x: toTapCoord(centerX, scaleFactor, platform, devicePixelRatio),
-                y: toTapCoord(centerY, scaleFactor, platform, devicePixelRatio),
+                x: toTapCoord(centerX, scaleFactor),
+                y: toTapCoord(centerY, scaleFactor),
             },
         };
     });
@@ -365,8 +357,6 @@ export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): 
  */
 async function recognizeTextLocal(imageBuffer: Buffer, options?: OCROptions): Promise<OCRResult> {
     const scaleFactor = options?.scaleFactor ?? 1;
-    const platform = options?.platform ?? "ios";
-    const devicePixelRatio = options?.devicePixelRatio ?? 3;
     const startTime = Date.now();
 
     let ocr: import("node-easyocr").EasyOCR;
@@ -410,8 +400,8 @@ async function recognizeTextLocal(imageBuffer: Buffer, options?: OCROptions): Pr
                     bbox: { x0, y0, x1, y1 },
                     center: { x: centerX, y: centerY },
                     tapCenter: {
-                        x: toTapCoord(centerX, scaleFactor, platform, devicePixelRatio),
-                        y: toTapCoord(centerY, scaleFactor, platform, devicePixelRatio),
+                        x: toTapCoord(centerX, scaleFactor),
+                        y: toTapCoord(centerY, scaleFactor),
                     },
                 });
 

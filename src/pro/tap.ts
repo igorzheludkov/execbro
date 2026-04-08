@@ -1,5 +1,4 @@
 import { connectedApps, imageBuffer } from "../core/state.js";
-import { inferIOSDevicePixelRatio } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
 import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid } from "../core/ios.js";
@@ -643,8 +642,6 @@ async function tryOcrStrategy(
 
         let imageBuffer: Buffer;
         let scaleFactor = 1;
-        let originalWidth: number | undefined;
-        let originalHeight: number | undefined;
 
         if (platform === "ios") {
             const screenshot = await iosScreenshot();
@@ -653,8 +650,6 @@ async function tryOcrStrategy(
             }
             imageBuffer = screenshot.data;
             scaleFactor = screenshot.scaleFactor ?? 1;
-            originalWidth = screenshot.originalWidth;
-            originalHeight = screenshot.originalHeight;
         } else {
             const { androidScreenshot } = await import("../core/android.js");
             const screenshot = await androidScreenshot();
@@ -663,19 +658,12 @@ async function tryOcrStrategy(
             }
             imageBuffer = screenshot.data;
             scaleFactor = screenshot.scaleFactor ?? 1;
-            originalWidth = screenshot.originalWidth;
-            originalHeight = screenshot.originalHeight;
         }
-
-        const devicePixelRatio = (platform === "ios" && originalWidth && originalHeight)
-            ? inferIOSDevicePixelRatio(originalWidth, originalHeight)
-            : 3;
 
         const { recognizeText } = await import("../core/ocr.js");
         const ocrResult = await recognizeText(imageBuffer, {
             scaleFactor,
             platform,
-            devicePixelRatio,
         });
 
         const lowerSearch = searchText.toLowerCase();
@@ -690,7 +678,12 @@ async function tryOcrStrategy(
         }
 
         if (platform === "ios") {
-            await iosTap(matchingWord.tapCenter.x, matchingWord.tapCenter.y);
+            const { getDevicePixelRatio } = await import("../core/ios.js");
+            const dpr = await getDevicePixelRatio();
+            await iosTap(
+                Math.round(matchingWord.tapCenter.x / dpr),
+                Math.round(matchingWord.tapCenter.y / dpr)
+            );
         } else {
             await androidTap(matchingWord.tapCenter.x, matchingWord.tapCenter.y);
         }
@@ -702,7 +695,7 @@ async function tryOcrStrategy(
             convertedTo: {
                 x: matchingWord.tapCenter.x,
                 y: matchingWord.tapCenter.y,
-                unit: platform === "ios" ? "points" : "pixels",
+                unit: "pixels",
             },
         };
     } catch (err) {
