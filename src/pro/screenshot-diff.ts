@@ -9,6 +9,7 @@ export interface ScreenshotDiffResult {
 }
 
 const POSSIBLE_CHANGE = 0.001;  // 0.1% — likely real (text updates, counter changes)
+const MIN_CHANGED_PIXELS = 500; // Absolute floor: any change above this is meaningful regardless of screen size
 const PIXEL_THRESHOLD = 0.1;    // pixelmatch per-pixel color tolerance (0-1)
 
 export async function compareScreenshots(
@@ -66,7 +67,7 @@ export async function compareScreenshots(
     const changeRate = changedPixels / totalPixels;
 
     return {
-        changed: changeRate >= POSSIBLE_CHANGE,
+        changed: changeRate >= POSSIBLE_CHANGE || changedPixels >= MIN_CHANGED_PIXELS,
         changeRate,
         changedPixels,
         totalPixels,
