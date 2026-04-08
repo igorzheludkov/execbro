@@ -1112,8 +1112,12 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     }
 
     // Detect available capabilities
-    let hasMetro = Array.from(connectedApps.values()).length > 0;
-    let app: ConnectedApp | undefined = Array.from(connectedApps.values())[0];
+    const allApps = Array.from(connectedApps.values());
+    let hasMetro = allApps.length > 0;
+    // If platform is specified, prefer an app matching that platform
+    let app: ConnectedApp | undefined = options.platform
+        ? allApps.find((a) => a.platform === options.platform) ?? allApps[0]
+        : allApps[0];
 
     // Try to auto-connect to Metro (for fiber strategy), but don't fail if it doesn't work
     if (!hasMetro) {
