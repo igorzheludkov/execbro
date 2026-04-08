@@ -2,7 +2,7 @@ import { connectedApps, imageBuffer } from "../core/state.js";
 import type { ConnectedApp } from "../core/types.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
-import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid } from "../core/ios.js";
+import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid, findSimulatorByName } from "../core/ios.js";
 import { androidTap, androidFindElement, getDefaultAndroidDevice, androidScreenshot } from "../core/android.js";
 import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
@@ -515,7 +515,8 @@ async function tryFiberAtDepth(
 async function tryAccessibilityStrategy(
     query: TapQuery,
     index: number | undefined,
-    platform: "ios" | "android"
+    platform: "ios" | "android",
+    udid?: string
 ): Promise<StrategyResult> {
     try {
         const hasTestID = !!query.testID;
@@ -566,7 +567,7 @@ async function tryAccessibilityStrategy(
                 return { success: false, reason: `Index ${index} out of bounds (${result.allMatches.length} matches)` };
             }
 
-            await iosTap(match.center.x, match.center.y);
+            await iosTap(match.center.x, match.center.y, { udid });
 
             return {
                 success: true,
@@ -633,7 +634,8 @@ async function tryAccessibilityStrategy(
 
 async function tryOcrStrategy(
     query: TapQuery,
-    platform: "ios" | "android"
+    platform: "ios" | "android",
+    udid?: string
 ): Promise<StrategyResult> {
     try {
         const searchText = query.text;
@@ -681,10 +683,11 @@ async function tryOcrStrategy(
         if (platform === "ios") {
             // tapCenter is in image-pixel space (downscaled) — convert to points
             const { getDevicePixelRatio } = await import("../core/ios.js");
-            const dpr = await getDevicePixelRatio();
+            const dpr = await getDevicePixelRatio(udid);
             await iosTap(
                 Math.round((matchingWord.tapCenter.x * scaleFactor) / dpr),
-                Math.round((matchingWord.tapCenter.y * scaleFactor) / dpr)
+                Math.round((matchingWord.tapCenter.y * scaleFactor) / dpr),
+                { udid }
             );
         } else {
             // Android: image-pixel → device-pixel (undo downscale), ADB accepts pixels
@@ -716,16 +719,17 @@ async function tryCoordinateStrategy(
     pixelX: number,
     pixelY: number,
     platform: "ios" | "android",
-    lastScreenshot?: { originalWidth: number; originalHeight: number; scaleFactor: number }
+    lastScreenshot?: { originalWidth: number; originalHeight: number; scaleFactor: number },
+    udid?: string
 ): Promise<StrategyResult> {
     try {
         if (platform === "ios") {
             const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
             const { getDevicePixelRatio } = await import("../core/ios.js");
-            const devicePixelRatio = await getDevicePixelRatio();
+            const devicePixelRatio = await getDevicePixelRatio(udid);
 
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
-            await iosTap(converted.x, converted.y);
+            await iosTap(converted.x, converted.y, { udid });
 
             // Best-effort: identify what was tapped via fiber tree
             let screen: string | null = null;
@@ -1002,6 +1006,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         let platform = options.platform as "ios" | "android" | undefined;
 
         // Auto-detect platform if not specified
+        let nativeUdid: string | undefined;
         if (!platform) {
             const [androidDevice, iosSimulator] = await Promise.all([
                 getDefaultAndroidDevice().catch(() => null),
@@ -1018,6 +1023,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 platform = "android";
             } else if (iosSimulator) {
                 platform = "ios";
+                nativeUdid = iosSimulator;
             } else {
                 return {
                     success: false,
@@ -1025,6 +1031,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     error: "No Android device or iOS simulator found. Connect a device or start a simulator.",
                 };
             }
+        } else if (platform === "ios") {
+            nativeUdid = (await getActiveOrBootedSimulatorUdid()) ?? undefined;
         }
 
         const nativeShouldScreenshot = options.screenshot !== false;
@@ -1062,7 +1070,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         let result: StrategyResult;
         try {
             result = await withTimeout(
-                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta),
+                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta, nativeUdid),
                 remainingMs(),
                 "native-coordinate"
             );
@@ -1161,6 +1169,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         };
     }
 
+    // Resolve target iOS simulator UDID from the connected app's device name
+    // This ensures taps go to the correct device when multiple simulators are booted
+    let targetUdid: string | undefined;
+    if (platform === "ios" && app?.deviceInfo?.deviceName) {
+        targetUdid = (await findSimulatorByName(app.deviceInfo.deviceName)) ?? undefined;
+    }
+
     // Determine strategies
     const strategies = getAvailableStrategies(query, strategy);
     const attempted: TapAttempt[] = [];
@@ -1215,14 +1230,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth), budget, `fiber`);
                     break;
                 case "accessibility":
-                    result = await withTimeout(tryAccessibilityStrategy(query, index, platform), budget, `accessibility`);
+                    result = await withTimeout(tryAccessibilityStrategy(query, index, platform, targetUdid), budget, `accessibility`);
                     break;
                 case "ocr":
-                    result = await withTimeout(tryOcrStrategy(query, platform), budget, `ocr`);
+                    result = await withTimeout(tryOcrStrategy(query, platform, targetUdid), budget, `ocr`);
                     break;
                 case "coordinate":
                     result = await withTimeout(
-                        tryCoordinateStrategy(query.x!, query.y!, platform, app?.lastScreenshot),
+                        tryCoordinateStrategy(query.x!, query.y!, platform, app?.lastScreenshot, targetUdid),
                         budget,
                         `coordinate`
                     );
@@ -1278,7 +1293,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 const coords = result.convertedTo;
                 if (platform === "ios") {
                     // Fabric returns points — iosTap expects points
-                    await iosTap(coords.x, coords.y);
+                    await iosTap(coords.x, coords.y, { udid: targetUdid });
                 } else {
                     // Fabric returns dp — androidTap expects pixels
                     // Convert dp to pixels using device density
