@@ -323,15 +323,16 @@ describe("formatTapFailure with screenshot and verification", () => {
     });
 });
 
-describe("toTapCoord returns device pixels on all platforms", () => {
-    it("returns device pixels for iOS (no DPR division)", async () => {
+describe("toTapCoord returns image-pixel coordinates", () => {
+    it("returns raw OCR coordinate (scaleFactor ignored)", async () => {
         const { toTapCoord } = await import("../../core/ocr.js");
-        // OCR coord 100, scaleFactor 1.368 → 100 * 1.368 = 137 device pixels
-        expect(toTapCoord(100, 1.368)).toBe(137);
+        // OCR coord 100 on downscaled image → returns 100 (image-pixel space)
+        // tap() handles un-downscaling and platform conversion
+        expect(toTapCoord(100, 1.368)).toBe(100);
     });
-    it("returns device pixels for Android", async () => {
+    it("rounds to integer", async () => {
         const { toTapCoord } = await import("../../core/ocr.js");
-        expect(toTapCoord(100, 1.2)).toBe(120);
+        expect(toTapCoord(100.6, 1.2)).toBe(101);
     });
     it("returns raw coord when scaleFactor is 1", async () => {
         const { toTapCoord } = await import("../../core/ocr.js");
