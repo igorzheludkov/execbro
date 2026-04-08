@@ -960,6 +960,15 @@ async function attemptReconnection(
         return false;
     }
 
+    // Quick check: is Metro even running on this port?
+    const { scanMetroPorts } = await import("./metro.js");
+    const openPorts = await scanMetroPorts(metadata.port, metadata.port);
+    if (openPorts.length === 0) {
+        console.error(`[rn-ai-debugger] Metro not running on port ${metadata.port}, stopping reconnection for ${appKey}`);
+        updateConnectionState(appKey, { status: "disconnected" });
+        return false;
+    }
+
     try {
         // Re-fetch devices to get fresh WebSocket URL (may have changed)
         const devices = await fetchDevices(metadata.port);
