@@ -722,11 +722,8 @@ async function tryCoordinateStrategy(
     try {
         if (platform === "ios") {
             const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
-            const originalWidth = lastScreenshot?.originalWidth;
-            const originalHeight = lastScreenshot?.originalHeight;
-            const devicePixelRatio = (originalWidth && originalHeight)
-                ? inferIOSDevicePixelRatio(originalWidth, originalHeight)
-                : 3;
+            const { getDevicePixelRatio } = await import("../core/ios.js");
+            const devicePixelRatio = await getDevicePixelRatio();
 
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
             await iosTap(converted.x, converted.y);
@@ -1032,15 +1029,39 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         const nativeShouldScreenshot = options.screenshot !== false;
         const nativeShouldVerify = nativeShouldScreenshot && options.verify !== false;
         let nativeBeforeBuffer: Buffer | null = null;
+        let nativeScreenshotMeta: { originalWidth: number; originalHeight: number; scaleFactor: number } | undefined;
         if (nativeShouldVerify) {
             const before = await captureScreenshot(platform);
             nativeBeforeBuffer = before?.buffer || null;
+            if (before) {
+                nativeScreenshotMeta = {
+                    originalWidth: before.width,
+                    originalHeight: before.height,
+                    scaleFactor: before.scaleFactor,
+                };
+            }
+        }
+
+        // If no screenshot was taken for verification, take one just for scaleFactor
+        if (!nativeScreenshotMeta) {
+            const ref = await captureScreenshot(platform);
+            if (ref) {
+                nativeScreenshotMeta = {
+                    originalWidth: ref.width,
+                    originalHeight: ref.height,
+                    scaleFactor: ref.scaleFactor,
+                };
+                // Also use it for verification if buffer is needed
+                if (!nativeBeforeBuffer) {
+                    nativeBeforeBuffer = ref.buffer;
+                }
+            }
         }
 
         let result: StrategyResult;
         try {
             result = await withTimeout(
-                tryCoordinateStrategy(query.x!, query.y!, platform, undefined),
+                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta),
                 remainingMs(),
                 "native-coordinate"
             );
