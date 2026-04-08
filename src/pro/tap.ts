@@ -225,23 +225,38 @@ export function getAvailableStrategies(
     return ["fiber", "accessibility", "ocr"];
 }
 
-export function convertPixelsToPoints(
+/**
+ * Convert screenshot image coordinates to platform-native tap coordinates.
+ *
+ * For iOS: screenshot pixels → device pixels (undo downscale) → points (÷ DPR)
+ * For Android: screenshot pixels → device pixels (undo downscale)
+ *
+ * IMPORTANT: Only use this for EXTERNAL coordinates from screenshots.
+ * Internal strategies (OCR, accessibility, fiber) produce tap-ready coordinates
+ * and call iosTap/androidTap directly — they must NOT go through this function.
+ */
+export function convertScreenshotToTapCoords(
     pixelX: number,
     pixelY: number,
     platform: "ios" | "android",
     devicePixelRatio: number,
     scaleFactor: number = 1
 ): { x: number; y: number } {
-    const originalX = pixelX * scaleFactor;
-    const originalY = pixelY * scaleFactor;
+    const deviceX = pixelX * scaleFactor;
+    const deviceY = pixelY * scaleFactor;
+
     if (platform === "android") {
-        return { x: Math.round(originalX), y: Math.round(originalY) };
+        return { x: Math.round(deviceX), y: Math.round(deviceY) };
     }
+
     return {
-        x: Math.round(originalX / devicePixelRatio),
-        y: Math.round(originalY / devicePixelRatio),
+        x: Math.round(deviceX / devicePixelRatio),
+        y: Math.round(deviceY / devicePixelRatio),
     };
 }
+
+/** @deprecated Use convertScreenshotToTapCoords instead */
+export const convertPixelsToPoints = convertScreenshotToTapCoords;
 
 export async function getCurrentScreen(): Promise<string | null> {
     try {
@@ -713,7 +728,7 @@ async function tryCoordinateStrategy(
                 ? inferIOSDevicePixelRatio(originalWidth, originalHeight)
                 : 3;
 
-            const converted = convertPixelsToPoints(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
+            const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
             await iosTap(converted.x, converted.y);
 
             // Best-effort: identify what was tapped via fiber tree
@@ -731,7 +746,7 @@ async function tryCoordinateStrategy(
             };
         } else {
             const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
-            const converted = convertPixelsToPoints(pixelX, pixelY, "android", 1, scaleFactor);
+            const converted = convertScreenshotToTapCoords(pixelX, pixelY, "android", 1, scaleFactor);
             await androidTap(converted.x, converted.y);
 
             // Best-effort: identify what was tapped via fiber tree
