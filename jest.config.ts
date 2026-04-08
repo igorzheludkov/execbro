@@ -15,7 +15,7 @@ const config: Config = {
             {
                 useESM: true,
                 diagnostics: {
-                    ignoreCodes: [151002],
+                    ignoreCodes: [151002, 1343],
                 },
             },
         ],

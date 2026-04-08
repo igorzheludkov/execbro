@@ -1491,6 +1491,60 @@ export async function iosFindElement(
     }
 }
 
+// DPR cache: UDID → device pixel ratio (never changes during session)
+const dprCache = new Map<string, number>();
+
+/**
+ * Pure calculation: DPR = screenshotPixelWidth / screenPointWidth.
+ * Exported for unit testing.
+ */
+export function calculateDPR(screenshotPixelWidth: number, screenPointWidth: number): number {
+    return Math.round(screenshotPixelWidth / screenPointWidth);
+}
+
+/**
+ * Query the actual device pixel ratio for an iOS simulator.
+ * Uses screenshot pixel width vs accessibility root frame width.
+ * Result is cached per UDID for the session.
+ */
+export async function getDevicePixelRatio(udid?: string): Promise<number> {
+    const cacheKey = udid || "__default__";
+    const cached = dprCache.get(cacheKey);
+    if (cached) return cached;
+
+    const resolvedUdid = udid || (await getActiveOrBootedSimulatorUdid());
+    if (!resolvedUdid) {
+        throw new Error("No iOS simulator is currently running. Start a simulator first.");
+    }
+
+    // Take screenshot to get pixel dimensions
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const screenshotPath = path.join(os.tmpdir(), `ios-dpr-screenshot-${timestamp}.png`);
+    await execAsync(`xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`, {
+        timeout: SIMCTL_TIMEOUT
+    });
+    const metadata = await sharp(screenshotPath).metadata();
+    const pixelWidth = metadata.width!;
+
+    // Get accessibility tree to read the root frame in points
+    await ensureIdbConnected(resolvedUdid);
+    const { stdout } = await runIdb("ui", "describe-all", "--udid", resolvedUdid, "--json", "--nested");
+    const screenSize = extractIOSScreenSize(stdout);
+    if (!screenSize) {
+        throw new Error("Could not parse root frame from accessibility tree");
+    }
+    const pointWidth = screenSize.width;
+
+    const dpr = calculateDPR(pixelWidth, pointWidth);
+    dprCache.set(cacheKey, dpr);
+    return dpr;
+}
+
+/** Clear DPR cache (for testing or when devices change) */
+export function clearDPRCache(): void {
+    dprCache.clear();
+}
+
 /**
  * Wait for element to appear on iOS screen with polling
  */
