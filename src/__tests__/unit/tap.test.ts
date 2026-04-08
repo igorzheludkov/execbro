@@ -323,6 +323,22 @@ describe("formatTapFailure with screenshot and verification", () => {
     });
 });
 
+describe("toTapCoord returns device pixels on all platforms", () => {
+    it("returns device pixels for iOS (no DPR division)", async () => {
+        const { toTapCoord } = await import("../../core/ocr.js");
+        // OCR coord 100, scaleFactor 1.368 → 100 * 1.368 = 137 device pixels
+        expect(toTapCoord(100, 1.368)).toBe(137);
+    });
+    it("returns device pixels for Android", async () => {
+        const { toTapCoord } = await import("../../core/ocr.js");
+        expect(toTapCoord(100, 1.2)).toBe(120);
+    });
+    it("returns raw coord when scaleFactor is 1", async () => {
+        const { toTapCoord } = await import("../../core/ocr.js");
+        expect(toTapCoord(250, 1)).toBe(250);
+    });
+});
+
 describe("buildVerificationExplanation", () => {
     it("explains persistent visual change", () => {
         const explanation = buildVerificationExplanation({

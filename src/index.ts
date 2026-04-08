@@ -3997,7 +3997,7 @@ registerToolWithTelemetry(
                 confidence: Math.round(ocrResult.confidence || 0),
                 elementCount: elements.length,
                 elements,
-                note: "tapX/tapY are ready to use with tap commands (already converted for platform)"
+                note: "tapX/tapY are in device pixels — pass directly to tap(x, y) for automatic platform conversion"
             };
 
             // Check for LogBox overlay (uses default CDP device — native deviceId cannot be mapped to CDP device name)
