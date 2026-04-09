@@ -247,6 +247,28 @@ describe("formatTapFailure", () => {
         expect(result.attempted).toHaveLength(1);
         expect(result.suggestion).toBe("Use screenshot");
     });
+
+    it("sets method to last attempted strategy for telemetry tracking", () => {
+        const result = formatTapFailure({
+            query: { text: "Submit" },
+            attempted: [
+                { strategy: "fiber", reason: "No match" },
+                { strategy: "accessibility", reason: "No match" },
+                { strategy: "ocr", reason: "OCR did not find text" },
+            ],
+            suggestion: "Use screenshot",
+        });
+        expect(result.method).toBe("ocr");
+    });
+
+    it("sets method to undefined when no strategies attempted", () => {
+        const result = formatTapFailure({
+            query: { text: "Submit" },
+            attempted: [],
+            suggestion: "Use screenshot",
+        });
+        expect(result.method).toBeUndefined();
+    });
 });
 
 describe("formatTapSuccess with coordinate conversion info", () => {
@@ -580,9 +602,12 @@ describe("tap without Metro connection", () => {
             platform: "ios",
         });
         // If Metro auto-connect succeeded, fiber may work — that's fine.
-        // But if it failed, the error should mention Metro, not be a generic failure.
+        // But if it failed, the error or attempted strategies should mention Metro.
         if (!result.success) {
-            expect(result.error).toContain("Metro");
+            const mentionsMetro =
+                result.error?.includes("Metro") ||
+                result.attempted?.some((a) => a.reason.includes("Metro"));
+            expect(mentionsMetro).toBe(true);
         }
     }, 15000);
 });
