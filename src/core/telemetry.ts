@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -17,6 +17,7 @@ const BATCH_INTERVAL_MS = 30_000; // 30 seconds
 const REQUEST_TIMEOUT_MS = 5_000;
 const CONFIG_DIR = join(homedir(), ".rn-ai-debugger");
 const CONFIG_FILE = join(CONFIG_DIR, "telemetry.json");
+export const TELEMETRY_JSONL_PATH = "/tmp/rn-devtools-telemetry.jsonl";
 
 // Read version from package.json dynamically
 export function getServerVersion(): string {
@@ -254,6 +255,16 @@ export function isTelemetryEnabled(): boolean {
     return telemetryEnabled;
 }
 
+/** Check if the MCP server is running in dev mode (config-based). */
+export function isDevMode(): boolean {
+    try {
+        const cfg = loadOrCreateConfig();
+        return cfg.devMode === true;
+    } catch {
+        return false;
+    }
+}
+
 // ============================================================================
 // Event Tracking
 // ============================================================================
@@ -290,6 +301,31 @@ export function trackToolInvocation(
     changeRate?: number,
     tapStrategy?: string
 ): void {
+    // Append to local JSONL file for local dashboard (dev mode only)
+    if (isDevMode()) try {
+        const localEvent: TelemetryEvent = {
+            name: "tool_invocation",
+            timestamp: Date.now(),
+            toolName,
+            success,
+            duration: durationMs,
+            isFirstRun: false,
+        };
+        if (!success && errorMessage) {
+            localEvent.errorCategory = categorizeError(errorMessage);
+            localEvent.errorMessage = errorMessage.substring(0, 200);
+            if (errorContext) localEvent.errorContext = errorContext.substring(0, 150);
+        }
+        if (targetPlatform) localEvent.targetPlatform = targetPlatform;
+        if (emptyResult !== undefined) localEvent.emptyResult = emptyResult;
+        if (meaningful !== undefined) localEvent.meaningful = meaningful;
+        if (changeRate !== undefined) localEvent.changeRate = changeRate;
+        if (tapStrategy) localEvent.tapStrategy = tapStrategy;
+        appendFileSync(TELEMETRY_JSONL_PATH, JSON.stringify(localEvent) + "\n");
+    } catch {
+        // Non-critical — local file sink failure should never affect tool execution
+    }
+
     if (!telemetryEnabled) return;
 
     const now = Date.now();

@@ -4,13 +4,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer as createHttpServer } from "node:http";
+import { existsSync, unlinkSync } from "fs";
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
 import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
-import { getInstallationId, getServerVersion } from "./core/telemetry.js";
+import { getInstallationId, getServerVersion, isDevMode, TELEMETRY_JSONL_PATH } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 import {
@@ -4605,6 +4606,29 @@ registerToolWithTelemetry(
     getDeleteAccountConfig(),
     handleDeleteAccount,
 );
+
+// Dev-only tool: reset local telemetry data
+if (isDevMode()) {
+    registerToolWithTelemetry(
+        "reset_telemetry",
+        {
+            description:
+                "Clear local telemetry data file (/tmp/rn-devtools-telemetry.jsonl). Only available in development mode.",
+            inputSchema: {},
+        },
+        async () => {
+            if (existsSync(TELEMETRY_JSONL_PATH)) {
+                unlinkSync(TELEMETRY_JSONL_PATH);
+                return {
+                    content: [{ type: "text" as const, text: "Local telemetry data cleared." }],
+                };
+            }
+            return {
+                content: [{ type: "text" as const, text: "No local telemetry data file found." }],
+            };
+        }
+    );
+}
 
 /**
  * Auto-connect to Metro bundler on startup
