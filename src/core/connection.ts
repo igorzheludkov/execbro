@@ -236,6 +236,11 @@ function formatPreview(preview: CDPObjectPreview): string {
 
 // Format a single CDP console argument (sync — without object resolution)
 function formatConsoleArg(arg: CDPConsoleArg): string {
+    // Explicit undefined (matches browser: console.log(undefined) → "undefined")
+    if (arg.type === "undefined") {
+        return "undefined";
+    }
+
     // Primitives
     if (arg.type === "string" || arg.type === "number" || arg.type === "boolean") {
         return String(arg.value);
@@ -256,7 +261,12 @@ function formatConsoleArg(arg: CDPConsoleArg): string {
         return arg.description;
     }
 
-    return "[object]";
+    // Object without any resolved data
+    if (arg.type === "object") {
+        return "[Object]";
+    }
+
+    return `[${arg.type || "unknown"}]`;
 }
 
 // Fetch object properties via CDP Runtime.getProperties
@@ -489,25 +499,21 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
         if (hasObjectArgs) {
             // Resolve object args asynchronously via CDP
             resolveConsoleArgs(ws, args).then((messageText) => {
-                if (messageText.trim()) {
-                    getLogBuffer(deviceName).add({
-                        timestamp: new Date(),
-                        level,
-                        message: messageText,
-                        args: args.map((a) => a.value)
-                    });
-                }
+                getLogBuffer(deviceName).add({
+                    timestamp: new Date(),
+                    level,
+                    message: messageText || "[console call with empty resolution]",
+                    args: args.map((a) => a.value)
+                });
             }).catch(() => {
                 // Fallback to sync formatting on error
                 const messageText = args.map(formatConsoleArg).join(" ");
-                if (messageText.trim()) {
-                    getLogBuffer(deviceName).add({
-                        timestamp: new Date(),
-                        level,
-                        message: messageText,
-                        args: args.map((a) => a.value)
-                    });
-                }
+                getLogBuffer(deviceName).add({
+                    timestamp: new Date(),
+                    level,
+                    message: messageText || "[console call with unresolvable args]",
+                    args: args.map((a) => a.value)
+                });
             });
         } else {
             const messageText = args.map(formatConsoleArg).join(" ");
