@@ -72,6 +72,7 @@ import {
     cancelAllReconnectionTimers,
     cancelReconnectionTimer,
     clearAllConnectionState,
+    clearAllCDPMessageTimes,
     suppressReconnection,
     suppressReconnectionForKey,
     clearReconnectionSuppression,
@@ -301,6 +302,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         let meaningful: boolean | undefined;
         let changeRate: number | undefined;
         let tapStrategy: string | undefined;
+        let responsePreview: string | undefined;
 
         try {
             inputTokens = Math.ceil(JSON.stringify(args).length / 4);
@@ -341,6 +343,15 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                 }
                 if (totalTokens > 0) outputTokens = totalTokens;
             }
+            // Capture response text preview for local dev dashboard
+            if (Array.isArray(result?.content)) {
+                const textParts = result.content
+                    .filter((item: { type: string }) => item.type === "text")
+                    .map((item: { text: string }) => item.text);
+                if (textParts.length > 0) {
+                    responsePreview = textParts.join("\n").substring(0, 2000);
+                }
+            }
             return result;
         } catch (error) {
             success = false;
@@ -349,7 +360,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, responsePreview);
             getPostHogClient()?.capture({
                 distinctId: getInstallationId(),
                 event: toolName,
@@ -1248,6 +1259,7 @@ registerToolWithTelemetry(
 
         // Clear connection state (but NOT log/network buffers)
         clearAllConnectionState();
+        clearAllCDPMessageTimes();
 
         const lines = [
             `Disconnected from ${disconnected.length} app(s):`,
