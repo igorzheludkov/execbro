@@ -80,6 +80,16 @@ describe("LogBuffer", () => {
         expect(cleared).toBe(2);
         expect(buffer.size).toBe(0);
     });
+
+    it("removeByText removes matching entries", () => {
+        buffer.add(makeLog("normal log"));
+        buffer.add(makeLog("__rn_devtools_health_12345"));
+        buffer.add(makeLog("another log"));
+        const removed = buffer.removeByText("__rn_devtools_health_");
+        expect(removed).toBe(1);
+        expect(buffer.size).toBe(2);
+        expect(buffer.getAll().every(l => !l.message.includes("__rn_devtools_health_"))).toBe(true);
+    });
 });
 
 describe("mapConsoleType", () => {

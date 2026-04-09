@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
 import { connectedApps, pendingExecutions, getNextMessageId, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
-import { mapConsoleType } from "./logs.js";
+import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
@@ -1114,6 +1114,137 @@ export async function runQuickHealthCheck(app: ConnectedApp): Promise<boolean> {
             resolve(false);
         }
     });
+}
+
+const LOG_PIPELINE_MARKER_PREFIX = "__rn_devtools_health_";
+
+/**
+ * Inject a sentinel console.log via CDP and wait for it to appear in the log buffer.
+ * Returns true if the marker arrives within TIMEOUT_MS.
+ */
+async function sendAndWaitForMarker(app: ConnectedApp, buffer: LogBuffer): Promise<boolean> {
+    const marker = `${LOG_PIPELINE_MARKER_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const TIMEOUT_MS = 3000;
+
+    try {
+        app.ws.send(
+            JSON.stringify({
+                id: getNextMessageId(),
+                method: "Runtime.evaluate",
+                params: { expression: `console.log("${marker}")`, returnByValue: true },
+            })
+        );
+    } catch {
+        return false;
+    }
+
+    // Poll the buffer for the marker (check every 50ms, up to TIMEOUT_MS)
+    const startTime = Date.now();
+    while (Date.now() - startTime < TIMEOUT_MS) {
+        if (buffer.getAll().some(entry => entry.message.includes(marker))) {
+            buffer.removeByText(marker);
+            return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    return false;
+}
+
+export interface LogPipelineResult {
+    ok: boolean;
+    recovered: boolean;
+    message: string | null;
+}
+
+/**
+ * End-to-end log pipeline verification with automatic recovery.
+ *
+ * 1. Injects a sentinel console.log via CDP and verifies it appears in the buffer.
+ * 2. If the marker doesn't arrive, attempts recovery:
+ *    a. Re-sends Runtime.enable + Log.enable (fixes missing domain subscription)
+ *    b. Retries the marker once
+ * 3. If still broken, force-reconnects via ensureConnection and retries.
+ *
+ * Returns { ok, recovered, message } — the caller decides what to show.
+ */
+export async function verifyLogPipeline(app: ConnectedApp): Promise<LogPipelineResult> {
+    const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+    const buffer = getLogBuffer(deviceName);
+
+    // --- Attempt 1: quick check ---
+    if (await sendAndWaitForMarker(app, buffer)) {
+        return { ok: true, recovered: false, message: null };
+    }
+
+    // --- Attempt 2: re-enable Runtime/Log domains and retry ---
+    try {
+        app.ws.send(JSON.stringify({ id: getNextMessageId(), method: "Runtime.enable" }));
+        app.ws.send(JSON.stringify({ id: getNextMessageId(), method: "Log.enable" }));
+    } catch {
+        // WS send failed — fall through to reconnect
+    }
+
+    // Brief pause for domain activation
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    if (await sendAndWaitForMarker(app, buffer)) {
+        return { ok: true, recovered: true, message: "[CONNECTION] Log pipeline was stale — re-enabled CDP domains. Logs are flowing again." };
+    }
+
+    // --- Attempt 3: force reconnect and retry ---
+    const appKey = `${app.port}-${app.deviceInfo.id}`;
+    const port = app.port;
+
+    cancelReconnectionTimer(appKey);
+    try { app.ws.close(); } catch { /* ignore */ }
+    connectedApps.delete(appKey);
+
+    const result = await ensureConnection({ port, forceRefresh: false, healthCheck: true });
+    if (!result.connected || !result.healthCheckPassed) {
+        return {
+            ok: false,
+            recovered: false,
+            message: "[CONNECTION] Log pipeline broken and reconnection failed. Ensure the app is running, then call scan_metro.",
+        };
+    }
+
+    // Wait for the new connection to settle
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Get the fresh app reference after reconnection
+    const freshApp = getFirstConnectedApp();
+    if (!freshApp) {
+        return {
+            ok: false,
+            recovered: false,
+            message: "[CONNECTION] Reconnected but no app available. Call scan_metro.",
+        };
+    }
+
+    const freshDeviceName = freshApp.deviceInfo.deviceName || freshApp.deviceInfo.title || "unknown";
+    const freshBuffer = getLogBuffer(freshDeviceName);
+
+    if (await sendAndWaitForMarker(freshApp, freshBuffer)) {
+        return {
+            ok: true,
+            recovered: true,
+            message: "[CONNECTION] Log pipeline was broken — reconnected and verified. Logs are flowing again.",
+        };
+    }
+
+    return {
+        ok: false,
+        recovered: false,
+        message: "[WARNING] Log pipeline verification failed after reconnection. Console events are not reaching the buffer. Try reload_app or scan_metro.",
+    };
+}
+
+/**
+ * Check if a log message is a health check marker (for filtering from output).
+ */
+export function isHealthCheckMarker(message: string): boolean {
+    return message.includes(LOG_PIPELINE_MARKER_PREFIX);
 }
 
 /**
