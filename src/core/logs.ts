@@ -60,6 +60,12 @@ export class LogBuffer {
         return count;
     }
 
+    removeByText(text: string): number {
+        const before = this.logs.length;
+        this.logs = this.logs.filter(log => !log.message.includes(text));
+        return before - this.logs.length;
+    }
+
     get size(): number {
         return this.logs.length;
     }

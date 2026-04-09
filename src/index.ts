@@ -153,7 +153,8 @@ import {
     dismissLogBox,
     formatDismissedEntries,
     pushLogBox,
-    addLogBoxIgnorePatterns
+    addLogBoxIgnorePatterns,
+    verifyLogPipeline
 } from "./core/index.js";
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
@@ -906,6 +907,16 @@ registerToolWithTelemetry(
             if (getTotalLogCount() === 0) {
                 const status = await checkAndEnsureConnection(device);
                 connectionWarning = status.message ? `\n\n${status.message}` : "";
+
+                if (status.connected) {
+                    const targetApp = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
+                    if (targetApp) {
+                        const pipeline = await verifyLogPipeline(targetApp);
+                        if (pipeline.message) {
+                            connectionWarning += `\n\n${pipeline.message}`;
+                        }
+                    }
+                }
             }
             return {
                 content: [
@@ -930,6 +941,32 @@ registerToolWithTelemetry(
         if (count === 0) {
             const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
+
+            // End-to-end log pipeline verification (with automatic recovery)
+            if (status.connected) {
+                const targetApp = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
+                if (targetApp) {
+                    const pipeline = await verifyLogPipeline(targetApp);
+                    if (pipeline.message) {
+                        connectionWarning += `\n\n${pipeline.message}`;
+                    }
+                    // If pipeline recovered, re-read the buffer — new logs may have arrived
+                    if (pipeline.recovered && pipeline.ok) {
+                        const retryResult = getLogs(resolveLogBuffer(device), {
+                            maxLogs, level, startFromText, maxMessageLength, verbose
+                        });
+                        if (retryResult.count > 0) {
+                            // Return the recovered logs instead of empty
+                            return {
+                                content: [{
+                                    type: "text",
+                                    text: `React Native Console Logs (${retryResult.count} entries):\n\n${retryResult.formatted}${connectionWarning}`
+                                }]
+                            };
+                        }
+                    }
+                }
+            }
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected

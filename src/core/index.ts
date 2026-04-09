@@ -84,9 +84,11 @@ export {
     suppressReconnection,
     suppressReconnectionForKey,
     clearReconnectionSuppression,
+    verifyLogPipeline,
+    isHealthCheckMarker,
 } from "./connection.js";
 
-export type { PassiveConnectionStatus } from "./connection.js";
+export type { PassiveConnectionStatus, LogPipelineResult } from "./connection.js";
 
 // Executor
 export {
