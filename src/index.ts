@@ -304,6 +304,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         let changeRate: number | undefined;
         let tapStrategy: string | undefined;
         let responsePreview: string | undefined;
+        let emptyReason: string | undefined;
 
         try {
             inputTokens = Math.ceil(JSON.stringify(args).length / 4);
@@ -333,6 +334,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             if (result?._meaningful !== undefined) meaningful = result._meaningful;
             if (result?._changeRate !== undefined) changeRate = result._changeRate;
             if (result?._tapStrategy) tapStrategy = result._tapStrategy;
+            if (result?._emptyReason) emptyReason = result._emptyReason;
             if (Array.isArray(result?.content)) {
                 let totalTokens = 0;
                 for (const item of result.content) {
@@ -361,7 +363,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, responsePreview);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, responsePreview, emptyReason);
             getPostHogClient()?.capture({
                 distinctId: getInstallationId(),
                 event: toolName,
@@ -938,9 +940,18 @@ registerToolWithTelemetry(
 
         // Check connection health
         let connectionWarning = "";
+        let emptyReason: string | undefined;
         if (count === 0) {
             const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
+
+            // Track empty reason for telemetry
+            emptyReason = "no_logs";
+            if (!status.connected) {
+                emptyReason = "disconnected";
+            } else if (status.wasReconnected) {
+                emptyReason = "post_reconnect";
+            }
 
             // End-to-end log pipeline verification (with automatic recovery)
             if (status.connected) {
@@ -950,6 +961,11 @@ registerToolWithTelemetry(
                     if (pipeline.message) {
                         connectionWarning += `\n\n${pipeline.message}`;
                     }
+                    if (!pipeline.ok) {
+                        emptyReason = "pipeline_failed";
+                    } else if (pipeline.recovered) {
+                        emptyReason = "pipeline_recovered";
+                    }
                     // If pipeline recovered, re-read the buffer — new logs may have arrived
                     if (pipeline.recovered && pipeline.ok) {
                         const retryResult = getLogs(resolveLogBuffer(device), {
@@ -958,6 +974,7 @@ registerToolWithTelemetry(
                         if (retryResult.count > 0) {
                             // Return the recovered logs instead of empty
                             return {
+                                _emptyReason: "pipeline_recovered",
                                 content: [{
                                     type: "text",
                                     text: `React Native Console Logs (${retryResult.count} entries):\n\n${retryResult.formatted}${connectionWarning}`
@@ -1008,6 +1025,7 @@ registerToolWithTelemetry(
         if (format === "tonl") {
             const tonlOutput = formatLogsAsTonl(logs, { maxMessageLength: verbose ? 0 : maxMessageLength });
             return {
+                ...(emptyReason && { _emptyReason: emptyReason }),
                 content: [
                     {
                         type: "text",
@@ -1018,6 +1036,7 @@ registerToolWithTelemetry(
         }
 
         return {
+            ...(emptyReason && { _emptyReason: emptyReason }),
             content: [
                 {
                     type: "text",
