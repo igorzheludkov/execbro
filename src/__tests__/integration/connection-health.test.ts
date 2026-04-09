@@ -1,7 +1,7 @@
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "@jest/globals";
 import { connectToDevice } from "../../core/connection.js";
 import { checkAndEnsureConnection, getPassiveConnectionStatus } from "../../core/connection.js";
-import { connectedApps, pendingExecutions, updateLastCDPMessageTime } from "../../core/state.js";
+import { connectedApps, pendingExecutions, updateLastCDPMessageTime, clearAllCDPMessageTimes } from "../../core/state.js";
 import { DeviceInfo } from "../../core/types.js";
 import { FakeCDPServer } from "../helpers/fake-cdp-server.js";
 
@@ -22,7 +22,7 @@ describe("Connection health (integration)", () => {
             connectedApps.delete(key);
         }
         pendingExecutions.clear();
-        updateLastCDPMessageTime(null);
+        clearAllCDPMessageTimes();
     });
 
     afterEach(async () => {
@@ -71,7 +71,7 @@ describe("Connection health (integration)", () => {
             });
 
             // Simulate recent CDP activity
-            updateLastCDPMessageTime(new Date());
+            updateLastCDPMessageTime(`${port}-test-device`, new Date());
 
             const status = getPassiveConnectionStatus();
             expect(status.connected).toBe(true);
@@ -97,7 +97,7 @@ describe("Connection health (integration)", () => {
             });
 
             // Set last activity to 60 seconds ago
-            updateLastCDPMessageTime(new Date(Date.now() - 60_000));
+            updateLastCDPMessageTime(`${port}-test-device`, new Date(Date.now() - 60_000));
 
             const status = getPassiveConnectionStatus();
             expect(status.connected).toBe(true);
@@ -125,7 +125,7 @@ describe("Connection health (integration)", () => {
 
             // Note: handleCDPMessage will fire for enable responses, which updates timestamp
             // Reset it to null to simulate the "never received" case
-            updateLastCDPMessageTime(null);
+            clearAllCDPMessageTimes();
 
             const status = getPassiveConnectionStatus();
             expect(status.connected).toBe(false);
@@ -159,7 +159,7 @@ describe("Connection health (integration)", () => {
                 reconnectionConfig: { enabled: false, maxAttempts: 0, initialDelayMs: 0, maxDelayMs: 0, backoffMultiplier: 1 },
             });
 
-            updateLastCDPMessageTime(new Date());
+            updateLastCDPMessageTime(`${port}-test-device`, new Date());
 
             const result = await checkAndEnsureConnection();
             expect(result.connected).toBe(true);

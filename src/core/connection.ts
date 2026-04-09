@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
-import { connectedApps, pendingExecutions, getNextMessageId, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime } from "./state.js";
+import { connectedApps, pendingExecutions, getNextMessageId, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
@@ -389,8 +389,11 @@ async function resolveConsoleArgs(ws: WebSocket, args: CDPConsoleArg[]): Promise
 
 // Handle CDP messages
 export function handleCDPMessage(message: Record<string, unknown>, device: DeviceInfo, ws?: WebSocket): void {
-    // Track last CDP activity for connection liveness detection
-    updateLastCDPMessageTime(new Date());
+    // Track last CDP activity for connection liveness detection (per-device)
+    const cdpAppKey = findAppKeyForDevice(device);
+    if (cdpAppKey) {
+        updateLastCDPMessageTime(cdpAppKey, new Date());
+    }
     const deviceName = device.deviceName || device.title || "unknown";
 
     // Handle responses to our requests (e.g., Runtime.evaluate)
@@ -835,6 +838,7 @@ export async function connectToDevice(
                 connectionLocks.delete(appKey);
 
                 connectedApps.delete(appKey);
+                clearLastCDPMessageTime(appKey);
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
 
@@ -880,6 +884,7 @@ export async function connectToDevice(
                 cancelReconnectionTimer(appKey);
 
                 connectedApps.delete(appKey);
+                clearLastCDPMessageTime(appKey);
                 // Clear active simulator UDID if this connection set it
                 clearActiveSimulatorIfSource(appKey);
 

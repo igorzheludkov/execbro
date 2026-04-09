@@ -99,13 +99,43 @@ export function clearActiveSimulatorIfSource(appKey: string): void {
     }
 }
 
-// Last CDP message received timestamp (for connection liveness detection)
-let _lastCDPMessageAt: Date | null = null;
+// Per-device last CDP message timestamps (for connection liveness detection)
+const _lastCDPMessageTimes = new Map<string, Date>();
 
-export function getLastCDPMessageTime(): Date | null {
-    return _lastCDPMessageAt;
+/**
+ * Get last CDP message time for a specific device, or the most recent across all devices.
+ */
+export function getLastCDPMessageTime(appKey?: string): Date | null {
+    if (appKey) {
+        return _lastCDPMessageTimes.get(appKey) ?? null;
+    }
+    // Global fallback: return the most recent time across all devices
+    let latest: Date | null = null;
+    for (const time of _lastCDPMessageTimes.values()) {
+        if (!latest || time.getTime() > latest.getTime()) {
+            latest = time;
+        }
+    }
+    return latest;
 }
 
-export function updateLastCDPMessageTime(time: Date | null): void {
-    _lastCDPMessageAt = time;
+/**
+ * Update last CDP message time for a specific device.
+ */
+export function updateLastCDPMessageTime(appKey: string, time: Date): void {
+    _lastCDPMessageTimes.set(appKey, time);
+}
+
+/**
+ * Clear last CDP message time for a specific device.
+ */
+export function clearLastCDPMessageTime(appKey: string): void {
+    _lastCDPMessageTimes.delete(appKey);
+}
+
+/**
+ * Clear all CDP message times (for cleanup/testing).
+ */
+export function clearAllCDPMessageTimes(): void {
+    _lastCDPMessageTimes.clear();
 }
