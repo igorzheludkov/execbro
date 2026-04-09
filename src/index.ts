@@ -967,6 +967,17 @@ registerToolWithTelemetry(
                     }
                 }
             }
+
+            // Add diagnostic metadata for empty results (captured by telemetry via responsePreview)
+            if (count === 0) {
+                const diagParts = [
+                    `empty_reason=${status?.wasReconnected ? "post_reconnect" : "no_logs"}`,
+                    `connection=${getPassiveConnectionStatus().reason}`,
+                    `device_count=${connectedApps.size}`,
+                    `buffer_sizes=${JSON.stringify(Object.fromEntries([...logBuffers.entries()].map(([k, v]) => [k, v.size])))}`,
+                ];
+                connectionWarning += `\n\n[DIAG] ${diagParts.join(", ")}`;
+            }
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected
