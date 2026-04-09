@@ -904,7 +904,7 @@ registerToolWithTelemetry(
             const summaryText = getLogSummary(resolveLogBuffer(device), { lastN: 5, maxMessageLength: 100 });
             let connectionWarning = "";
             if (getTotalLogCount() === 0) {
-                const status = await checkAndEnsureConnection();
+                const status = await checkAndEnsureConnection(device);
                 connectionWarning = status.message ? `\n\n${status.message}` : "";
             }
             return {
@@ -928,7 +928,7 @@ registerToolWithTelemetry(
         // Check connection health
         let connectionWarning = "";
         if (count === 0) {
-            const status = await checkAndEnsureConnection();
+            const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
         } else {
             const passive = getPassiveConnectionStatus();
@@ -1047,7 +1047,7 @@ registerToolWithTelemetry(
         // Check connection health
         let connectionWarning = "";
         if (count === 0) {
-            const status = await checkAndEnsureConnection();
+            const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
         } else {
             const passive = getPassiveConnectionStatus();
@@ -2223,7 +2223,7 @@ registerToolWithTelemetry(
             const stats = getNetworkStats(resolveNetworkBuffer(device));
             let connectionWarning = "";
             if (resolveNetworkBuffer(device).size === 0) {
-                const connStatus = await checkAndEnsureConnection();
+                const connStatus = await checkAndEnsureConnection(device);
                 connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
                 if (!sdkAvailable) {
                     connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
@@ -2249,7 +2249,7 @@ registerToolWithTelemetry(
         // Check connection health
         let connectionWarning = "";
         if (count === 0) {
-            const connStatus = await checkAndEnsureConnection();
+            const connStatus = await checkAndEnsureConnection(device);
             connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
             if (!sdkAvailable) {
                 connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
@@ -2349,7 +2349,7 @@ registerToolWithTelemetry(
         // Check connection health
         let connectionWarning = "";
         if (count === 0) {
-            const status = await checkAndEnsureConnection();
+            const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
         } else {
             const passive = getPassiveConnectionStatus();
@@ -2452,7 +2452,7 @@ registerToolWithTelemetry(
         const request = resolveNetworkBuffer(device).get(requestId);
 
         if (!request) {
-            const status = await checkAndEnsureConnection();
+            const status = await checkAndEnsureConnection(device);
             const connectionNote = status.message ? `\n\n${status.message}` : "";
             return {
                 content: [
@@ -2519,7 +2519,7 @@ registerToolWithTelemetry(
         // Check connection health
         let connectionWarning = "";
         if (resolveNetworkBuffer(device).size === 0) {
-            const status = await checkAndEnsureConnection();
+            const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
         } else {
             const passive = getPassiveConnectionStatus();

@@ -1340,15 +1340,30 @@ export function getPassiveConnectionStatus(targetAppKey?: string): PassiveConnec
     return { connected: true, needsPing: false, reason: "ok" };
 }
 
-export async function checkAndEnsureConnection(): Promise<ConnectionCheckResult> {
-    const passive = getPassiveConnectionStatus();
+export async function checkAndEnsureConnection(device?: string): Promise<ConnectionCheckResult> {
+    // Resolve targeted device to appKey if specified
+    let targetAppKey: string | undefined;
+    let targetApp: ConnectedApp | null = null;
+
+    if (device) {
+        try {
+            targetApp = getConnectedAppByDevice(device);
+            if (targetApp) {
+                targetAppKey = `${targetApp.port}-${targetApp.deviceInfo.id}`;
+            }
+        } catch {
+            // Device not found — fall through to reconnection
+        }
+    }
+
+    const passive = getPassiveConnectionStatus(targetAppKey);
 
     if (passive.connected && !passive.needsPing) {
         return { connected: true, wasReconnected: false, message: null };
     }
 
     if (passive.connected && passive.needsPing) {
-        const app = getFirstConnectedApp();
+        const app = targetApp ?? getFirstConnectedApp();
         if (app) {
             const healthy = await runQuickHealthCheck(app);
             if (healthy) {
