@@ -377,8 +377,10 @@ export function formatTapFailure(data: {
         data.verification && !data.verification.meaningful
             ? "Tap executed but no visual change detected. The element may not exist at these coordinates. Examine the screenshot to verify and retry with adjusted coordinates."
             : undefined;
+    const lastStrategy = data.attempted.length > 0 ? data.attempted[data.attempted.length - 1].strategy : undefined;
     return {
         success: false,
+        method: lastStrategy,
         query: data.query,
         screen: data.screen,
         error: errorMsg,
@@ -688,11 +690,14 @@ async function tryOcrStrategy(
             // tapCenter is in image-pixel space (downscaled) — convert to points
             const { getDevicePixelRatio } = await import("../core/ios.js");
             const dpr = await getDevicePixelRatio(udid);
-            await iosTap(
+            const tapResult = await iosTap(
                 Math.round((matchingWord.tapCenter.x * scaleFactor) / dpr),
                 Math.round((matchingWord.tapCenter.y * scaleFactor) / dpr),
                 { udid }
             );
+            if (!tapResult.success) {
+                return { success: false, reason: `OCR found "${matchingWord.text}" but tap failed: ${tapResult.error}` };
+            }
         } else {
             // Android: image-pixel → device-pixel (undo downscale), ADB accepts pixels
             await androidTap(
@@ -733,7 +738,10 @@ async function tryCoordinateStrategy(
             const devicePixelRatio = await getDevicePixelRatio(udid);
 
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
-            await iosTap(converted.x, converted.y, { udid });
+            const tapResult = await iosTap(converted.x, converted.y, { udid });
+            if (!tapResult.success) {
+                return { success: false, reason: `Coordinate tap failed: ${tapResult.error}` };
+            }
 
             // Best-effort: identify what was tapped via fiber tree
             let screen: string | null = null;
@@ -826,7 +834,8 @@ async function verifyAndCapture(
     shouldVerify: boolean,
     shouldScreenshot: boolean,
     beforeBuffer: Buffer | null,
-    udid?: string
+    udid?: string,
+    beforeScaleFactor?: number
 ): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
     if (!shouldScreenshot) return {};
 
@@ -845,7 +854,9 @@ async function verifyAndCapture(
     let verification: TapVerification | undefined;
     if (shouldVerify && beforeBuffer) {
         try {
-            const statusBarHeight = platform === "ios" ? 177 : 142; // pixels in screenshot space
+            const rawStatusBar = platform === "ios" ? 177 : 142; // pixels in original screenshot space
+            const scale = beforeScaleFactor || after.scaleFactor || 1;
+            const statusBarHeight = Math.round(rawStatusBar / scale);
             const diff = await compareScreenshots(beforeBuffer, after.buffer, { statusBarHeight });
             verification = {
                 meaningful: diff.changed,
@@ -895,23 +906,27 @@ const BURST_FRAME_INTERVAL_MS = 150;
 async function burstCaptureAndVerify(
     platform: "ios" | "android",
     beforeBuffer: Buffer | null,
-    udid?: string
+    udid?: string,
+    beforeScaleFactor?: number
 ): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
     if (!beforeBuffer) return {};
 
     const frames: Buffer[] = [beforeBuffer];
+    let capturedScaleFactor = beforeScaleFactor || 1;
 
     for (let i = 0; i < BURST_FRAME_COUNT; i++) {
         await new Promise((resolve) => setTimeout(resolve, BURST_FRAME_INTERVAL_MS));
         const capture = await captureScreenshot(platform, udid);
         if (capture) {
             frames.push(capture.buffer);
+            if (i === 0) capturedScaleFactor = capture.scaleFactor || capturedScaleFactor;
         }
     }
 
     if (frames.length < 2) return {};
 
-    const statusBarHeight = platform === "ios" ? 177 : 142; // pixels in screenshot space
+    const rawStatusBar = platform === "ios" ? 177 : 142; // pixels in original screenshot space
+    const statusBarHeight = Math.round(rawStatusBar / capturedScaleFactor);
     const analysis = await analyzeBurstFrames(frames, { statusBarHeight });
 
     const groupId = `burst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1092,14 +1107,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             if (options.burst && nativeShouldVerify && nativeBeforeBuffer) {
-                ({ screenshot, verification } = await burstCaptureAndVerify(platform, nativeBeforeBuffer, nativeUdid));
+                ({ screenshot, verification } = await burstCaptureAndVerify(platform, nativeBeforeBuffer, nativeUdid, nativeScreenshotMeta?.scaleFactor));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
                     platform,
                     nativeShouldVerify,
                     nativeShouldScreenshot,
                     nativeBeforeBuffer,
-                    nativeUdid
+                    nativeUdid,
+                    nativeScreenshotMeta?.scaleFactor
                 ));
             }
             return formatTapSuccess({
@@ -1221,9 +1237,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
     // Capture "before" screenshot for verification
     let beforeBuffer: Buffer | null = null;
+    let beforeScaleFactor: number | undefined;
     if (canVerify) {
         const before = await captureScreenshot(platform, targetUdid);
         beforeBuffer = before?.buffer || null;
+        beforeScaleFactor = before?.scaleFactor;
     }
 
     // Execute strategies in order with per-strategy caps and overall budget
@@ -1269,14 +1287,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             if (options.burst && canVerify && beforeBuffer) {
-                ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid));
+                ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid, beforeScaleFactor));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
                     platform,
                     canVerify,
                     shouldScreenshot,
                     beforeBuffer,
-                    targetUdid
+                    targetUdid,
+                    beforeScaleFactor
                 ));
             }
             if (screenshot && app) {
@@ -1326,14 +1345,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 let screenshot: TapScreenshot | undefined;
                 let verification: TapVerification | undefined;
                 if (options.burst && canVerify && beforeBuffer) {
-                    ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid));
+                    ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid, beforeScaleFactor));
                 } else {
                     ({ screenshot, verification } = await verifyAndCapture(
                         platform,
                         canVerify,
                         shouldScreenshot,
                         beforeBuffer,
-                        targetUdid
+                        targetUdid,
+                        beforeScaleFactor
                     ));
                 }
                 if (screenshot && app) {

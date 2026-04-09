@@ -1526,17 +1526,28 @@ export async function getDevicePixelRatio(udid?: string): Promise<number> {
     });
     const metadata = await sharp(screenshotPath).metadata();
     const pixelWidth = metadata.width!;
+    const pixelHeight = metadata.height!;
 
-    // Get accessibility tree to read the root frame in points
-    await ensureIdbConnected(resolvedUdid);
-    const { stdout } = await runIdb("ui", "describe-all", "--udid", resolvedUdid, "--json", "--nested");
-    const screenSize = extractIOSScreenSize(stdout);
-    if (!screenSize) {
-        throw new Error("Could not parse root frame from accessibility tree");
+    // Try idb accessibility tree for exact DPR, fall back to inference
+    const idbOk = await isIdbAvailable();
+    if (idbOk) {
+        try {
+            await ensureIdbConnected(resolvedUdid);
+            const { stdout } = await runIdb("ui", "describe-all", "--udid", resolvedUdid, "--json", "--nested");
+            const screenSize = extractIOSScreenSize(stdout);
+            if (screenSize) {
+                const dpr = calculateDPR(pixelWidth, screenSize.width);
+                dprCache.set(cacheKey, dpr);
+                return dpr;
+            }
+        } catch {
+            // idb failed — fall through to inference
+        }
     }
-    const pointWidth = screenSize.width;
 
-    const dpr = calculateDPR(pixelWidth, pointWidth);
+    // Fallback: infer DPR from screenshot pixel dimensions
+    const { inferIOSDevicePixelRatio } = await import("./ocr.js");
+    const dpr = inferIOSDevicePixelRatio(pixelWidth, pixelHeight);
     dprCache.set(cacheKey, dpr);
     return dpr;
 }

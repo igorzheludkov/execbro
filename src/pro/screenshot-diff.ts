@@ -9,7 +9,7 @@ export interface ScreenshotDiffResult {
 }
 
 const POSSIBLE_CHANGE = 0.001;  // 0.1% — likely real (text updates, counter changes)
-const MIN_CHANGED_PIXELS = 500; // Absolute floor: any change above this is meaningful regardless of screen size
+const MIN_CHANGED_PIXELS = 200; // Absolute floor: a single character change is ~200-400px at typical resolutions
 const PIXEL_THRESHOLD = 0.1;    // pixelmatch per-pixel color tolerance (0-1)
 
 export async function compareScreenshots(
