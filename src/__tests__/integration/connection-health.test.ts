@@ -105,6 +105,13 @@ describe("Connection health (integration)", () => {
             expect(status.reason).toBe("activity_stale");
         });
 
+        it("checks specific device when appKey is provided", () => {
+            // With no connections, should return no_connection regardless of appKey
+            const result = getPassiveConnectionStatus("8081-somedevice");
+            expect(result.connected).toBe(false);
+            expect(result.reason).toBe("no_connection");
+        });
+
         it("returns no_activity when connected but no CDP messages ever received", async () => {
             server = new FakeCDPServer();
             const port = await server.start();

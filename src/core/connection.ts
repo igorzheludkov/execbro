@@ -1287,7 +1287,33 @@ export interface PassiveConnectionStatus {
     reason: "ok" | "no_connection" | "context_stale" | "no_activity" | "activity_stale";
 }
 
-export function getPassiveConnectionStatus(): PassiveConnectionStatus {
+export function getPassiveConnectionStatus(targetAppKey?: string): PassiveConnectionStatus {
+    if (targetAppKey) {
+        // Check a specific device's connection
+        const app = connectedApps.get(targetAppKey);
+        if (!app || app.ws.readyState !== WebSocket.OPEN) {
+            return { connected: false, needsPing: false, reason: "no_connection" };
+        }
+
+        const health = getContextHealth(targetAppKey);
+        if (health?.isStale) {
+            return { connected: false, needsPing: false, reason: "context_stale" };
+        }
+
+        const lastMessage = getLastCDPMessageTime(targetAppKey);
+        if (!lastMessage) {
+            return { connected: false, needsPing: false, reason: "no_activity" };
+        }
+
+        const elapsed = Date.now() - lastMessage.getTime();
+        if (elapsed > STALE_ACTIVITY_THRESHOLD_MS) {
+            return { connected: true, needsPing: true, reason: "activity_stale" };
+        }
+
+        return { connected: true, needsPing: false, reason: "ok" };
+    }
+
+    // Default: check first connected app (backwards compatible)
     if (!hasConnectedApp()) {
         return { connected: false, needsPing: false, reason: "no_connection" };
     }
