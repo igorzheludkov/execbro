@@ -6,7 +6,7 @@ import type { AppDetectionResult, ConnectedApp } from "./types.js";
 const DETECTION_TIMEOUT_MS = 3000;
 const DETECTION_DELAY_MS = 500;
 
-const DETECTION_EXPRESSION = `(function(){try{var r={};var p=globalThis.nativeModuleProxy;if(p&&p.PlatformConstants){var c=p.PlatformConstants.getConstants?p.PlatformConstants.getConstants():p.PlatformConstants;if(c){if(c.reactNativeVersion)r.rnVersion=c.reactNativeVersion;if(c.osVersion)r.osVersion=c.osVersion;if(c.systemName)r.systemName=c.systemName}}r.newArch=typeof globalThis.nativeFabricUIManager==='object';r.hermes=typeof globalThis.HermesInternal!=='undefined';return r}catch(e){return null}})()`;
+const DETECTION_EXPRESSION = `(function(){try{var r={};var p=globalThis.nativeModuleProxy;if(p&&p.PlatformConstants){var c=p.PlatformConstants.getConstants?p.PlatformConstants.getConstants():p.PlatformConstants;if(c){if(c.reactNativeVersion)r.rnVersion=c.reactNativeVersion;if(c.osVersion)r.osVersion=c.osVersion;if(c.systemName)r.systemName=c.systemName}}r.newArch=typeof globalThis.nativeFabricUIManager==='object';r.hermes=typeof globalThis.HermesInternal!=='undefined';if(p&&p.ExpoConstants){try{var ec=p.ExpoConstants.getConstants?p.ExpoConstants.getConstants():p.ExpoConstants;if(ec&&ec.expoConfig&&ec.expoConfig.sdkVersion)r.expoSdk=ec.expoConfig.sdkVersion}catch(e2){}}return r}catch(e){return null}})()`;
 
 function formatVersion(v: { major: number; minor: number; patch: number }): string {
     return `${v.major}.${v.minor}.${v.patch}`;
@@ -19,6 +19,7 @@ function parseDetectionResult(
         systemName?: string;
         newArch?: boolean;
         hermes?: boolean;
+        expoSdk?: string;
     } | null,
     platform: "ios" | "android"
 ): AppDetectionResult | null {
@@ -30,6 +31,7 @@ function parseDetectionResult(
         jsEngine: raw.hermes ? "hermes" : "jsc",
         appPlatform: platform,
         osVersion: raw.osVersion || "unknown",
+        ...(raw.expoSdk ? { expoSdkVersion: raw.expoSdk } : {}),
     };
 }
 
