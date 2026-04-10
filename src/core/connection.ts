@@ -65,6 +65,77 @@ const STALE_ACTIVITY_THRESHOLD_MS = 30_000;
 const PING_INTERVAL_MS = 1_000; // WebSocket ping/pong keepalive interval
 const RECONNECT_SETTLE_MS = 500;
 
+/**
+ * Creates a WebSocket connection with Origin header fallback.
+ * RN 0.85+ Metro requires the Origin header, but Expo SDK 55 Bridgeless
+ * rejects connections that include one. The rejection can manifest as:
+ *   - Connection refused before open (error/close before open event)
+ *   - Immediate close after open (open fires, then close with code 1006)
+ * Tries with Origin first, falls back to without on quick failure.
+ */
+export function createWebSocketWithOriginFallback(url: string, timeoutMs = 5000): Promise<WebSocket> {
+    const STABILIZE_MS = 500; // Wait after open to detect immediate close
+
+    return new Promise((resolve, reject) => {
+        const wsUrl = new URL(url);
+        const origin = `http://${wsUrl.hostname}:${wsUrl.port}`;
+        let settled = false;
+
+        const tryConnect = (withOrigin: boolean) => {
+            const options = withOrigin ? { headers: { Origin: origin } } : undefined;
+            const ws = new WebSocket(url, options);
+            let opened = false;
+
+            ws.on("open", () => {
+                opened = true;
+                if (withOrigin) {
+                    // Wait briefly to detect immediate close (Expo SDK 55 pattern)
+                    setTimeout(() => {
+                        if (settled) return;
+                        if (ws.readyState === WebSocket.OPEN) {
+                            settled = true;
+                            console.error("[rn-ai-debugger] WebSocket connected with Origin header");
+                            resolve(ws);
+                        }
+                        // If not OPEN, the close handler will trigger fallback
+                    }, STABILIZE_MS);
+                } else {
+                    if (settled) return;
+                    settled = true;
+                    console.error("[rn-ai-debugger] WebSocket connected without Origin header");
+                    resolve(ws);
+                }
+            });
+
+            const handleFailure = (error?: Error) => {
+                if (settled) return;
+                ws.removeAllListeners();
+                ws.terminate();
+                if (withOrigin) {
+                    const reason = opened ? "immediately closed after open" : "rejected before open";
+                    console.error(`[rn-ai-debugger] Origin header connection ${reason}, retrying without...`);
+                    tryConnect(false);
+                } else {
+                    settled = true;
+                    reject(error || new Error("WebSocket connection failed"));
+                }
+            };
+
+            ws.on("error", (err: Error) => handleFailure(err));
+            ws.on("close", () => handleFailure());
+        };
+
+        tryConnect(true);
+
+        setTimeout(() => {
+            if (!settled) {
+                settled = true;
+                reject(new Error("WebSocket connection timed out"));
+            }
+        }, timeoutMs);
+    });
+}
+
 // Helper to find appKey from device info by searching connectedApps
 function findAppKeyForDevice(device: DeviceInfo): string | null {
     for (const [key, app] of connectedApps.entries()) {
@@ -684,7 +755,7 @@ export async function connectToDevice(
 ): Promise<string> {
     const { isReconnection = false, reconnectionConfig = DEFAULT_RECONNECTION_CONFIG } = options;
 
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         const appKey = `${port}-${device.id}`;
 
         // Check if already connected with a valid WebSocket
@@ -730,104 +801,92 @@ export async function connectToDevice(
         });
 
         try {
-            // Metro requires a valid Origin header matching the server's host
-            const wsUrl = new URL(device.webSocketDebuggerUrl);
-            const origin = `http://${wsUrl.hostname}:${wsUrl.port}`;
-            const ws = new WebSocket(device.webSocketDebuggerUrl, { headers: { Origin: origin } });
+            const ws = await createWebSocketWithOriginFallback(device.webSocketDebuggerUrl);
 
-            ws.on("open", async () => {
-                // Release connection lock
-                connectionLocks.delete(appKey);
+            // Connection established — run setup
+            connectionLocks.delete(appKey);
+            connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
 
-                connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
-
-                // Initialize or update connection state
-                // Note: We do NOT reset reconnectionAttempts here - that happens
-                // only when connection has been stable for MIN_STABLE_CONNECTION_MS
-                if (isReconnection) {
-                    closeConnectionGap(appKey);
-                    updateConnectionState(appKey, {
-                        status: "connected",
-                        lastConnectedTime: new Date()
-                        // reconnectionAttempts NOT reset here - see ws.on("close") for stable connection check
-                    });
-                    // Reset context health for reconnection
-                    initContextHealth(appKey);
-                    console.error(`[rn-ai-debugger] Reconnected to ${device.title}`);
-                } else {
-                    initConnectionState(appKey);
-                    initContextHealth(appKey);
-                    console.error(`[rn-ai-debugger] Connected to ${device.title}`);
-                }
-
-                // Enable Runtime domain to receive console messages
-                ws.send(
-                    JSON.stringify({
-                        id: getNextMessageId(),
-                        method: "Runtime.enable"
-                    })
-                );
-
-                // Also enable Log domain
-                ws.send(
-                    JSON.stringify({
-                        id: getNextMessageId(),
-                        method: "Log.enable"
-                    })
-                );
-
-                // Inject JS network interceptor (immediate capture, may fail if context not ready)
-                injectNetworkInterceptor(ws);
-
-                // Also try CDP Network.enable (takes priority if supported)
-                const networkEnableId = sendNetworkEnable(ws);
-                pendingNetworkEnableIds.add(networkEnableId);
-
-                // Try to resolve iOS simulator UDID from device name
-                // This enables automatic device scoping for iOS tools
-                if (device.deviceName) {
-                    const simulatorUdid = await findSimulatorByName(device.deviceName);
-                    if (simulatorUdid) {
-                        setActiveSimulatorUdid(simulatorUdid, appKey);
-                        // Update platform to ios now that simulator is confirmed
-                        const connectedApp = connectedApps.get(appKey);
-                        if (connectedApp) {
-                            connectedApp.platform = "ios";
-                            connectedApp.simulatorUdid = simulatorUdid;
-                        }
-                        console.error(`[rn-ai-debugger] Linked to iOS simulator: ${simulatorUdid}`);
-                    }
-                }
-
-                // Fire-and-forget app detection (500ms delayed, non-blocking)
-                const appForDetection = connectedApps.get(appKey);
-                if (appForDetection) {
-                    scheduleAppDetection(appForDetection);
-                }
-
-                // Start WebSocket ping/pong keepalive to detect dead connections
-                // (especially important for physical devices over Wi-Fi)
-                let pongReceived = true;
-                const pingInterval = setInterval(() => {
-                    if (!pongReceived) {
-                        console.error(`[rn-ai-debugger] No pong from ${device.title}, terminating connection`);
-                        clearInterval(pingInterval);
-                        ws.terminate();
-                        return;
-                    }
-                    pongReceived = false;
-                    ws.ping();
-                }, PING_INTERVAL_MS);
-
-                ws.on("pong", () => {
-                    pongReceived = true;
+            // Initialize or update connection state
+            // Note: We do NOT reset reconnectionAttempts here - that happens
+            // only when connection has been stable for MIN_STABLE_CONNECTION_MS
+            if (isReconnection) {
+                closeConnectionGap(appKey);
+                updateConnectionState(appKey, {
+                    status: "connected",
+                    lastConnectedTime: new Date()
+                    // reconnectionAttempts NOT reset here - see ws.on("close") for stable connection check
                 });
+                // Reset context health for reconnection
+                initContextHealth(appKey);
+                console.error(`[rn-ai-debugger] Reconnected to ${device.title}`);
+            } else {
+                initConnectionState(appKey);
+                initContextHealth(appKey);
+                console.error(`[rn-ai-debugger] Connected to ${device.title}`);
+            }
 
-                ws.on("close", () => {
+            // Enable Runtime domain to receive console messages
+            ws.send(
+                JSON.stringify({
+                    id: getNextMessageId(),
+                    method: "Runtime.enable"
+                })
+            );
+
+            // Also enable Log domain
+            ws.send(
+                JSON.stringify({
+                    id: getNextMessageId(),
+                    method: "Log.enable"
+                })
+            );
+
+            // Inject JS network interceptor (immediate capture, may fail if context not ready)
+            injectNetworkInterceptor(ws);
+
+            // Also try CDP Network.enable (takes priority if supported)
+            const networkEnableId = sendNetworkEnable(ws);
+            pendingNetworkEnableIds.add(networkEnableId);
+
+            // Try to resolve iOS simulator UDID from device name
+            // This enables automatic device scoping for iOS tools
+            if (device.deviceName) {
+                const simulatorUdid = await findSimulatorByName(device.deviceName);
+                if (simulatorUdid) {
+                    setActiveSimulatorUdid(simulatorUdid, appKey);
+                    // Update platform to ios now that simulator is confirmed
+                    const connectedApp = connectedApps.get(appKey);
+                    if (connectedApp) {
+                        connectedApp.platform = "ios";
+                        connectedApp.simulatorUdid = simulatorUdid;
+                    }
+                    console.error(`[rn-ai-debugger] Linked to iOS simulator: ${simulatorUdid}`);
+                }
+            }
+
+            // Fire-and-forget app detection (500ms delayed, non-blocking)
+            const appForDetection = connectedApps.get(appKey);
+            if (appForDetection) {
+                scheduleAppDetection(appForDetection);
+            }
+
+            // Start WebSocket ping/pong keepalive to detect dead connections
+            // (especially important for physical devices over Wi-Fi)
+            let pongReceived = true;
+            const pingInterval = setInterval(() => {
+                if (!pongReceived) {
+                    console.error(`[rn-ai-debugger] No pong from ${device.title}, terminating connection`);
                     clearInterval(pingInterval);
-                });
+                    ws.terminate();
+                    return;
+                }
+                pongReceived = false;
+                ws.ping();
+            }, PING_INTERVAL_MS);
 
-                resolve(`Connected to ${device.title} (${device.deviceName})`);
+            ws.on("pong", () => {
+                pongReceived = true;
             });
 
             ws.on("message", (data: WebSocket.Data) => {
@@ -840,6 +899,8 @@ export async function connectToDevice(
             });
 
             ws.on("close", () => {
+                clearInterval(pingInterval);
+
                 // Release connection lock if still held
                 connectionLocks.delete(appKey);
 
@@ -883,45 +944,23 @@ export async function connectToDevice(
             });
 
             ws.on("error", (error: Error) => {
-                // Release connection lock
-                connectionLocks.delete(appKey);
-
-                // Cancel any pending reconnection timer to prevent orphaned loops
-                cancelReconnectionTimer(appKey);
-
-                connectedApps.delete(appKey);
-                clearLastCDPMessageTime(appKey);
-                // Clear active simulator UDID if this connection set it
-                clearActiveSimulatorIfSource(appKey);
-
-                // Extract error message safely - some WebSocket errors may not have a message
-                const errorMsg = error?.message || error?.toString() || 'Unknown WebSocket error';
-
-                // Only reject if this is initial connection, not reconnection attempt
-                if (!isReconnection) {
-                    reject(`Failed to connect to ${device.title}: ${errorMsg}`);
-                } else {
-                    console.error(`[rn-ai-debugger] Reconnection error: ${errorMsg}`);
-                }
+                console.error(`[rn-ai-debugger] WebSocket error for ${device.title}: ${error?.message || error}`);
             });
 
-            // Timeout after 5 seconds
-            setTimeout(() => {
-                if (ws.readyState !== WebSocket.OPEN) {
-                    // Release connection lock on timeout
-                    connectionLocks.delete(appKey);
-                    ws.terminate();
-                    if (!isReconnection) {
-                        reject(`Connection to ${device.title} timed out`);
-                    }
-                }
-            }, 5000);
+            resolve(`Connected to ${device.title} (${device.deviceName})`);
         } catch (error) {
-            // Release connection lock on exception
+            // Connection failed (both with and without Origin header)
             connectionLocks.delete(appKey);
+            cancelReconnectionTimer(appKey);
+            connectedApps.delete(appKey);
+            clearLastCDPMessageTime(appKey);
+            clearActiveSimulatorIfSource(appKey);
+
+            const errorMsg = error instanceof Error ? error.message : String(error);
             if (!isReconnection) {
-                const errorMessage = error instanceof Error ? error.message : (error ? String(error) : "Unknown error");
-                reject(`Failed to create WebSocket connection: ${errorMessage}`);
+                reject(`Failed to connect to ${device.title}: ${errorMsg}`);
+            } else {
+                console.error(`[rn-ai-debugger] Reconnection error: ${errorMsg}`);
             }
         }
     });
