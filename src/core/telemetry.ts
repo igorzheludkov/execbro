@@ -431,6 +431,7 @@ export function trackAppDetection(detection: {
     jsEngine: string;
     appPlatform: string;
     osVersion: string;
+    expoSdkVersion?: string;
 }): void {
     if (!telemetryEnabled) return;
 
@@ -444,6 +445,7 @@ export function trackAppDetection(detection: {
             eng: detection.jsEngine,
             plat: detection.appPlatform,
             os: detection.osVersion,
+            ...(detection.expoSdkVersion ? { expo: detection.expoSdkVersion } : {}),
         }),
         targetPlatform: detection.appPlatform,
     };

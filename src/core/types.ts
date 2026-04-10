@@ -41,6 +41,7 @@ export interface AppDetectionResult {
     jsEngine: "hermes" | "jsc";
     appPlatform: "ios" | "android";
     osVersion: string;
+    expoSdkVersion?: string;
 }
 
 // CDP RemoteObject type (result of Runtime.evaluate)
