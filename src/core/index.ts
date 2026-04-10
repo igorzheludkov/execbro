@@ -62,6 +62,7 @@ export {
     fetchDevices,
     selectMainDevice,
     filterBridgelessDevices,
+    filterDebuggableDevices,
     discoverMetroDevices,
     checkMetroState
 } from "./metro.js";

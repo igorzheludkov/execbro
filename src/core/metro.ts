@@ -90,6 +90,33 @@ export function filterBridgelessDevices(devices: DeviceInfo[]): DeviceInfo[] {
     return devices.filter(d => d.description.includes("React Native Bridgeless"));
 }
 
+/**
+ * Select the best debuggable target per physical device.
+ * Uses the same priority as selectMainDevice but groups by deviceName
+ * so multi-device setups get one target each.
+ * Excludes Reanimated/Experimental targets.
+ */
+export function filterDebuggableDevices(devices: DeviceInfo[]): DeviceInfo[] {
+    // Group by physical device
+    const byDevice = new Map<string, DeviceInfo[]>();
+    for (const d of devices) {
+        const name = d.deviceName || d.title;
+        const group = byDevice.get(name) || [];
+        group.push(d);
+        byDevice.set(name, group);
+    }
+
+    // Pick the best target for each physical device (same priority as selectMainDevice)
+    const result: DeviceInfo[] = [];
+    for (const group of byDevice.values()) {
+        const best = selectMainDevice(group);
+        if (best) {
+            result.push(best);
+        }
+    }
+    return result;
+}
+
 // Scan for Metro and return all devices grouped by port
 export async function discoverMetroDevices(
     startPort: number = 8081,

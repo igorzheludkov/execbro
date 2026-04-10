@@ -39,7 +39,7 @@ import {
     scanMetroPorts,
     fetchDevices,
     selectMainDevice,
-    filterBridgelessDevices,
+    filterDebuggableDevices,
     connectToDevice,
     getConnectedApps,
     executeInApp,
@@ -453,9 +453,9 @@ registerToolWithTelemetry(
         const portDevices = new Map<number, DeviceInfo[]>();
         for (const port of openPorts) {
             const devices = await fetchDevices(port);
-            const bridgeless = filterBridgelessDevices(devices);
-            if (bridgeless.length > 0) {
-                portDevices.set(port, bridgeless);
+            const debuggable = filterDebuggableDevices(devices);
+            if (debuggable.length > 0) {
+                portDevices.set(port, debuggable);
             }
         }
 

@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { createWebSocketWithOriginFallback } from "./connection.js";
 
 // Bundle error entry
 export interface BundleError {
@@ -233,7 +234,7 @@ function scheduleBuildEventReconnection(port: number): void {
 
 // Connect to Metro's WebSocket for build events
 export async function connectMetroBuildEvents(port: number): Promise<string> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         if (metroEventWs && metroEventWs.readyState === WebSocket.OPEN) {
             resolve("Already connected to Metro build events");
             return;
@@ -241,18 +242,14 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
 
         try {
             // Metro exposes build events via its main WebSocket or through /hot endpoint
-            const origin = `http://localhost:${port}`;
-            const ws = new WebSocket(`ws://localhost:${port}/hot`, { headers: { Origin: origin } });
+            const ws = await createWebSocketWithOriginFallback(`ws://localhost:${port}/hot`);
 
-            ws.on("open", () => {
-                metroEventWs = ws;
-                metroBuildEventPort = port;
-                // Reset reconnection state on successful connection
-                metroBuildEventAttempts = 0;
-                metroBuildEventReconnecting = false;
-                console.error(`[rn-ai-debugger] Connected to Metro build events on port ${port}`);
-                resolve(`Connected to Metro build events on port ${port}`);
-            });
+            metroEventWs = ws;
+            metroBuildEventPort = port;
+            // Reset reconnection state on successful connection
+            metroBuildEventAttempts = 0;
+            metroBuildEventReconnecting = false;
+            console.error(`[rn-ai-debugger] Connected to Metro build events on port ${port}`);
 
             ws.on("message", (data: WebSocket.Data) => {
                 try {
@@ -280,21 +277,15 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
             });
 
             ws.on("error", (error: Error) => {
-                metroEventWs = null;
-                // Only reject if not a reconnection attempt
-                if (!metroBuildEventReconnecting) {
-                    reject(`Failed to connect to Metro build events: ${error.message}`);
-                }
+                console.error(`[rn-ai-debugger] Metro build events WebSocket error: ${error?.message || error}`);
             });
 
-            setTimeout(() => {
-                if (ws.readyState !== WebSocket.OPEN) {
-                    ws.terminate();
-                    reject("Connection to Metro build events timed out");
-                }
-            }, 5000);
+            resolve(`Connected to Metro build events on port ${port}`);
         } catch (error) {
-            reject(`Failed to create WebSocket connection: ${error}`);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            if (!metroBuildEventReconnecting) {
+                reject(`Failed to connect to Metro build events: ${errorMsg}`);
+            }
         }
     });
 }
