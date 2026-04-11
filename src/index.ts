@@ -1624,38 +1624,23 @@ registerToolWithTelemetry(
     "get_screen_layout",
     {
         description:
-            "Get layout information for visible components on screen with actual screen positions (frame data). Uses measureInWindow to get real coordinates and filters out off-screen components. Coordinates are in **points** (iOS) or **dp** (Android) — NOT screenshot pixels. Do not pass these coordinates directly to tap(x, y) which expects screenshot pixels. Use tap(text=...) or tap(testID=...) to interact with discovered components. Use componentsOnly=true for a compact screen map showing only meaningful components as an indented tree.",
+            "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are in **points** (iOS) or **dp** (Android) — NOT screenshot pixels. Use tap(text=...) or tap(testID=...) to interact with discovered components. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.).",
         inputSchema: {
-            maxDepth: z
-                .number()
-                .optional()
-                .default(5000)
-                .describe("Maximum tree depth to traverse (default: 5000)"),
-            componentsOnly: z
+            extended: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Only show custom components, hide host components (View, Text, etc.)"),
-            shortPath: z
-                .boolean()
-                .optional()
-                .default(true)
-                .describe("Show only last 3 path segments instead of full path (default: true)"),
+                .describe("Include layout styles (padding, margin, flex, backgroundColor, borderRadius, etc.) for each component. Default: false for compact output."),
             summary: z
                 .boolean()
                 .optional()
                 .default(false)
-                .describe("Return only component counts by name instead of full element list (default: false)"),
-            format: z
-                .enum(["json", "tonl"])
-                .optional()
-                .default("tonl")
-                .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)"),
+                .describe("Return only component counts by name instead of full tree (default: false)"),
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ maxDepth, componentsOnly, shortPath, summary, format, device }) => {
-        const result = await getScreenLayout({ maxDepth, componentsOnly, shortPath, summary, format, device });
+    async ({ extended, summary, device }) => {
+        const result = await getScreenLayout({ extended, summary, device });
 
         if (!result.success) {
             return {
