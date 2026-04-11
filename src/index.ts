@@ -1741,7 +1741,7 @@ registerToolWithTelemetry(
     "find_components",
     {
         description:
-            "Find components matching a name pattern. **TARGETED SEARCH**: Use after get_component_tree(structureOnly=true) to find specific components by pattern and get their layout info. More efficient than get_screen_layout for targeted queries. Use includeLayout=true to get padding/margin/flex styles.",
+            "Find components matching a name pattern. **TARGETED SEARCH**: Use after get_screen_layout or get_component_tree(structureOnly=true) to find specific components by pattern. Use includeLayout=true to get padding/margin/flex styles.",
         inputSchema: {
             pattern: z
                 .string()

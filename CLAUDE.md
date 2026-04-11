@@ -128,7 +128,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_component_tree`: Get React component hierarchy. Use `focusedOnly=true` + `structureOnly=true` for compact active-screen view
 - `inspect_component`: Deep dive into a specific component's props, state, hooks, and children
 - `find_components`: Search the React fiber tree for components by name regex pattern
-- `get_screen_layout`: Full layout data for all screen components with frame measurements
+- `get_screen_layout`: Screen map — indented tree of visible components with frame positions, text content, and identifiers. Use `extended=true` for layout styles (padding, flex, backgroundColor, etc.). Coordinates are in points (iOS) / dp (Android)
 - `get_inspector_selection`: Identify component at screen coordinates — returns clean hierarchy with file paths (e.g. `HomeScreen > SneakerCard > PulseActionButton`)
 - `inspect_at_point`: Layout debugging at coordinates — returns component props, frame (position/size), and path
 - `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
@@ -189,8 +189,9 @@ When debugging React Native apps through this MCP server:
     4. If you also need layout details (frame bounds, props, styles), use `inspect_at_point(x, y)` on the same coordinates
     5. To tap at a specific coordinate after inspection, use `tap(x=..., y=...)`
 - **When to use which inspection tool**:
-    - `get_inspector_selection` → finding component names and screen structure (returns hierarchy like RN's Element Inspector overlay)
-    - `inspect_at_point` → layout debugging with props and exact frame measurements
+    - `get_screen_layout` → **start here** — full screen map with component tree, positions, and text content. Best for understanding what's on screen
+    - `get_inspector_selection` → finding component names and file paths at specific coordinates (returns hierarchy like RN's Element Inspector overlay)
+    - `inspect_at_point` → layout debugging with props and exact frame measurements at specific coordinates
     - `find_components` → searching for components by name pattern across the entire fiber tree
 - **Multi-Device Debugging**: When multiple devices are connected:
     1. Use `get_apps` to see all connected devices and their names
