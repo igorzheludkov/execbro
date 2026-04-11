@@ -1618,13 +1618,13 @@ registerToolWithTelemetry(
     "get_screen_layout",
     {
         description:
-            "Get layout information for all components on screen. **USE AFTER get_component_tree**: First use get_component_tree(structureOnly=true) to understand structure, then use this tool OR find_components with includeLayout=true to get layout details for specific areas. This tool returns full layout data which can be large for complex screens.",
+            "Get layout information for visible components on screen with actual screen positions (frame data). Uses measureInWindow to get real coordinates and filters out off-screen components. Coordinates are in **points** (iOS) or **dp** (Android) — NOT screenshot pixels. Do not pass these coordinates directly to tap(x, y) which expects screenshot pixels. Use tap(text=...) or tap(testID=...) to interact with discovered components. Use componentsOnly=true for a compact screen map showing only meaningful components as an indented tree.",
         inputSchema: {
             maxDepth: z
                 .number()
                 .optional()
-                .default(65)
-                .describe("Maximum tree depth to traverse (default: 65, balanced for most screens)"),
+                .default(5000)
+                .describe("Maximum tree depth to traverse (default: 5000)"),
             componentsOnly: z
                 .boolean()
                 .optional()

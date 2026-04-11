@@ -645,22 +645,141 @@ interface ScreenElement {
     component: string;
     path: string;
     depth: number;
+    frame?: { x: number; y: number; width: number; height: number };
     layout?: Record<string, unknown>;
     text?: string;
     identifiers?: Record<string, string>;
+    parentIndex?: number;
+    originalIndex?: number;
 }
 
 function formatScreenLayoutToTonl(elements: ScreenElement[]): string {
-    const lines: string[] = ["#elements{component,path,depth,layout,id}"];
+    // Check if elements have tree structure (parentIndex)
+    const hasTree = elements.some(el => el.parentIndex !== undefined);
+
+    if (hasTree) {
+        return formatScreenLayoutTree(elements);
+    }
+
+    // Flat format fallback
+    const lines: string[] = ["#elements{component,path,depth,frame,layout,id}"];
     for (const el of elements) {
+        const frame = el.frame
+            ? `${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)}`
+            : "";
         const layout = el.layout
             ? Object.entries(el.layout)
                   .map(([k, v]) => `${k}:${v}`)
                   .join(";")
             : "";
         const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
-        lines.push(`${el.component}|${el.path}|${el.depth}|${layout}|${id}`);
+        lines.push(`${el.component}|${el.path}|${el.depth}|${frame}|${layout}|${id}`);
     }
+    return lines.join("\n");
+}
+
+function formatScreenLayoutTree(elements: ScreenElement[]): string {
+    // Build index: originalIndex -> element index in the filtered array
+    const indexMap = new Map<number, number>();
+    for (let i = 0; i < elements.length; i++) {
+        if (elements[i].originalIndex !== undefined) {
+            indexMap.set(elements[i].originalIndex!, i);
+        }
+    }
+
+    // Build children lists
+    const children = new Map<number, number[]>();
+    const roots: number[] = [];
+    for (let i = 0; i < elements.length; i++) {
+        const el = elements[i];
+        const parentOrigIdx = el.parentIndex;
+        if (parentOrigIdx === undefined || parentOrigIdx === -1 || !indexMap.has(parentOrigIdx)) {
+            roots.push(i);
+        } else {
+            const parentIdx = indexMap.get(parentOrigIdx)!;
+            if (!children.has(parentIdx)) children.set(parentIdx, []);
+            children.get(parentIdx)!.push(i);
+        }
+    }
+
+    // Collapse wrapper chains: if a child has the same frame as its parent,
+    // it's just a wrapper — promote its children and text to the parent
+    function sameFrame(a: ScreenElement, b: ScreenElement): boolean {
+        if (!a.frame || !b.frame) return false;
+        return Math.abs(a.frame.x - b.frame.x) < 1 &&
+               Math.abs(a.frame.y - b.frame.y) < 1 &&
+               Math.abs(a.frame.width - b.frame.width) < 1 &&
+               Math.abs(a.frame.height - b.frame.height) < 1;
+    }
+
+    function collapseNode(parentIdx: number) {
+        const kids = children.get(parentIdx);
+        if (!kids) return;
+
+        const newKids: number[] = [];
+        for (const kidIdx of kids) {
+            if (sameFrame(elements[parentIdx], elements[kidIdx])) {
+                // Collapse: inherit text if parent has none
+                if (!elements[parentIdx].text && elements[kidIdx].text) {
+                    elements[parentIdx].text = elements[kidIdx].text;
+                }
+                // Promote grandchildren to parent
+                const grandKids = children.get(kidIdx);
+                if (grandKids) {
+                    newKids.push(...grandKids);
+                }
+            } else {
+                newKids.push(kidIdx);
+            }
+        }
+
+        if (newKids.length > 0) {
+            children.set(parentIdx, newKids);
+        } else {
+            children.delete(parentIdx);
+        }
+
+        // Recurse into the (possibly new) children
+        const updatedKids = children.get(parentIdx);
+        if (updatedKids) {
+            for (const kid of updatedKids) {
+                collapseNode(kid);
+            }
+        }
+    }
+
+    for (const root of roots) {
+        collapseNode(root);
+    }
+
+    const lines: string[] = [];
+
+    function printNode(idx: number, indent: number) {
+        const el = elements[idx];
+        const prefix = "  ".repeat(indent);
+        const frame = el.frame
+            ? ` (${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`
+            : "";
+        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
+        const idStr = id ? ` [${id}]` : "";
+        // Only show text on leaf nodes (no meaningful children in tree)
+        // to avoid repeating children's text on every parent
+        const isLeaf = !children.has(idx);
+        const textStr = el.text && isLeaf ? ` "${el.text}"` : "";
+        lines.push(`${prefix}${el.component}${frame}${idStr}${textStr}`);
+
+        const kids = children.get(idx);
+        if (kids) {
+            for (const kid of kids) {
+                printNode(kid, indent + 1);
+            }
+        }
+    }
+
+    for (const root of roots) {
+        printNode(root, 0);
+    }
+
     return lines.join("\n");
 }
 
@@ -953,8 +1072,13 @@ export async function getComponentTree(
 }
 
 /**
- * Get layout styles for all components on the current screen.
- * Useful for verifying layout without screenshots.
+ * Get layout data for visible components on the current screen.
+ * Uses measureInWindow to get actual screen positions and filters
+ * to only components within the viewport.
+ *
+ * Two-step approach (same as inspectAtPoint):
+ * Step 1: Walk fiber tree, dispatch measureInWindow on host components
+ * Step 2: After 300ms, read measurements, filter by viewport, build results
  */
 export async function getScreenLayout(
     options: {
@@ -966,30 +1090,46 @@ export async function getScreenLayout(
         device?: string;
     } = {}
 ): Promise<ExecutionResult> {
-    const { maxDepth = 65, componentsOnly = false, shortPath = true, summary = false, format = "tonl", device } = options;
+    const { maxDepth = 5000, componentsOnly = false, shortPath = true, summary = false, format = "tonl", device } = options;
 
-    const expression = `
+    // --- Step 1: walk fiber tree + dispatch measureInWindow calls ---
+    const dispatchExpression = `
         (function() {
-            const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             if (!hook) return { error: 'React DevTools hook not found.' };
 
-            let roots = [];
+            var roots = [];
             if (hook.getFiberRoots) {
-                roots = [...(hook.getFiberRoots(1) || [])];
+                roots = Array.from(hook.getFiberRoots(1) || []);
             }
             if (roots.length === 0 && hook.renderers) {
-                for (const [id] of hook.renderers) {
-                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
+                for (var entry of hook.renderers) {
+                    var r = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
                     if (r.length > 0) { roots = r; break; }
                 }
             }
             if (roots.length === 0) return { error: 'No fiber roots found.' };
 
-            const maxDepth = ${maxDepth};
-            const componentsOnly = ${componentsOnly};
-            const shortPath = ${shortPath};
-            const summaryMode = ${summary};
-            const pathSegments = 3; // Number of path segments to show in shortPath mode
+            function getMeasurable(fiber) {
+                var sn = fiber.stateNode;
+                if (!sn) return null;
+                if (typeof sn.measureInWindow === 'function') return sn;
+                if (sn.canonical && sn.canonical.publicInstance &&
+                    typeof sn.canonical.publicInstance.measureInWindow === 'function') {
+                    return sn.canonical.publicInstance;
+                }
+                return null;
+            }
+
+            // Collect host fibers with their metadata
+            var hostFibers = [];
+            var fiberMeta = [];
+            var componentsOnlyMode = ${componentsOnly};
+
+            // RN internals and primitives — skip these when looking for meaningful component names
+            // Only filter internal components that can't be written as JSX.
+            // Keep all user-facing components (View, Text, ScrollView, Modal, etc.)
+            var RN_PRIMITIVES = /^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/;
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
@@ -997,8 +1137,197 @@ export async function getScreenLayout(
                 return fiber.type.displayName || fiber.type.name || null;
             }
 
-            function isHostComponent(fiber) {
-                return typeof fiber?.type === 'string';
+            // Find the first measurable host descendant of a fiber
+            function findFirstHost(fiber, depth) {
+                if (!fiber || depth > 20) return null;
+                if (typeof fiber.type === 'string' && getMeasurable(fiber)) return fiber;
+                var child = fiber.child;
+                while (child) {
+                    var found = findFirstHost(child, depth + 1);
+                    if (found) return found;
+                    child = child.sibling;
+                }
+                return null;
+            }
+
+            // Extract text content from a fiber subtree.
+            // When a fiber has a string child, return it without recursing
+            // (avoids duplication from Text > RCTText having the same string).
+            function collectText(fiber, d) {
+                if (!fiber || d > 30) return '';
+                var props = fiber.memoizedProps;
+                if (props) {
+                    var ch = props.children;
+                    // Leaf text — return without recursing into children fibers
+                    if (typeof ch === 'string') return ch;
+                    if (typeof ch === 'number') return String(ch);
+                    if (Array.isArray(ch)) {
+                        var inline = [];
+                        for (var ci = 0; ci < ch.length; ci++) {
+                            if (typeof ch[ci] === 'string') inline.push(ch[ci]);
+                            else if (typeof ch[ci] === 'number') inline.push(String(ch[ci]));
+                        }
+                        if (inline.length > 0) return inline.join('');
+                    }
+                }
+                // No direct text — collect from child fibers (siblings = adjacent elements)
+                var parts = [];
+                var child = fiber.child;
+                while (child) {
+                    var t = collectText(child, d + 1);
+                    if (t) parts.push(t);
+                    child = child.sibling;
+                }
+                return parts.join(' ').trim();
+            }
+
+            if (componentsOnlyMode) {
+                // componentsOnly: walk tree looking for meaningful custom components,
+                // measure their first host child, track parent for tree output
+                function walkComponents(fiber, depth, path, parentIdx) {
+                    if (!fiber || depth > ${maxDepth}) return;
+                    var name = getComponentName(fiber);
+                    var isHost = typeof fiber.type === 'string';
+                    var isMeaningful = name && !isHost && !RN_PRIMITIVES.test(name);
+
+                    var myIdx = parentIdx;
+                    if (isMeaningful) {
+                        var host = findFirstHost(fiber, 0);
+                        if (host) {
+                            myIdx = hostFibers.length;
+                            // Extract text from this component's subtree
+                            var text = collectText(fiber, 0);
+                            hostFibers.push(host);
+                            fiberMeta.push({
+                                hostName: typeof host.type === 'string' ? host.type : '',
+                                customName: name,
+                                depth: depth,
+                                path: path.concat([name]),
+                                parentIndex: parentIdx,
+                                text: text ? text.slice(0, 80) : null
+                            });
+                        }
+                    }
+
+                    var child = fiber.child;
+                    while (child) {
+                        var childName = getComponentName(child);
+                        walkComponents(child, depth + 1, childName ? path.concat([childName]) : path, myIdx);
+                        child = child.sibling;
+                    }
+                }
+                walkComponents(roots[0].current, 0, [], -1);
+            } else {
+                // Default mode: collect all host fibers with ancestor info
+                function walkFibers(fiber, depth, path) {
+                    if (!fiber || depth > ${maxDepth}) return;
+                    var name = getComponentName(fiber);
+                    var isHost = typeof fiber.type === 'string';
+
+                    if (name && isHost && getMeasurable(fiber)) {
+                        // Find nearest meaningful custom component ancestor for display
+                        var customName = null;
+                        var fallbackName = null;
+                        var cur = fiber.return;
+                        while (cur) {
+                            if (cur.type && typeof cur.type !== 'string') {
+                                var cName = cur.type.displayName || cur.type.name || null;
+                                if (cName) {
+                                    if (!fallbackName) fallbackName = cName;
+                                    if (!RN_PRIMITIVES.test(cName)) {
+                                        customName = cName;
+                                        break;
+                                    }
+                                }
+                            }
+                            cur = cur.return;
+                        }
+                        if (!customName) customName = fallbackName;
+
+                        hostFibers.push(fiber);
+                        fiberMeta.push({
+                            hostName: name,
+                            customName: customName,
+                            depth: depth,
+                            path: path.slice()
+                        });
+                    }
+
+                    var child = fiber.child;
+                    while (child) {
+                        var childName = getComponentName(child);
+                        walkFibers(child, depth + 1, childName ? path.concat([childName]) : path);
+                        child = child.sibling;
+                    }
+                }
+                walkFibers(roots[0].current, 0, []);
+            }
+
+            if (hostFibers.length === 0) return { error: 'No measurable host components found.' };
+
+            // Store fibers and metadata globally for step 2
+            globalThis.__layoutFibers = hostFibers;
+            globalThis.__layoutMeta = fiberMeta;
+            globalThis.__layoutMeasurements = new Array(hostFibers.length).fill(null);
+
+            // Dispatch measureInWindow on all host fibers
+            for (var i = 0; i < hostFibers.length; i++) {
+                try {
+                    (function(idx) {
+                        getMeasurable(hostFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                            globalThis.__layoutMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                        });
+                    })(i);
+                } catch(e) {}
+            }
+
+            return { count: hostFibers.length };
+        })()
+    `;
+
+    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
+    if (!dispatchResult.success) return dispatchResult;
+
+    try {
+        const parsed = JSON.parse(dispatchResult.result || "{}");
+        if (parsed.error) return { success: false, error: parsed.error };
+    } catch {
+        /* ignore */
+    }
+
+    // Wait for measureInWindow callbacks
+    await delay(300);
+
+    // --- Step 2: read measurements, filter visible, build results ---
+    const resolveExpression = `
+        (function() {
+            var fibers = globalThis.__layoutFibers;
+            var meta = globalThis.__layoutMeta;
+            var measurements = globalThis.__layoutMeasurements;
+            globalThis.__layoutFibers = null;
+            globalThis.__layoutMeta = null;
+            globalThis.__layoutMeasurements = null;
+
+            if (!fibers || !measurements || !meta) {
+                return { error: 'No measurement data. Run get_screen_layout again.' };
+            }
+
+            var componentsOnly = ${componentsOnly};
+            var shortPath = ${shortPath};
+            var summaryMode = ${summary};
+            var pathSegments = 3;
+
+
+            // Get viewport dimensions from the first root view measurement
+            // or use a generous default
+            var viewportW = 9999, viewportH = 9999;
+            for (var v = 0; v < measurements.length; v++) {
+                if (measurements[v] && measurements[v].x === 0 && measurements[v].y === 0 &&
+                    measurements[v].width > 0 && measurements[v].height > 0) {
+                    viewportW = measurements[v].width;
+                    viewportH = measurements[v].height;
+                    break;
+                }
             }
 
             function formatPath(pathArray) {
@@ -1008,22 +1337,14 @@ export async function getScreenLayout(
                 return '... > ' + pathArray.slice(-pathSegments).join(' > ');
             }
 
-            function extractAllStyles(style) {
-                if (!style) return null;
-                const merged = Array.isArray(style)
-                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
-                    : (typeof style === 'object' ? style : {});
-                return Object.keys(merged).length > 0 ? merged : null;
-            }
-
             function extractLayoutStyles(style) {
                 if (!style) return null;
-                const merged = Array.isArray(style)
-                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
+                var merged = Array.isArray(style)
+                    ? Object.assign.apply(null, [{}].concat(style.filter(Boolean).map(function(s) { return typeof s === 'object' ? s : {}; })))
                     : (typeof style === 'object' ? style : {});
 
-                const layout = {};
-                const layoutKeys = [
+                var layout = {};
+                var layoutKeys = [
                     'padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
                     'paddingHorizontal', 'paddingVertical',
                     'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
@@ -1037,76 +1358,103 @@ export async function getScreenLayout(
                     'backgroundColor', 'borderColor', 'borderRadius'
                 ];
 
-                for (const key of layoutKeys) {
-                    if (merged[key] !== undefined) layout[key] = merged[key];
+                for (var k = 0; k < layoutKeys.length; k++) {
+                    if (merged[layoutKeys[k]] !== undefined) layout[layoutKeys[k]] = merged[layoutKeys[k]];
                 }
                 return Object.keys(layout).length > 0 ? layout : null;
             }
 
-            const elements = [];
+            var elements = [];
 
-            function walkFiber(fiber, depth, path) {
-                if (!fiber || depth > maxDepth) return;
+            for (var i = 0; i < measurements.length; i++) {
+                var m = measurements[i];
+                if (!m) continue;
 
-                const name = getComponentName(fiber);
-                const isHost = isHostComponent(fiber);
+                // Filter: only visible within viewport (with some tolerance for partial visibility)
+                if (m.width <= 0 || m.height <= 0) continue;
+                if (m.x + m.width < 0 || m.y + m.height < 0) continue;
+                if (m.x > viewportW || m.y > viewportH) continue;
 
-                // Include host components (View, Text, etc.) or named components
-                if (name && (!componentsOnly || !isHost)) {
-                    const style = fiber.memoizedProps?.style;
-                    const layout = extractLayoutStyles(style);
+                var fiber = fibers[i];
+                var info = meta[i];
 
-                    // Get text content if it's a Text component
-                    let textContent = null;
-                    if (name === 'Text' || name === 'RCTText') {
-                        const children = fiber.memoizedProps?.children;
-                        if (typeof children === 'string') textContent = children;
-                        else if (typeof children === 'number') textContent = String(children);
-                    }
+                var displayName = componentsOnly ? info.customName : info.hostName;
+                if (!displayName) continue;
+                if (componentsOnly && !info.customName) continue;
 
-                    const element = {
-                        component: name,
-                        path: formatPath(path),
-                        depth
-                    };
+                var style = fiber.memoizedProps ? fiber.memoizedProps.style : null;
+                var layout = extractLayoutStyles(style);
 
-                    if (layout) element.layout = layout;
-                    if (textContent) element.text = textContent.slice(0, 100);
-
-                    // Include key props for identification
-                    if (fiber.memoizedProps) {
-                        const identifiers = {};
-                        if (fiber.memoizedProps.testID) identifiers.testID = fiber.memoizedProps.testID;
-                        if (fiber.memoizedProps.accessibilityLabel) identifiers.accessibilityLabel = fiber.memoizedProps.accessibilityLabel;
-                        if (fiber.memoizedProps.nativeID) identifiers.nativeID = fiber.memoizedProps.nativeID;
-                        if (fiber.key) identifiers.key = fiber.key;
-                        if (Object.keys(identifiers).length > 0) element.identifiers = identifiers;
-                    }
-
-                    elements.push(element);
+                // Get text content — use pre-collected text from step 1, or fall back to host fiber
+                var textContent = info.text || null;
+                if (!textContent && (info.hostName === 'RCTText' || info.hostName === 'Text')) {
+                    var children = fiber.memoizedProps ? fiber.memoizedProps.children : null;
+                    if (typeof children === 'string') textContent = children;
+                    else if (typeof children === 'number') textContent = String(children);
                 }
 
-                // Traverse children
-                let child = fiber.child;
-                while (child) {
-                    const childName = getComponentName(child);
-                    walkFiber(child, depth + 1, childName ? [...path, childName] : path);
-                    child = child.sibling;
+                var element = {
+                    component: displayName,
+                    path: formatPath(info.path),
+                    depth: info.depth,
+                    frame: { x: m.x, y: m.y, width: m.width, height: m.height },
+                    originalIndex: i
+                };
+
+                if (info.parentIndex !== undefined) element.parentIndex = info.parentIndex;
+                if (layout) element.layout = layout;
+                if (textContent) element.text = textContent.slice(0, 100);
+
+                // Identifiers
+                if (fiber.memoizedProps) {
+                    var identifiers = {};
+                    if (fiber.memoizedProps.testID) identifiers.testID = fiber.memoizedProps.testID;
+                    if (fiber.memoizedProps.accessibilityLabel) identifiers.accessibilityLabel = fiber.memoizedProps.accessibilityLabel;
+                    if (fiber.memoizedProps.nativeID) identifiers.nativeID = fiber.memoizedProps.nativeID;
+                    if (fiber.key) identifiers.key = fiber.key;
+                    if (Object.keys(identifiers).length > 0) element.identifiers = identifiers;
                 }
+
+                elements.push(element);
             }
 
-            walkFiber(roots[0].current, 0, []);
+            // In componentsOnly mode, remove full-screen wrapper components
+            // and re-parent their children to collapse the wrapper chain
+            if (componentsOnly && elements.length > 0) {
+                var filtered = [];
+                // Map: originalIndex -> resolved parent for skipped wrappers
+                var reparent = {};
 
-            // Summary mode: return counts by component name
-            if (summaryMode) {
-                const counts = {};
-                for (const el of elements) {
-                    counts[el.component] = (counts[el.component] || 0) + 1;
+                for (var fi = 0; fi < elements.length; fi++) {
+                    var el = elements[fi];
+                    var fr = el.frame;
+                    var isFullScreen = fr && fr.x === 0 && fr.y === 0 &&
+                        Math.abs(fr.width - viewportW) < 2 && Math.abs(fr.height - viewportH) < 2;
+
+                    if (isFullScreen) {
+                        // Skip this wrapper, map its originalIndex to its parent
+                        reparent[el.originalIndex] = el.parentIndex;
+                    } else {
+                        // Resolve parent through any skipped wrappers
+                        var resolvedParent = el.parentIndex;
+                        while (resolvedParent !== undefined && resolvedParent !== -1 && reparent[resolvedParent] !== undefined) {
+                            resolvedParent = reparent[resolvedParent];
+                        }
+                        el.parentIndex = resolvedParent;
+                        filtered.push(el);
+                    }
                 }
-                // Sort by count descending
-                const sorted = Object.entries(counts)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([name, count]) => ({ component: name, count }));
+                elements = filtered;
+            }
+
+            if (summaryMode) {
+                var counts = {};
+                for (var j = 0; j < elements.length; j++) {
+                    counts[elements[j].component] = (counts[elements[j].component] || 0) + 1;
+                }
+                var sorted = Object.keys(counts).map(function(name) {
+                    return { component: name, count: counts[name] };
+                }).sort(function(a, b) { return b.count - a.count; });
                 return {
                     totalElements: elements.length,
                     uniqueComponents: sorted.length,
@@ -1115,14 +1463,14 @@ export async function getScreenLayout(
             }
 
             return {
+                viewport: { width: viewportW, height: viewportH },
                 totalElements: elements.length,
                 elements: elements
             };
         })()
     `;
 
-    // Use a longer timeout for layout traversal — large component trees can exceed 10s
-    const result = await executeInApp(expression, false, { timeoutMs: 30000 }, device);
+    const result = await executeInApp(resolveExpression, false, { timeoutMs: 30000 }, device);
 
     // Apply TONL formatting if requested
     if (format === "tonl" && result.success && result.result) {
@@ -2266,7 +2614,7 @@ export async function inspectAtPoint(
 
             // RN primitives and internal components to skip when surfacing the "element" name.
             // We want the nearest *custom* component, not a library wrapper.
-            var RN_PRIMITIVES = /^(View|Text|Image|ScrollView|FlatList|SectionList|TextInput|TouchableOpacity|TouchableHighlight|TouchableNativeFeedback|TouchableWithoutFeedback|Pressable|Button|Switch|ActivityIndicator|Modal|SafeAreaView|KeyboardAvoidingView|Animated\\(.*|withAnimated.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|VirtualizedList.*|CellRenderer.*|FrameSizeProvider|MaybeScreenContainer|RCT.*|RNS.*|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|Expo.*|LinearGradient|ViewManagerAdapter_.*|Svg.*|Defs|Path|Rect|Circle|G|Line|Polygon|Polyline|Ellipse|ClipPath|GestureHandler.*|NativeViewGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|MaybeScreen|SafeAreaProvider.*|GestureDetector|PanGestureHandler|DropShadow|BlurView|MaskedView.*)$/;
+            var RN_PRIMITIVES = /^(View|Text|Image|ScrollView|FlatList|SectionList|TextInput|TouchableOpacity|TouchableHighlight|TouchableNativeFeedback|TouchableWithoutFeedback|Pressable|Button|Switch|ActivityIndicator|SafeAreaView|KeyboardAvoidingView|Animated\\(.*|withAnimated.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|VirtualizedList.*|CellRenderer.*|FrameSizeProvider|MaybeScreenContainer|RCT.*|RNS.*|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|Expo.*|LinearGradient|ViewManagerAdapter_.*|Svg.*|Defs|Path|Rect|Circle|G|Line|Polygon|Polyline|Ellipse|ClipPath|GestureHandler.*|NativeViewGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|MaybeScreen|SafeAreaProvider.*|GestureDetector|PanGestureHandler|DropShadow|BlurView|MaskedView.*)$/;
 
             function getNearestNamed(fiber, skipPrimitives) {
                 var cur = fiber;
