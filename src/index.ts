@@ -4709,46 +4709,6 @@ if (isDevMode()) {
     );
 }
 
-/**
- * Auto-connect to Metro bundler on startup
- * Scans common ports and connects to any running Metro servers
- */
-async function autoConnectToMetro(): Promise<void> {
-    console.error("[rn-ai-debugger] Auto-scanning for Metro servers...");
-
-    try {
-        const openPorts = await scanMetroPorts();
-
-        if (openPorts.length === 0) {
-            console.error("[rn-ai-debugger] No Metro servers found on startup. Use scan_metro to connect later.");
-            return;
-        }
-
-        for (const port of openPorts) {
-            try {
-                const devices = await fetchDevices(port);
-                const mainDevice = selectMainDevice(devices);
-
-                if (mainDevice) {
-                    await connectToDevice(mainDevice, port);
-                    console.error(`[rn-ai-debugger] Auto-connected to ${mainDevice.title} on port ${port}`);
-
-                    // Also connect to Metro build events
-                    try {
-                        await connectMetroBuildEvents(port);
-                    } catch {
-                        // Build events connection is optional
-                    }
-                }
-            } catch (error) {
-                console.error(`[rn-ai-debugger] Failed to auto-connect on port ${port}: ${error}`);
-            }
-        }
-    } catch (error) {
-        console.error(`[rn-ai-debugger] Auto-connect error: ${error}`);
-    }
-}
-
 // Main function
 async function main() {
     // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
@@ -4848,13 +4808,6 @@ async function main() {
         console.error("[rn-ai-debugger] Server started on stdio");
     }
 
-    // Auto-connect to Metro in background (non-blocking)
-    // Use setImmediate to ensure MCP server is fully ready first
-    setImmediate(() => {
-        autoConnectToMetro().catch((err) => {
-            console.error("[rn-ai-debugger] Auto-connect failed:", err);
-        });
-    });
 }
 
 main().catch((error) => {
@@ -4862,6 +4815,34 @@ main().catch((error) => {
     process.exit(1);
 });
 
+// Graceful shutdown: close CDP connections so the slot is freed for other sessions
+function gracefulShutdown() {
+    suppressReconnection();
+    cancelAllReconnectionTimers();
+    for (const [key, app] of connectedApps.entries()) {
+        try {
+            app.ws.close();
+        } catch {
+            // Ignore close errors during shutdown
+        }
+        connectedApps.delete(key);
+    }
+    disconnectMetroBuildEvents();
+    clearAllConnectionState();
+    clearAllCDPMessageTimes();
+    shutdownPostHog().catch(() => {});
+}
+
 process.on("beforeExit", () => {
     shutdownPostHog().catch(() => {});
+});
+
+process.on("SIGINT", () => {
+    gracefulShutdown();
+    process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+    gracefulShutdown();
+    process.exit(0);
 });
