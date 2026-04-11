@@ -129,6 +129,7 @@ export {
   // React Component Inspection
   getComponentTree,
   getScreenLayout,
+  enrichScreenshotWithLayout,
   inspectComponent,
   findComponents,
   pressElement,

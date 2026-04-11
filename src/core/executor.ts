@@ -1088,9 +1088,10 @@ export async function getScreenLayout(
         extended?: boolean;
         summary?: boolean;
         device?: string;
+        raw?: boolean;
     } = {}
-): Promise<ExecutionResult> {
-    const { extended = false, summary = false, device } = options;
+): Promise<ExecutionResult & { parsedElements?: ScreenElement[]; viewport?: { width: number; height: number } }> {
+    const { extended = false, summary = false, device, raw = false } = options;
     const maxDepth = 5000;
     const componentsOnly = true;
     const shortPath = true;
@@ -1484,6 +1485,14 @@ export async function getScreenLayout(
                 const tonl = formatSummaryToTonl(parsed.components, parsed.totalElements);
                 return { success: true, result: tonl };
             } else if (parsed.elements) {
+                if (raw) {
+                    return {
+                        success: true,
+                        result: result.result,
+                        parsedElements: parsed.elements,
+                        viewport: parsed.viewport
+                    };
+                }
                 const tree = formatScreenLayoutTree(parsed.elements, extended);
                 return { success: true, result: tree };
             }
@@ -1493,6 +1502,133 @@ export async function getScreenLayout(
     }
 
     return result;
+}
+
+interface EnrichedElement {
+    component: string;
+    frame: { x: number; y: number; width: number; height: number };
+    tapX: number;
+    tapY: number;
+    text?: string;
+    identifiers?: Record<string, string>;
+    parentIndex?: number;
+    originalIndex?: number;
+    depth?: number;
+    path?: string;
+}
+
+/**
+ * Format enriched elements as an indented tree with tap coordinates in pixels.
+ * Preserves the same hierarchy as get_screen_layout but adds tapX,tapY to each line.
+ */
+function formatEnrichedLayoutTree(elements: EnrichedElement[]): string {
+    // Build index: originalIndex -> element index in the filtered array
+    const indexMap = new Map<number, number>();
+    for (let i = 0; i < elements.length; i++) {
+        if (elements[i].originalIndex !== undefined) {
+            indexMap.set(elements[i].originalIndex!, i);
+        }
+    }
+
+    // Build children lists
+    const childrenMap = new Map<number, number[]>();
+    const roots: number[] = [];
+    for (let i = 0; i < elements.length; i++) {
+        const el = elements[i];
+        const parentOrigIdx = el.parentIndex;
+        if (parentOrigIdx === undefined || parentOrigIdx === -1 || !indexMap.has(parentOrigIdx)) {
+            roots.push(i);
+        } else {
+            const parentIdx = indexMap.get(parentOrigIdx)!;
+            if (!childrenMap.has(parentIdx)) childrenMap.set(parentIdx, []);
+            childrenMap.get(parentIdx)!.push(i);
+        }
+    }
+
+    const lines: string[] = [];
+
+    function printNode(idx: number, indent: number) {
+        const el = elements[idx];
+        const prefix = "  ".repeat(indent);
+        const frame = `(${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`;
+        const tap = ` tap:(${el.tapX},${el.tapY})`;
+        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
+        const idStr = id ? ` [${id}]` : "";
+        const isLeaf = !childrenMap.has(idx);
+        const textStr = el.text && isLeaf ? ` "${el.text}"` : "";
+        lines.push(`${prefix}${el.component} ${frame}${tap}${idStr}${textStr}`);
+
+        const kids = childrenMap.get(idx);
+        if (kids) {
+            for (const kid of kids) {
+                printNode(kid, indent + 1);
+            }
+        }
+    }
+
+    for (const root of roots) {
+        printNode(root, 0);
+    }
+
+    return lines.join("\n");
+}
+
+/**
+ * Enrich screen layout data with tap-ready pixel coordinates for bundling with screenshots.
+ * Converts points/dp frame coordinates to pixels using the device pixel ratio,
+ * computes center-point tapX/tapY for each element.
+ *
+ * @param pixelRatio - device pixel ratio (e.g., 3 for @3x iPhone)
+ * @param screenshotScaleFactor - if the screenshot image was scaled down, this factor adjusts coordinates
+ * @param device - optional target device name
+ * @returns formatted tree string with pixel coordinates, or null if unavailable
+ */
+export async function enrichScreenshotWithLayout(
+    pixelRatio: number,
+    screenshotScaleFactor: number,
+    device?: string
+): Promise<string | null> {
+    try {
+        const result = await getScreenLayout({ extended: false, summary: false, device, raw: true });
+        if (!result.success || !result.parsedElements || result.parsedElements.length === 0) return null;
+
+        const elements: EnrichedElement[] = result.parsedElements.map((el: ScreenElement) => {
+            const frame = el.frame || { x: 0, y: 0, width: 0, height: 0 };
+
+            // Convert center point from points/dp to screenshot pixels
+            // Points -> device pixels: multiply by pixelRatio
+            // Device pixels -> screenshot pixels: divide by screenshotScaleFactor (if image was resized)
+            const centerXPoints = frame.x + frame.width / 2;
+            const centerYPoints = frame.y + frame.height / 2;
+            const tapX = Math.round((centerXPoints * pixelRatio) / screenshotScaleFactor);
+            const tapY = Math.round((centerYPoints * pixelRatio) / screenshotScaleFactor);
+
+            // Convert frame to pixels too
+            const pixelFrame = {
+                x: Math.round((frame.x * pixelRatio) / screenshotScaleFactor),
+                y: Math.round((frame.y * pixelRatio) / screenshotScaleFactor),
+                width: Math.round((frame.width * pixelRatio) / screenshotScaleFactor),
+                height: Math.round((frame.height * pixelRatio) / screenshotScaleFactor),
+            };
+
+            return {
+                component: el.component,
+                frame: pixelFrame,
+                tapX,
+                tapY,
+                text: el.text,
+                identifiers: el.identifiers,
+                parentIndex: el.parentIndex,
+                originalIndex: el.originalIndex,
+                depth: el.depth,
+                path: el.path,
+            };
+        });
+
+        return formatEnrichedLayoutTree(elements);
+    } catch {
+        return null; // Non-fatal: screenshot works without layout
+    }
 }
 
 /**
