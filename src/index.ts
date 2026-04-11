@@ -1535,15 +1535,8 @@ registerToolWithTelemetry(
     "get_component_tree",
     {
         description:
-            "Get the React component tree from the running app. **RECOMMENDED**: Use focusedOnly=true with structureOnly=true for a token-efficient overview of just the active screen (~1-2KB). This skips navigation wrappers and global overlays, showing only what's actually visible.",
+            "Get the full React component tree from the running app. Shows the complete fiber hierarchy including providers, navigation wrappers, and internal components. For a screen overview with positions and text, use get_screen_layout instead. Use structureOnly=true for compact names-only output.",
         inputSchema: {
-            focusedOnly: z
-                .boolean()
-                .optional()
-                .default(false)
-                .describe(
-                    "Return only the focused/active screen subtree, skipping navigation wrappers and overlays. Dramatically reduces output size. (Recommended: true)"
-                ),
             structureOnly: z
                 .boolean()
                 .optional()
@@ -1555,7 +1548,7 @@ registerToolWithTelemetry(
                 .number()
                 .optional()
                 .describe(
-                    "Maximum tree depth (default: 25 for focusedOnly+structureOnly, 40 for structureOnly, 100 for full mode)"
+                    "Maximum tree depth (default: 5000)"
                 ),
             includeProps: z
                 .boolean()
@@ -1584,9 +1577,8 @@ registerToolWithTelemetry(
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
-    async ({ focusedOnly, structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format, device }) => {
+    async ({ structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format, device }) => {
         const result = await getComponentTree({
-            focusedOnly,
             structureOnly,
             maxDepth,
             includeProps,
@@ -1670,7 +1662,7 @@ registerToolWithTelemetry(
     "inspect_component",
     {
         description:
-            "Inspect a specific React component by name. **DRILL-DOWN TOOL**: Use after get_component_tree(structureOnly=true) to inspect specific components. Returns props, style, state (hooks), and optionally children tree. Use childrenDepth to control how deep nested children go.",
+            "Inspect a specific React component by name. **DRILL-DOWN TOOL**: Use after get_screen_layout or find_components to identify which component to inspect. Returns props, style, state (hooks), and optionally children tree. Use childrenDepth to control how deep nested children go.",
         inputSchema: {
             componentName: z
                 .string()
