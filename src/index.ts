@@ -95,6 +95,7 @@ import {
     // OCR
     recognizeText,
     inferIOSDevicePixelRatio,
+    enrichScreenshotWithLayout,
     // Android
     listAndroidDevices,
     androidScreenshot,
@@ -3932,6 +3933,14 @@ registerToolWithTelemetry(
 
             const safeAreaOffsetPixels = safeAreaTop * scaleFactor;
 
+            // Enrich with screen layout data (component names + tap coordinates)
+            let layoutText: string | null = null;
+            try {
+                layoutText = await enrichScreenshotWithLayout(scaleFactor, result.scaleFactor || 1);
+            } catch {
+                // Non-fatal: screenshot works without layout enrichment
+            }
+
             let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
             infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
             infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
@@ -3939,11 +3948,21 @@ registerToolWithTelemetry(
             if (result.scaleFactor && result.scaleFactor > 1) {
                 infoText += `\n🖼️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
             }
-            infoText += `\n\n💡 Next steps:`;
-            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
-            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
-            infoText += `\n  • ios_describe_all — get full UI tree with exact tap coordinates`;
-            infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
+            if (layoutText) {
+                infoText += `\n\n📋 Screen Layout (components with tap coordinates in pixels):`;
+                infoText += `\n${layoutText}`;
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — tap element by visible text (preferred)`;
+                infoText += `\n  • tap(testID="id") or tap(component="Name") — tap by testID or component name`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — use tap coordinates from layout above ONLY if text/testID/component tap fails`;
+                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout above`;
+            } else {
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+                infoText += `\n  • ios_describe_all — get full UI tree with exact tap coordinates`;
+                infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
+            }
 
             // Check for LogBox overlay (uses default CDP device — native UDID cannot be mapped to CDP device name)
             try {
