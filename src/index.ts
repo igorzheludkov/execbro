@@ -3236,6 +3236,16 @@ registerToolWithTelemetry(
                 // Use defaults
             }
 
+            // Enrich with screen layout data (component names + tap coordinates)
+            // Android: density ratio = densityDpi / 160 (160dpi = 1dp = 1px baseline)
+            const androidPixelRatio = densityDpi / 160;
+            let layoutText: string | null = null;
+            try {
+                layoutText = await enrichScreenshotWithLayout(androidPixelRatio, result.scaleFactor || 1);
+            } catch {
+                // Non-fatal: screenshot works without layout enrichment
+            }
+
             infoText += `\n📱 Android uses PIXELS for all coordinates`;
 
             if (result.scaleFactor && result.scaleFactor > 1) {
@@ -3247,11 +3257,21 @@ registerToolWithTelemetry(
 
             infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
             infoText += `\n📊 Display density: ${densityDpi}dpi`;
-            infoText += `\n\n💡 Next steps:`;
-            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
-            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
-            infoText += `\n  • android_describe_all — get full UI tree with exact tap coordinates`;
-            infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
+            if (layoutText) {
+                infoText += `\n\n📋 Screen Layout (components with tap coordinates in pixels):`;
+                infoText += `\n${layoutText}`;
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — tap element by visible text (preferred)`;
+                infoText += `\n  • tap(testID="id") or tap(component="Name") — tap by testID or component name`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — use tap coordinates from layout above ONLY if text/testID/component tap fails`;
+                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout above`;
+            } else {
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+                infoText += `\n  • android_describe_all — get full UI tree with exact tap coordinates`;
+                infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
+            }
 
             // Check for LogBox overlay (uses default CDP device — native deviceId cannot be mapped to CDP device name)
             try {
