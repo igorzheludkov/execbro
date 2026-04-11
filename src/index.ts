@@ -76,6 +76,7 @@ import {
     suppressReconnection,
     suppressReconnectionForKey,
     clearReconnectionSuppression,
+    purgeStaleConnectionsForPorts,
     // Context health tracking
     getContextHealth,
     // Connection resilience
@@ -137,9 +138,6 @@ import {
     // iOS Element Finding (no screenshots)
     iosFindElement,
     iosWaitForElement,
-    // Debug HTTP Server
-    startDebugHttpServer,
-    getDebugServerPort,
     // Telemetry
     initTelemetry,
     trackToolInvocation,
@@ -461,6 +459,11 @@ registerToolWithTelemetry(
             }
         }
 
+        // Phase 1.5: Purge stale connections for scanned ports
+        // When Metro restarts with a different app, device IDs change.
+        // Old connections remain in connectedApps — remove them before connecting new devices.
+        const purged = purgeStaleConnectionsForPorts(portDevices);
+
         // Phase 2: Assign each device to the best port
         // If a device appears on multiple ports, prefer the port where it has
         // the fewest OTHER unique devices (i.e. its dedicated Metro server)
@@ -500,6 +503,9 @@ registerToolWithTelemetry(
 
         // Phase 3: Connect devices to their assigned ports
         const results: string[] = [];
+        if (purged.length > 0) {
+            results.push(`Purged ${purged.length} stale connection(s): ${purged.join(", ")}`);
+        }
         for (const port of openPorts) {
             const devices = portDevices.get(port);
             if (!devices) {
@@ -4028,34 +4034,44 @@ registerToolWithTelemetry(
         }
     },
     async ({ platform, deviceId }) => {
-        // Call the HTTP endpoint for OCR (allows hot-reload without session restart)
-        // Prefer child process port, fall back to in-process port
-        const port = getDebugServerPort();
-        if (!port) {
-            return {
-                content: [
-                    {
-                        type: "text" as const,
-                        text: "Debug HTTP server not running"
-                    }
-                ],
-                isError: true
-            };
-        }
-
         try {
-            const params = new URLSearchParams({ platform, engine: "auto" });
-            if (deviceId) params.set("deviceId", deviceId);
+            // Take screenshot
+            const screenshotResult = platform === "android"
+                ? await androidScreenshot(undefined, deviceId)
+                : await iosScreenshot(undefined, deviceId);
 
-            const response = await fetch(`http://localhost:${port}/api/ocr?${params}`);
-            const ocrResult = await response.json();
+            if (!screenshotResult.success || !screenshotResult.data) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: `Screenshot failed: ${screenshotResult.error || "No image data"}`
+                        }
+                    ],
+                    isError: true
+                };
+            }
+
+            // Calculate device pixel ratio for iOS
+            const devicePixelRatio =
+                platform === "ios" && screenshotResult.originalWidth && screenshotResult.originalHeight
+                    ? inferIOSDevicePixelRatio(screenshotResult.originalWidth, screenshotResult.originalHeight)
+                    : 1;
+
+            // Run OCR on the screenshot
+            const scaleFactor = screenshotResult.scaleFactor || 1;
+            const ocrResult = await recognizeText(screenshotResult.data, {
+                scaleFactor,
+                platform,
+                devicePixelRatio
+            });
 
             if (!ocrResult.success) {
                 return {
                     content: [
                         {
                             type: "text" as const,
-                            text: `OCR failed: ${ocrResult.error || "Unknown error"}`
+                            text: `OCR failed: no text recognized`
                         }
                     ],
                     isError: true
@@ -4093,25 +4109,20 @@ registerToolWithTelemetry(
                 // Non-fatal: LogBox detection failure should not break OCR
             }
 
-            // Capture screenshot and store in image buffer
+            // Store screenshot in image buffer
             try {
-                const screenshotResult = platform === "android"
-                    ? await androidScreenshot(undefined, deviceId)
-                    : await iosScreenshot(undefined, deviceId);
-                if (screenshotResult.success && screenshotResult.data) {
-                    imageBuffer.add({
-                        id: `ocr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                        image: screenshotResult.data,
-                        timestamp: Date.now(),
-                        source: "ocr_screenshot",
-                        metadata: {
-                            width: screenshotResult.originalWidth || 0,
-                            height: screenshotResult.originalHeight || 0,
-                            scaleFactor: screenshotResult.scaleFactor || 1,
-                            platform,
-                        },
-                    });
-                }
+                imageBuffer.add({
+                    id: `ocr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                    image: screenshotResult.data,
+                    timestamp: Date.now(),
+                    source: "ocr_screenshot",
+                    metadata: {
+                        width: screenshotResult.originalWidth || 0,
+                        height: screenshotResult.originalHeight || 0,
+                        scaleFactor,
+                        platform,
+                    },
+                });
             } catch {
                 // Non-fatal: image buffer write failure should not break OCR response
             }
@@ -4129,7 +4140,7 @@ registerToolWithTelemetry(
                 content: [
                     {
                         type: "text" as const,
-                        text: `OCR request failed: ${error instanceof Error ? error.message : String(error)}`
+                        text: `OCR failed: ${error instanceof Error ? error.message : String(error)}`
                     }
                 ],
                 isError: true
@@ -4609,72 +4620,6 @@ server.registerTool(
     }
 );
 
-// Tool: Get debug server info
-registerToolWithTelemetry(
-    "get_debug_server",
-    {
-        description:
-            "Get the debug HTTP server URL. Use this to find where you can access logs, network requests, and other debug data via HTTP.",
-        inputSchema: {}
-    },
-    async () => {
-        const port = getDebugServerPort();
-
-        if (!port) {
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: "Debug HTTP server is not running."
-                    }
-                ],
-                isError: true
-            };
-        }
-
-        const info = {
-            url: `http://localhost:${port}`,
-            endpoints: {
-                status: `http://localhost:${port}/api/status`,
-                logs: `http://localhost:${port}/api/logs`,
-                network: `http://localhost:${port}/api/network`,
-                bundleErrors: `http://localhost:${port}/api/bundle-errors`,
-                apps: `http://localhost:${port}/api/apps`
-            }
-        };
-
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: `Debug HTTP server running at:\n\n${JSON.stringify(info, null, 2)}`
-                }
-            ]
-        };
-    }
-);
-
-// Tool: Restart HTTP server (hot-reload)
-registerToolWithTelemetry(
-    "restart_http_server",
-    {
-        description:
-            "Note: HTTP server now runs in-process to share state. To apply code changes, restart the MCP session.",
-        inputSchema: {}
-    },
-    async () => {
-        const port = getDebugServerPort();
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: `HTTP server is running in-process on port ${port}. To apply code changes, rebuild with 'npm run build' and restart the MCP session. The in-process mode is required for the dashboard to show logs, network requests, and connected apps.`
-                }
-            ]
-        };
-    }
-);
-
 // Tool: Activate Pro license
 registerToolWithTelemetry(
     "activate_license",
@@ -4718,11 +4663,6 @@ async function main() {
     // License validation is lazy — runs on first tool use via ensureLicense()
     initTelemetry();
     identifyIfDevMode(getInstallationId());
-
-    // Start debug HTTP server in-process (shares state with MCP server)
-    // Note: Child process mode doesn't work because state (logs, network, apps) isn't shared
-    await startDebugHttpServer();
-    console.error("[rn-ai-debugger] HTTP server started in-process");
 
     // --- Eager usage check (pre-loads usage cache for tool-level gate) ---
     const { ensureLicense } = await import("./core/license.js");

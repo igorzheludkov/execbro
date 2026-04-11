@@ -110,6 +110,7 @@ export {
   suppressReconnection,
   suppressReconnectionForKey,
   clearReconnectionSuppression,
+  purgeStaleConnectionsForPorts,
   verifyLogPipeline,
   isHealthCheckMarker,
 } from "./connection.js";
@@ -236,18 +237,6 @@ export {
   getBundleErrors,
   getBundleStatusWithErrors,
 } from "./bundle.js";
-
-// Debug HTTP Server
-export { startDebugHttpServer, getDebugServerPort } from "./httpServer.js";
-
-// HTTP Server Process (for hot-reload)
-export {
-  startHttpServerProcess,
-  stopHttpServerProcess,
-  restartHttpServerProcess,
-  getHttpServerProcessPort,
-  isHttpServerProcessRunning,
-} from "./httpServerProcess.js";
 
 // License & Usage
 export {

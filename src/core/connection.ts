@@ -157,6 +157,53 @@ function getWebSocketStateName(state: number): string {
     }
 }
 
+/**
+ * Purge stale connections for scanned ports.
+ * When Metro restarts with a different app, /json returns new device IDs.
+ * Old connections keyed by the previous device IDs remain in connectedApps.
+ * This function removes connections on scanned ports whose device IDs
+ * are no longer present in the fresh device list from Metro.
+ */
+export function purgeStaleConnectionsForPorts(
+    freshDevicesByPort: Map<number, DeviceInfo[]>
+): string[] {
+    const purged: string[] = [];
+    const scannedPorts = new Set(freshDevicesByPort.keys());
+
+    for (const [appKey, app] of connectedApps.entries()) {
+        // Only check connections on ports we just scanned
+        if (!scannedPorts.has(app.port)) continue;
+
+        const freshDevices = freshDevicesByPort.get(app.port) || [];
+        // Check both device ID and appId — device IDs are per-physical-device
+        // (stable across Metro restarts), so a different app on the same device
+        // would have the same ID but a different appId
+        const matchingDevice = freshDevices.find(d => d.id === app.deviceInfo.id);
+        const stillValid = matchingDevice && matchingDevice.appId === app.deviceInfo.appId;
+
+        if (!stillValid) {
+            const name = app.deviceInfo.deviceName || app.deviceInfo.title;
+            const reason = !matchingDevice
+                ? "device no longer in Metro /json"
+                : `appId changed: ${app.deviceInfo.appId} → ${matchingDevice.appId}`;
+            console.error(`[rn-ai-debugger] Purging stale connection: ${name} (port ${app.port}, id ${app.deviceInfo.id}) — ${reason}`);
+
+            // Suppress reconnection so close handler doesn't try to reconnect
+            reconnectionSuppressed.add(appKey);
+            cancelReconnectionTimer(appKey);
+            clearLastCDPMessageTime(appKey);
+            clearActiveSimulatorIfSource(appKey);
+
+            try { app.ws.close(); } catch { /* ignore */ }
+            connectedApps.delete(appKey);
+
+            purged.push(name);
+        }
+    }
+
+    return purged;
+}
+
 // Format CDP RemoteObject to readable string
 export function formatRemoteObject(result: RemoteObject): string {
     if (result.type === "undefined") {
@@ -762,12 +809,40 @@ export async function connectToDevice(
         const existingApp = connectedApps.get(appKey);
         if (existingApp) {
             if (existingApp.ws.readyState === WebSocket.OPEN) {
-                resolve(`Already connected to ${device.title}`);
-                return;
+                // Verify WebSocket is actually alive with a ping/pong check.
+                // readyState can show OPEN even when the remote end is gone
+                // (TCP hasn't timed out yet, especially after Metro restart).
+                const isAlive = await new Promise<boolean>((pongResolve) => {
+                    const timeout = setTimeout(() => pongResolve(false), 2000);
+                    existingApp.ws.once("pong", () => {
+                        clearTimeout(timeout);
+                        pongResolve(true);
+                    });
+                    try {
+                        existingApp.ws.ping();
+                    } catch {
+                        clearTimeout(timeout);
+                        pongResolve(false);
+                    }
+                });
+
+                if (isAlive) {
+                    resolve(`Already connected to ${device.title}`);
+                    return;
+                }
+
+                // Ping failed — connection is dead, clean up
+                console.error(`[rn-ai-debugger] Existing connection to ${device.title} failed liveness check (no pong), reconnecting`);
+                reconnectionSuppressed.add(appKey);
+                try { existingApp.ws.terminate(); } catch { /* ignore */ }
+                connectedApps.delete(appKey);
+                clearLastCDPMessageTime(appKey);
+                clearActiveSimulatorIfSource(appKey);
+            } else {
+                // WebSocket exists but not OPEN - clean up stale entry
+                console.error(`[rn-ai-debugger] Cleaning up stale connection for ${device.title} (state: ${getWebSocketStateName(existingApp.ws.readyState)})`);
+                connectedApps.delete(appKey);
             }
-            // WebSocket exists but not OPEN - clean up stale entry
-            console.error(`[rn-ai-debugger] Cleaning up stale connection for ${device.title} (state: ${getWebSocketStateName(existingApp.ws.readyState)})`);
-            connectedApps.delete(appKey);
         }
 
         // Skip if this device is already connected on a different port
