@@ -1800,7 +1800,7 @@ registerToolWithTelemetry(
             "- tap(text=\"Submit\") — finds and taps element with matching text\n" +
             "- tap(testID=\"login-btn\") — finds by testID\n" +
             "- tap(component=\"HamburgerIcon\") — finds by React component name\n" +
-            "- tap(x=300, y=600) — taps at pixel coordinates from screenshot (conversion handled internally)\n" +
+            "- tap(x=300, y=600) — taps at pixel coordinates (LAST RESORT — only use if text/testID/component strategies all fail)\n" +
             "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only\n" +
             "- tap(x=300, y=600, native=true, platform=\"android\") — taps directly via ADB/simctl without React Native connection\n\n" +
             "Returns a post-tap screenshot by default (set screenshot=false to disable). " +
@@ -3171,7 +3171,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_screenshot",
     {
-        description: "Take a screenshot from an Android device/emulator. Returns the image data that can be displayed.",
+        description: "Take a screenshot from an Android device/emulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail.",
         inputSchema: {
             outputPath: z
                 .string()
@@ -3861,7 +3861,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_screenshot",
     {
-        description: "Take a screenshot from an iOS simulator. Returns the image data that can be displayed.",
+        description: "Take a screenshot from an iOS simulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail.",
         inputSchema: {
             outputPath: z
                 .string()
