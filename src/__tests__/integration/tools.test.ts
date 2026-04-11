@@ -147,32 +147,31 @@ describe("Tool handlers (integration)", () => {
     });
 
     describe("getScreenLayout", () => {
-        it("returns layout data in JSON format", async () => {
+        it("returns tree-formatted layout by default", async () => {
             server.respondWithValue({
                 totalElements: 2,
                 elements: [
-                    { component: "View", path: "App > View", depth: 1, layout: { width: 375, height: 812 } },
-                    { component: "Text", path: "App > View > Text", depth: 2 },
-                ],
-            });
-            const result = await getScreenLayout({ format: "json" });
-            expect(result.success).toBe(true);
-            expect(result.result).toBeDefined();
-            expect(result.result).toContain("View");
-            expect(result.result).toContain("375");
-        });
-
-        it("returns TONL-formatted layout by default", async () => {
-            server.respondWithValue({
-                totalElements: 1,
-                elements: [
-                    { component: "View", path: "App > View", depth: 1, layout: { width: 375 } },
+                    { component: "HomeScreen", path: "App > HomeScreen", depth: 1, frame: { x: 0, y: 0, width: 375, height: 812 }, originalIndex: 0, parentIndex: -1 },
+                    { component: "ThemedText", path: "HomeScreen > ThemedText", depth: 2, text: "Hello", originalIndex: 1, parentIndex: 0 },
                 ],
             });
             const result = await getScreenLayout();
             expect(result.success).toBe(true);
             expect(result.result).toBeDefined();
-            expect(result.result).toContain("View");
+            expect(result.result).toContain("HomeScreen");
+        });
+
+        it("returns extended layout with styles", async () => {
+            server.respondWithValue({
+                totalElements: 1,
+                elements: [
+                    { component: "View", path: "App > View", depth: 1, frame: { x: 0, y: 0, width: 375, height: 812 }, layout: { flex: 1, backgroundColor: "#fff" }, originalIndex: 0, parentIndex: -1 },
+                ],
+            });
+            const result = await getScreenLayout({ extended: true });
+            expect(result.success).toBe(true);
+            expect(result.result).toBeDefined();
+            expect(result.result).toContain("flex:1");
         });
 
         it("returns summary mode data", async () => {

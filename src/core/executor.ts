@@ -678,7 +678,7 @@ function formatScreenLayoutToTonl(elements: ScreenElement[]): string {
     return lines.join("\n");
 }
 
-function formatScreenLayoutTree(elements: ScreenElement[]): string {
+function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = false): string {
     // Build index: originalIndex -> element index in the filtered array
     const indexMap = new Map<number, number>();
     for (let i = 0; i < elements.length; i++) {
@@ -766,7 +766,10 @@ function formatScreenLayoutTree(elements: ScreenElement[]): string {
         // to avoid repeating children's text on every parent
         const isLeaf = !children.has(idx);
         const textStr = el.text && isLeaf ? ` "${el.text}"` : "";
-        lines.push(`${prefix}${el.component}${frame}${idStr}${textStr}`);
+        const layoutStr = extended && el.layout
+            ? ` {${Object.entries(el.layout).map(([k, v]) => `${k}:${v}`).join("; ")}}`
+            : "";
+        lines.push(`${prefix}${el.component}${frame}${idStr}${textStr}${layoutStr}`);
 
         const kids = children.get(idx);
         if (kids) {
@@ -1082,15 +1085,15 @@ export async function getComponentTree(
  */
 export async function getScreenLayout(
     options: {
-        maxDepth?: number;
-        componentsOnly?: boolean;
-        shortPath?: boolean;
+        extended?: boolean;
         summary?: boolean;
-        format?: "json" | "tonl";
         device?: string;
     } = {}
 ): Promise<ExecutionResult> {
-    const { maxDepth = 5000, componentsOnly = false, shortPath = true, summary = false, format = "tonl", device } = options;
+    const { extended = false, summary = false, device } = options;
+    const maxDepth = 5000;
+    const componentsOnly = true;
+    const shortPath = true;
 
     // --- Step 1: walk fiber tree + dispatch measureInWindow calls ---
     const dispatchExpression = `
@@ -1472,8 +1475,8 @@ export async function getScreenLayout(
 
     const result = await executeInApp(resolveExpression, false, { timeoutMs: 30000 }, device);
 
-    // Apply TONL formatting if requested
-    if (format === "tonl" && result.success && result.result) {
+    // Format output as tree
+    if (result.success && result.result) {
         try {
             const parsed = JSON.parse(result.result);
             if (parsed.components) {
@@ -1481,9 +1484,8 @@ export async function getScreenLayout(
                 const tonl = formatSummaryToTonl(parsed.components, parsed.totalElements);
                 return { success: true, result: tonl };
             } else if (parsed.elements) {
-                // Full element list
-                const tonl = formatScreenLayoutToTonl(parsed.elements);
-                return { success: true, result: tonl };
+                const tree = formatScreenLayoutTree(parsed.elements, extended);
+                return { success: true, result: tree };
             }
         } catch {
             // If parsing fails, return original result
