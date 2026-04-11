@@ -8,11 +8,10 @@
     "react-native-ai-devtools": "./build/index.js"
   },
   "scripts": {
-    "build": "tsc && chmod 755 build/index.js && chmod 755 build/httpServerStandalone.js",
+    "build": "tsc && chmod 755 build/index.js",
     "start": "node build/index.js",
     "dev": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js'",
     "dev:mcp": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js --http'",
-    "http-server": "node build/httpServerStandalone.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
     "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/unit'",
     "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
