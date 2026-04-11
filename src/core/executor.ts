@@ -873,7 +873,7 @@ export async function getComponentTree(
 
             // Find focused screen if requested
             function findFocusedScreen(fiber, depth = 0) {
-                if (!fiber || depth > 200) return null;
+                if (!fiber || depth > 5000) return null;
 
                 const name = getComponentName(fiber);
 
@@ -1605,7 +1605,7 @@ export async function pressElement(options: {
             }
 
             function extractText(fiber, depth) {
-                if (!fiber || depth > 15) return '';
+                if (!fiber || depth > 5000) return '';
                 var parts = [];
                 var props = fiber.memoizedProps;
                 if (props) {
@@ -1874,7 +1874,7 @@ export async function pressElement(options: {
                 var hostFiber = null;
                 var fallbackHost = null;
                 function findHostChild(fiber, depth) {
-                    if (!fiber || depth > 15 || hostFiber) return;
+                    if (!fiber || depth > 5000 || hostFiber) return;
                     if (fiber.tag === 5 && fiber.stateNode) {
                         var hostType = typeof fiber.type === 'string' ? fiber.type : '';
                         if (target.isInput && (hostType.indexOf('TextInput') !== -1 || hostType.indexOf('textinput') !== -1)) {
@@ -2029,7 +2029,7 @@ export async function isInspectorActive(device?: string): Promise<boolean> {
             if (roots.length === 0) return false;
 
             function findComponent(fiber, targetName, depth = 0) {
-                if (!fiber || depth > 100) return null;
+                if (!fiber || depth > 5000) return null;
                 const name = fiber.type?.displayName || fiber.type?.name;
                 if (name === targetName) return fiber;
                 let child = fiber.child;
@@ -2073,28 +2073,29 @@ export async function getInspectorSelection(device?: string): Promise<ExecutionR
             }
             if (roots.length === 0) return { error: 'No fiber roots found.' };
 
-            // Find InspectorPanel component
-            function findComponent(fiber, targetName, depth = 0) {
-                if (!fiber || depth > 100) return null;
+            // Find all InspectorPanel instances (apps with modals may have multiple)
+            function findAllPanels(fiber, targetName, depth, results) {
+                if (!fiber || depth > 5000) return;
                 const name = fiber.type?.displayName || fiber.type?.name;
-                if (name === targetName) return fiber;
+                if (name === targetName) results.push(fiber);
                 let child = fiber.child;
                 while (child) {
-                    const found = findComponent(child, targetName, depth + 1);
-                    if (found) return found;
+                    findAllPanels(child, targetName, depth + 1, results);
                     child = child.sibling;
                 }
-                return null;
             }
 
-            const panelFiber = findComponent(roots[0].current, 'InspectorPanel');
-            if (!panelFiber) {
+            const panels = [];
+            findAllPanels(roots[0].current, 'InspectorPanel', 0, panels);
+            if (panels.length === 0) {
                 return {
                     error: 'Element Inspector is not active.',
                     hint: 'Use toggle_element_inspector to enable the inspector, then tap an element to select it.'
                 };
             }
 
+            // Prefer the panel that has an active selection
+            const panelFiber = panels.find(p => p.memoizedProps.hierarchy?.length > 0) || panels[0];
             const props = panelFiber.memoizedProps;
             if (!props.hierarchy || props.hierarchy.length === 0) {
                 return {

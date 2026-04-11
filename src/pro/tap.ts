@@ -284,7 +284,7 @@ export async function getCurrentScreen(): Promise<string | null> {
             if (roots.length === 0) return null;
 
             function findScreen(fiber, depth) {
-                if (!fiber || depth > 30) return null;
+                if (!fiber || depth > 5000) return null;
                 var name = fiber.type && (fiber.type.displayName || fiber.type.name || (typeof fiber.type === 'string' ? fiber.type : null));
 
                 if (name === 'RNSScreen') {
@@ -316,7 +316,7 @@ export async function getCurrentScreen(): Promise<string | null> {
             }
 
             function findFirstUserComponent(fiber, depth) {
-                if (!fiber || depth > 10) return null;
+                if (!fiber || depth > 5000) return null;
                 var name = fiber.type && (fiber.type.displayName || fiber.type.name);
                 if (name && typeof fiber.type !== 'string') return name;
                 var child = fiber.child;
