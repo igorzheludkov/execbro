@@ -2,7 +2,7 @@ import { connectedApps, imageBuffer } from "../core/state.js";
 import type { ConnectedApp } from "../core/types.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
-import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid, findSimulatorByName } from "../core/ios.js";
+import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid, findSimulatorByName, isIdbAvailable } from "../core/ios.js";
 import { androidTap, androidFindElement, getDefaultAndroidDevice, androidScreenshot } from "../core/android.js";
 import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
@@ -1211,21 +1211,35 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const strategies = getAvailableStrategies(query, strategy);
     const attempted: TapAttempt[] = [];
 
+    // Early IDB check for iOS — fail fast instead of falling through every strategy
+    const IDB_REQUIRED_STRATEGIES = ["accessibility", "ocr", "coordinate"];
+    let idbMissing = false;
+    if (platform === "ios") {
+        idbMissing = !(await isIdbAvailable());
+    }
+
     // Filter strategies by available capabilities
     const filteredStrategies = strategies.filter((strat) => {
         if (strat === "fiber" && !hasMetro) {
             attempted.push({ strategy: "fiber", reason: "Skipped — no Metro connection (required for fiber)" });
             return false;
         }
+        if (idbMissing && IDB_REQUIRED_STRATEGIES.includes(strat)) {
+            attempted.push({ strategy: strat, reason: "Skipped — IDB is not installed (required for iOS tap/accessibility/OCR)" });
+            return false;
+        }
         return true;
     });
 
     if (filteredStrategies.length === 0) {
+        const errorMessage = idbMissing
+            ? "Cannot tap on iOS Simulator — IDB is not installed.\n\nIDB (iOS Development Bridge) is required for tapping, swiping, text input, and accessibility queries on iOS Simulators.\n\nInstall with:\n  brew install idb-companion\n\nVerify with:\n  idb_companion --list 1\n\nAfter installing, retry the tap. See: https://github.com/facebook/idb"
+            : "All strategies require Metro connection, which is unavailable.\n\nTo fix:\n1. Make sure your React Native app is running\n2. Run scan_metro to connect\n3. Or use tap(x, y, native=true) for coordinate-based taps";
         return {
             success: false,
             query,
             attempted,
-            error: "All strategies require Metro connection, which is unavailable.\n\nTo fix:\n1. Make sure your React Native app is running\n2. Run scan_metro to connect\n3. Or use tap(x, y, native=true) for coordinate-based taps",
+            error: errorMessage,
         };
     }
 
