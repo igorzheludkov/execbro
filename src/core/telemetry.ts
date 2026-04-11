@@ -54,6 +54,7 @@ interface TelemetryEvent {
     meaningful?: boolean; // tap verification: did the tap cause visual change?
     changeRate?: number; // tap verification: percentage of pixels changed (0-1)
     tapStrategy?: string; // tap: winning strategy (fiber, ocr, accessibility, coordinate, etc.)
+    iosDriver?: string; // tap: which iOS UI driver was used (idb, axe)
     emptyReason?: string; // get_logs: why the result was empty (no_logs, post_reconnect, pipeline_recovered, pipeline_failed, disconnected)
     properties?: Record<string, string | number | boolean>;
 }
@@ -301,6 +302,7 @@ export function trackToolInvocation(
     meaningful?: boolean,
     changeRate?: number,
     tapStrategy?: string,
+    iosDriver?: string,
     responsePreview?: string,
     emptyReason?: string
 ): void {
@@ -324,6 +326,7 @@ export function trackToolInvocation(
         if (meaningful !== undefined) localEvent.meaningful = meaningful;
         if (changeRate !== undefined) localEvent.changeRate = changeRate;
         if (tapStrategy) localEvent.tapStrategy = tapStrategy;
+        if (iosDriver) localEvent.iosDriver = iosDriver;
         if (emptyReason) localEvent.emptyReason = emptyReason;
         if (responsePreview) localEvent.responsePreview = responsePreview;
         appendFileSync(TELEMETRY_JSONL_PATH, JSON.stringify(localEvent) + "\n");
@@ -385,6 +388,7 @@ export function trackToolInvocation(
     if (meaningful !== undefined) event.meaningful = meaningful;
     if (changeRate !== undefined) event.changeRate = changeRate;
     if (tapStrategy) event.tapStrategy = tapStrategy;
+    if (iosDriver) event.iosDriver = iosDriver;
     if (emptyReason) event.emptyReason = emptyReason;
 
     eventQueue.push(event);

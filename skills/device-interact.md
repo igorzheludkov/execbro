@@ -178,7 +178,7 @@ After interactions, verify the result:
 ## Notes
 
 - Requires the rn-debugger-local MCP server to be running
-- iOS simulator interactions require IDB (`brew install idb-companion`)
+- iOS simulator interactions require IDB (`brew install idb-companion`) or AXe CLI (`brew install cameroncooke/axe/axe`). Set `IOS_DRIVER=axe` env var to use AXe.
 - **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically. Use `native=true` for system UI or non-RN apps
 - On failure, follow the `suggestion` field in the tap response — it tells you exactly what to try next
 - Use `wait_for_element` after navigation to ensure the next screen is ready before interacting

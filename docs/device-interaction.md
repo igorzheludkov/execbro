@@ -2,7 +2,7 @@
 
 Control iOS Simulators and Android devices/emulators — screenshots, tap, swipe, text input, and more.
 
-> **Note:** Many iOS interaction tools (swipe, text input, accessibility queries) require [IDB](https://github.com/facebook/idb). See the [Platform Setup](../README.md#platform-setup) section for installation instructions.
+> **Note:** Many iOS interaction tools (swipe, text input, accessibility queries) require a UI driver — either [IDB](https://github.com/facebook/idb) or [AXe CLI](https://github.com/cameroncooke/AXe). See the [Platform Setup](../README.md#platform-setup) section for installation instructions.
 
 ## Unified `tap` Tool (Recommended)
 
