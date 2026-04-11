@@ -45,13 +45,13 @@ When you use the Tool, anonymous usage data is sent to our telemetry service:
 
 ### How to opt out
 
-Set the environment variable before starting the server:
+Add `RN_DEBUGGER_TELEMETRY` to the `env` field in your MCP server configuration:
 
-```bash
-export RN_DEBUGGER_TELEMETRY=false
+```json
+"env": { "RN_DEBUGGER_TELEMETRY": "false" }
 ```
 
-Also accepts `0` or `off`. Telemetry is fully disabled before any data is sent.
+Also accepts `"0"` or `"off"`. Telemetry is fully disabled before any data is sent.
 
 ## 2. Auto-Registration & Device Fingerprinting
 
@@ -87,10 +87,10 @@ Registration data is stored in **Google Firebase Firestore**. Each installation 
 
 ### How to opt out
 
-Auto-registration is tied to telemetry. To disable both:
+Auto-registration is tied to telemetry. To disable both, add to your MCP server config:
 
-```bash
-export RN_DEBUGGER_TELEMETRY=false
+```json
+"env": { "RN_DEBUGGER_TELEMETRY": "false" }
 ```
 
 With telemetry disabled, registration does not occur. License validation will still check the local cache but will not create remote records. The Tool defaults to the free tier if no cached license exists.
@@ -211,14 +211,13 @@ API keys embedded in the source code are **write-only tokens** — they cannot b
 
 ## 8. Disabling All External Communication
 
-To run the Tool with zero external data transmission:
+To run the Tool with zero external data transmission, add to your MCP server config:
 
-```bash
-# Disable telemetry and auto-registration
-export RN_DEBUGGER_TELEMETRY=false
-
-# Avoid using ocr_screenshot (or let it fall back to local OCR)
+```json
+"env": { "RN_DEBUGGER_TELEMETRY": "false" }
 ```
+
+`ocr_screenshot` will automatically fall back to local OCR (EasyOCR) when cloud is unavailable.
 
 All debugging tools will continue to work normally — external calls are never required for core functionality. License validation falls back to local cache, then defaults to the free tier.
 

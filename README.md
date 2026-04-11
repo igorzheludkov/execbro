@@ -359,16 +359,19 @@ Registration is fire-and-forget — it never blocks your work, fails silently if
 
 ### Opt-out
 
-To disable telemetry and auto-registration, set the environment variable:
+To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `env` field in your MCP server configuration:
 
-```bash
-export RN_DEBUGGER_TELEMETRY=false
-```
-
-Or inline:
-
-```bash
-RN_DEBUGGER_TELEMETRY=false npx react-native-ai-devtools
+```json
+{
+  "mcpServers": {
+    "rn-debugger": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["react-native-ai-devtools"],
+      "env": { "RN_DEBUGGER_TELEMETRY": "false" }
+    }
+  }
+}
 ```
 
 All debugging tools work normally with telemetry disabled. For the complete privacy policy, see [PRIVACY.md](./PRIVACY.md).
