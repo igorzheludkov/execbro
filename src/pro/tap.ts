@@ -2,7 +2,15 @@ import { connectedApps, imageBuffer } from "../core/state.js";
 import type { ConnectedApp } from "../core/types.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
-import { iosTap, iosFindElement, iosScreenshot, getActiveOrBootedSimulatorUdid, findSimulatorByName, isIdbAvailable } from "../core/ios.js";
+import {
+    iosTap,
+    iosFindElement,
+    iosScreenshot,
+    getActiveOrBootedSimulatorUdid,
+    findSimulatorByName,
+    isUiDriverAvailable,
+    getUiDriverInstallHint
+} from "../core/ios.js";
 import { androidTap, androidFindElement, getDefaultAndroidDevice, androidScreenshot } from "../core/android.js";
 import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
@@ -107,7 +115,10 @@ export interface BurstAnalysis {
 
 const BURST_CHANGE_THRESHOLD = 0.005;
 
-export async function analyzeBurstFrames(frames: Buffer[], options?: { statusBarHeight?: number }): Promise<BurstAnalysis> {
+export async function analyzeBurstFrames(
+    frames: Buffer[],
+    options?: { statusBarHeight?: number }
+): Promise<BurstAnalysis> {
     if (frames.length < 2) {
         return {
             meaningful: false,
@@ -115,7 +126,7 @@ export async function analyzeBurstFrames(frames: Buffer[], options?: { statusBar
             transientChangeDetected: false,
             peakChangeRate: 0,
             peakFrame: 0,
-            framesWithChange: [],
+            framesWithChange: []
         };
     }
 
@@ -145,7 +156,7 @@ export async function analyzeBurstFrames(frames: Buffer[], options?: { statusBar
         transientChangeDetected,
         peakChangeRate,
         peakFrame,
-        framesWithChange,
+        framesWithChange
     };
 }
 
@@ -174,13 +185,13 @@ export interface TapResult {
 // --- Helpers ---
 
 export function buildQuery(options: TapOptions): TapQuery {
-    const query: TapQuery = {};
-    if (options.text !== undefined) query.text = options.text;
-    if (options.testID !== undefined) query.testID = options.testID;
-    if (options.component !== undefined) query.component = options.component;
-    if (options.x !== undefined) query.x = options.x;
-    if (options.y !== undefined) query.y = options.y;
-    return query;
+  const query: TapQuery = {};
+  if (options.text !== undefined) query.text = options.text;
+  if (options.testID !== undefined) query.testID = options.testID;
+  if (options.component !== undefined) query.component = options.component;
+  if (options.x !== undefined) query.x = options.x;
+  if (options.y !== undefined) query.y = options.y;
+  return query;
 }
 
 /**
@@ -189,15 +200,12 @@ export function buildQuery(options: TapOptions): TapQuery {
  * and Cyrillic work fine in Hermes. Only emoji and special Unicode ranges cause issues.
  */
 export function hasProblematicUnicode(text: string): boolean {
-    const emojiPattern =
-        /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{1F900}-\u{1F9FF}]|[\u{200D}]|[\u{20E3}]|[\u{E0020}-\u{E007F}]/u;
-    return emojiPattern.test(text);
+  const emojiPattern =
+      /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{1F900}-\u{1F9FF}]|[\u{200D}]|[\u{20E3}]|[\u{E0020}-\u{E007F}]/u;
+  return emojiPattern.test(text);
 }
 
-export function getAvailableStrategies(
-    query: TapQuery,
-    strategy: TapStrategy
-): string[] {
+export function getAvailableStrategies(query: TapQuery, strategy: TapStrategy): string[] {
     if (query.x !== undefined && query.y !== undefined) {
         return ["coordinate"];
     }
@@ -252,7 +260,7 @@ export function convertScreenshotToTapCoords(
 
     return {
         x: Math.round(deviceX / devicePixelRatio),
-        y: Math.round(deviceY / devicePixelRatio),
+        y: Math.round(deviceY / devicePixelRatio)
     };
 }
 
@@ -260,10 +268,10 @@ export function convertScreenshotToTapCoords(
 export const convertPixelsToPoints = convertScreenshotToTapCoords;
 
 export async function getCurrentScreen(): Promise<string | null> {
-    try {
-        // Note: Uses var instead of let/const because Hermes Runtime.evaluate
-        // sometimes has issues with block-scoped declarations
-        const expression = `(function() {
+  try {
+      // Note: Uses var instead of let/const because Hermes Runtime.evaluate
+      // sometimes has issues with block-scoped declarations
+      const expression = `(function() {
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             if (!hook) return null;
             var roots = [];
@@ -327,14 +335,14 @@ export async function getCurrentScreen(): Promise<string | null> {
             return null;
         })()`;
 
-        const result = await executeInApp(expression, false);
-        if (result.success && result.result && result.result !== "null" && result.result !== "undefined") {
-            return result.result.replace(/^"|"$/g, "");
-        }
-        return null;
-    } catch {
-        return null;
-    }
+      const result = await executeInApp(expression, false);
+      if (result.success && result.result && result.result !== "null" && result.result !== "undefined") {
+          return result.result.replace(/^"|"$/g, "");
+      }
+      return null;
+  } catch {
+      return null;
+  }
 }
 
 export function formatTapSuccess(data: {
@@ -357,7 +365,7 @@ export function formatTapSuccess(data: {
         success: true,
         ...rest,
         ...(verification && { verification }),
-        ...(screenshot && { screenshot }),
+        ...(screenshot && { screenshot })
     };
 }
 
@@ -390,16 +398,16 @@ export function formatTapFailure(data: {
         ...(data.device && { device: data.device }),
         ...(data.verification && { verification: data.verification }),
         ...(data.screenshot && { screenshot: data.screenshot }),
-        ...(warning && { warning }),
+        ...(warning && { warning })
     };
 }
 
 function buildErrorMessage(query: TapQuery): string {
-    const parts: string[] = [];
-    if (query.text) parts.push(`text="${query.text}"`);
-    if (query.testID) parts.push(`testID="${query.testID}"`);
-    if (query.component) parts.push(`component="${query.component}"`);
-    return `No element found matching ${parts.join(", ")}`;
+  const parts: string[] = [];
+  if (query.text) parts.push(`text="${query.text}"`);
+  if (query.testID) parts.push(`testID="${query.testID}"`);
+  if (query.component) parts.push(`component="${query.component}"`);
+  return `No element found matching ${parts.join(", ")}`;
 }
 
 // --- Strategy Result ---
@@ -418,11 +426,7 @@ interface StrategyResult {
 
 // --- Strategy Functions ---
 
-async function tryFiberStrategy(
-    query: TapQuery,
-    index?: number,
-    maxTraversalDepth?: number
-): Promise<StrategyResult> {
+async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number): Promise<StrategyResult> {
     // Retry with increasing depth if the initial traversal finds nothing
     const baseDepth = maxTraversalDepth ?? 15;
     const depthAttempts = [baseDepth];
@@ -457,7 +461,7 @@ async function tryFiberAtDepth(
             testID: query.testID,
             component: query.component,
             index,
-            maxTraversalDepth,
+            maxTraversalDepth
         });
 
         if (!result.success) {
@@ -473,7 +477,7 @@ async function tryFiberAtDepth(
         if (parsed.error) {
             const strategyResult: StrategyResult = {
                 success: false,
-                reason: parsed.error,
+                reason: parsed.error
             };
             if (parsed.matches) {
                 strategyResult.matches = parsed.matches;
@@ -498,22 +502,25 @@ async function tryFiberAtDepth(
                     convertedTo: {
                         x: parsed.nativeTapTarget.x,
                         y: parsed.nativeTapTarget.y,
-                        unit: parsed.nativeTapTarget.unit || "points",
-                    },
+                        unit: parsed.nativeTapTarget.unit || "points"
+                    }
                 };
             }
             return {
                 success: false,
-                reason: `Found ${parsed.pressed} (${elementType}) but could not measure coordinates — falling through to next strategy`,
+                reason: `Found ${parsed.pressed} (${elementType}) but could not measure coordinates — falling through to next strategy`
             };
         }
 
         // All elements now use needsNativeTap — this shouldn't be reached
-        return { success: false, reason: "Unexpected: element did not request native tap" };
+        return {
+            success: false,
+            reason: "Unexpected: element did not request native tap"
+        };
     } catch (err) {
         return {
             success: false,
-            reason: `Fiber strategy error: ${err instanceof Error ? err.message : String(err)}`,
+            reason: `Fiber strategy error: ${err instanceof Error ? err.message : String(err)}`
         };
     }
 }
@@ -529,7 +536,10 @@ async function tryAccessibilityStrategy(
         const hasText = !!query.text;
 
         if (!hasTestID && !hasText) {
-            return { success: false, reason: "No text or testID for accessibility search" };
+            return {
+                success: false,
+                reason: "No text or testID for accessibility search"
+            };
         }
 
         if (platform === "ios") {
@@ -538,39 +548,57 @@ async function tryAccessibilityStrategy(
             let result;
             if (hasTestID && !hasText) {
                 // Try exact identifier match first (testID → accessibilityIdentifier)
-                result = await iosFindElement({
-                    identifier: query.testID,
-                    index,
-                }, udid);
+                result = await iosFindElement(
+                    {
+                        identifier: query.testID,
+                        index
+                    },
+                    udid
+                );
                 // Fall back to identifierContains if exact match fails
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
-                    result = await iosFindElement({
-                        identifierContains: query.testID,
-                        index,
-                    }, udid);
+                    result = await iosFindElement(
+                        {
+                            identifierContains: query.testID,
+                            index
+                        },
+                        udid
+                    );
                 }
                 // Last resort: try labelContains in case testID is reflected in label
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
-                    result = await iosFindElement({
-                        labelContains: query.testID,
-                        index,
-                    }, udid);
+                    result = await iosFindElement(
+                        {
+                            labelContains: query.testID,
+                            index
+                        },
+                        udid
+                    );
                 }
             } else {
                 const searchText = query.text!;
-                result = await iosFindElement({
-                    labelContains: searchText,
-                    index,
-                }, udid);
+                result = await iosFindElement(
+                    {
+                        labelContains: searchText,
+                        index
+                    },
+                    udid
+                );
             }
 
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
-                return { success: false, reason: result.error ?? "No iOS accessibility match" };
+                return {
+                    success: false,
+                    reason: result.error ?? "No iOS accessibility match"
+                };
             }
 
             const match = result.allMatches[index ?? 0];
             if (!match) {
-                return { success: false, reason: `Index ${index} out of bounds (${result.allMatches.length} matches)` };
+                return {
+                    success: false,
+                    reason: `Index ${index} out of bounds (${result.allMatches.length} matches)`
+                };
             }
 
             await iosTap(match.center.x, match.center.y, { udid });
@@ -581,7 +609,7 @@ async function tryAccessibilityStrategy(
                 pressed: match.label || match.type,
                 text: match.label || undefined,
                 component: match.type || null,
-                convertedTo: { x: match.center.x, y: match.center.y, unit: "points" },
+                convertedTo: { x: match.center.x, y: match.center.y, unit: "points" }
             };
         } else {
             // Android: testID maps to resource-id, text maps to text content
@@ -602,21 +630,26 @@ async function tryAccessibilityStrategy(
 
             // If testID search via resourceId failed, try contentDescContains
             // (older RN versions map testID to content-description)
-            if (hasTestID && !hasText &&
-                (!result.success || !result.allMatches || result.allMatches.length === 0)) {
+            if (hasTestID && !hasText && (!result.success || !result.allMatches || result.allMatches.length === 0)) {
                 result = await androidFindElement({
                     contentDescContains: query.testID,
-                    index,
+                    index
                 });
             }
 
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
-                return { success: false, reason: result.error ?? "No Android accessibility match" };
+                return {
+                    success: false,
+                    reason: result.error ?? "No Android accessibility match"
+                };
             }
 
             const match = result.allMatches[index ?? 0];
             if (!match) {
-                return { success: false, reason: `Index ${index} out of bounds (${result.allMatches.length} matches)` };
+                return {
+                    success: false,
+                    reason: `Index ${index} out of bounds (${result.allMatches.length} matches)`
+                };
             }
 
             await androidTap(match.center.x, match.center.y);
@@ -627,22 +660,18 @@ async function tryAccessibilityStrategy(
                 pressed: match.text || match.className || undefined,
                 text: match.text || undefined,
                 component: match.className || undefined,
-                convertedTo: { x: match.center.x, y: match.center.y, unit: "pixels" },
+                convertedTo: { x: match.center.x, y: match.center.y, unit: "pixels" }
             };
         }
     } catch (err) {
         return {
             success: false,
-            reason: `Accessibility strategy error: ${err instanceof Error ? err.message : String(err)}`,
+            reason: `Accessibility strategy error: ${err instanceof Error ? err.message : String(err)}`
         };
     }
 }
 
-async function tryOcrStrategy(
-    query: TapQuery,
-    platform: "ios" | "android",
-    udid?: string
-): Promise<StrategyResult> {
+async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string): Promise<StrategyResult> {
     try {
         const searchText = query.text;
         if (!searchText) {
@@ -655,7 +684,10 @@ async function tryOcrStrategy(
         if (platform === "ios") {
             const screenshot = await iosScreenshot(undefined, udid);
             if (!screenshot.success || !screenshot.data) {
-                return { success: false, reason: "Failed to capture iOS screenshot for OCR" };
+                return {
+                    success: false,
+                    reason: "Failed to capture iOS screenshot for OCR"
+                };
             }
             imageBuffer = screenshot.data;
             scaleFactor = screenshot.scaleFactor ?? 1;
@@ -663,7 +695,10 @@ async function tryOcrStrategy(
             const { androidScreenshot } = await import("../core/android.js");
             const screenshot = await androidScreenshot();
             if (!screenshot.success || !screenshot.data) {
-                return { success: false, reason: "Failed to capture Android screenshot for OCR" };
+                return {
+                    success: false,
+                    reason: "Failed to capture Android screenshot for OCR"
+                };
             }
             imageBuffer = screenshot.data;
             scaleFactor = screenshot.scaleFactor ?? 1;
@@ -672,18 +707,19 @@ async function tryOcrStrategy(
         const { recognizeText } = await import("../core/ocr.js");
         const ocrResult = await recognizeText(imageBuffer, {
             scaleFactor,
-            platform,
+            platform
         });
 
         const lowerSearch = searchText.toLowerCase();
-        const matchingWord = ocrResult.words.find(
-            (w) => w.text.toLowerCase() === lowerSearch
-        ) || ocrResult.words.find(
-            (w) => w.text.toLowerCase().includes(lowerSearch)
-        );
+        const matchingWord =
+            ocrResult.words.find((w) => w.text.toLowerCase() === lowerSearch) ||
+            ocrResult.words.find((w) => w.text.toLowerCase().includes(lowerSearch));
 
         if (!matchingWord) {
-            return { success: false, reason: `OCR did not find text "${searchText}" on screen` };
+            return {
+                success: false,
+                reason: `OCR did not find text "${searchText}" on screen`
+            };
         }
 
         if (platform === "ios") {
@@ -696,7 +732,10 @@ async function tryOcrStrategy(
                 { udid }
             );
             if (!tapResult.success) {
-                return { success: false, reason: `OCR found "${matchingWord.text}" but tap failed: ${tapResult.error}` };
+                return {
+                    success: false,
+                    reason: `OCR found "${matchingWord.text}" but tap failed: ${tapResult.error}`
+                };
             }
         } else {
             // Android: image-pixel → device-pixel (undo downscale), ADB accepts pixels
@@ -713,13 +752,13 @@ async function tryOcrStrategy(
             convertedTo: {
                 x: matchingWord.tapCenter.x,
                 y: matchingWord.tapCenter.y,
-                unit: "pixels",
-            },
+                unit: "pixels"
+            }
         };
     } catch (err) {
         return {
             success: false,
-            reason: `OCR strategy error: ${err instanceof Error ? err.message : String(err)}`,
+            reason: `OCR strategy error: ${err instanceof Error ? err.message : String(err)}`
         };
     }
 }
@@ -728,7 +767,11 @@ async function tryCoordinateStrategy(
     pixelX: number,
     pixelY: number,
     platform: "ios" | "android",
-    lastScreenshot?: { originalWidth: number; originalHeight: number; scaleFactor: number },
+    lastScreenshot?: {
+        originalWidth: number;
+        originalHeight: number;
+        scaleFactor: number;
+    },
     udid?: string
 ): Promise<StrategyResult> {
     try {
@@ -740,7 +783,10 @@ async function tryCoordinateStrategy(
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
             const tapResult = await iosTap(converted.x, converted.y, { udid });
             if (!tapResult.success) {
-                return { success: false, reason: `Coordinate tap failed: ${tapResult.error}` };
+                return {
+                    success: false,
+                    reason: `Coordinate tap failed: ${tapResult.error}`
+                };
             }
 
             // Best-effort: identify what was tapped via fiber tree
@@ -754,7 +800,7 @@ async function tryCoordinateStrategy(
                 success: true,
                 reason: "Tapped at coordinates (iOS)",
                 screen,
-                convertedTo: { x: converted.x, y: converted.y, unit: "points" },
+                convertedTo: { x: converted.x, y: converted.y, unit: "points" }
             };
         } else {
             const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
@@ -772,13 +818,13 @@ async function tryCoordinateStrategy(
                 success: true,
                 reason: "Tapped at coordinates (Android)",
                 screen,
-                convertedTo: { x: converted.x, y: converted.y, unit: "pixels" },
+                convertedTo: { x: converted.x, y: converted.y, unit: "pixels" }
             };
         }
     } catch (err) {
         return {
             success: false,
-            reason: `Coordinate strategy error: ${err instanceof Error ? err.message : String(err)}`,
+            reason: `Coordinate strategy error: ${err instanceof Error ? err.message : String(err)}`
         };
     }
 }
@@ -790,18 +836,21 @@ const MAX_STRATEGY_MS: Record<string, number> = {
     fiber: 5000,
     accessibility: 3000,
     ocr: 5000,
-    coordinate: 3000,
+    coordinate: 3000
 };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(
-            () => reject(new Error(`${label} timed out after ${ms}ms`)),
-            ms
-        );
+        const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
         promise.then(
-            (val) => { clearTimeout(timer); resolve(val); },
-            (err) => { clearTimeout(timer); reject(err); }
+            (val) => {
+                clearTimeout(timer);
+                resolve(val);
+            },
+            (err) => {
+                clearTimeout(timer);
+                reject(err);
+            }
         );
     });
 }
@@ -809,16 +858,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 async function captureScreenshot(
     platform: "ios" | "android",
     udid?: string
-): Promise<{ buffer: Buffer; width: number; height: number; scaleFactor: number } | null> {
+): Promise<{
+    buffer: Buffer;
+    width: number;
+    height: number;
+    scaleFactor: number;
+} | null> {
     try {
-        const result =
-            platform === "ios" ? await iosScreenshot(undefined, udid) : await androidScreenshot();
+        const result = platform === "ios" ? await iosScreenshot(undefined, udid) : await androidScreenshot();
         if (!result.success || !result.data) return null;
         return {
             buffer: result.data,
             width: result.originalWidth || 0,
             height: result.originalHeight || 0,
-            scaleFactor: result.scaleFactor || 1,
+            scaleFactor: result.scaleFactor || 1
         };
     } catch {
         return null;
@@ -826,7 +879,7 @@ async function captureScreenshot(
 }
 
 function screenshotToBase64(buffer: Buffer): string {
-    return buffer.toString("base64");
+  return buffer.toString("base64");
 }
 
 async function verifyAndCapture(
@@ -848,7 +901,7 @@ async function verifyAndCapture(
         image: screenshotToBase64(after.buffer),
         width: after.width,
         height: after.height,
-        scaleFactor: after.scaleFactor,
+        scaleFactor: after.scaleFactor
     };
 
     let verification: TapVerification | undefined;
@@ -857,7 +910,9 @@ async function verifyAndCapture(
             const rawStatusBar = platform === "ios" ? 177 : 142; // pixels in original screenshot space
             const scale = beforeScaleFactor || after.scaleFactor || 1;
             const statusBarHeight = Math.round(rawStatusBar / scale);
-            const diff = await compareScreenshots(beforeBuffer, after.buffer, { statusBarHeight });
+            const diff = await compareScreenshots(beforeBuffer, after.buffer, {
+                statusBarHeight
+            });
             verification = {
                 meaningful: diff.changed,
                 changeRate: diff.changeRate,
@@ -867,8 +922,8 @@ async function verifyAndCapture(
                     meaningful: diff.changed,
                     changeRate: diff.changeRate,
                     changedPixels: diff.changedPixels,
-                    totalPixels: diff.totalPixels,
-                }),
+                    totalPixels: diff.totalPixels
+                })
             };
         } catch {
             // Diff failed — still return the screenshot
@@ -883,7 +938,7 @@ async function verifyAndCapture(
             timestamp: Date.now(),
             source: "tap-verify",
             groupId: verifyGroupId,
-            metadata: { phase: "before" },
+            metadata: { phase: "before" }
         });
     }
     imageBuffer.add({
@@ -892,7 +947,7 @@ async function verifyAndCapture(
         timestamp: Date.now(),
         source: "tap-verify",
         groupId: verifyGroupId,
-        metadata: { phase: "after", changeRate: verification?.changeRate },
+        metadata: { phase: "after", changeRate: verification?.changeRate }
     });
 
     return { screenshot, verification };
@@ -940,8 +995,8 @@ async function burstCaptureAndVerify(
             metadata: {
                 frameIndex: i,
                 isBefore: i === 0,
-                changeRate: i === 0 ? 0 : (analysis.framesWithChange.includes(i) ? analysis.peakChangeRate : 0),
-            },
+                changeRate: i === 0 ? 0 : analysis.framesWithChange.includes(i) ? analysis.peakChangeRate : 0
+            }
         });
     }
 
@@ -956,8 +1011,8 @@ async function burstCaptureAndVerify(
             peakFrame: analysis.peakFrame,
             framesWithChange: analysis.framesWithChange,
             transientChangeDetected: analysis.transientChangeDetected,
-            persistentChangeRate: analysis.persistentChangeRate,
-        },
+            persistentChangeRate: analysis.persistentChangeRate
+        }
     });
 
     // Get dimensions from the last frame using sharp
@@ -967,7 +1022,7 @@ async function burstCaptureAndVerify(
         image: screenshotToBase64(frames[frames.length - 1]),
         width: meta.width || 0,
         height: meta.height || 0,
-        scaleFactor: 1,
+        scaleFactor: 1
     };
 
     const verification: TapVerification = {
@@ -986,8 +1041,8 @@ async function burstCaptureAndVerify(
             totalPixels: 0,
             transientChangeDetected: analysis.transientChangeDetected,
             peakChangeRate: analysis.peakChangeRate,
-            peakFrame: analysis.peakFrame,
-        }),
+            peakFrame: analysis.peakFrame
+        })
     };
 
     return { screenshot, verification };
@@ -1011,7 +1066,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return {
             success: false,
             query,
-            error: "Must provide at least one of: text, testID, component, or x/y coordinates",
+            error: "Must provide at least one of: text, testID, component, or x/y coordinates"
         };
     }
 
@@ -1019,7 +1074,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return {
             success: false,
             query,
-            error: "Both x and y coordinates must be provided",
+            error: "Both x and y coordinates must be provided"
         };
     }
 
@@ -1032,13 +1087,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         if (!platform) {
             const [androidDevice, iosSimulator] = await Promise.all([
                 getDefaultAndroidDevice().catch(() => null),
-                getActiveOrBootedSimulatorUdid().catch(() => null),
+                getActiveOrBootedSimulatorUdid().catch(() => null)
             ]);
             if (androidDevice && iosSimulator) {
                 return {
                     success: false,
                     query,
-                    error: "Multiple platforms detected (both Android and iOS). Specify platform: \"android\" or platform: \"ios\" to target the correct device.",
+                    error: 'Multiple platforms detected (both Android and iOS). Specify platform: "android" or platform: "ios" to target the correct device.'
                 };
             }
             if (androidDevice) {
@@ -1050,7 +1105,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 return {
                     success: false,
                     query,
-                    error: "No Android device or iOS simulator found. Connect a device or start a simulator.",
+                    error: "No Android device or iOS simulator found. Connect a device or start a simulator."
                 };
             }
         } else if (platform === "ios") {
@@ -1068,7 +1123,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 nativeScreenshotMeta = {
                     originalWidth: before.width,
                     originalHeight: before.height,
-                    scaleFactor: before.scaleFactor,
+                    scaleFactor: before.scaleFactor
                 };
             }
         }
@@ -1080,7 +1135,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 nativeScreenshotMeta = {
                     originalWidth: ref.width,
                     originalHeight: ref.height,
-                    scaleFactor: ref.scaleFactor,
+                    scaleFactor: ref.scaleFactor
                 };
                 // Also use it for verification if buffer is needed
                 if (!nativeBeforeBuffer) {
@@ -1099,15 +1154,25 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         } catch (err) {
             return formatTapFailure({
                 query,
-                attempted: [{ strategy: "native-coordinate", reason: err instanceof Error ? err.message : String(err) }],
-                suggestion: `Tap timed out. Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) and retry with coordinates.`,
+                attempted: [
+                    {
+                        strategy: "native-coordinate",
+                        reason: err instanceof Error ? err.message : String(err)
+                    }
+                ],
+                suggestion: `Tap timed out. Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) and retry with coordinates.`
             });
         }
         if (result.success) {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             if (options.burst && nativeShouldVerify && nativeBeforeBuffer) {
-                ({ screenshot, verification } = await burstCaptureAndVerify(platform, nativeBeforeBuffer, nativeUdid, nativeScreenshotMeta?.scaleFactor));
+                ({ screenshot, verification } = await burstCaptureAndVerify(
+                    platform,
+                    nativeBeforeBuffer,
+                    nativeUdid,
+                    nativeScreenshotMeta?.scaleFactor
+                ));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
                     platform,
@@ -1125,13 +1190,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 convertedTo: result.convertedTo,
                 platform,
                 screenshot,
-                verification,
+                verification
             });
         }
         return formatTapFailure({
             query,
             attempted: [{ strategy: "native-coordinate", reason: result.reason }],
-            suggestion: `Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) to verify coordinates.`,
+            suggestion: `Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) to verify coordinates.`
         });
     }
 
@@ -1140,24 +1205,28 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     let hasMetro = allApps.length > 0;
     // If platform is specified, prefer an app matching that platform
     let app: ConnectedApp | undefined = options.platform
-        ? allApps.find((a) => a.platform === options.platform) ?? allApps[0]
+        ? (allApps.find((a) => a.platform === options.platform) ?? allApps[0])
         : allApps[0];
 
     // Try to auto-connect to Metro (for fiber strategy), but don't fail if it doesn't work
     if (!hasMetro) {
         try {
-            await withTimeout((async () => {
-                clearReconnectionSuppression();
-                const openPorts = await scanMetroPorts();
-                for (const port of openPorts) {
-                    const devices = await fetchDevices(port);
-                    const mainDevice = selectMainDevice(devices);
-                    if (mainDevice) {
-                        await connectToDevice(mainDevice, port);
-                        break;
+            await withTimeout(
+                (async () => {
+                    clearReconnectionSuppression();
+                    const openPorts = await scanMetroPorts();
+                    for (const port of openPorts) {
+                        const devices = await fetchDevices(port);
+                        const mainDevice = selectMainDevice(devices);
+                        if (mainDevice) {
+                            await connectToDevice(mainDevice, port);
+                            break;
+                        }
                     }
-                }
-            })(), Math.min(remainingMs(), 3000), "auto-connect");
+                })(),
+                Math.min(remainingMs(), 3000),
+                "auto-connect"
+            );
             const apps = Array.from(connectedApps.values());
             hasMetro = apps.length > 0;
             app = apps[0];
@@ -1175,13 +1244,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             // No Metro — detect from available devices
             const [androidDevice, iosSimulator] = await Promise.all([
                 getDefaultAndroidDevice().catch(() => null),
-                getActiveOrBootedSimulatorUdid().catch(() => null),
+                getActiveOrBootedSimulatorUdid().catch(() => null)
             ]);
             if (androidDevice && iosSimulator) {
                 return {
                     success: false,
                     query,
-                    error: "Both iOS and Android devices detected but no Metro connection. Specify platform=\"ios\" or platform=\"android\".",
+                    error: 'Both iOS and Android devices detected but no Metro connection. Specify platform="ios" or platform="android".'
                 };
             }
             if (androidDevice) platform = "android";
@@ -1193,7 +1262,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return {
             success: false,
             query,
-            error: "No devices found. Boot a simulator or connect an Android device.",
+            error: "No devices found. Boot a simulator or connect an Android device."
         };
     }
 
@@ -1201,8 +1270,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // This ensures taps go to the correct device when multiple simulators are booted
     let targetUdid: string | undefined;
     if (platform === "ios") {
-        targetUdid = app?.simulatorUdid
-            ?? ((app?.deviceInfo?.deviceName ? (await findSimulatorByName(app.deviceInfo.deviceName)) : null) ?? undefined);
+        targetUdid =
+            app?.simulatorUdid ??
+            (app?.deviceInfo?.deviceName ? await findSimulatorByName(app.deviceInfo.deviceName) : null) ??
+            undefined;
     }
 
     const deviceName = app?.deviceInfo?.deviceName;
@@ -1211,35 +1282,41 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const strategies = getAvailableStrategies(query, strategy);
     const attempted: TapAttempt[] = [];
 
-    // Early IDB check for iOS — fail fast instead of falling through every strategy
-    const IDB_REQUIRED_STRATEGIES = ["accessibility", "ocr", "coordinate"];
-    let idbMissing = false;
+    // Early UI driver check for iOS — fail fast instead of falling through every strategy
+    const UI_DRIVER_REQUIRED_STRATEGIES = ["accessibility", "ocr", "coordinate"];
+    let uiDriverMissing = false;
     if (platform === "ios") {
-        idbMissing = !(await isIdbAvailable());
+        uiDriverMissing = !(await isUiDriverAvailable());
     }
 
     // Filter strategies by available capabilities
     const filteredStrategies = strategies.filter((strat) => {
         if (strat === "fiber" && !hasMetro) {
-            attempted.push({ strategy: "fiber", reason: "Skipped — no Metro connection (required for fiber)" });
+            attempted.push({
+                strategy: "fiber",
+                reason: "Skipped — no Metro connection (required for fiber)"
+            });
             return false;
         }
-        if (idbMissing && IDB_REQUIRED_STRATEGIES.includes(strat)) {
-            attempted.push({ strategy: strat, reason: "Skipped — IDB is not installed (required for iOS tap/accessibility/OCR)" });
+        if (uiDriverMissing && UI_DRIVER_REQUIRED_STRATEGIES.includes(strat)) {
+            attempted.push({
+                strategy: strat,
+                reason: "Skipped — iOS UI driver is not installed (required for iOS tap/accessibility/OCR)"
+            });
             return false;
         }
         return true;
     });
 
     if (filteredStrategies.length === 0) {
-        const errorMessage = idbMissing
-            ? "Cannot tap on iOS Simulator — IDB is not installed.\n\nIDB (iOS Development Bridge) is required for tapping, swiping, text input, and accessibility queries on iOS Simulators.\n\nInstall with:\n  brew install idb-companion\n\nVerify with:\n  idb_companion --list 1\n\nAfter installing, retry the tap. See: https://github.com/facebook/idb"
+        const errorMessage = uiDriverMissing
+            ? `Cannot tap on iOS Simulator — ${getUiDriverInstallHint()}\n\nThe iOS UI driver is required for tapping, swiping, text input, and accessibility queries on iOS Simulators.\n\nAfter installing, retry the tap.`
             : "All strategies require Metro connection, which is unavailable.\n\nTo fix:\n1. Make sure your React Native app is running\n2. Run scan_metro to connect\n3. Or use tap(x, y, native=true) for coordinate-based taps";
         return {
             success: false,
             query,
             attempted,
-            error: errorMessage,
+            error: errorMessage
         };
     }
 
@@ -1262,7 +1339,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     for (const strat of filteredStrategies) {
         const remaining = remainingMs();
         if (remaining < MIN_STRATEGY_BUDGET_MS) {
-            attempted.push({ strategy: strat, reason: `Skipped — only ${remaining}ms remaining (budget ${TAP_TIMEOUT_MS}ms)` });
+            attempted.push({
+                strategy: strat,
+                reason: `Skipped — only ${remaining}ms remaining (budget ${TAP_TIMEOUT_MS}ms)`
+            });
             continue;
         }
 
@@ -1277,7 +1357,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth), budget, `fiber`);
                     break;
                 case "accessibility":
-                    result = await withTimeout(tryAccessibilityStrategy(query, index, platform, targetUdid), budget, `accessibility`);
+                    result = await withTimeout(
+                        tryAccessibilityStrategy(query, index, platform, targetUdid),
+                        budget,
+                        `accessibility`
+                    );
                     break;
                 case "ocr":
                     result = await withTimeout(tryOcrStrategy(query, platform, targetUdid), budget, `ocr`);
@@ -1293,7 +1377,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     result = { success: false, reason: `Unknown strategy: ${strat}` };
             }
         } catch (err) {
-            attempted.push({ strategy: strat, reason: err instanceof Error ? err.message : String(err) });
+            attempted.push({
+                strategy: strat,
+                reason: err instanceof Error ? err.message : String(err)
+            });
             continue;
         }
 
@@ -1301,7 +1388,12 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             if (options.burst && canVerify && beforeBuffer) {
-                ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid, beforeScaleFactor));
+                ({ screenshot, verification } = await burstCaptureAndVerify(
+                    platform,
+                    beforeBuffer,
+                    targetUdid,
+                    beforeScaleFactor
+                ));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
                     platform,
@@ -1316,7 +1408,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 app.lastScreenshot = {
                     originalWidth: screenshot.width,
                     originalHeight: screenshot.height,
-                    scaleFactor: screenshot.scaleFactor,
+                    scaleFactor: screenshot.scaleFactor
                 };
             }
             return formatTapSuccess({
@@ -1331,7 +1423,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 platform,
                 device: deviceName,
                 screenshot,
-                verification,
+                verification
             });
         }
 
@@ -1350,16 +1442,18 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     const { androidGetDensity } = await import("../core/android.js");
                     const densityResult = await androidGetDensity();
                     const densityScale = (densityResult.density || 420) / 160;
-                    await androidTap(
-                        Math.round(coords.x * densityScale),
-                        Math.round(coords.y * densityScale)
-                    );
+                    await androidTap(Math.round(coords.x * densityScale), Math.round(coords.y * densityScale));
                 }
                 // fiber+native uses native tap — always verify
                 let screenshot: TapScreenshot | undefined;
                 let verification: TapVerification | undefined;
                 if (options.burst && canVerify && beforeBuffer) {
-                    ({ screenshot, verification } = await burstCaptureAndVerify(platform, beforeBuffer, targetUdid, beforeScaleFactor));
+                    ({ screenshot, verification } = await burstCaptureAndVerify(
+                        platform,
+                        beforeBuffer,
+                        targetUdid,
+                        beforeScaleFactor
+                    ));
                 } else {
                     ({ screenshot, verification } = await verifyAndCapture(
                         platform,
@@ -1374,7 +1468,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     app.lastScreenshot = {
                         originalWidth: screenshot.width,
                         originalHeight: screenshot.height,
-                        scaleFactor: screenshot.scaleFactor,
+                        scaleFactor: screenshot.scaleFactor
                     };
                 }
                 return formatTapSuccess({
@@ -1388,7 +1482,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     platform,
                     device: deviceName,
                     screenshot,
-                    verification,
+                    verification
                 });
             } catch {
                 // Native tap at fiber coordinates failed — continue to next strategy
@@ -1404,7 +1498,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 app.lastScreenshot = {
                     originalWidth: matchScreenshot.width,
                     originalHeight: matchScreenshot.height,
-                    scaleFactor: matchScreenshot.scaleFactor,
+                    scaleFactor: matchScreenshot.scaleFactor
                 };
             }
             return formatTapFailure({
@@ -1413,14 +1507,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 suggestion: `Found ${result.matches.length} match(es) — specify index to select one`,
                 device: deviceName,
                 matches: result.matches,
-                screenshot: matchScreenshot,
+                screenshot: matchScreenshot
             });
         }
     }
 
     // All strategies failed — check if timeout was the cause
-    const timedOut = attempted.some(a => a.reason.includes("timed out"));
-    const skipped = attempted.some(a => a.reason.includes("Skipped"));
+    const timedOut = attempted.some((a) => a.reason.includes("timed out"));
+    const skipped = attempted.some((a) => a.reason.includes("Skipped"));
     const hitTimeout = timedOut || skipped;
     const elapsed = TAP_TIMEOUT_MS - remainingMs();
 
@@ -1432,26 +1526,20 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         app.lastScreenshot = {
             originalWidth: failScreenshot.width,
             originalHeight: failScreenshot.height,
-            scaleFactor: failScreenshot.scaleFactor,
+            scaleFactor: failScreenshot.scaleFactor
         };
     }
     return formatTapFailure({
         query,
         attempted,
-        error: hitTimeout
-            ? `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)`
-            : undefined,
+        error: hitTimeout ? `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)` : undefined,
         suggestion,
         device: deviceName,
-        screenshot: failScreenshot,
+        screenshot: failScreenshot
     });
 }
 
-function buildSuggestion(
-    query: TapQuery,
-    triedStrategies: string[],
-    platform: string
-): string {
+function buildSuggestion(query: TapQuery, triedStrategies: string[], platform: string): string {
     const suggestions: string[] = [];
 
     if (!triedStrategies.includes("ocr") && query.text) {
@@ -1459,9 +1547,7 @@ function buildSuggestion(
     }
 
     if (query.text && query.text.length <= 2) {
-        suggestions.push(
-            "Very short text is unreliable for OCR — use testID or coordinates instead"
-        );
+        suggestions.push("Very short text is unreliable for OCR — use testID or coordinates instead");
     }
 
     if (query.text && hasProblematicUnicode(query.text)) {
@@ -1482,7 +1568,7 @@ function buildSuggestion(
 
     suggestions.push(
         `Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) ` +
-        "to verify the element is visible, then use x/y coordinates"
+            "to verify the element is visible, then use x/y coordinates"
     );
 
     return suggestions.join(". ");

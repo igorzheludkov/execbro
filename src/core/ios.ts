@@ -15,8 +15,20 @@ const SIMCTL_TIMEOUT = 30000;
 // IDB command timeout in milliseconds
 const IDB_TIMEOUT = 30000;
 
+// AXe command timeout in milliseconds
+const AXE_TIMEOUT = 30000;
+
+// iOS UI driver type — controlled by IOS_DRIVER env var
+type IOSDriverType = "idb" | "axe";
+
 // Valid button types for IDB ui button command
-export const IOS_BUTTON_TYPES = ["HOME", "LOCK", "SIDE_BUTTON", "SIRI", "APPLE_PAY"] as const;
+export const IOS_BUTTON_TYPES = [
+  "HOME",
+  "LOCK",
+  "SIDE_BUTTON",
+  "SIRI",
+  "APPLE_PAY",
+] as const;
 export type iOSButtonType = (typeof IOS_BUTTON_TYPES)[number];
 
 // Track connected IDB simulators to avoid redundant connect calls
@@ -27,268 +39,423 @@ const connectedIdbSimulators = new Set<string>();
  * Supports IDB_PATH environment variable for custom installations
  */
 function getIdbPath(): string {
-    return process.env.IDB_PATH || "idb";
+  return process.env.IDB_PATH || "idb";
+}
+
+/**
+ * Get the active iOS UI driver.
+ * Set IOS_DRIVER=axe in MCP server env to use AXe CLI instead of IDB.
+ */
+function getIosDriver(): IOSDriverType {
+  const driver = process.env.IOS_DRIVER?.toLowerCase();
+  if (driver === "axe") return "axe";
+  return "idb";
+}
+
+/**
+ * Get the AXe executable path.
+ * Supports AXE_PATH environment variable for custom installations.
+ */
+function getAxePath(): string {
+  return process.env.AXE_PATH || "axe";
+}
+
+/**
+ * Run AXe command with execFile (no shell) for proper argument handling.
+ */
+async function runAxe(
+  ...args: string[]
+): Promise<{ stdout: string; stderr: string }> {
+  const axePath = getAxePath();
+  const { stdout, stderr } = await execFileAsync(axePath, args, {
+    timeout: AXE_TIMEOUT,
+  });
+  return {
+    stdout: stdout.trim(),
+    stderr: stderr.trim(),
+  };
 }
 
 /**
  * Run IDB command with execFile (no shell) for proper argument handling
  * This matches the original ios-simulator-mcp implementation
  */
-async function runIdb(...args: string[]): Promise<{ stdout: string; stderr: string }> {
-    const idbPath = getIdbPath();
-    const { stdout, stderr } = await execFileAsync(idbPath, args, {
-        timeout: IDB_TIMEOUT
-    });
-    return {
-        stdout: stdout.trim(),
-        stderr: stderr.trim()
-    };
+async function runIdb(
+  ...args: string[]
+): Promise<{ stdout: string; stderr: string }> {
+  const idbPath = getIdbPath();
+  const { stdout, stderr } = await execFileAsync(idbPath, args, {
+    timeout: IDB_TIMEOUT,
+  });
+  return {
+    stdout: stdout.trim(),
+    stderr: stderr.trim(),
+  };
 }
 
 /**
  * Check if IDB is available
  */
 export async function isIdbAvailable(): Promise<boolean> {
-    try {
-        await runIdb("--help");
-        return true;
-    } catch {
-        return false;
-    }
+  try {
+    await runIdb("--help");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if AXe CLI is available
+ */
+export async function isAxeAvailable(): Promise<boolean> {
+  try {
+    await runAxe("--version");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if the active iOS UI driver is available.
+ * Used by tap.ts for early fail-fast checks.
+ */
+export async function isUiDriverAvailable(): Promise<boolean> {
+  const driver = getIosDriver();
+  return driver === "axe" ? isAxeAvailable() : isIdbAvailable();
+}
+
+/**
+ * Get install instructions for the active iOS UI driver.
+ */
+export function getUiDriverInstallHint(): string {
+  const driver = getIosDriver();
+  if (driver === "axe") {
+    return "AXe is not installed. Install with: brew install cameroncooke/axe/axe";
+  }
+  return "IDB is not installed. Install with: brew install idb-companion";
+}
+
+/**
+ * Map IDB button names (uppercase/underscores) to AXe button names (lowercase/hyphens).
+ */
+function toAxeButtonName(idbButton: iOSButtonType): string {
+  const map: Record<iOSButtonType, string> = {
+    HOME: "home",
+    LOCK: "lock",
+    SIDE_BUTTON: "side-button",
+    SIRI: "siri",
+    APPLE_PAY: "apple-pay",
+  };
+  return map[idbButton];
 }
 
 /**
  * Ensure IDB is connected to the specified simulator
  * IDB requires `idb connect <UDID>` before any UI commands work
  */
-async function ensureIdbConnected(udid: string): Promise<{ success: boolean; error?: string }> {
-    // Skip if already connected in this session
-    if (connectedIdbSimulators.has(udid)) {
-        return { success: true };
-    }
+async function ensureIdbConnected(
+  udid: string,
+): Promise<{ success: boolean; error?: string }> {
+  // Skip if already connected in this session
+  if (connectedIdbSimulators.has(udid)) {
+    return { success: true };
+  }
 
-    try {
-        await runIdb("connect", udid);
-        connectedIdbSimulators.add(udid);
-        return { success: true };
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        // "Already connected" is not an error
-        if (errorMessage.includes("already connected") || errorMessage.includes("Connected")) {
-            connectedIdbSimulators.add(udid);
-            return { success: true };
-        }
-        return {
-            success: false,
-            error: `Failed to connect IDB to simulator: ${errorMessage}`
-        };
+  try {
+    await runIdb("connect", udid);
+    connectedIdbSimulators.add(udid);
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    // "Already connected" is not an error
+    if (
+      errorMessage.includes("already connected") ||
+      errorMessage.includes("Connected")
+    ) {
+      connectedIdbSimulators.add(udid);
+      return { success: true };
     }
+    return {
+      success: false,
+      error: `Failed to connect IDB to simulator: ${errorMessage}`,
+    };
+  }
+}
+
+/**
+ * Shared pre-flight check for all UI driver functions:
+ * 1. Check driver availability
+ * 2. Resolve target simulator UDID
+ * 3. Ensure IDB connection (IDB only)
+ */
+async function ensureUiDriverReady(
+  udid?: string,
+): Promise<
+  | { ready: true; driver: IOSDriverType; targetUdid: string }
+  | { ready: false; error: iOSResult }
+> {
+  const driver = getIosDriver();
+
+  if (driver === "axe") {
+    if (!(await isAxeAvailable())) {
+      return {
+        ready: false,
+        error: { success: false, error: getUiDriverInstallHint() },
+      };
+    }
+  } else {
+    if (!(await isIdbAvailable())) {
+      return {
+        ready: false,
+        error: { success: false, error: getUiDriverInstallHint() },
+      };
+    }
+  }
+
+  const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+  if (!targetUdid) {
+    return {
+      ready: false,
+      error: {
+        success: false,
+        error:
+          "No iOS simulator is currently running. Start a simulator first.",
+      },
+    };
+  }
+
+  if (driver === "idb") {
+    const connectResult = await ensureIdbConnected(targetUdid);
+    if (!connectResult.success) {
+      return {
+        ready: false,
+        error: { success: false, error: connectResult.error },
+      };
+    }
+  }
+
+  return { ready: true, driver, targetUdid };
 }
 
 // iOS Simulator info
 export interface iOSSimulator {
-    udid: string;
-    name: string;
-    state: "Booted" | "Shutdown" | "Creating" | string;
-    runtime: string;
-    deviceType?: string;
-    isAvailable?: boolean;
+  udid: string;
+  name: string;
+  state: "Booted" | "Shutdown" | "Creating" | string;
+  runtime: string;
+  deviceType?: string;
+  isAvailable?: boolean;
 }
 
 // Result of iOS operations
 export interface iOSResult {
-    success: boolean;
-    result?: string;
-    error?: string;
-    data?: Buffer;
-    // For screenshots: scale factor to convert image coords to device coords
-    scaleFactor?: number;
-    originalWidth?: number;
-    originalHeight?: number;
-    // For listIOSSimulators: structured simulator list
-    simulators?: iOSSimulator[];
+  success: boolean;
+  result?: string;
+  error?: string;
+  data?: Buffer;
+  // For screenshots: scale factor to convert image coords to device coords
+  scaleFactor?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  // For listIOSSimulators: structured simulator list
+  simulators?: iOSSimulator[];
 }
 
 // Accessibility element from IDB describe commands
 export interface iOSAccessibilityElement {
-    AXLabel?: string;
-    AXValue?: string;
-    AXFrame?: string; // String format: "{{x, y}, {width, height}}"
-    frame?: { x: number; y: number; width: number; height: number }; // Parsed object format
-    AXUniqueId?: string;
-    type?: string;
-    children?: iOSAccessibilityElement[];
-    [key: string]: unknown; // Allow additional accessibility properties
+  AXLabel?: string;
+  AXValue?: string;
+  AXFrame?: string; // String format: "{{x, y}, {width, height}}"
+  frame?: { x: number; y: number; width: number; height: number }; // Parsed object format
+  AXUniqueId?: string;
+  type?: string;
+  children?: iOSAccessibilityElement[];
+  [key: string]: unknown; // Allow additional accessibility properties
 }
 
 // Result for describe commands that include elements
 export interface iOSDescribeResult extends iOSResult {
-    elements?: iOSAccessibilityElement[];
+  elements?: iOSAccessibilityElement[];
 }
 
 /**
  * Check if simctl is available
  */
 export async function isSimctlAvailable(): Promise<boolean> {
-    try {
-        await execAsync("xcrun simctl help", { timeout: 5000 });
-        return true;
-    } catch {
-        return false;
-    }
+  try {
+    await execAsync("xcrun simctl help", { timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * List iOS simulators
  */
-export async function listIOSSimulators(onlyBooted: boolean = false): Promise<iOSResult> {
-    try {
-        const simctlAvailable = await isSimctlAvailable();
-        if (!simctlAvailable) {
-            return {
-                success: false,
-                error: "Xcode command line tools not available. Install Xcode from the App Store."
-            };
-        }
-
-        const { stdout } = await execAsync("xcrun simctl list devices -j", {
-            timeout: SIMCTL_TIMEOUT
-        });
-
-        const data = JSON.parse(stdout);
-        const simulators: iOSSimulator[] = [];
-
-        // Parse devices from each runtime
-        for (const [runtime, devices] of Object.entries(data.devices)) {
-            if (!Array.isArray(devices)) continue;
-
-            for (const device of devices as Array<{
-                udid: string;
-                name: string;
-                state: string;
-                isAvailable?: boolean;
-                deviceTypeIdentifier?: string;
-            }>) {
-                if (!device.isAvailable) continue;
-                if (onlyBooted && device.state !== "Booted") continue;
-
-                // Extract iOS version from runtime string
-                const runtimeMatch = runtime.match(/iOS[- ](\d+[.-]\d+)/i);
-                const runtimeVersion = runtimeMatch ? `iOS ${runtimeMatch[1].replace("-", ".")}` : runtime;
-
-                simulators.push({
-                    udid: device.udid,
-                    name: device.name,
-                    state: device.state,
-                    runtime: runtimeVersion,
-                    deviceType: device.deviceTypeIdentifier,
-                    isAvailable: device.isAvailable
-                });
-            }
-        }
-
-        if (simulators.length === 0) {
-            return {
-                success: true,
-                result: onlyBooted
-                    ? "No booted iOS simulators. Start a simulator first."
-                    : "No available iOS simulators found.",
-                simulators: []
-            };
-        }
-
-        // Sort: Booted first, then by name
-        simulators.sort((a, b) => {
-            if (a.state === "Booted" && b.state !== "Booted") return -1;
-            if (a.state !== "Booted" && b.state === "Booted") return 1;
-            return a.name.localeCompare(b.name);
-        });
-
-        const formatted = simulators
-            .map((s) => {
-                const status = s.state === "Booted" ? "🟢 Booted" : "⚪ Shutdown";
-                return `${s.name} (${s.runtime}) - ${status}\n  UDID: ${s.udid}`;
-            })
-            .join("\n\n");
-
-        return {
-            success: true,
-            result: `iOS Simulators:\n\n${formatted}`,
-            simulators
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to list simulators: ${error instanceof Error ? error.message : String(error)}`
-        };
+export async function listIOSSimulators(
+  onlyBooted: boolean = false,
+): Promise<iOSResult> {
+  try {
+    const simctlAvailable = await isSimctlAvailable();
+    if (!simctlAvailable) {
+      return {
+        success: false,
+        error:
+          "Xcode command line tools not available. Install Xcode from the App Store.",
+      };
     }
+
+    const { stdout } = await execAsync("xcrun simctl list devices -j", {
+      timeout: SIMCTL_TIMEOUT,
+    });
+
+    const data = JSON.parse(stdout);
+    const simulators: iOSSimulator[] = [];
+
+    // Parse devices from each runtime
+    for (const [runtime, devices] of Object.entries(data.devices)) {
+      if (!Array.isArray(devices)) continue;
+
+      for (const device of devices as Array<{
+        udid: string;
+        name: string;
+        state: string;
+        isAvailable?: boolean;
+        deviceTypeIdentifier?: string;
+      }>) {
+        if (!device.isAvailable) continue;
+        if (onlyBooted && device.state !== "Booted") continue;
+
+        // Extract iOS version from runtime string
+        const runtimeMatch = runtime.match(/iOS[- ](\d+[.-]\d+)/i);
+        const runtimeVersion = runtimeMatch
+          ? `iOS ${runtimeMatch[1].replace("-", ".")}`
+          : runtime;
+
+        simulators.push({
+          udid: device.udid,
+          name: device.name,
+          state: device.state,
+          runtime: runtimeVersion,
+          deviceType: device.deviceTypeIdentifier,
+          isAvailable: device.isAvailable,
+        });
+      }
+    }
+
+    if (simulators.length === 0) {
+      return {
+        success: true,
+        result: onlyBooted
+          ? "No booted iOS simulators. Start a simulator first."
+          : "No available iOS simulators found.",
+        simulators: [],
+      };
+    }
+
+    // Sort: Booted first, then by name
+    simulators.sort((a, b) => {
+      if (a.state === "Booted" && b.state !== "Booted") return -1;
+      if (a.state !== "Booted" && b.state === "Booted") return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    const formatted = simulators
+      .map((s) => {
+        const status = s.state === "Booted" ? "🟢 Booted" : "⚪ Shutdown";
+        return `${s.name} (${s.runtime}) - ${status}\n  UDID: ${s.udid}`;
+      })
+      .join("\n\n");
+
+    return {
+      success: true,
+      result: `iOS Simulators:\n\n${formatted}`,
+      simulators,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to list simulators: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
  * Get the booted simulator UDID
  */
 export async function getBootedSimulatorUdid(): Promise<string | null> {
-    try {
-        const { stdout } = await execAsync("xcrun simctl list devices booted -j", {
-            timeout: SIMCTL_TIMEOUT
-        });
+  try {
+    const { stdout } = await execAsync("xcrun simctl list devices booted -j", {
+      timeout: SIMCTL_TIMEOUT,
+    });
 
-        const data = JSON.parse(stdout);
+    const data = JSON.parse(stdout);
 
-        for (const devices of Object.values(data.devices)) {
-            if (!Array.isArray(devices)) continue;
+    for (const devices of Object.values(data.devices)) {
+      if (!Array.isArray(devices)) continue;
 
-            for (const device of devices as Array<{ udid: string; state: string }>) {
-                if (device.state === "Booted") {
-                    return device.udid;
-                }
-            }
+      for (const device of devices as Array<{ udid: string; state: string }>) {
+        if (device.state === "Booted") {
+          return device.udid;
         }
-
-        return null;
-    } catch {
-        return null;
+      }
     }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Find a booted simulator's UDID by its device name
  * Matches Metro's deviceName against simulator names from simctl
  */
-export async function findSimulatorByName(deviceName: string): Promise<string | null> {
-    try {
-        const { stdout } = await execAsync("xcrun simctl list devices booted -j", {
-            timeout: SIMCTL_TIMEOUT
-        });
+export async function findSimulatorByName(
+  deviceName: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execAsync("xcrun simctl list devices booted -j", {
+      timeout: SIMCTL_TIMEOUT,
+    });
 
-        const data = JSON.parse(stdout);
-        const normalizedDeviceName = deviceName.toLowerCase().trim();
+    const data = JSON.parse(stdout);
+    const normalizedDeviceName = deviceName.toLowerCase().trim();
 
-        for (const devices of Object.values(data.devices)) {
-            if (!Array.isArray(devices)) continue;
+    for (const devices of Object.values(data.devices)) {
+      if (!Array.isArray(devices)) continue;
 
-            for (const device of devices as Array<{ udid: string; name: string; state: string }>) {
-                if (device.state !== "Booted") continue;
+      for (const device of devices as Array<{
+        udid: string;
+        name: string;
+        state: string;
+      }>) {
+        if (device.state !== "Booted") continue;
 
-                const normalizedSimName = device.name.toLowerCase().trim();
+        const normalizedSimName = device.name.toLowerCase().trim();
 
-                // Exact match
-                if (normalizedSimName === normalizedDeviceName) {
-                    return device.udid;
-                }
-
-                // Partial match (deviceName contains simulator name or vice versa)
-                if (normalizedSimName.includes(normalizedDeviceName) ||
-                    normalizedDeviceName.includes(normalizedSimName)) {
-                    return device.udid;
-                }
-            }
+        // Exact match
+        if (normalizedSimName === normalizedDeviceName) {
+          return device.udid;
         }
 
-        return null;
-    } catch {
-        return null;
+        // Partial match (deviceName contains simulator name or vice versa)
+        if (
+          normalizedSimName.includes(normalizedDeviceName) ||
+          normalizedDeviceName.includes(normalizedSimName)
+        ) {
+          return device.udid;
+        }
+      }
     }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -296,310 +463,344 @@ export async function findSimulatorByName(deviceName: string): Promise<string | 
  * This enables automatic device scoping based on Metro connection
  */
 export async function getActiveOrBootedSimulatorUdid(): Promise<string | null> {
-    // First, check if there's an active Metro-connected simulator
-    const activeUdid = getActiveSimulatorUdid();
-    if (activeUdid) {
-        return activeUdid;
-    }
+  // First, check if there's an active Metro-connected simulator
+  const activeUdid = getActiveSimulatorUdid();
+  if (activeUdid) {
+    return activeUdid;
+  }
 
-    // Fall back to first booted simulator
-    return getBootedSimulatorUdid();
+  // Fall back to first booted simulator
+  return getBootedSimulatorUdid();
 }
 
 /**
  * Build device selector for simctl command
  */
 function buildDeviceArg(udid?: string): string {
-    return udid || "booted";
+  return udid || "booted";
 }
 
 /**
  * Take a screenshot from an iOS simulator
  */
-export async function iosScreenshot(outputPath?: string, udid?: string): Promise<iOSResult> {
-    try {
-        const simctlAvailable = await isSimctlAvailable();
-        if (!simctlAvailable) {
-            return {
-                success: false,
-                error: "Xcode command line tools not available. Install Xcode from the App Store."
-            };
-        }
-
-        // Resolve target UDID (prefer Metro-connected simulator)
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        // Generate output path if not provided
-        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const finalOutputPath =
-            outputPath || path.join(os.tmpdir(), `ios-screenshot-${timestamp}.png`);
-
-        await execAsync(`xcrun simctl io ${targetUdid} screenshot "${finalOutputPath}"`, {
-            timeout: SIMCTL_TIMEOUT
-        });
-
-        // Resize image if needed (API limit: 2000px max for multi-image requests)
-        // Return scale factor so AI can convert image coords to device coords
-        const MAX_DIMENSION = 2000;
-        const image = sharp(finalOutputPath);
-        const metadata = await image.metadata();
-        const originalWidth = metadata.width || 0;
-        const originalHeight = metadata.height || 0;
-
-        let imageData: Buffer;
-        let scaleFactor = 1;
-
-        if (originalWidth > MAX_DIMENSION || originalHeight > MAX_DIMENSION) {
-            // Calculate scale to fit within MAX_DIMENSION
-            scaleFactor = Math.max(originalWidth, originalHeight) / MAX_DIMENSION;
-
-            imageData = await image
-                .resize(MAX_DIMENSION, MAX_DIMENSION, {
-                    fit: "inside",
-                    withoutEnlargement: true
-                })
-                .jpeg({ quality: 85 })
-                .toBuffer();
-        } else {
-            imageData = await image
-                .jpeg({ quality: 85 })
-                .toBuffer();
-        }
-
-        return {
-            success: true,
-            result: finalOutputPath,
-            data: imageData,
-            scaleFactor,
-            originalWidth,
-            originalHeight
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to capture screenshot: ${error instanceof Error ? error.message : String(error)}`
-        };
+export async function iosScreenshot(
+  outputPath?: string,
+  udid?: string,
+): Promise<iOSResult> {
+  try {
+    const simctlAvailable = await isSimctlAvailable();
+    if (!simctlAvailable) {
+      return {
+        success: false,
+        error:
+          "Xcode command line tools not available. Install Xcode from the App Store.",
+      };
     }
+
+    // Resolve target UDID (prefer Metro-connected simulator)
+    const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+    if (!targetUdid) {
+      return {
+        success: false,
+        error:
+          "No iOS simulator is currently running. Start a simulator first.",
+      };
+    }
+
+    // Generate output path if not provided
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const finalOutputPath =
+      outputPath || path.join(os.tmpdir(), `ios-screenshot-${timestamp}.png`);
+
+    await execAsync(
+      `xcrun simctl io ${targetUdid} screenshot "${finalOutputPath}"`,
+      {
+        timeout: SIMCTL_TIMEOUT,
+      },
+    );
+
+    // Resize image if needed (API limit: 2000px max for multi-image requests)
+    // Return scale factor so AI can convert image coords to device coords
+    const MAX_DIMENSION = 2000;
+    const image = sharp(finalOutputPath);
+    const metadata = await image.metadata();
+    const originalWidth = metadata.width || 0;
+    const originalHeight = metadata.height || 0;
+
+    let imageData: Buffer;
+    let scaleFactor = 1;
+
+    if (originalWidth > MAX_DIMENSION || originalHeight > MAX_DIMENSION) {
+      // Calculate scale to fit within MAX_DIMENSION
+      scaleFactor = Math.max(originalWidth, originalHeight) / MAX_DIMENSION;
+
+      imageData = await image
+        .resize(MAX_DIMENSION, MAX_DIMENSION, {
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+    } else {
+      imageData = await image.jpeg({ quality: 85 }).toBuffer();
+    }
+
+    return {
+      success: true,
+      result: finalOutputPath,
+      data: imageData,
+      scaleFactor,
+      originalWidth,
+      originalHeight,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to capture screenshot: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
  * Install an app on an iOS simulator
  */
-export async function iosInstallApp(appPath: string, udid?: string): Promise<iOSResult> {
-    try {
-        const simctlAvailable = await isSimctlAvailable();
-        if (!simctlAvailable) {
-            return {
-                success: false,
-                error: "Xcode command line tools not available. Install Xcode from the App Store."
-            };
-        }
-
-        // Verify app exists
-        if (!existsSync(appPath)) {
-            return {
-                success: false,
-                error: `App bundle not found: ${appPath}`
-            };
-        }
-
-        // Resolve target UDID (prefer Metro-connected simulator)
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        await execAsync(`xcrun simctl install ${targetUdid} "${appPath}"`, {
-            timeout: 120000 // 2 minute timeout for install
-        });
-
-        return {
-            success: true,
-            result: `Successfully installed ${path.basename(appPath)}`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to install app: ${error instanceof Error ? error.message : String(error)}`
-        };
+export async function iosInstallApp(
+  appPath: string,
+  udid?: string,
+): Promise<iOSResult> {
+  try {
+    const simctlAvailable = await isSimctlAvailable();
+    if (!simctlAvailable) {
+      return {
+        success: false,
+        error:
+          "Xcode command line tools not available. Install Xcode from the App Store.",
+      };
     }
+
+    // Verify app exists
+    if (!existsSync(appPath)) {
+      return {
+        success: false,
+        error: `App bundle not found: ${appPath}`,
+      };
+    }
+
+    // Resolve target UDID (prefer Metro-connected simulator)
+    const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+    if (!targetUdid) {
+      return {
+        success: false,
+        error:
+          "No iOS simulator is currently running. Start a simulator first.",
+      };
+    }
+
+    await execAsync(`xcrun simctl install ${targetUdid} "${appPath}"`, {
+      timeout: 120000, // 2 minute timeout for install
+    });
+
+    return {
+      success: true,
+      result: `Successfully installed ${path.basename(appPath)}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to install app: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
  * Launch an app on an iOS simulator
  */
-export async function iosLaunchApp(bundleId: string, udid?: string): Promise<iOSResult> {
-    try {
-        const simctlAvailable = await isSimctlAvailable();
-        if (!simctlAvailable) {
-            return {
-                success: false,
-                error: "Xcode command line tools not available. Install Xcode from the App Store."
-            };
-        }
-
-        // Resolve target UDID (prefer Metro-connected simulator)
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        await execAsync(`xcrun simctl launch ${targetUdid} ${bundleId}`, {
-            timeout: SIMCTL_TIMEOUT
-        });
-
-        return {
-            success: true,
-            result: `Launched ${bundleId}`
-        };
-    } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        let hint = "";
-        if (msg.includes("FBSOpenApplicationErrorDomain")) {
-            hint = "\n\nCommon causes:\n- App is not installed on this simulator (install it first with ios_install_app)\n- Bundle ID is incorrect (check with: xcrun simctl listapps booted)";
-        }
-        return {
-            success: false,
-            error: `Failed to launch app: ${msg}${hint}`
-        };
+export async function iosLaunchApp(
+  bundleId: string,
+  udid?: string,
+): Promise<iOSResult> {
+  try {
+    const simctlAvailable = await isSimctlAvailable();
+    if (!simctlAvailable) {
+      return {
+        success: false,
+        error:
+          "Xcode command line tools not available. Install Xcode from the App Store.",
+      };
     }
+
+    // Resolve target UDID (prefer Metro-connected simulator)
+    const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+    if (!targetUdid) {
+      return {
+        success: false,
+        error:
+          "No iOS simulator is currently running. Start a simulator first.",
+      };
+    }
+
+    await execAsync(`xcrun simctl launch ${targetUdid} ${bundleId}`, {
+      timeout: SIMCTL_TIMEOUT,
+    });
+
+    return {
+      success: true,
+      result: `Launched ${bundleId}`,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    let hint = "";
+    if (msg.includes("FBSOpenApplicationErrorDomain")) {
+      hint =
+        "\n\nCommon causes:\n- App is not installed on this simulator (install it first with ios_install_app)\n- Bundle ID is incorrect (check with: xcrun simctl listapps booted)";
+    }
+    return {
+      success: false,
+      error: `Failed to launch app: ${msg}${hint}`,
+    };
+  }
 }
 
 /**
  * Open a URL in the iOS simulator
  */
-export async function iosOpenUrl(url: string, udid?: string): Promise<iOSResult> {
-    try {
-        const simctlAvailable = await isSimctlAvailable();
-        if (!simctlAvailable) {
-            return {
-                success: false,
-                error: "Xcode command line tools not available. Install Xcode from the App Store."
-            };
-        }
-
-        // Resolve target UDID (prefer Metro-connected simulator)
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        await execAsync(`xcrun simctl openurl ${targetUdid} "${url}"`, {
-            timeout: SIMCTL_TIMEOUT
-        });
-
-        return {
-            success: true,
-            result: `Opened URL: ${url}`
-        };
-    } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        let hint = "";
-        if (msg.includes("LSApplicationWorkspaceError") || msg.includes("OpenApplicationErrorDomain")) {
-            hint = "\n\nCommon causes:\n- Custom URL scheme not registered in the app's Info.plist\n- App that handles this URL scheme is not installed\n- For Expo apps, use the exp:// URL format";
-        }
-        return {
-            success: false,
-            error: `Failed to open URL: ${msg}${hint}`
-        };
+export async function iosOpenUrl(
+  url: string,
+  udid?: string,
+): Promise<iOSResult> {
+  try {
+    const simctlAvailable = await isSimctlAvailable();
+    if (!simctlAvailable) {
+      return {
+        success: false,
+        error:
+          "Xcode command line tools not available. Install Xcode from the App Store.",
+      };
     }
+
+    // Resolve target UDID (prefer Metro-connected simulator)
+    const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+    if (!targetUdid) {
+      return {
+        success: false,
+        error:
+          "No iOS simulator is currently running. Start a simulator first.",
+      };
+    }
+
+    await execAsync(`xcrun simctl openurl ${targetUdid} "${url}"`, {
+      timeout: SIMCTL_TIMEOUT,
+    });
+
+    return {
+      success: true,
+      result: `Opened URL: ${url}`,
+    };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    let hint = "";
+    if (
+      msg.includes("LSApplicationWorkspaceError") ||
+      msg.includes("OpenApplicationErrorDomain")
+    ) {
+      hint =
+        "\n\nCommon causes:\n- Custom URL scheme not registered in the app's Info.plist\n- App that handles this URL scheme is not installed\n- For Expo apps, use the exp:// URL format";
+    }
+    return {
+      success: false,
+      error: `Failed to open URL: ${msg}${hint}`,
+    };
+  }
 }
 
 /**
  * Terminate an app on an iOS simulator
  */
-export async function iosTerminateApp(bundleId: string, udid?: string): Promise<iOSResult> {
-    try {
-        const simctlAvailable = await isSimctlAvailable();
-        if (!simctlAvailable) {
-            return {
-                success: false,
-                error: "Xcode command line tools not available. Install Xcode from the App Store."
-            };
-        }
-
-        // Resolve target UDID (prefer Metro-connected simulator)
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        await execAsync(`xcrun simctl terminate ${targetUdid} ${bundleId}`, {
-            timeout: SIMCTL_TIMEOUT
-        });
-
-        return {
-            success: true,
-            result: `Terminated ${bundleId}`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to terminate app: ${error instanceof Error ? error.message : String(error)}`
-        };
+export async function iosTerminateApp(
+  bundleId: string,
+  udid?: string,
+): Promise<iOSResult> {
+  try {
+    const simctlAvailable = await isSimctlAvailable();
+    if (!simctlAvailable) {
+      return {
+        success: false,
+        error:
+          "Xcode command line tools not available. Install Xcode from the App Store.",
+      };
     }
+
+    // Resolve target UDID (prefer Metro-connected simulator)
+    const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
+    if (!targetUdid) {
+      return {
+        success: false,
+        error:
+          "No iOS simulator is currently running. Start a simulator first.",
+      };
+    }
+
+    await execAsync(`xcrun simctl terminate ${targetUdid} ${bundleId}`, {
+      timeout: SIMCTL_TIMEOUT,
+    });
+
+    return {
+      success: true,
+      result: `Terminated ${bundleId}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to terminate app: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
  * Boot an iOS simulator
  */
 export async function iosBootSimulator(udid: string): Promise<iOSResult> {
-    try {
-        const simctlAvailable = await isSimctlAvailable();
-        if (!simctlAvailable) {
-            return {
-                success: false,
-                error: "Xcode command line tools not available. Install Xcode from the App Store."
-            };
-        }
-
-        await execAsync(`xcrun simctl boot ${udid}`, {
-            timeout: 60000 // 1 minute timeout for boot
-        });
-
-        // Open Simulator app
-        await execAsync("open -a Simulator", { timeout: 10000 }).catch(() => {
-            // Ignore if Simulator app doesn't open
-        });
-
-        return {
-            success: true,
-            result: `Simulator ${udid} is now booting`
-        };
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        // Already booted is not an error
-        if (errorMessage.includes("Unable to boot device in current state: Booted")) {
-            return {
-                success: true,
-                result: "Simulator is already booted"
-            };
-        }
-
-        return {
-            success: false,
-            error: `Failed to boot simulator: ${errorMessage}`
-        };
+  try {
+    const simctlAvailable = await isSimctlAvailable();
+    if (!simctlAvailable) {
+      return {
+        success: false,
+        error:
+          "Xcode command line tools not available. Install Xcode from the App Store.",
+      };
     }
+
+    await execAsync(`xcrun simctl boot ${udid}`, {
+      timeout: 60000, // 1 minute timeout for boot
+    });
+
+    // Open Simulator app
+    await execAsync("open -a Simulator", { timeout: 10000 }).catch(() => {
+      // Ignore if Simulator app doesn't open
+    });
+
+    return {
+      success: true,
+      result: `Simulator ${udid} is now booting`,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Already booted is not an error
+    if (
+      errorMessage.includes("Unable to boot device in current state: Booted")
+    ) {
+      return {
+        success: true,
+        result: "Simulator is already booted",
+      };
+    }
+
+    return {
+      success: false,
+      error: `Failed to boot simulator: ${errorMessage}`,
+    };
+  }
 }
 
 // ============================================================================
@@ -612,589 +813,580 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
  * Tap at coordinates on an iOS simulator using IDB
  */
 export async function iosTap(
-    x: number,
-    y: number,
-    options?: { duration?: number; udid?: string }
+  x: number,
+  y: number,
+  options?: { duration?: number; udid?: string },
 ): Promise<iOSResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
+  try {
+    const preflight = await ensureUiDriverReady(options?.udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
 
-        // Get simulator UDID (prefer Metro-connected, then fall back to booted)
-        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
+    const xRounded = Math.round(x);
+    const yRounded = Math.round(y);
 
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        const xRounded = Math.round(x);
-        const yRounded = Math.round(y);
-
-        // Build args array for execFile (no shell)
-        const args: string[] = ["ui", "tap", "--udid", targetUdid];
-        if (options?.duration !== undefined) {
-            args.push("--duration", String(options.duration));
-        }
-        args.push("--json", "--", String(xRounded), String(yRounded));
-
-        const { stderr } = await runIdb(...args);
-        if (stderr) throw new Error(stderr);
-
-        return {
-            success: true,
-            result: `Tapped at (${xRounded}, ${yRounded})`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to tap: ${error instanceof Error ? error.message : String(error)}`
-        };
+    if (driver === "axe") {
+      if (options?.duration !== undefined) {
+        // Long press: use axe touch with delay (convert ms to seconds)
+        const delaySecs = String(options.duration / 1000);
+        await runAxe(
+          "touch",
+          "-x",
+          String(xRounded),
+          "-y",
+          String(yRounded),
+          "--down",
+          "--up",
+          "--delay",
+          delaySecs,
+          "--udid",
+          targetUdid,
+        );
+      } else {
+        await runAxe(
+          "tap",
+          "-x",
+          String(xRounded),
+          "-y",
+          String(yRounded),
+          "--udid",
+          targetUdid,
+        );
+      }
+    } else {
+      const args: string[] = ["ui", "tap", "--udid", targetUdid];
+      if (options?.duration !== undefined) {
+        args.push("--duration", String(options.duration));
+      }
+      args.push("--json", "--", String(xRounded), String(yRounded));
+      const { stderr } = await runIdb(...args);
+      if (stderr) throw new Error(stderr);
     }
+
+    return {
+      success: true,
+      result: `Tapped at (${xRounded}, ${yRounded})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to tap: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
- * Swipe gesture on an iOS simulator using IDB
+ * Swipe gesture on an iOS simulator
  */
 export async function iosSwipe(
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    options?: { duration?: number; delta?: number; udid?: string }
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  options?: { duration?: number; delta?: number; udid?: string },
 ): Promise<iOSResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
+  try {
+    const preflight = await ensureUiDriverReady(options?.udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
 
-        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
+    const x1 = Math.round(startX);
+    const y1 = Math.round(startY);
+    const x2 = Math.round(endX);
+    const y2 = Math.round(endY);
 
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        const x1 = Math.round(startX);
-        const y1 = Math.round(startY);
-        const x2 = Math.round(endX);
-        const y2 = Math.round(endY);
-
-        // Build args array for execFile (no shell)
-        const args: string[] = ["ui", "swipe", "--udid", targetUdid];
-        if (options?.duration !== undefined) {
-            args.push("--duration", String(options.duration));
-        }
-        if (options?.delta !== undefined) {
-            args.push("--delta", String(options.delta));
-        }
-        args.push("--json", "--", String(x1), String(y1), String(x2), String(y2));
-
-        const { stderr } = await runIdb(...args);
-        if (stderr) throw new Error(stderr);
-
-        return {
-            success: true,
-            result: `Swiped from (${x1}, ${y1}) to (${x2}, ${y2})`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to swipe: ${error instanceof Error ? error.message : String(error)}`
-        };
+    if (driver === "axe") {
+      const args: string[] = [
+        "swipe",
+        "--start-x",
+        String(x1),
+        "--start-y",
+        String(y1),
+        "--end-x",
+        String(x2),
+        "--end-y",
+        String(y2),
+      ];
+      if (options?.duration !== undefined) {
+        args.push("--duration", String(options.duration / 1000));
+      }
+      if (options?.delta !== undefined) {
+        args.push("--delta", String(options.delta));
+      }
+      args.push("--udid", targetUdid);
+      await runAxe(...args);
+    } else {
+      const args: string[] = ["ui", "swipe", "--udid", targetUdid];
+      if (options?.duration !== undefined) {
+        args.push("--duration", String(options.duration));
+      }
+      if (options?.delta !== undefined) {
+        args.push("--delta", String(options.delta));
+      }
+      args.push("--json", "--", String(x1), String(y1), String(x2), String(y2));
+      const { stderr } = await runIdb(...args);
+      if (stderr) throw new Error(stderr);
     }
+
+    return {
+      success: true,
+      result: `Swiped from (${x1}, ${y1}) to (${x2}, ${y2})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to swipe: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
- * Input text into the active field on an iOS simulator using IDB
+ * Input text into the active field on an iOS simulator
  */
-export async function iosInputText(text: string, udid?: string): Promise<iOSResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
+export async function iosInputText(
+  text: string,
+  udid?: string,
+): Promise<iOSResult> {
+  try {
+    const preflight = await ensureUiDriverReady(udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
 
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        // Use execFile with args array (no shell escaping needed)
-        const { stderr } = await runIdb("ui", "text", "--udid", targetUdid, text);
-        if (stderr) throw new Error(stderr);
-
-        return {
-            success: true,
-            result: `Typed text: "${text}"`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to input text: ${error instanceof Error ? error.message : String(error)}`
-        };
+    if (driver === "axe") {
+      await runAxe("type", text, "--udid", targetUdid);
+    } else {
+      const { stderr } = await runIdb("ui", "text", "--udid", targetUdid, text);
+      if (stderr) throw new Error(stderr);
     }
+
+    return {
+      success: true,
+      result: `Typed text: "${text}"`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to input text: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
- * Press a hardware button on an iOS simulator using IDB
+ * Press a hardware button on an iOS simulator
  */
 export async function iosButton(
-    button: iOSButtonType,
-    options?: { duration?: number; udid?: string }
+  button: iOSButtonType,
+  options?: { duration?: number; udid?: string },
 ): Promise<iOSResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
-
-        // Validate button type
-        if (!IOS_BUTTON_TYPES.includes(button)) {
-            return {
-                success: false,
-                error: `Invalid button type: ${button}. Valid options: ${IOS_BUTTON_TYPES.join(", ")}`
-            };
-        }
-
-        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        // Build args array for execFile (no shell)
-        const args: string[] = ["ui", "button", "--udid", targetUdid];
-        if (options?.duration !== undefined) {
-            args.push("--duration", String(options.duration));
-        }
-        args.push(button);
-
-        const { stderr } = await runIdb(...args);
-        if (stderr) throw new Error(stderr);
-
-        return {
-            success: true,
-            result: `Pressed ${button} button`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to press button: ${error instanceof Error ? error.message : String(error)}`
-        };
+  try {
+    // Validate button type
+    if (!IOS_BUTTON_TYPES.includes(button)) {
+      return {
+        success: false,
+        error: `Invalid button type: ${button}. Valid options: ${IOS_BUTTON_TYPES.join(", ")}`,
+      };
     }
+
+    const preflight = await ensureUiDriverReady(options?.udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
+
+    if (driver === "axe") {
+      const args: string[] = ["button", toAxeButtonName(button)];
+      if (options?.duration !== undefined) {
+        args.push("--duration", String(options.duration));
+      }
+      args.push("--udid", targetUdid);
+      await runAxe(...args);
+    } else {
+      const args: string[] = ["ui", "button", "--udid", targetUdid];
+      if (options?.duration !== undefined) {
+        args.push("--duration", String(options.duration));
+      }
+      args.push(button);
+      const { stderr } = await runIdb(...args);
+      if (stderr) throw new Error(stderr);
+    }
+
+    return {
+      success: true,
+      result: `Pressed ${button} button`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to press button: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
- * Send a key event to an iOS simulator using IDB
+ * Send a key event to an iOS simulator
  */
 export async function iosKeyEvent(
-    keycode: number,
-    options?: { duration?: number; udid?: string }
+  keycode: number,
+  options?: { duration?: number; udid?: string },
 ): Promise<iOSResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
+  try {
+    const preflight = await ensureUiDriverReady(options?.udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
 
-        const targetUdid = options?.udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        // Build args array for execFile (no shell)
-        const args: string[] = ["ui", "key", "--udid", targetUdid];
-        if (options?.duration !== undefined) {
-            args.push("--duration", String(options.duration));
-        }
-        args.push(String(keycode));
-
-        const { stderr } = await runIdb(...args);
-        if (stderr) throw new Error(stderr);
-
-        return {
-            success: true,
-            result: `Sent key event: ${keycode}`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to send key event: ${error instanceof Error ? error.message : String(error)}`
-        };
+    if (driver === "axe") {
+      const args: string[] = ["key", String(keycode)];
+      if (options?.duration !== undefined) {
+        args.push("--duration", String(options.duration));
+      }
+      args.push("--udid", targetUdid);
+      await runAxe(...args);
+    } else {
+      const args: string[] = ["ui", "key", "--udid", targetUdid];
+      if (options?.duration !== undefined) {
+        args.push("--duration", String(options.duration));
+      }
+      args.push(String(keycode));
+      const { stderr } = await runIdb(...args);
+      if (stderr) throw new Error(stderr);
     }
+
+    return {
+      success: true,
+      result: `Sent key event: ${keycode}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to send key event: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
- * Send a sequence of key events to an iOS simulator using IDB
+ * Send a sequence of key events to an iOS simulator
  */
-export async function iosKeySequence(keycodes: number[], udid?: string): Promise<iOSResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
-
-        if (!keycodes || keycodes.length === 0) {
-            return {
-                success: false,
-                error: "At least one keycode is required"
-            };
-        }
-
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        // Build args array for execFile (no shell)
-        const args: string[] = ["ui", "key-sequence", "--udid", targetUdid, ...keycodes.map(String)];
-
-        const { stderr } = await runIdb(...args);
-        if (stderr) throw new Error(stderr);
-
-        return {
-            success: true,
-            result: `Sent key sequence: ${keycodes.join(", ")}`
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to send key sequence: ${error instanceof Error ? error.message : String(error)}`
-        };
+export async function iosKeySequence(
+  keycodes: number[],
+  udid?: string,
+): Promise<iOSResult> {
+  try {
+    if (!keycodes || keycodes.length === 0) {
+      return {
+        success: false,
+        error: "At least one keycode is required",
+      };
     }
+
+    const preflight = await ensureUiDriverReady(udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
+
+    if (driver === "axe") {
+      await runAxe(
+        "key-sequence",
+        "--keycodes",
+        keycodes.join(","),
+        "--udid",
+        targetUdid,
+      );
+    } else {
+      const args: string[] = [
+        "ui",
+        "key-sequence",
+        "--udid",
+        targetUdid,
+        ...keycodes.map(String),
+      ];
+      const { stderr } = await runIdb(...args);
+      if (stderr) throw new Error(stderr);
+    }
+
+    return {
+      success: true,
+      result: `Sent key sequence: ${keycodes.join(", ")}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to send key sequence: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
  * Format accessibility tree for human-readable output
  */
-function formatAccessibilityTree(elements: iOSAccessibilityElement[], depth: number = 0): string {
-    const lines: string[] = [];
-    const indent = "  ".repeat(depth);
+function formatAccessibilityTree(
+  elements: iOSAccessibilityElement[],
+  depth: number = 0,
+): string {
+  const lines: string[] = [];
+  const indent = "  ".repeat(depth);
 
-    for (const element of elements) {
-        const parts: string[] = [];
+  for (const element of elements) {
+    const parts: string[] = [];
 
-        if (element.type) parts.push(`[${element.type}]`);
-        if (element.AXLabel) parts.push(`"${element.AXLabel}"`);
-        if (element.AXValue) parts.push(`value="${element.AXValue}"`);
-        if (element.frame) {
-            const f = element.frame;
-            const centerX = Math.round(f.x + f.width / 2);
-            const centerY = Math.round(f.y + f.height / 2);
-            parts.push(`frame=(${f.x}, ${f.y}, ${f.width}x${f.height}) tap=(${centerX}, ${centerY})`);
-        }
-
-        if (parts.length > 0) {
-            lines.push(`${indent}${parts.join(" ")}`);
-        }
-
-        if (element.children && element.children.length > 0) {
-            lines.push(formatAccessibilityTree(element.children, depth + 1));
-        }
+    if (element.type) parts.push(`[${element.type}]`);
+    if (element.AXLabel) parts.push(`"${element.AXLabel}"`);
+    if (element.AXValue) parts.push(`value="${element.AXValue}"`);
+    if (element.frame) {
+      const f = element.frame;
+      const centerX = Math.round(f.x + f.width / 2);
+      const centerY = Math.round(f.y + f.height / 2);
+      parts.push(
+        `frame=(${f.x}, ${f.y}, ${f.width}x${f.height}) tap=(${centerX}, ${centerY})`,
+      );
     }
 
-    return lines.join("\n");
+    if (parts.length > 0) {
+      lines.push(`${indent}${parts.join(" ")}`);
+    }
+
+    if (element.children && element.children.length > 0) {
+      lines.push(formatAccessibilityTree(element.children, depth + 1));
+    }
+  }
+
+  return lines.join("\n");
 }
 
 /**
- * Get accessibility info for the entire screen using IDB
+ * Get accessibility info for the entire screen
  */
-export async function iosDescribeAll(udid?: string): Promise<iOSDescribeResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
+export async function iosDescribeAll(
+  udid?: string,
+): Promise<iOSDescribeResult> {
+  try {
+    const preflight = await ensureUiDriverReady(udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
 
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        // Use execFile with args array (no shell)
-        const { stdout, stderr } = await runIdb("ui", "describe-all", "--udid", targetUdid, "--json", "--nested");
-        if (stderr) throw new Error(stderr);
-
-        // Parse JSON response
-        const elements = JSON.parse(stdout) as iOSAccessibilityElement[];
-
-        // Format for human-readable output
-        const formatted = formatAccessibilityTree(elements);
-        const header = "Note: All coordinates are in iOS points. Use tap(text=\"...\") for tapping — do not pass these coordinates to tap(x, y) directly.\n\n";
-
-        return {
-            success: true,
-            result: header + (formatted || "No accessibility elements found"),
-            elements
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to describe screen: ${error instanceof Error ? error.message : String(error)}`
-        };
+    let stdout: string;
+    if (driver === "axe") {
+      const result = await runAxe("describe-ui", "--udid", targetUdid);
+      stdout = result.stdout;
+    } else {
+      const result = await runIdb(
+        "ui",
+        "describe-all",
+        "--udid",
+        targetUdid,
+        "--json",
+        "--nested",
+      );
+      if (result.stderr) throw new Error(result.stderr);
+      stdout = result.stdout;
     }
+
+    // Parse JSON response
+    const elements = JSON.parse(stdout) as iOSAccessibilityElement[];
+
+    // Format for human-readable output
+    const formatted = formatAccessibilityTree(elements);
+    const header =
+      'Note: All coordinates are in iOS points. Use tap(text="...") for tapping — do not pass these coordinates to tap(x, y) directly.\n\n';
+
+    return {
+      success: true,
+      result: header + (formatted || "No accessibility elements found"),
+      elements,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to describe screen: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
- * Get accessibility info at a specific point using IDB
+ * Get accessibility info at a specific point
  */
-export async function iosDescribePoint(x: number, y: number, udid?: string): Promise<iOSDescribeResult> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
+export async function iosDescribePoint(
+  x: number,
+  y: number,
+  udid?: string,
+): Promise<iOSDescribeResult> {
+  try {
+    const preflight = await ensureUiDriverReady(udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
 
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
+    const xRounded = Math.round(x);
+    const yRounded = Math.round(y);
 
-        // Ensure IDB is connected to the simulator
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        const xRounded = Math.round(x);
-        const yRounded = Math.round(y);
-
-        // Use execFile with args array (no shell)
-        const { stdout, stderr } = await runIdb("ui", "describe-point", "--udid", targetUdid, "--json", "--", String(xRounded), String(yRounded));
-        if (stderr) throw new Error(stderr);
-
-        // Parse JSON response - may be single element or array
-        let element: iOSAccessibilityElement;
-        try {
-            const parsed = JSON.parse(stdout);
-            element = Array.isArray(parsed) ? parsed[0] : parsed;
-        } catch {
-            return {
-                success: true,
-                result: `No accessibility element found at (${xRounded}, ${yRounded})`,
-                elements: []
-            };
-        }
-
-        // Format for human-readable output
-        const parts: string[] = [];
-        if (element.type) parts.push(`Type: ${element.type}`);
-        if (element.AXLabel) parts.push(`Label: "${element.AXLabel}"`);
-        if (element.AXValue) parts.push(`Value: "${element.AXValue}"`);
-        if (element.frame) {
-            const f = element.frame;
-            const centerX = Math.round(f.x + f.width / 2);
-            const centerY = Math.round(f.y + f.height / 2);
-            parts.push(`Frame: (${f.x}, ${f.y}) ${f.width}x${f.height}`);
-            parts.push(`Tap: (${centerX}, ${centerY})`);
-        }
-
-        return {
-            success: true,
-            result: parts.length > 0
-                ? `Element at (${xRounded}, ${yRounded}):\n${parts.join("\n")}`
-                : `No accessibility element found at (${xRounded}, ${yRounded})`,
-            elements: element ? [element] : []
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to describe point: ${error instanceof Error ? error.message : String(error)}`
-        };
+    let stdout: string;
+    if (driver === "axe") {
+      const result = await runAxe(
+        "describe-ui",
+        "--point",
+        `${xRounded},${yRounded}`,
+        "--udid",
+        targetUdid,
+      );
+      stdout = result.stdout;
+    } else {
+      const result = await runIdb(
+        "ui",
+        "describe-point",
+        "--udid",
+        targetUdid,
+        "--json",
+        "--",
+        String(xRounded),
+        String(yRounded),
+      );
+      if (result.stderr) throw new Error(result.stderr);
+      stdout = result.stdout;
     }
+
+    // Parse JSON response - may be single element or array
+    let element: iOSAccessibilityElement;
+    try {
+      const parsed = JSON.parse(stdout);
+      element = Array.isArray(parsed) ? parsed[0] : parsed;
+    } catch {
+      return {
+        success: true,
+        result: `No accessibility element found at (${xRounded}, ${yRounded})`,
+        elements: [],
+      };
+    }
+
+    // Format for human-readable output
+    const parts: string[] = [];
+    if (element.type) parts.push(`Type: ${element.type}`);
+    if (element.AXLabel) parts.push(`Label: "${element.AXLabel}"`);
+    if (element.AXValue) parts.push(`Value: "${element.AXValue}"`);
+    if (element.frame) {
+      const f = element.frame;
+      const centerX = Math.round(f.x + f.width / 2);
+      const centerY = Math.round(f.y + f.height / 2);
+      parts.push(`Frame: (${f.x}, ${f.y}) ${f.width}x${f.height}`);
+      parts.push(`Tap: (${centerX}, ${centerY})`);
+    }
+
+    return {
+      success: true,
+      result:
+        parts.length > 0
+          ? `Element at (${xRounded}, ${yRounded}):\n${parts.join("\n")}`
+          : `No accessibility element found at (${xRounded}, ${yRounded})`,
+      elements: element ? [element] : [],
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to describe point: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
  * Helper to flatten nested accessibility elements
  */
-function flattenElements(elements: iOSAccessibilityElement[]): iOSAccessibilityElement[] {
-    const result: iOSAccessibilityElement[] = [];
-    for (const el of elements) {
-        result.push(el);
-        if (el.children && el.children.length > 0) {
-            result.push(...flattenElements(el.children));
-        }
+function flattenElements(
+  elements: iOSAccessibilityElement[],
+): iOSAccessibilityElement[] {
+  const result: iOSAccessibilityElement[] = [];
+  for (const el of elements) {
+    result.push(el);
+    if (el.children && el.children.length > 0) {
+      result.push(...flattenElements(el.children));
     }
-    return result;
+  }
+  return result;
 }
 
 /**
  * Tap an element by its accessibility label using IDB
  * This simplifies the workflow: no need to manually find coordinates
  */
-export async function iosTapElement(
-    options: {
-        label?: string;
-        labelContains?: string;
-        index?: number;
-        duration?: number;
-        udid?: string;
+export async function iosTapElement(options: {
+  label?: string;
+  labelContains?: string;
+  index?: number;
+  duration?: number;
+  udid?: string;
+}): Promise<iOSResult> {
+  try {
+    const { label, labelContains, index = 0, duration, udid } = options;
+
+    if (!label && !labelContains) {
+      return {
+        success: false,
+        error:
+          "Either 'label' (exact match) or 'labelContains' (partial match) is required",
+      };
     }
-): Promise<iOSResult> {
-    try {
-        const { label, labelContains, index = 0, duration, udid } = options;
 
-        if (!label && !labelContains) {
-            return {
-                success: false,
-                error: "Either 'label' (exact match) or 'labelContains' (partial match) is required"
-            };
-        }
-
-        // Get all accessibility elements
-        const describeResult = await iosDescribeAll(udid);
-        if (!describeResult.success || !describeResult.elements) {
-            return {
-                success: false,
-                error: describeResult.error || "Failed to get accessibility elements"
-            };
-        }
-
-        // Flatten the tree and find matching elements
-        const allElements = flattenElements(describeResult.elements);
-        const matches = allElements.filter(el => {
-            if (!el.AXLabel) return false;
-            if (label) return el.AXLabel === label;
-            if (labelContains) return el.AXLabel.toLowerCase().includes(labelContains.toLowerCase());
-            return false;
-        });
-
-        if (matches.length === 0) {
-            const searchTerm = label ? `label="${label}"` : `labelContains="${labelContains}"`;
-            return {
-                success: false,
-                error: `No element found with ${searchTerm}`
-            };
-        }
-
-        // Select element by index (default 0 = first match)
-        if (index >= matches.length) {
-            return {
-                success: false,
-                error: `Index ${index} out of range. Found ${matches.length} matching element(s).`
-            };
-        }
-
-        const element = matches[index];
-
-        // Check if element has frame coordinates
-        if (!element.frame) {
-            return {
-                success: false,
-                error: `Element "${element.AXLabel}" has no frame coordinates`
-            };
-        }
-
-        // Calculate center
-        const centerX = Math.round(element.frame.x + element.frame.width / 2);
-        const centerY = Math.round(element.frame.y + element.frame.height / 2);
-
-        // Tap at center
-        const tapResult = await iosTap(centerX, centerY, { duration, udid });
-
-        if (tapResult.success) {
-            return {
-                success: true,
-                result: `Tapped "${element.AXLabel}" at (${centerX}, ${centerY})`
-            };
-        }
-
-        return tapResult;
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to tap element: ${error instanceof Error ? error.message : String(error)}`
-        };
+    // Get all accessibility elements
+    const describeResult = await iosDescribeAll(udid);
+    if (!describeResult.success || !describeResult.elements) {
+      return {
+        success: false,
+        error: describeResult.error || "Failed to get accessibility elements",
+      };
     }
+
+    // Flatten the tree and find matching elements
+    const allElements = flattenElements(describeResult.elements);
+    const matches = allElements.filter((el) => {
+      if (!el.AXLabel) return false;
+      if (label) return el.AXLabel === label;
+      if (labelContains)
+        return el.AXLabel.toLowerCase().includes(labelContains.toLowerCase());
+      return false;
+    });
+
+    if (matches.length === 0) {
+      const searchTerm = label
+        ? `label="${label}"`
+        : `labelContains="${labelContains}"`;
+      return {
+        success: false,
+        error: `No element found with ${searchTerm}`,
+      };
+    }
+
+    // Select element by index (default 0 = first match)
+    if (index >= matches.length) {
+      return {
+        success: false,
+        error: `Index ${index} out of range. Found ${matches.length} matching element(s).`,
+      };
+    }
+
+    const element = matches[index];
+
+    // Check if element has frame coordinates
+    if (!element.frame) {
+      return {
+        success: false,
+        error: `Element "${element.AXLabel}" has no frame coordinates`,
+      };
+    }
+
+    // Calculate center
+    const centerX = Math.round(element.frame.x + element.frame.width / 2);
+    const centerY = Math.round(element.frame.y + element.frame.height / 2);
+
+    // Tap at center
+    const tapResult = await iosTap(centerX, centerY, { duration, udid });
+
+    if (tapResult.success) {
+      return {
+        success: true,
+        result: `Tapped "${element.AXLabel}" at (${centerX}, ${centerY})`,
+      };
+    }
+
+    return tapResult;
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to tap element: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 // ============================================================================
@@ -1205,291 +1397,337 @@ export async function iosTapElement(
  * UI Element from iOS accessibility tree (simplified for find_element)
  */
 export interface IOSUIElement {
-    label: string;
-    value: string;
-    type: string;
-    identifier: string;
-    frame: {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    };
-    center: { x: number; y: number };
-    enabled: boolean;
-    traits: string[];
+  label: string;
+  value: string;
+  type: string;
+  identifier: string;
+  frame: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  center: { x: number; y: number };
+  enabled: boolean;
+  traits: string[];
 }
 
 /**
  * Result of iOS element find operations
  */
 export interface IOSFindElementResult {
-    success: boolean;
-    found: boolean;
-    element?: IOSUIElement;
-    allMatches?: IOSUIElement[];
-    matchCount?: number;
-    error?: string;
+  success: boolean;
+  found: boolean;
+  element?: IOSUIElement;
+  allMatches?: IOSUIElement[];
+  matchCount?: number;
+  error?: string;
 }
 
 /**
  * Result of iOS wait for element operations
  */
 export interface IOSWaitForElementResult extends IOSFindElementResult {
-    elapsedMs?: number;
-    timedOut?: boolean;
+  elapsedMs?: number;
+  timedOut?: boolean;
 }
 
 /**
  * Options for finding iOS elements
  */
 export interface IOSFindElementOptions {
-    label?: string;
-    labelContains?: string;
-    value?: string;
-    valueContains?: string;
-    type?: string;
-    identifier?: string;
-    identifierContains?: string;
-    index?: number;
+  label?: string;
+  labelContains?: string;
+  value?: string;
+  valueContains?: string;
+  type?: string;
+  identifier?: string;
+  identifierContains?: string;
+  index?: number;
 }
 
 /**
  * Parse IDB accessibility output into simplified element array
  */
 function parseIdbAccessibilityForFindElement(output: string): IOSUIElement[] {
-    const elements: IOSUIElement[] = [];
+  const elements: IOSUIElement[] = [];
 
-    try {
-        const data = JSON.parse(output);
+  try {
+    const data = JSON.parse(output);
 
-        const extractElements = (node: Record<string, unknown>): void => {
-            const frame = node.frame as { x: number; y: number; width: number; height: number } | undefined;
+    const extractElements = (node: Record<string, unknown>): void => {
+      const frame = node.frame as
+        | { x: number; y: number; width: number; height: number }
+        | undefined;
 
-            if (frame) {
-                const element: IOSUIElement = {
-                    label: (node.AXLabel as string) || (node.label as string) || "",
-                    value: (node.AXValue as string) || (node.value as string) || "",
-                    type: (node.type as string) || (node.AXType as string) || "",
-                    identifier: (node.AXIdentifier as string) || (node.identifier as string) || (node.AXUniqueId as string) || "",
-                    frame: {
-                        x: frame.x || 0,
-                        y: frame.y || 0,
-                        width: frame.width || 0,
-                        height: frame.height || 0
-                    },
-                    center: {
-                        x: Math.round((frame.x || 0) + (frame.width || 0) / 2),
-                        y: Math.round((frame.y || 0) + (frame.height || 0) / 2)
-                    },
-                    enabled: (node.enabled as boolean) !== false,
-                    traits: (node.traits as string[]) || []
-                };
-
-                if (element.label || element.value || element.type || element.identifier) {
-                    elements.push(element);
-                }
-            }
-
-            const children = node.children as Record<string, unknown>[] | undefined;
-            if (children && Array.isArray(children)) {
-                for (const child of children) {
-                    extractElements(child);
-                }
-            }
+      if (frame) {
+        const element: IOSUIElement = {
+          label: (node.AXLabel as string) || (node.label as string) || "",
+          value: (node.AXValue as string) || (node.value as string) || "",
+          type: (node.type as string) || (node.AXType as string) || "",
+          identifier:
+            (node.AXIdentifier as string) ||
+            (node.identifier as string) ||
+            (node.AXUniqueId as string) ||
+            "",
+          frame: {
+            x: frame.x || 0,
+            y: frame.y || 0,
+            width: frame.width || 0,
+            height: frame.height || 0,
+          },
+          center: {
+            x: Math.round((frame.x || 0) + (frame.width || 0) / 2),
+            y: Math.round((frame.y || 0) + (frame.height || 0) / 2),
+          },
+          enabled: (node.enabled as boolean) !== false,
+          traits: (node.traits as string[]) || [],
         };
 
-        if (Array.isArray(data)) {
-            for (const item of data) {
-                extractElements(item as Record<string, unknown>);
-            }
-        } else {
-            extractElements(data as Record<string, unknown>);
+        if (
+          element.label ||
+          element.value ||
+          element.type ||
+          element.identifier
+        ) {
+          elements.push(element);
         }
-    } catch {
-        // If JSON parsing fails, return empty array
-    }
+      }
 
-    return elements;
+      const children = node.children as Record<string, unknown>[] | undefined;
+      if (children && Array.isArray(children)) {
+        for (const child of children) {
+          extractElements(child);
+        }
+      }
+    };
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        extractElements(item as Record<string, unknown>);
+      }
+    } else {
+      extractElements(data as Record<string, unknown>);
+    }
+  } catch {
+    // If JSON parsing fails, return empty array
+  }
+
+  return elements;
 }
 
 /**
  * Check if an element's center is within the screen viewport.
  * Filters out off-screen elements in scroll views, horizontal pagers, etc.
  */
-function isIOSElementInViewport(element: IOSUIElement, screenWidth: number, screenHeight: number): boolean {
-    const { center } = element;
-    return center.x >= 0 && center.x <= screenWidth && center.y >= 0 && center.y <= screenHeight;
+function isIOSElementInViewport(
+  element: IOSUIElement,
+  screenWidth: number,
+  screenHeight: number,
+): boolean {
+  const { center } = element;
+  return (
+    center.x >= 0 &&
+    center.x <= screenWidth &&
+    center.y >= 0 &&
+    center.y <= screenHeight
+  );
 }
 
 /**
  * Extract screen dimensions from the parsed UI tree.
  * The root Application element's frame represents the screen size.
  */
-function extractIOSScreenSize(rawOutput: string): { width: number; height: number } | null {
-    try {
-        const data = JSON.parse(rawOutput);
-        const root = Array.isArray(data) ? data[0] : data;
-        const frame = root?.frame as { width?: number; height?: number } | undefined;
-        if (frame?.width && frame?.height) {
-            return { width: frame.width, height: frame.height };
-        }
-    } catch {
-        // Fall through
+function extractIOSScreenSize(
+  rawOutput: string,
+): { width: number; height: number } | null {
+  try {
+    const data = JSON.parse(rawOutput);
+    const root = Array.isArray(data) ? data[0] : data;
+    const frame = root?.frame as
+      | { width?: number; height?: number }
+      | undefined;
+    if (frame?.width && frame?.height) {
+      return { width: frame.width, height: frame.height };
     }
-    return null;
+  } catch {
+    // Fall through
+  }
+  return null;
 }
 
 /**
  * Match iOS element against find options
  */
-function matchesIOSFindElement(element: IOSUIElement, options: IOSFindElementOptions): boolean {
-    if (options.label !== undefined) {
-        if (element.label !== options.label) return false;
-    }
-    if (options.labelContains !== undefined) {
-        if (!element.label.toLowerCase().includes(options.labelContains.toLowerCase())) return false;
-    }
-    if (options.value !== undefined) {
-        if (element.value !== options.value) return false;
-    }
-    if (options.valueContains !== undefined) {
-        if (!element.value.toLowerCase().includes(options.valueContains.toLowerCase())) return false;
-    }
-    if (options.type !== undefined) {
-        if (!element.type.toLowerCase().includes(options.type.toLowerCase())) return false;
-    }
-    if (options.identifier !== undefined) {
-        if (element.identifier !== options.identifier) return false;
-    }
-    if (options.identifierContains !== undefined) {
-        if (!element.identifier.toLowerCase().includes(options.identifierContains.toLowerCase())) return false;
-    }
-    return true;
+function matchesIOSFindElement(
+  element: IOSUIElement,
+  options: IOSFindElementOptions,
+): boolean {
+  if (options.label !== undefined) {
+    if (element.label !== options.label) return false;
+  }
+  if (options.labelContains !== undefined) {
+    if (
+      !element.label.toLowerCase().includes(options.labelContains.toLowerCase())
+    )
+      return false;
+  }
+  if (options.value !== undefined) {
+    if (element.value !== options.value) return false;
+  }
+  if (options.valueContains !== undefined) {
+    if (
+      !element.value.toLowerCase().includes(options.valueContains.toLowerCase())
+    )
+      return false;
+  }
+  if (options.type !== undefined) {
+    if (!element.type.toLowerCase().includes(options.type.toLowerCase()))
+      return false;
+  }
+  if (options.identifier !== undefined) {
+    if (element.identifier !== options.identifier) return false;
+  }
+  if (options.identifierContains !== undefined) {
+    if (
+      !element.identifier
+        .toLowerCase()
+        .includes(options.identifierContains.toLowerCase())
+    )
+      return false;
+  }
+  return true;
 }
 
 /**
  * Get UI accessibility tree from iOS simulator using IDB (for find_element)
  */
 export async function iosGetUITree(udid?: string): Promise<{
-    success: boolean;
-    elements?: IOSUIElement[];
-    rawOutput?: string;
-    error?: string;
+  success: boolean;
+  elements?: IOSUIElement[];
+  rawOutput?: string;
+  error?: string;
 }> {
-    try {
-        const idbAvailable = await isIdbAvailable();
-        if (!idbAvailable) {
-            return {
-                success: false,
-                error: "IDB is not installed. Install with: brew install idb-companion"
-            };
-        }
+  try {
+    const preflight = await ensureUiDriverReady(udid);
+    if (!preflight.ready) return preflight.error;
+    const { driver, targetUdid } = preflight;
 
-        const targetUdid = udid || (await getActiveOrBootedSimulatorUdid());
-        if (!targetUdid) {
-            return {
-                success: false,
-                error: "No iOS simulator is currently running. Start a simulator first."
-            };
-        }
-
-        const connectResult = await ensureIdbConnected(targetUdid);
-        if (!connectResult.success) {
-            return { success: false, error: connectResult.error };
-        }
-
-        const { stdout } = await runIdb("ui", "describe-all", "--udid", targetUdid);
-        const elements = parseIdbAccessibilityForFindElement(stdout);
-
-        return {
-            success: true,
-            elements,
-            rawOutput: stdout
-        };
-    } catch (error) {
-        return {
-            success: false,
-            error: `Failed to get UI tree: ${error instanceof Error ? error.message : String(error)}`
-        };
+    let stdout: string;
+    if (driver === "axe") {
+      const result = await runAxe("describe-ui", "--udid", targetUdid);
+      stdout = result.stdout;
+    } else {
+      const result = await runIdb("ui", "describe-all", "--udid", targetUdid);
+      stdout = result.stdout;
     }
+
+    const elements = parseIdbAccessibilityForFindElement(stdout);
+
+    return {
+      success: true,
+      elements,
+      rawOutput: stdout,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to get UI tree: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 /**
  * Find element(s) in the iOS UI tree matching the given criteria
  */
 export async function iosFindElement(
-    options: IOSFindElementOptions,
-    udid?: string
+  options: IOSFindElementOptions,
+  udid?: string,
 ): Promise<IOSFindElementResult> {
-    try {
-        if (!options.label && !options.labelContains && !options.value &&
-            !options.valueContains && !options.type && !options.identifier && !options.identifierContains) {
-            return {
-                success: false,
-                found: false,
-                error: "At least one search criteria (label, labelContains, value, valueContains, identifier, identifierContains, or type) must be provided"
-            };
-        }
-
-        const treeResult = await iosGetUITree(udid);
-        if (!treeResult.success || !treeResult.elements) {
-            return {
-                success: false,
-                found: false,
-                error: treeResult.error
-            };
-        }
-
-        // Filter to viewport-visible elements first, then match criteria.
-        // This prevents selecting off-screen duplicates in scroll views / pagers.
-        const screenSize = treeResult.rawOutput ? extractIOSScreenSize(treeResult.rawOutput) : null;
-        const visibleElements = screenSize
-            ? treeResult.elements.filter(el => isIOSElementInViewport(el, screenSize.width, screenSize.height))
-            : treeResult.elements;
-
-        let matches = visibleElements.filter(el => matchesIOSFindElement(el, options));
-
-        // If no visible matches, fall back to all elements (element may be partially visible
-        // or the screen size extraction failed)
-        if (matches.length === 0) {
-            matches = treeResult.elements.filter(el => matchesIOSFindElement(el, options));
-        }
-
-        if (matches.length === 0) {
-            return {
-                success: true,
-                found: false,
-                matchCount: 0
-            };
-        }
-
-        const index = options.index ?? 0;
-        const selectedElement = matches[index];
-
-        if (!selectedElement) {
-            return {
-                success: true,
-                found: false,
-                matchCount: matches.length,
-                error: `Index ${index} out of bounds. Found ${matches.length} matching element(s).`
-            };
-        }
-
-        return {
-            success: true,
-            found: true,
-            element: selectedElement,
-            allMatches: matches,
-            matchCount: matches.length
-        };
-    } catch (error) {
-        return {
-            success: false,
-            found: false,
-            error: `Failed to find element: ${error instanceof Error ? error.message : String(error)}`
-        };
+  try {
+    if (
+      !options.label &&
+      !options.labelContains &&
+      !options.value &&
+      !options.valueContains &&
+      !options.type &&
+      !options.identifier &&
+      !options.identifierContains
+    ) {
+      return {
+        success: false,
+        found: false,
+        error:
+          "At least one search criteria (label, labelContains, value, valueContains, identifier, identifierContains, or type) must be provided",
+      };
     }
+
+    const treeResult = await iosGetUITree(udid);
+    if (!treeResult.success || !treeResult.elements) {
+      return {
+        success: false,
+        found: false,
+        error: treeResult.error,
+      };
+    }
+
+    // Filter to viewport-visible elements first, then match criteria.
+    // This prevents selecting off-screen duplicates in scroll views / pagers.
+    const screenSize = treeResult.rawOutput
+      ? extractIOSScreenSize(treeResult.rawOutput)
+      : null;
+    const visibleElements = screenSize
+      ? treeResult.elements.filter((el) =>
+          isIOSElementInViewport(el, screenSize.width, screenSize.height),
+        )
+      : treeResult.elements;
+
+    let matches = visibleElements.filter((el) =>
+      matchesIOSFindElement(el, options),
+    );
+
+    // If no visible matches, fall back to all elements (element may be partially visible
+    // or the screen size extraction failed)
+    if (matches.length === 0) {
+      matches = treeResult.elements.filter((el) =>
+        matchesIOSFindElement(el, options),
+      );
+    }
+
+    if (matches.length === 0) {
+      return {
+        success: true,
+        found: false,
+        matchCount: 0,
+      };
+    }
+
+    const index = options.index ?? 0;
+    const selectedElement = matches[index];
+
+    if (!selectedElement) {
+      return {
+        success: true,
+        found: false,
+        matchCount: matches.length,
+        error: `Index ${index} out of bounds. Found ${matches.length} matching element(s).`,
+      };
+    }
+
+    return {
+      success: true,
+      found: true,
+      element: selectedElement,
+      allMatches: matches,
+      matchCount: matches.length,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      found: false,
+      error: `Failed to find element: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 // DPR cache: UDID → device pixel ratio (never changes during session)
@@ -1499,8 +1737,11 @@ const dprCache = new Map<string, number>();
  * Pure calculation: DPR = screenshotPixelWidth / screenPointWidth.
  * Exported for unit testing.
  */
-export function calculateDPR(screenshotPixelWidth: number, screenPointWidth: number): number {
-    return Math.round(screenshotPixelWidth / screenPointWidth);
+export function calculateDPR(
+  screenshotPixelWidth: number,
+  screenPointWidth: number,
+): number {
+  return Math.round(screenshotPixelWidth / screenPointWidth);
 }
 
 /**
@@ -1509,105 +1750,135 @@ export function calculateDPR(screenshotPixelWidth: number, screenPointWidth: num
  * Result is cached per UDID for the session.
  */
 export async function getDevicePixelRatio(udid?: string): Promise<number> {
-    const cacheKey = udid || "__default__";
-    const cached = dprCache.get(cacheKey);
-    if (cached) return cached;
+  const cacheKey = udid || "__default__";
+  const cached = dprCache.get(cacheKey);
+  if (cached) return cached;
 
-    const resolvedUdid = udid || (await getActiveOrBootedSimulatorUdid());
-    if (!resolvedUdid) {
-        throw new Error("No iOS simulator is currently running. Start a simulator first.");
+  const resolvedUdid = udid || (await getActiveOrBootedSimulatorUdid());
+  if (!resolvedUdid) {
+    throw new Error(
+      "No iOS simulator is currently running. Start a simulator first.",
+    );
+  }
+
+  // Take screenshot to get pixel dimensions
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const screenshotPath = path.join(
+    os.tmpdir(),
+    `ios-dpr-screenshot-${timestamp}.png`,
+  );
+  await execAsync(
+    `xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`,
+    {
+      timeout: SIMCTL_TIMEOUT,
+    },
+  );
+  const metadata = await sharp(screenshotPath).metadata();
+  const pixelWidth = metadata.width!;
+  const pixelHeight = metadata.height!;
+
+  // Try accessibility tree for exact DPR, fall back to inference
+  const driver = getIosDriver();
+  const driverOk =
+    driver === "axe" ? await isAxeAvailable() : await isIdbAvailable();
+  if (driverOk) {
+    try {
+      let stdout: string;
+      if (driver === "axe") {
+        const result = await runAxe("describe-ui", "--udid", resolvedUdid);
+        stdout = result.stdout;
+      } else {
+        await ensureIdbConnected(resolvedUdid);
+        const result = await runIdb(
+          "ui",
+          "describe-all",
+          "--udid",
+          resolvedUdid,
+          "--json",
+          "--nested",
+        );
+        stdout = result.stdout;
+      }
+      const screenSize = extractIOSScreenSize(stdout);
+      if (screenSize) {
+        const dpr = calculateDPR(pixelWidth, screenSize.width);
+        dprCache.set(cacheKey, dpr);
+        return dpr;
+      }
+    } catch {
+      // driver failed — fall through to inference
     }
+  }
 
-    // Take screenshot to get pixel dimensions
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const screenshotPath = path.join(os.tmpdir(), `ios-dpr-screenshot-${timestamp}.png`);
-    await execAsync(`xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`, {
-        timeout: SIMCTL_TIMEOUT
-    });
-    const metadata = await sharp(screenshotPath).metadata();
-    const pixelWidth = metadata.width!;
-    const pixelHeight = metadata.height!;
-
-    // Try idb accessibility tree for exact DPR, fall back to inference
-    const idbOk = await isIdbAvailable();
-    if (idbOk) {
-        try {
-            await ensureIdbConnected(resolvedUdid);
-            const { stdout } = await runIdb("ui", "describe-all", "--udid", resolvedUdid, "--json", "--nested");
-            const screenSize = extractIOSScreenSize(stdout);
-            if (screenSize) {
-                const dpr = calculateDPR(pixelWidth, screenSize.width);
-                dprCache.set(cacheKey, dpr);
-                return dpr;
-            }
-        } catch {
-            // idb failed — fall through to inference
-        }
-    }
-
-    // Fallback: infer DPR from screenshot pixel dimensions
-    const { inferIOSDevicePixelRatio } = await import("./ocr.js");
-    const dpr = inferIOSDevicePixelRatio(pixelWidth, pixelHeight);
-    dprCache.set(cacheKey, dpr);
-    return dpr;
+  // Fallback: infer DPR from screenshot pixel dimensions
+  const { inferIOSDevicePixelRatio } = await import("./ocr.js");
+  const dpr = inferIOSDevicePixelRatio(pixelWidth, pixelHeight);
+  dprCache.set(cacheKey, dpr);
+  return dpr;
 }
 
 /** Clear DPR cache (for testing or when devices change) */
 export function clearDPRCache(): void {
-    dprCache.clear();
+  dprCache.clear();
 }
 
 /**
  * Wait for element to appear on iOS screen with polling
  */
 export async function iosWaitForElement(
-    options: IOSFindElementOptions & {
-        timeoutMs?: number;
-        pollIntervalMs?: number;
-    },
-    udid?: string
+  options: IOSFindElementOptions & {
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+  },
+  udid?: string,
 ): Promise<IOSWaitForElementResult> {
-    const timeoutMs = options.timeoutMs ?? 10000;
-    const pollIntervalMs = options.pollIntervalMs ?? 500;
-    const startTime = Date.now();
+  const timeoutMs = options.timeoutMs ?? 10000;
+  const pollIntervalMs = options.pollIntervalMs ?? 500;
+  const startTime = Date.now();
 
-    if (!options.label && !options.labelContains && !options.value &&
-        !options.valueContains && !options.type) {
-        return {
-            success: false,
-            found: false,
-            timedOut: false,
-            error: "At least one search criteria (label, labelContains, value, valueContains, or type) must be provided"
-        };
-    }
-
-    while (Date.now() - startTime < timeoutMs) {
-        const result = await iosFindElement(options, udid);
-
-        if (result.found && result.element) {
-            return {
-                ...result,
-                elapsedMs: Date.now() - startTime,
-                timedOut: false
-            };
-        }
-
-        if (!result.success) {
-            return {
-                ...result,
-                elapsedMs: Date.now() - startTime,
-                timedOut: false
-            };
-        }
-
-        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-    }
-
+  if (
+    !options.label &&
+    !options.labelContains &&
+    !options.value &&
+    !options.valueContains &&
+    !options.type
+  ) {
     return {
-        success: true,
-        found: false,
-        elapsedMs: Date.now() - startTime,
-        timedOut: true,
-        error: `Timed out after ${timeoutMs}ms waiting for element`
+      success: false,
+      found: false,
+      timedOut: false,
+      error:
+        "At least one search criteria (label, labelContains, value, valueContains, or type) must be provided",
     };
+  }
+
+  while (Date.now() - startTime < timeoutMs) {
+    const result = await iosFindElement(options, udid);
+
+    if (result.found && result.element) {
+      return {
+        ...result,
+        elapsedMs: Date.now() - startTime,
+        timedOut: false,
+      };
+    }
+
+    if (!result.success) {
+      return {
+        ...result,
+        elapsedMs: Date.now() - startTime,
+        timedOut: false,
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  return {
+    success: true,
+    found: false,
+    elapsedMs: Date.now() - startTime,
+    timedOut: true,
+    error: `Timed out after ${timeoutMs}ms waiting for element`,
+  };
 }

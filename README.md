@@ -52,30 +52,53 @@ Android works out of the box — all device control tools use ADB, which ships w
 adb devices
 ```
 
-### iOS Simulator — IDB Setup
+### iOS Simulator — UI Automation Setup
 
-[IDB (iOS Development Bridge)](https://github.com/facebook/idb) is a tool built by Meta for automating iOS Simulators and devices. It provides programmatic access to gestures, text input, accessibility trees, and more — capabilities that Apple's built-in `simctl` doesn't cover.
+iOS UI automation tools (tap, swipe, text input, accessibility queries) require a UI driver. Install one of the following:
 
-Many iOS tools (tap, swipe, text input, accessibility queries) require IDB's `idb-companion` daemon. Without it, the tool can detect UI elements via OCR but **cannot execute taps or gestures** on iOS Simulators.
+**Option A: AXe CLI (experimental)**
 
-**Install:**
+[AXe](https://github.com/cameroncooke/AXe) is a standalone CLI for iOS simulator automation. No daemon required — single binary, simple setup.
+
+```bash
+brew install cameroncooke/axe/axe
+```
+
+Verify: `axe --version`
+
+Add `env` to your MCP server configuration:
+
+```json
+{
+    "mcpServers": {
+        "rn-debugger": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["react-native-ai-devtools"],
+            "env": { "IOS_DRIVER": "axe" }
+        }
+    }
+}
+```
+
+> **Note:** AXe text input only supports US keyboard layout characters.
+
+**Option B: IDB**
+
+[IDB (iOS Development Bridge)](https://github.com/facebook/idb) is a tool built by Meta for automating iOS Simulators. Requires a background daemon.
 
 ```bash
 brew install idb-companion
 ```
 
-**Verify:**
+Verify: `idb_companion --list 1`
 
-```bash
-idb_companion --list 1
-```
+IDB is the default driver — no `IOS_DRIVER` env var needed.
 
-You should see a list of available simulators. If the command is not found, the installation didn't succeed.
+**What works without a UI driver:**
 
-**What works without IDB:**
-
-| Capability | Without IDB | With IDB |
-|------------|-------------|----------|
+| Capability | Without IDB/AXe | With IDB/AXe |
+|------------|-----------------|--------------|
 | Screenshots | Yes (simctl) | Yes |
 | App install/launch/terminate | Yes (simctl) | Yes |
 | URL opening | Yes (simctl) | Yes |
@@ -86,13 +109,13 @@ You should see a list of available simulators. If the command is not found, the 
 | **Element finding / waiting** | **No** | Yes |
 | **Hardware buttons (Home, Lock)** | **No** | Yes |
 
-> **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"Coordinate tap failed: IDB is not installed"` in tap results, install IDB with the command above and retry.
+> **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"AXe is not installed"` in tap results, install the appropriate driver with the commands above and retry.
 
 ## Requirements
 
 -   Node.js 18+
 -   React Native app running with Metro bundler
--   **iOS UI automation**: [Facebook IDB](https://fbidb.io/) — `brew install idb-companion` (required for tap, swipe, text input, accessibility on iOS Simulator)
+-   **iOS UI automation**: [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`) or [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`) — required for tap, swipe, text input, accessibility on iOS Simulator
 -   **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
 
 ## Claude Code Setup
