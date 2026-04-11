@@ -238,20 +238,22 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
    - **Without SDK**: Enables CDP `Network.enable` (on supported targets) or injects a JS fetch interceptor as fallback
 5. Stores logs and network requests in circular buffers for retrieval
 
-## Auto-Reconnection
+## Connection Management
 
-The server automatically handles connection interruptions:
+### Explicit Connection
 
-### Auto-Connect on Startup
+The server does **not** auto-connect on startup. Call `scan_metro` to discover and connect to Metro servers. This prevents multiple MCP server instances (from parallel agent sessions) from competing for the single CDP WebSocket slot, which would cause connection thrashing and dropped tools.
 
-When the MCP server starts, it automatically scans common Metro ports (8081, 8082, 19000-19002) and connects to any running Metro bundlers. No need to manually call `scan_metro` if Metro is already running.
+### Graceful Shutdown
+
+When the MCP server process is terminated (`SIGINT`/`SIGTERM`), it closes all CDP WebSocket connections and cancels reconnection timers, freeing the CDP slot immediately for other sessions.
 
 ### Reconnection on Disconnect
 
 When the connection to Metro is lost (e.g., app restart, Metro restart, or network issues):
 
 1. The server automatically attempts to reconnect
-2. Uses exponential backoff: immediate, 500ms, 1s, 2s, 4s, 8s (up to 8 attempts)
+2. Uses exponential backoff: 500ms, 1s, 2s, 4s, 8s (up to 8 attempts)
 3. Re-fetches device list to handle new WebSocket URLs
 4. Preserves existing log and network buffers
 
