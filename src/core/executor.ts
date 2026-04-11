@@ -849,7 +849,7 @@ export async function getComponentTree(
     // Use lower default depth for structureOnly to keep output compact (~2-5KB)
     // Full mode uses higher depth since TONL format handles it better
     // focusedOnly mode uses moderate depth since we're already filtering to active screen
-    const maxDepth = options.maxDepth ?? (structureOnly ? (focusedOnly ? 25 : 40) : 100);
+    const maxDepth = options.maxDepth ?? 5000;
 
     const expression = `
         (function() {
@@ -1835,8 +1835,6 @@ export async function findComponents(
                         child = child.sibling;
                     }
                 } catch(e) {
-                    // Skip nodes that throw (e.g. Reanimated animated components)
-                    // Still try to traverse children if possible
                     try {
                         var child = fiber.child;
                         while (child && results.length < maxResults) {
@@ -1849,7 +1847,6 @@ export async function findComponents(
 
             search(roots[0].current, [], 0);
 
-            // Summary mode: just return counts by component name
             if (summaryMode) {
                 const counts = {};
                 for (const r of results) {
@@ -1876,17 +1873,14 @@ export async function findComponents(
 
     const result = await executeInApp(expression, false, {}, device);
 
-    // Apply TONL formatting if requested
     if (format === "tonl" && result.success && result.result) {
         try {
             const parsed = JSON.parse(result.result);
             if (parsed.components) {
                 if (parsed.totalMatches !== undefined) {
-                    // Summary mode
                     const tonl = formatSummaryToTonl(parsed.components, parsed.totalMatches);
                     return { success: true, result: `pattern: ${parsed.pattern}\n${tonl}` };
                 } else {
-                    // Full list mode
                     const tonl = formatFoundComponentsToTonl(parsed.components);
                     return { success: true, result: `pattern: ${parsed.pattern}\nfound: ${parsed.found}\n${tonl}` };
                 }

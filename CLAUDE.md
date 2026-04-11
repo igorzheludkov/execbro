@@ -124,11 +124,11 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `ocr_screenshot`: Screenshot with OCR text recognition and tap-ready coordinates
 - `get_images`: Access shared image buffer containing screenshots from all tools. Returns metadata by default; use `id` or `groupId`+`frameIndex` to retrieve specific images. Tap burst frames are stored here.
 
-**Component Inspection:**
-- `get_component_tree`: Get React component hierarchy. Use `focusedOnly=true` + `structureOnly=true` for compact active-screen view
-- `inspect_component`: Deep dive into a specific component's props, state, hooks, and children
-- `find_components`: Search the React fiber tree for components by name regex pattern
-- `get_screen_layout`: Screen map — indented tree of visible components with frame positions, text content, and identifiers. Use `extended=true` for layout styles (padding, flex, backgroundColor, etc.). Coordinates are in points (iOS) / dp (Android)
+**Component Inspection (recommended workflow: get_screen_layout → find_components → inspect_component):**
+- `get_screen_layout`: **Start here.** Screen map — indented tree of visible components with real screen positions (measureInWindow), text content, and identifiers. Shows only what's on screen, filters out off-screen and internal components. Use `extended=true` for layout styles (padding, flex, backgroundColor, etc.). Coordinates are in points (iOS) / dp (Android)
+- `find_components`: Fast regex search across the fiber tree by component name pattern. Returns all matching instances with path and depth. Use after `get_screen_layout` to locate specific components
+- `inspect_component`: Deep dive into a specific component's props, state (hooks), and optionally children tree. Use after finding a component name via `get_screen_layout` or `find_components`
+- `get_component_tree`: Full React fiber tree including all providers, navigation wrappers, and internal components. Use when you need to understand the complete React architecture, not just what's visible. Use `structureOnly=true` for compact names-only output
 - `get_inspector_selection`: Identify component at screen coordinates — returns clean hierarchy with file paths (e.g. `HomeScreen > SneakerCard > PulseActionButton`)
 - `inspect_at_point`: Layout debugging at coordinates — returns component props, frame (position/size), and path
 - `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
@@ -182,17 +182,22 @@ When debugging React Native apps through this MCP server:
 - **TextInput fields**: `tap` detects TextInput elements (`onChangeText`/`onFocus`) in the fiber tree and falls through to native tap for actual focus. `tap(testID="email-input")` works even though inputs don't have `onPress`.
 - **Icon-only buttons** (no text label inside the pressable): Use `tap(component="ComponentName")` to match by React component name — automatically walks up to the nearest pressable parent. Use `find_components` first to discover actual component names. Use `maxTraversalDepth` param to increase parent search depth for deeply wrapped components (default: 15).
 - **Non-ASCII text** (Cyrillic, CJK, Arabic, etc.): `tap(text="текст")` automatically skips fiber (Hermes limitation) and uses accessibility/OCR. For best results, use `testID` or `component` params instead.
-- **Component Inspection — Identifying elements on screen**: When you need to find which React component renders a specific UI element (to fix layout, styling, or behavior):
-    1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
-    2. Identify the target element visually and estimate its coordinates (convert screenshot pixels to points: divide by device pixel ratio)
-    3. Use `get_inspector_selection(x, y)` to get the clean component hierarchy with file paths — this tells you the exact component name and source file (e.g. `HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton`)
-    4. If you also need layout details (frame bounds, props, styles), use `inspect_at_point(x, y)` on the same coordinates
-    5. To tap at a specific coordinate after inspection, use `tap(x=..., y=...)`
+- **Component Inspection — Understanding what's on screen**:
+    1. Call `get_screen_layout` — returns a tree of visible components with positions, text, and identifiers. This is the fastest way to understand the current UI
+    2. To find a specific component by name, use `find_components(pattern="Button")` — fast regex search across the fiber tree
+    3. To inspect a component's props, state, and hooks, use `inspect_component(componentName="SneakerCard")`
+    4. To see the full React architecture (providers, navigation, hidden modals), use `get_component_tree(structureOnly=true)`
+- **Component Inspection — Identifying elements at coordinates**: When you need to find which React component renders at a specific screen position:
+    1. Take a screenshot (`ios_screenshot` / `android_screenshot`) to see the current screen
+    2. Use `get_inspector_selection(x, y)` to get the component hierarchy with file paths at those coordinates
+    3. Use `inspect_at_point(x, y)` for layout details (frame bounds, props, styles) at those coordinates
 - **When to use which inspection tool**:
-    - `get_screen_layout` → **start here** — full screen map with component tree, positions, and text content. Best for understanding what's on screen
-    - `get_inspector_selection` → finding component names and file paths at specific coordinates (returns hierarchy like RN's Element Inspector overlay)
+    - `get_screen_layout` → **start here** — screen map with component tree, real positions, and text content
+    - `find_components` → fast regex search by component name across the entire fiber tree
+    - `inspect_component` → deep dive into props, hooks, and state of a specific component
+    - `get_component_tree` → full React fiber tree including internals, providers, hidden components
+    - `get_inspector_selection` → finding component names and file paths at specific screen coordinates
     - `inspect_at_point` → layout debugging with props and exact frame measurements at specific coordinates
-    - `find_components` → searching for components by name pattern across the entire fiber tree
 - **Multi-Device Debugging**: When multiple devices are connected:
     1. Use `get_apps` to see all connected devices and their names
     2. Use `device="iPhone"` or `device="sdk_gphone"` to target specific devices (case-insensitive substring match)
