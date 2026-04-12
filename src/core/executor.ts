@@ -1192,6 +1192,11 @@ export async function getScreenLayout(
                     if (!fiber || depth > ${maxDepth}) return;
                     var name = getComponentName(fiber);
                     var isHost = typeof fiber.type === 'string';
+
+                    // Skip inactive screens (react-native-screens MaybeScreen with active=0)
+                    // active: 0 = inactive/detached, 1 = transitioning, 2 = active
+                    if (name === 'MaybeScreen' && fiber.memoizedProps && fiber.memoizedProps.active === 0) return;
+
                     var isMeaningful = name && !isHost && !RN_PRIMITIVES.test(name);
 
                     var myIdx = parentIdx;
@@ -1227,6 +1232,9 @@ export async function getScreenLayout(
                     if (!fiber || depth > ${maxDepth}) return;
                     var name = getComponentName(fiber);
                     var isHost = typeof fiber.type === 'string';
+
+                    // Skip inactive screens (react-native-screens MaybeScreen with active=0)
+                    if (name === 'MaybeScreen' && fiber.memoizedProps && fiber.memoizedProps.active === 0) return;
 
                     if (name && isHost && getMeasurable(fiber)) {
                         // Find nearest meaningful custom component ancestor for display
