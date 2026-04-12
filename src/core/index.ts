@@ -285,6 +285,14 @@ export type {
   LogBoxDismissResult,
 } from "./logbox.js";
 
+// Feedback
+export {
+  shouldShowFeedbackHint,
+  markFeedbackHintShown,
+  formatIssueBody,
+  buildGitHubUrl,
+} from "./feedback.js";
+
 // Format utilities (TONL)
 export { formatLogsAsTonl, formatNetworkAsTonl } from "./format.js";
 export type { OutputFormat } from "./format.js";
