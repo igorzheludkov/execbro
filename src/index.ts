@@ -387,7 +387,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                 markFeedbackHintShown();
                 // Fire-and-forget — don't block the tool response
                 pushLogBox(
-                    "Having ideas or issues? Ask your AI assistant to call send_feedback — your feedback shapes what we build next.",
+                    "Congratulations on your first tool call! If you encounter any issues or have ideas for improvement, ask your AI assistant to call send_feedback. Your feedback helps me make this product better for everyone. Best regards, rn-ai-devtools developer.",
                     "warning",
                     true,
                     "logbox"
