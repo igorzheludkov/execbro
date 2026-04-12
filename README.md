@@ -12,35 +12,35 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 ### Runtime Interaction
 
--   **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search
--   **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) for full capture from app startup including request/response bodies
--   **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
--   **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals
--   **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
+- **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search
+- **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) for full capture from app startup including request/response bodies
+- **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
+- **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals
+- **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
 
 ### Device Control
 
--   **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
--   **Android Devices** - Screenshots, app install/launch, package management (via ADB)
--   **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots. Returns post-tap screenshot and verifies visual change by default
--   **UI Automation** - Swipe, long press, text input, and key events on both platforms
--   **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
--   **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
+- **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
+- **Android Devices** - Screenshots, app install/launch, package management (via ADB)
+- **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots. Returns post-tap screenshot and verifies visual change by default
+- **UI Automation** - Swipe, long press, text input, and key events on both platforms
+- **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
+- **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
 
 ### Multi-Device Debugging
 
--   **Connect All Devices** - `scan_metro` automatically discovers and connects to all Bridgeless targets on each Metro port
--   **Device Targeting** - Every tool accepts an optional `device` parameter for targeting specific devices by name (case-insensitive substring match)
--   **Per-Device Buffers** - Logs and network requests are captured separately per device for clean debugging
--   **Cross-Platform Comparison** - Debug iOS and Android side-by-side, comparing logs, network traffic, and component trees
+- **Connect All Devices** - `scan_metro` automatically discovers and connects to all Bridgeless targets on each Metro port
+- **Device Targeting** - Every tool accepts an optional `device` parameter for targeting specific devices by name (case-insensitive substring match)
+- **Per-Device Buffers** - Logs and network requests are captured separately per device for clean debugging
+- **Cross-Platform Comparison** - Debug iOS and Android side-by-side, comparing logs, network traffic, and component trees
 
 ### Under the Hood
 
--   **Auto-Discovery** - Scans Metro on ports 8081, 8082, 19000-19002 automatically
--   **Multi-Device Support** - Connects to all Bridgeless targets simultaneously, with per-device log and network buffers
--   **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
--   **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
--   **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
+- **Auto-Discovery** - Scans Metro on ports 8081, 8082, 19000-19002 automatically
+- **Multi-Device Support** - Connects to all Bridgeless targets simultaneously, with per-device log and network buffers
+- **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
+- **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
+- **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
 
 ## Platform Setup
 
@@ -70,14 +70,14 @@ Add `env` to your MCP server configuration:
 
 ```json
 {
-    "mcpServers": {
-        "rn-debugger": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["react-native-ai-devtools"],
-            "env": { "IOS_DRIVER": "axe" }
-        }
+  "mcpServers": {
+    "rn-debugger": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["react-native-ai-devtools"],
+      "env": { "IOS_DRIVER": "axe" }
     }
+  }
 }
 ```
 
@@ -97,26 +97,26 @@ IDB is the default driver — no `IOS_DRIVER` env var needed.
 
 **What works without a UI driver:**
 
-| Capability | Without IDB/AXe | With IDB/AXe |
-|------------|-----------------|--------------|
-| Screenshots | Yes (simctl) | Yes |
-| App install/launch/terminate | Yes (simctl) | Yes |
-| URL opening | Yes (simctl) | Yes |
-| Boot simulator | Yes (simctl) | Yes |
-| **Tap / swipe / gestures** | **No** | Yes |
-| **Text input** | **No** | Yes |
-| **Accessibility tree queries** | **No** | Yes |
-| **Element finding / waiting** | **No** | Yes |
-| **Hardware buttons (Home, Lock)** | **No** | Yes |
+| Capability                        | Without IDB/AXe | With IDB/AXe |
+| --------------------------------- | --------------- | ------------ |
+| Screenshots                       | Yes (simctl)    | Yes          |
+| App install/launch/terminate      | Yes (simctl)    | Yes          |
+| URL opening                       | Yes (simctl)    | Yes          |
+| Boot simulator                    | Yes (simctl)    | Yes          |
+| **Tap / swipe / gestures**        | **No**          | Yes          |
+| **Text input**                    | **No**          | Yes          |
+| **Accessibility tree queries**    | **No**          | Yes          |
+| **Element finding / waiting**     | **No**          | Yes          |
+| **Hardware buttons (Home, Lock)** | **No**          | Yes          |
 
 > **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"AXe is not installed"` in tap results, install the appropriate driver with the commands above and retry.
 
 ## Requirements
 
--   Node.js 18+
--   React Native app running with Metro bundler
--   **iOS UI automation**: [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`) or [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`) — required for tap, swipe, text input, accessibility on iOS Simulator
--   **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
+- Node.js 18+
+- React Native app running with Metro bundler
+- **iOS UI automation**: [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`) or [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`) — required for tap, swipe, text input, accessibility on iOS Simulator
+- **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
 
 ## Claude Code Setup
 
@@ -140,13 +140,13 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
 
 ```json
 {
-    "mcpServers": {
-        "rn-debugger": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["react-native-ai-devtools"]
-        }
+  "mcpServers": {
+    "rn-debugger": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["react-native-ai-devtools"]
     }
+  }
 }
 ```
 
@@ -162,13 +162,13 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ```json
 {
-    "servers": {
-        "rn-debugger": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "react-native-ai-devtools"]
-        }
+  "servers": {
+    "rn-debugger": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"]
     }
+  }
 }
 ```
 
@@ -182,12 +182,12 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ```json
 {
-    "mcpServers": {
-        "rn-debugger": {
-            "command": "npx",
-            "args": ["-y", "react-native-ai-devtools"]
-        }
+  "mcpServers": {
+    "rn-debugger": {
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"]
     }
+  }
 }
 ```
 
@@ -199,57 +199,59 @@ Pre-built skills for common debugging workflows — session setup, log inspectio
 
 See the [full tool reference](docs/tools.md) for all tools with descriptions. Key tools:
 
-| Tool | Description |
-| ---- | ----------- |
-| `scan_metro` | **Start here** — scan for Metro servers and auto-connect |
-| `get_logs` / `search_logs` | Capture and search console logs with filtering and summaries |
-| `get_network_requests` | Monitor HTTP requests with method/status filtering |
-| `tap` | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
-| `execute_in_app` | Run JS expressions in the app runtime (REPL-style) |
-| `ios_screenshot` / `android_screenshot` | Take device screenshots |
+| Tool                                    | Description                                                                              |
+| --------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `scan_metro`                            | **Start here** — scan for Metro servers and auto-connect                                 |
+| `get_logs` / `search_logs`              | Capture and search console logs with filtering and summaries                             |
+| `get_network_requests`                  | Monitor HTTP requests with method/status filtering                                       |
+| `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
+| `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
+| `execute_in_app`                        | Run JS expressions in the app runtime (REPL-style)                                       |
+| `ios_screenshot` / `android_screenshot` | Take device screenshots                                                                  |
 
 ## Usage
 
 1. Start your React Native app:
 
-    ```bash
-    npm start
-    # or
-    expo start
-    ```
+   ```bash
+   npm start
+   # or
+   expo start
+   ```
 
 2. In Claude Code, scan for Metro:
 
-    ```
-    Use scan_metro to find and connect to Metro
-    ```
+   ```
+   Use scan_metro to find and connect to Metro
+   ```
 
 3. Get logs:
-    ```
-    Use get_logs to see recent console output
-    ```
+   ```
+   Use get_logs to see recent console output
+   ```
 
 ## Detailed Guides
 
-| Guide | Description |
-| ----- | ----------- |
-| [Console Logging](docs/logging.md) | `get_logs` parameters, filtering, summary mode, TONL format, token optimization |
-| [Network Tracking](docs/network.md) | SDK setup for full capture, filtering, request details, statistics |
-| [App Inspection](docs/app-inspection.md) | Debug globals (Apollo, Redux, Expo Router), `execute_in_app`, limitations |
-| [Device Interaction](docs/device-interaction.md) | Unified `tap`, platform-specific gestures, text input, key events |
-| [OCR Text Extraction](docs/ocr.md) | Cloud Vision OCR, offline fallback, language config, workflows |
-| [Claude Code Skills](docs/skills.md) | Pre-built skills for session setup, debugging, and automation |
-| [Full Tool Reference](docs/tools.md) | Complete list of all 40+ tools with descriptions |
+| Guide                                                      | Description                                                                     |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [Console Logging](docs/logging.md)                         | `get_logs` parameters, filtering, summary mode, TONL format, token optimization |
+| [Network Tracking](docs/network.md)                        | SDK setup for full capture, filtering, request details, statistics              |
+| [App Inspection](docs/app-inspection.md)                   | Debug globals (Apollo, Redux, Expo Router), `execute_in_app`, limitations       |
+| [Layout & Component Inspection](docs/layout-inspection.md) | `get_screen_layout`, component tree, `inspect_at_point`, `find_components`      |
+| [Device Interaction](docs/device-interaction.md)           | Unified `tap`, platform-specific gestures, text input, key events               |
+| [OCR Text Extraction](docs/ocr.md)                         | Cloud Vision OCR, offline fallback, language config, workflows                  |
+| [Claude Code Skills](docs/skills.md)                       | Pre-built skills for session setup, debugging, and automation                   |
+| [Full Tool Reference](docs/tools.md)                       | Complete list of all 40+ tools with descriptions                                |
 
 ## Supported React Native Versions
 
-| Version | Architecture | Engine | Status |
-| ------- | ------------ | ------ | ------ |
-| Expo SDK 54+ | Bridgeless (New Arch) | Hermes | ✓ Fully supported |
-| RN 0.76+ | Bridgeless (New Arch) | Hermes | ✓ Fully supported |
-| RN 0.73 - 0.75 | Bridge (Old Arch) | Hermes | ✓ Fully supported (best network capture via CDP) |
-| RN 0.70 - 0.72 | Bridge (Old Arch) | Hermes / JSC | ✓ Supported |
-| RN < 0.70 | Bridge | JSC | Not tested |
+| Version        | Architecture          | Engine       | Status                                           |
+| -------------- | --------------------- | ------------ | ------------------------------------------------ |
+| Expo SDK 54+   | Bridgeless (New Arch) | Hermes       | ✓ Fully supported                                |
+| RN 0.76+       | Bridgeless (New Arch) | Hermes       | ✓ Fully supported                                |
+| RN 0.73 - 0.75 | Bridge (Old Arch)     | Hermes       | ✓ Fully supported (best network capture via CDP) |
+| RN 0.70 - 0.72 | Bridge (Old Arch)     | Hermes / JSC | ✓ Supported                                      |
+| RN < 0.70      | Bridge                | JSC          | Not tested                                       |
 
 ## How It Works
 
@@ -307,8 +309,8 @@ Use `get_connection_status` to see detailed connection information:
 
 ### No devices found
 
--   Make sure the app is running on a simulator/device
--   Check that Metro bundler is running (`npm start`)
+- Make sure the app is running on a simulator/device
+- Check that Metro bundler is running (`npm start`)
 
 ### Wrong device connected
 
@@ -320,9 +322,9 @@ The server prioritizes devices in this order:
 
 ### Logs not appearing
 
--   Ensure the app is actively running (not just Metro)
--   Try `clear_logs` then trigger some actions in the app
--   Check `get_apps` to verify connection status
+- Ensure the app is actively running (not just Metro)
+- Try `clear_logs` then trigger some actions in the app
+- Check `get_apps` to verify connection status
 
 ## Telemetry & Data Collection
 
@@ -330,14 +332,14 @@ This package collects anonymous usage telemetry to help improve the product. No 
 
 ### What is collected
 
-| Data | Purpose |
-|------|---------|
-| Tool names | Which MCP tools are used most |
-| Success/failure | Error rates for reliability improvements |
-| Duration (ms) | Performance monitoring |
-| Session start/end | Retention analysis |
-| Platform | macOS/Linux/Windows distribution |
-| Server version | Adoption of new versions |
+| Data              | Purpose                                  |
+| ----------------- | ---------------------------------------- |
+| Tool names        | Which MCP tools are used most            |
+| Success/failure   | Error rates for reliability improvements |
+| Duration (ms)     | Performance monitoring                   |
+| Session start/end | Retention analysis                       |
+| Platform          | macOS/Linux/Windows distribution         |
+| Server version    | Adoption of new versions                 |
 
 **Not collected**: No file paths, code content, network data, or personally identifiable information.
 
