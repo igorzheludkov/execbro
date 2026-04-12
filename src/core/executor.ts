@@ -1323,13 +1323,15 @@ export async function getScreenLayout(
 
 
             // Get viewport dimensions from the first root view measurement
-            // or use a generous default
+            // Accept elements starting at x=0 even with negative y (safe area extensions)
             var viewportW = 9999, viewportH = 9999;
             for (var v = 0; v < measurements.length; v++) {
-                if (measurements[v] && measurements[v].x === 0 && measurements[v].y === 0 &&
+                if (measurements[v] && measurements[v].x === 0 && measurements[v].y <= 0 &&
                     measurements[v].width > 0 && measurements[v].height > 0) {
                     viewportW = measurements[v].width;
-                    viewportH = measurements[v].height;
+                    // For wrappers extending behind safe area, the visible viewport height
+                    // is the total height minus the negative offset
+                    viewportH = measurements[v].height + measurements[v].y;
                     break;
                 }
             }
