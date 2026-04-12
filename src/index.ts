@@ -153,7 +153,9 @@ import {
     formatDismissedEntries,
     pushLogBox,
     addLogBoxIgnorePatterns,
-    verifyLogPipeline
+    verifyLogPipeline,
+    formatIssueBody,
+    buildGitHubUrl,
 } from "./core/index.js";
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
@@ -749,6 +751,62 @@ registerToolWithTelemetry(
 
         return {
             content: [{ type: "text" as const, text: lines.join("\n") }],
+        };
+    }
+);
+
+// Tool: Send feedback / bug report / feature request
+registerToolWithTelemetry(
+    "send_feedback",
+    {
+        description:
+            "Create a feedback report (bug, feature request, or general feedback) for the react-native-ai-devtools team. " +
+            "Auto-collects environment info. Returns a pre-filled GitHub issue URL and formatted issue body. " +
+            "Ask the user to open the URL and paste the body to submit.",
+        inputSchema: {
+            type: z.enum(["feedback", "feature_request", "bug"]).describe('Type of feedback: "feedback", "feature_request", or "bug"'),
+            title: z.string().describe("Short summary (becomes the GitHub issue title)"),
+            description: z.string().describe("Detailed description of the feedback, feature request, or bug"),
+            workflow_context: z.string().optional().describe("What the user was trying to accomplish when they decided to give feedback")
+        }
+    },
+    async ({ type, title, description, workflow_context }) => {
+        // Collect environment info
+        const serverVersion = getServerVersion();
+        const platform = process.platform;
+        const deviceType = getTargetPlatform();
+        const licenseStatus = getLicenseStatus();
+
+        const env = {
+            serverVersion,
+            platform,
+            deviceType,
+            licenseTier: licenseStatus.tier
+        };
+
+        const input = { type, title, description, workflowContext: workflow_context };
+        const issueBody = formatIssueBody(input, env);
+        const githubUrl = buildGitHubUrl(title, type);
+
+        const output = [
+            "## Feedback Report Ready",
+            "",
+            `**GitHub Issue URL:** ${githubUrl}`,
+            "",
+            "**Issue body to paste:**",
+            "",
+            "```markdown",
+            issueBody,
+            "```",
+            "",
+            "Please ask the user to:",
+            "1. Open the GitHub URL above",
+            "2. Paste the issue body into the description field",
+            "3. Review and submit the issue"
+        ].join("\n");
+
+        return {
+            content: [{ type: "text" as const, text: output }]
         };
     }
 );
