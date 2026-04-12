@@ -653,32 +653,86 @@ interface ScreenElement {
     originalIndex?: number;
 }
 
-function formatScreenLayoutToTonl(elements: ScreenElement[]): string {
-    // Check if elements have tree structure (parentIndex)
-    const hasTree = elements.some(el => el.parentIndex !== undefined);
 
-    if (hasTree) {
-        return formatScreenLayoutTree(elements);
+/**
+ * Classify each root as "screen" or "overlay".
+ *
+ * A root is a **screen** if its subtree contains a navigation screen marker
+ * (Route(...), *Screen, *Page). Falls back to the largest root by area
+ * if no navigation markers are found. Everything else is an overlay.
+ */
+function classifyRoots(
+    roots: number[],
+    elements: { component: string; frame?: { x: number; y: number; width: number; height: number } }[],
+    childrenMap: Map<number, number[]>
+): { labels: string[]; hasOverlays: boolean } {
+    const labels: string[] = [];
+
+    // Navigation screen markers: Route(...) wrapper or user-defined *Screen/*Page
+    const screenMarker = /^(Route\(|.*Screen\(|.*Page\(|.*Screen$|.*Page$)/;
+
+    function subtreeHasScreen(idx: number, depth: number): boolean {
+        if (depth > 30) return false;
+        if (screenMarker.test(elements[idx].component)) return true;
+        const kids = childrenMap.get(idx);
+        if (kids) {
+            for (const kid of kids) {
+                if (subtreeHasScreen(kid, depth + 1)) return true;
+            }
+        }
+        return false;
     }
 
-    // Flat format fallback
-    const lines: string[] = ["#elements{component,path,depth,frame,layout,id}"];
-    for (const el of elements) {
-        const frame = el.frame
-            ? `${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)}`
-            : "";
-        const layout = el.layout
-            ? Object.entries(el.layout)
-                  .map(([k, v]) => `${k}:${v}`)
-                  .join(";")
-            : "";
-        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
-        lines.push(`${el.component}|${el.path}|${el.depth}|${frame}|${layout}|${id}`);
+    // First pass: check which roots contain a navigation screen
+    const hasScreen: boolean[] = roots.map(ri => subtreeHasScreen(ri, 0));
+    const anyScreenFound = hasScreen.some(Boolean);
+
+    if (anyScreenFound) {
+        for (let i = 0; i < roots.length; i++) {
+            labels.push(hasScreen[i] ? "screen" : "overlay");
+        }
+    } else {
+        // Fallback: largest root by area is the screen
+        let maxArea = 0;
+        let maxIdx = 0;
+        for (let i = 0; i < roots.length; i++) {
+            const f = elements[roots[i]].frame;
+            if (f && f.width * f.height > maxArea) {
+                maxArea = f.width * f.height;
+                maxIdx = i;
+            }
+        }
+        for (let i = 0; i < roots.length; i++) {
+            labels.push(i === maxIdx ? "screen" : "overlay");
+        }
     }
-    return lines.join("\n");
+
+    return { labels, hasOverlays: labels.some(l => l === "overlay") };
 }
 
-function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = false): string {
+interface LayoutNode {
+    component: string;
+    frame?: { x: number; y: number; width: number; height: number };
+    text?: string;
+    identifiers?: Record<string, string>;
+    parentIndex?: number;
+    originalIndex?: number;
+}
+
+/**
+ * Build, collapse, classify, and render a layout tree.
+ *
+ * Shared by both get_screen_layout (points, no tap coords) and
+ * the screenshot layout enrichment (pixels, with tap coords).
+ *
+ * @param elements - flat list of layout nodes with parentIndex linkage
+ * @param renderLine - callback that produces the output line for a node,
+ *   given (element, indent level, whether it's a leaf)
+ */
+function formatLayoutTree<T extends LayoutNode>(
+    elements: T[],
+    renderLine: (el: T, indent: number, isLeaf: boolean) => string
+): string {
     // Build index: originalIndex -> element index in the filtered array
     const indexMap = new Map<number, number>();
     for (let i = 0; i < elements.length; i++) {
@@ -704,7 +758,7 @@ function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = f
 
     // Collapse wrapper chains: if a child has the same frame as its parent,
     // it's just a wrapper — promote its children and text to the parent
-    function sameFrame(a: ScreenElement, b: ScreenElement): boolean {
+    function sameFrame(a: LayoutNode, b: LayoutNode): boolean {
         if (!a.frame || !b.frame) return false;
         return Math.abs(a.frame.x - b.frame.x) < 1 &&
                Math.abs(a.frame.y - b.frame.y) < 1 &&
@@ -719,11 +773,9 @@ function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = f
         const newKids: number[] = [];
         for (const kidIdx of kids) {
             if (sameFrame(elements[parentIdx], elements[kidIdx])) {
-                // Collapse: inherit text if parent has none
                 if (!elements[parentIdx].text && elements[kidIdx].text) {
                     elements[parentIdx].text = elements[kidIdx].text;
                 }
-                // Promote grandchildren to parent
                 const grandKids = children.get(kidIdx);
                 if (grandKids) {
                     newKids.push(...grandKids);
@@ -739,7 +791,6 @@ function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = f
             children.delete(parentIdx);
         }
 
-        // Recurse into the (possibly new) children
         const updatedKids = children.get(parentIdx);
         if (updatedKids) {
             for (const kid of updatedKids) {
@@ -752,25 +803,12 @@ function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = f
         collapseNode(root);
     }
 
+    // Render tree
     const lines: string[] = [];
 
     function printNode(idx: number, indent: number) {
-        const el = elements[idx];
-        const prefix = "  ".repeat(indent);
-        const frame = el.frame
-            ? ` (${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`
-            : "";
-        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
-        const idStr = id ? ` [${id}]` : "";
-        // Only show text on leaf nodes (no meaningful children in tree)
-        // to avoid repeating children's text on every parent
         const isLeaf = !children.has(idx);
-        const textStr = el.text && isLeaf ? ` "${el.text}"` : "";
-        const layoutStr = extended && el.layout
-            ? ` {${Object.entries(el.layout).map(([k, v]) => `${k}:${v}`).join("; ")}}`
-            : "";
-        lines.push(`${prefix}${el.component}${frame}${idStr}${textStr}${layoutStr}`);
-
+        lines.push(renderLine(elements[idx], indent, isLeaf));
         const kids = children.get(idx);
         if (kids) {
             for (const kid of kids) {
@@ -779,11 +817,43 @@ function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = f
         }
     }
 
-    for (const root of roots) {
-        printNode(root, 0);
+    // Classify roots and emit layer headers
+    const { labels, hasOverlays } = classifyRoots(roots, elements, children);
+
+    if (hasOverlays) {
+        let prevLabel = "";
+        for (let ri = 0; ri < roots.length; ri++) {
+            const label = labels[ri];
+            if (label === "overlay" || label !== prevLabel) {
+                if (lines.length > 0) lines.push("");
+                lines.push(`[${label}]`);
+            }
+            prevLabel = label;
+            printNode(roots[ri], 0);
+        }
+    } else {
+        for (const root of roots) {
+            printNode(root, 0);
+        }
     }
 
     return lines.join("\n");
+}
+
+function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = false): string {
+    return formatLayoutTree(elements, (el, indent, isLeaf) => {
+        const prefix = "  ".repeat(indent);
+        const frame = el.frame
+            ? ` (${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`
+            : "";
+        const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
+        const idStr = id ? ` [${id}]` : "";
+        const textStr = el.text && isLeaf ? ` "${el.text}"` : "";
+        const layoutStr = extended && el.layout
+            ? ` {${Object.entries(el.layout).map(([k, v]) => `${k}:${v}`).join("; ")}}`
+            : "";
+        return `${prefix}${el.component}${frame}${idStr}${textStr}${layoutStr}`;
+    });
 }
 
 interface FoundComponent {
@@ -1375,7 +1445,8 @@ export async function getScreenLayout(
                     'position', 'top', 'bottom', 'left', 'right',
                     'gap', 'rowGap', 'columnGap',
                     'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth',
-                    'backgroundColor', 'borderColor', 'borderRadius'
+                    'backgroundColor', 'borderColor', 'borderRadius',
+                    'zIndex', 'elevation'
                 ];
 
                 for (var k = 0; k < layoutKeys.length; k++) {
@@ -1537,58 +1608,18 @@ interface EnrichedElement {
 
 /**
  * Format enriched elements as an indented tree with tap coordinates in pixels.
- * Preserves the same hierarchy as get_screen_layout but adds tapX,tapY to each line.
+ * Same tree structure as get_screen_layout but with tap:(x,y) per node.
  */
 function formatEnrichedLayoutTree(elements: EnrichedElement[]): string {
-    // Build index: originalIndex -> element index in the filtered array
-    const indexMap = new Map<number, number>();
-    for (let i = 0; i < elements.length; i++) {
-        if (elements[i].originalIndex !== undefined) {
-            indexMap.set(elements[i].originalIndex!, i);
-        }
-    }
-
-    // Build children lists
-    const childrenMap = new Map<number, number[]>();
-    const roots: number[] = [];
-    for (let i = 0; i < elements.length; i++) {
-        const el = elements[i];
-        const parentOrigIdx = el.parentIndex;
-        if (parentOrigIdx === undefined || parentOrigIdx === -1 || !indexMap.has(parentOrigIdx)) {
-            roots.push(i);
-        } else {
-            const parentIdx = indexMap.get(parentOrigIdx)!;
-            if (!childrenMap.has(parentIdx)) childrenMap.set(parentIdx, []);
-            childrenMap.get(parentIdx)!.push(i);
-        }
-    }
-
-    const lines: string[] = [];
-
-    function printNode(idx: number, indent: number) {
-        const el = elements[idx];
+    return formatLayoutTree(elements, (el, indent, isLeaf) => {
         const prefix = "  ".repeat(indent);
         const frame = `(${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`;
         const tap = ` tap:(${el.tapX},${el.tapY})`;
         const id = el.identifiers?.testID || el.identifiers?.accessibilityLabel || "";
         const idStr = id ? ` [${id}]` : "";
-        const isLeaf = !childrenMap.has(idx);
         const textStr = el.text && isLeaf ? ` "${el.text}"` : "";
-        lines.push(`${prefix}${el.component} ${frame}${tap}${idStr}${textStr}`);
-
-        const kids = childrenMap.get(idx);
-        if (kids) {
-            for (const kid of kids) {
-                printNode(kid, indent + 1);
-            }
-        }
-    }
-
-    for (const root of roots) {
-        printNode(root, 0);
-    }
-
-    return lines.join("\n");
+        return `${prefix}${el.component} ${frame}${tap}${idStr}${textStr}`;
+    });
 }
 
 /**
