@@ -11,7 +11,7 @@ import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/gu
 import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
-import { getInstallationId, getServerVersion, isDevMode, TELEMETRY_JSONL_PATH } from "./core/telemetry.js";
+import { getInstallationId, getPackageName, getServerVersion, isDevMode, TELEMETRY_JSONL_PATH } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 import {
@@ -155,6 +155,27 @@ import {
     addLogBoxIgnorePatterns,
     verifyLogPipeline
 } from "./core/index.js";
+
+// Legacy package migration: notify once per session via LogBox
+const LEGACY_PACKAGE_NAME = "react-native-ai-debugger";
+let legacyMigrationNotified = false;
+
+async function notifyLegacyPackageMigration(): Promise<void> {
+    if (legacyMigrationNotified) return;
+    if (getPackageName() !== LEGACY_PACKAGE_NAME) return;
+    legacyMigrationNotified = true;
+    try {
+        await pushLogBox(
+            "You are using the deprecated 'react-native-ai-debugger' package. " +
+            "Please update your MCP settings to use 'react-native-ai-devtools' instead. " +
+            "See: https://www.npmjs.com/package/react-native-ai-devtools",
+            "warning",
+            true
+        );
+    } catch {
+        // Best-effort — don't break the connection flow
+    }
+}
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
 function resolveLogBuffer(device?: string): LogBuffer {
@@ -787,6 +808,9 @@ registerToolWithTelemetry(
                 isError: true
             };
         }
+
+        // Notify legacy package users (fire-and-forget, once per session)
+        notifyLegacyPackageMigration();
 
         const lines: string[] = [];
         lines.push("=== Connection Ensured ===\n");
@@ -4758,19 +4782,19 @@ async function main() {
         });
 
         httpServer.listen(httpPort, () => {
-            console.error(`[rn-ai-debugger] MCP HTTP server listening on http://localhost:${httpPort}/mcp`);
+            console.error(`[rn-ai-devtools] MCP HTTP server listening on http://localhost:${httpPort}/mcp`);
         });
     } else {
         // Stdio transport mode — default for production
         const transport = new StdioServerTransport();
         await server.connect(transport);
-        console.error("[rn-ai-debugger] Server started on stdio");
+        console.error("[rn-ai-devtools] Server started on stdio");
     }
 
 }
 
 main().catch((error) => {
-    console.error("[rn-ai-debugger] Fatal error:", error);
+    console.error("[rn-ai-devtools] Fatal error:", error);
     process.exit(1);
 });
 
