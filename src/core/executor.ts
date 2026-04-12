@@ -1432,8 +1432,10 @@ export async function getScreenLayout(
                 for (var fi = 0; fi < elements.length; fi++) {
                     var el = elements[fi];
                     var fr = el.frame;
-                    var isFullScreen = fr && fr.x === 0 && fr.y === 0 &&
-                        Math.abs(fr.width - viewportW) < 2 && Math.abs(fr.height - viewportH) < 2;
+                    // A wrapper is full-screen if it covers the entire viewport or extends beyond it
+                    // (e.g., y=-119 wrappers that extend behind the safe area)
+                    var isFullScreen = fr && fr.x <= 0 && fr.y <= 0 &&
+                        (fr.width >= viewportW - 2) && (fr.y + fr.height >= viewportH - 2);
 
                     if (isFullScreen) {
                         // Skip this wrapper, map its originalIndex to its parent
