@@ -1197,6 +1197,9 @@ export async function getScreenLayout(
                     // active: 0 = inactive/detached, 1 = transitioning, 2 = active
                     if (name === 'MaybeScreen' && fiber.memoizedProps && fiber.memoizedProps.active === 0) return;
 
+                    // Skip unfocused screens in NativeStackNavigator (SceneView with focused=false)
+                    if (name === 'SceneView' && fiber.memoizedProps && fiber.memoizedProps.focused === false) return;
+
                     var isMeaningful = name && !isHost && !RN_PRIMITIVES.test(name);
 
                     var myIdx = parentIdx;
@@ -1235,6 +1238,9 @@ export async function getScreenLayout(
 
                     // Skip inactive screens (react-native-screens MaybeScreen with active=0)
                     if (name === 'MaybeScreen' && fiber.memoizedProps && fiber.memoizedProps.active === 0) return;
+
+                    // Skip unfocused screens in NativeStackNavigator (SceneView with focused=false)
+                    if (name === 'SceneView' && fiber.memoizedProps && fiber.memoizedProps.focused === false) return;
 
                     if (name && isHost && getMeasurable(fiber)) {
                         // Find nearest meaningful custom component ancestor for display
