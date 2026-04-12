@@ -270,6 +270,32 @@ If no errors captured via CDP, use get_bundle_errors with platform="ios" or "and
 - clear_bundle_errors: clear error buffer
 - reload_app: full JS bundle reload
 - ensure_connection: verify connection with healthCheck=true`
+    },
+    {
+        id: "feedback",
+        title: "Feedback",
+        summary: "Share feedback, request features, or report bugs to the development team",
+        content: `# Feedback
+
+## When to Use
+If the user wants to share feedback, request a feature, or report a problem with react-native-ai-devtools, use the send_feedback tool.
+
+## How It Works
+1. Call send_feedback with a type (feedback, feature_request, or bug), title, and description
+2. The tool auto-collects environment info (server version, platform, device, license)
+3. It returns a pre-filled GitHub issue URL and a formatted issue body
+4. Ask the user to open the URL and paste the body to submit
+
+## Parameters
+- type: "feedback", "feature_request", or "bug"
+- title: short summary (becomes the GitHub issue title)
+- description: detailed explanation
+- workflow_context (optional): what the user was trying to do
+
+## Tips
+- Include workflow_context when possible — it helps the team understand the real use case
+- The user can review and edit the issue body before submitting
+- No GitHub account setup or CLI tools needed — just a browser`
     }
 ];
 
