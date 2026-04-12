@@ -156,6 +156,8 @@ import {
     verifyLogPipeline,
     formatIssueBody,
     buildGitHubUrl,
+    shouldShowFeedbackHint,
+    markFeedbackHintShown,
 } from "./core/index.js";
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
@@ -276,6 +278,28 @@ function estimateImageTokens(base64Data: string): number {
     }
 }
 
+// Tools that do NOT require an active Metro connection — excluded from feedback hint trigger
+const NON_METRO_TOOLS = new Set([
+    "scan_metro",
+    "connect_metro",
+    "disconnect_metro",
+    "ensure_connection",
+    "get_connection_status",
+    "get_license_status",
+    "activate_license",
+    "delete_account",
+    "get_usage_guide",
+    "get_apps",
+    "list_ios_simulators",
+    "list_android_devices",
+    "ios_boot_simulator",
+    "ios_launch_app",
+    "android_launch_app",
+    "ios_install_app",
+    "android_install_app",
+    "send_feedback"
+]);
+
 // Registry for dev meta-tool — stores handlers and configs for dynamic dispatch
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const toolRegistry = new Map<string, { config: any; handler: (args: any) => Promise<any> }>();
@@ -357,6 +381,19 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                 if (textParts.length > 0) {
                     responsePreview = textParts.join("\n").substring(0, 2000);
                 }
+            }
+            // First-install feedback hint — fires once on first successful Metro-connected tool
+            if (!NON_METRO_TOOLS.has(toolName) && shouldShowFeedbackHint()) {
+                markFeedbackHintShown();
+                // Fire-and-forget — don't block the tool response
+                pushLogBox(
+                    "Having ideas or issues? Ask your AI assistant to call send_feedback — your feedback shapes what we build next.",
+                    "warning",
+                    false,
+                    "logbox"
+                ).catch(() => {
+                    // Non-fatal — hint delivery failure should not affect tool execution
+                });
             }
             return result;
         } catch (error) {
