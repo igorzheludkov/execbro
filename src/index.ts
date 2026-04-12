@@ -389,7 +389,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                 pushLogBox(
                     "Having ideas or issues? Ask your AI assistant to call send_feedback — your feedback shapes what we build next.",
                     "warning",
-                    false,
+                    true,
                     "logbox"
                 ).catch(() => {
                     // Non-fatal — hint delivery failure should not affect tool execution
