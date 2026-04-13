@@ -71,7 +71,7 @@ Add `env` to your MCP server configuration:
 ```json
 {
   "mcpServers": {
-    "rn-debugger": {
+    "rn-ai-devtools": {
       "type": "stdio",
       "command": "npx",
       "args": ["react-native-ai-devtools"],
@@ -125,13 +125,13 @@ No installation required - Claude Code uses `npx` to run the latest version auto
 ### Global (all projects)
 
 ```bash
-claude mcp add rn-debugger --scope user -- npx react-native-ai-devtools
+claude mcp add rn-ai-devtools --scope user -- npx react-native-ai-devtools
 ```
 
 ### Project-specific
 
 ```bash
-claude mcp add rn-debugger --scope project -- npx react-native-ai-devtools
+claude mcp add rn-ai-devtools --scope project -- npx react-native-ai-devtools
 ```
 
 ### Manual Configuration
@@ -141,7 +141,7 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
 ```json
 {
   "mcpServers": {
-    "rn-debugger": {
+    "rn-ai-devtools": {
       "type": "stdio",
       "command": "npx",
       "args": ["react-native-ai-devtools"]
@@ -163,7 +163,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 ```json
 {
   "servers": {
-    "rn-debugger": {
+    "rn-ai-devtools": {
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "react-native-ai-devtools"]
@@ -183,7 +183,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 ```json
 {
   "mcpServers": {
-    "rn-debugger": {
+    "rn-ai-devtools": {
       "command": "npx",
       "args": ["-y", "react-native-ai-devtools"]
     }
@@ -367,7 +367,7 @@ To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `
 ```json
 {
   "mcpServers": {
-    "rn-debugger": {
+    "rn-ai-devtools": {
       "type": "stdio",
       "command": "npx",
       "args": ["react-native-ai-devtools"],

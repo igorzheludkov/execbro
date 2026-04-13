@@ -17,19 +17,19 @@ Use this skill when the task involves:
 ### 1. Ensure Connection
 
 First, verify the debugger is connected:
-- Use `mcp__rn-debugger-local__ensure_connection` to check/establish connection
-- If not connected, use `mcp__rn-debugger-local__scan_metro` to find and connect to Metro
+- Use `mcp__rn-ai-devtools__ensure_connection` to check/establish connection
+- If not connected, use `mcp__rn-ai-devtools__scan_metro` to find and connect to Metro
 
 ### 2. Discover Available Debug Objects
 
 List what's exposed globally in the app:
-- Use `mcp__rn-debugger-local__list_debug_globals` to see all available debugging objects
+- Use `mcp__rn-ai-devtools__list_debug_globals` to see all available debugging objects
 - This reveals Redux store, navigation refs, action creators, and other globals
 
 ### 3. Inspect Specific Objects
 
 Before calling methods on any global object:
-- Use `mcp__rn-debugger-local__inspect_global` with `objectName` to see its properties and methods
+- Use `mcp__rn-ai-devtools__inspect_global` with `objectName` to see its properties and methods
 - This prevents errors from calling non-existent methods
 
 ### 4. Read and Modify State
@@ -42,13 +42,13 @@ globalThis.__REDUX_STORE__.getState()
 // Specific slice
 globalThis.__REDUX_STORE__.getState().personalData
 ```
-- Use `mcp__rn-debugger-local__execute_in_app` with the expression above
+- Use `mcp__rn-ai-devtools__execute_in_app` with the expression above
 
 **Dispatch Redux actions:**
 ```javascript
 globalThis.__dispatch__(globalThis.__REDUX_ACTIONS__.locale.setLocale('en'))
 ```
-- Use `mcp__rn-debugger-local__execute_in_app` to dispatch
+- Use `mcp__rn-ai-devtools__execute_in_app` to dispatch
 
 **Navigate:**
 ```javascript
@@ -59,7 +59,7 @@ globalThis.__getCurrentRoute__()
 ### 5. Execute Custom JavaScript
 
 For ad-hoc debugging:
-- Use `mcp__rn-debugger-local__execute_in_app` with any valid Hermes expression
+- Use `mcp__rn-ai-devtools__execute_in_app` with any valid Hermes expression
 - Remember limitations: no `require()`, no `async/await`, no emoji in strings
 - Use `globalThis` instead of `global` for Hermes compatibility
 - Set `verbose=true` for full output when inspecting large objects
@@ -85,15 +85,15 @@ For ad-hoc debugging:
 
 ## MCP Tools Used
 
-- `mcp__rn-debugger-local__ensure_connection`
-- `mcp__rn-debugger-local__scan_metro`
-- `mcp__rn-debugger-local__list_debug_globals`
-- `mcp__rn-debugger-local__inspect_global`
-- `mcp__rn-debugger-local__execute_in_app`
+- `mcp__rn-ai-devtools__ensure_connection`
+- `mcp__rn-ai-devtools__scan_metro`
+- `mcp__rn-ai-devtools__list_debug_globals`
+- `mcp__rn-ai-devtools__inspect_global`
+- `mcp__rn-ai-devtools__execute_in_app`
 
 ## Notes
 
-- Requires the rn-debugger-local MCP server to be running and connected to the app
+- Requires the rn-ai-devtools MCP server to be running and connected to the app
 - Hermes engine limitations: no `require()`, no `async/await`, no emoji/non-ASCII in string literals
 - Use `inspect_global` before calling methods on unfamiliar objects to avoid errors
 - For large state objects, use `verbose=true` with caution - Redux stores can return 10KB+

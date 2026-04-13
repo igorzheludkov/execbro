@@ -16,13 +16,13 @@ Use this skill when the task involves:
 ### 1. Ensure Connection
 
 First, verify the debugger is connected to the running app:
-- Use `mcp__rn-debugger-local__ensure_connection` to check/establish connection
-- If not connected, use `mcp__rn-debugger-local__scan_metro` to find and connect to Metro
+- Use `mcp__rn-ai-devtools__ensure_connection` to check/establish connection
+- If not connected, use `mcp__rn-ai-devtools__scan_metro` to find and connect to Metro
 
 ### 2. Get Log Overview
 
 Start with a summary to understand the log landscape:
-- Use `mcp__rn-debugger-local__get_logs` with `summary=true` to get counts by level and last 5 messages
+- Use `mcp__rn-ai-devtools__get_logs` with `summary=true` to get counts by level and last 5 messages
 - This helps decide what to focus on (errors? warnings? specific messages?)
 
 ### 3. Retrieve Relevant Logs
@@ -30,21 +30,21 @@ Start with a summary to understand the log landscape:
 Based on the task, fetch targeted logs:
 
 **For errors/crashes:**
-- Use `mcp__rn-debugger-local__get_logs` with `level="error"` to get only errors
+- Use `mcp__rn-ai-devtools__get_logs` with `level="error"` to get only errors
 - Use `verbose=true` with low `maxLogs` (e.g., 10) for full error details
 
 **For specific messages:**
-- Use `mcp__rn-debugger-local__search_logs` with `text` parameter to find specific log output
+- Use `mcp__rn-ai-devtools__search_logs` with `text` parameter to find specific log output
 - Use `verbose=true` when you need to see complete data structures
 
 **For recent activity:**
-- Use `mcp__rn-debugger-local__get_logs` with appropriate `maxLogs` count
+- Use `mcp__rn-ai-devtools__get_logs` with appropriate `maxLogs` count
 - Use `startFromText` to begin from a specific point in the log stream
 
 ### 4. Clear and Re-capture (if needed)
 
 When you need fresh logs after a specific action:
-- Use `mcp__rn-debugger-local__clear_logs` to reset the log buffer
+- Use `mcp__rn-ai-devtools__clear_logs` to reset the log buffer
 - Ask the user to perform the action
 - Then capture new logs with `get_logs`
 
@@ -67,15 +67,15 @@ When you need fresh logs after a specific action:
 
 ## MCP Tools Used
 
-- `mcp__rn-debugger-local__ensure_connection`
-- `mcp__rn-debugger-local__scan_metro`
-- `mcp__rn-debugger-local__get_logs`
-- `mcp__rn-debugger-local__search_logs`
-- `mcp__rn-debugger-local__clear_logs`
+- `mcp__rn-ai-devtools__ensure_connection`
+- `mcp__rn-ai-devtools__scan_metro`
+- `mcp__rn-ai-devtools__get_logs`
+- `mcp__rn-ai-devtools__search_logs`
+- `mcp__rn-ai-devtools__clear_logs`
 
 ## Notes
 
-- Requires the rn-debugger-local MCP server to be running and connected to the app
+- Requires the rn-ai-devtools MCP server to be running and connected to the app
 - Use `summary=true` first to avoid token overload from large log volumes
 - For large objects in logs, use `verbose=true` with low `maxLogs` to see full content
 - Output defaults to `tonl` format (compact, ~30-50% smaller); use `format="text"` for plain text

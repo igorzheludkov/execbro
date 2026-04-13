@@ -21,22 +21,22 @@ When this skill is invoked, follow these steps:
 
 First, check what devices are available:
 
-- Use `mcp__rn-debugger-local__list_ios_simulators` to find running iOS simulators
-- Use `mcp__rn-debugger-local__list_android_devices` to find connected Android devices/emulators
+- Use `mcp__rn-ai-devtools__list_ios_simulators` to find running iOS simulators
+- Use `mcp__rn-ai-devtools__list_android_devices` to find connected Android devices/emulators
 
 ### 2. Take Screenshots
 
 Based on what's running, capture screenshots:
 
 **For iOS Simulators:**
-- Use `mcp__rn-debugger-local__ios_screenshot` with the simulator UDID
+- Use `mcp__rn-ai-devtools__ios_screenshot` with the simulator UDID
 - Capture from both iPhone and iPad if both are running (important for responsive layouts)
 
 **For Android Devices:**
-- Use `mcp__rn-debugger-local__android_screenshot` with the device serial
+- Use `mcp__rn-ai-devtools__android_screenshot` with the device serial
 
 **Screenshot with OCR (when you need tap coordinates):**
-- Use `mcp__rn-debugger-local__ocr_screenshot` to capture a screenshot and extract all visible text with tap-ready coordinates
+- Use `mcp__rn-ai-devtools__ocr_screenshot` to capture a screenshot and extract all visible text with tap-ready coordinates
 - Recommended when you need to identify tappable elements — returns ready-to-use tapX/tapY coordinates
 
 ### 3. Present Results
@@ -48,8 +48,8 @@ Based on what's running, capture screenshots:
 ### 4. Optional: Inspect Layout Details
 
 If a screenshot reveals a layout issue and you need precise measurements:
-- Use `mcp__rn-debugger-local__inspect_at_point` with x/y coordinates (in points) to get the component's frame (position/size), props, and styles at that location
-- Use `mcp__rn-debugger-local__get_inspector_selection` with x/y coordinates to identify the component name and source file path — helps you find the exact file to fix
+- Use `mcp__rn-ai-devtools__inspect_at_point` with x/y coordinates (in points) to get the component's frame (position/size), props, and styles at that location
+- Use `mcp__rn-ai-devtools__get_inspector_selection` with x/y coordinates to identify the component name and source file path — helps you find the exact file to fix
 
 ### 5. Optional: Compare with Design
 
@@ -71,16 +71,16 @@ If the user provides a Figma URL or design reference:
 
 ## MCP Tools Used
 
-- `mcp__rn-debugger-local__list_ios_simulators`
-- `mcp__rn-debugger-local__list_android_devices`
-- `mcp__rn-debugger-local__ios_screenshot`
-- `mcp__rn-debugger-local__android_screenshot`
-- `mcp__rn-debugger-local__inspect_at_point` (optional: layout detail drill-down)
-- `mcp__rn-debugger-local__ocr_screenshot` (screenshot + OCR text with tap coordinates)
-- `mcp__rn-debugger-local__get_inspector_selection` (optional: identify component name/source file)
+- `mcp__rn-ai-devtools__list_ios_simulators`
+- `mcp__rn-ai-devtools__list_android_devices`
+- `mcp__rn-ai-devtools__ios_screenshot`
+- `mcp__rn-ai-devtools__android_screenshot`
+- `mcp__rn-ai-devtools__inspect_at_point` (optional: layout detail drill-down)
+- `mcp__rn-ai-devtools__ocr_screenshot` (screenshot + OCR text with tap coordinates)
+- `mcp__rn-ai-devtools__get_inspector_selection` (optional: identify component name/source file)
 
 ## Notes
 
-- This skill requires the rn-debugger-local MCP server to be running
+- This skill requires the rn-ai-devtools MCP server to be running
 - Devices must be booted and the app must be running
 - For iPad testing, ensure both portrait and landscape are considered if relevant
