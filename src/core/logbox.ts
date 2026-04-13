@@ -1,4 +1,5 @@
 import { executeInApp } from "./executor.js";
+import { connectedApps } from "./state.js";
 
 // ── Types ──
 
@@ -293,4 +294,32 @@ export function formatDismissedEntries(result: LogBoxDismissResult): string {
     output += `\nBottom UI should now be unobstructed.`;
 
     return output;
+}
+
+// ── Driver Missing Notification ──
+
+// Throttle: don't spam the user with repeated notifications within 60 seconds
+let lastDriverNotificationTime = 0;
+const DRIVER_NOTIFICATION_COOLDOWN_MS = 60_000;
+
+/**
+ * Push a full-screen LogBox notification when a UI driver is missing.
+ * Fire-and-forget — silently does nothing if no Metro connection exists.
+ * Throttled to avoid spamming the device on repeated tool calls.
+ */
+export function notifyDriverMissing(platform: "ios" | "android"): void {
+    // Only notify if there's an active Metro/CDP connection to push to
+    if (connectedApps.size === 0) return;
+
+    const now = Date.now();
+    if (now - lastDriverNotificationTime < DRIVER_NOTIFICATION_COOLDOWN_MS) return;
+    lastDriverNotificationTime = now;
+
+    const message =
+        platform === "ios"
+            ? "iOS UI Driver Not Installed\n\nAI tools (tap, swipe, text input, accessibility) require a UI driver to interact with the simulator.\n\nInstall AXe (recommended):\nbrew install cameroncooke/axe/axe\n\nThen restart your MCP server session."
+            : "ADB Not Installed\n\nAI tools (tap, swipe, text input, accessibility) require ADB to interact with the device.\n\nInstall Android Platform Tools:\nbrew install android-platform-tools\n\nThen add to PATH and restart your MCP server session.";
+
+    // Fire-and-forget — don't await, don't block the error response
+    pushLogBox(message, "error", true, "logbox", "Setup Required").catch(() => {});
 }

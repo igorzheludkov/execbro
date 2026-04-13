@@ -5,6 +5,7 @@ import path from "path";
 import os from "os";
 import sharp from "sharp";
 import { getActiveSimulatorUdid } from "./state.js";
+import { notifyDriverMissing } from "./logbox.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -200,6 +201,7 @@ async function ensureUiDriverReady(
 
   if (driver === "axe") {
     if (!(await isAxeAvailable())) {
+      notifyDriverMissing("ios");
       return {
         ready: false,
         error: { success: false, error: getUiDriverInstallHint() },
@@ -207,6 +209,7 @@ async function ensureUiDriverReady(
     }
   } else {
     if (!(await isIdbAvailable())) {
+      notifyDriverMissing("ios");
       return {
         ready: false,
         error: { success: false, error: getUiDriverInstallHint() },
