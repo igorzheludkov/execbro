@@ -12,8 +12,8 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 ### Runtime Interaction
 
-- **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search
-- **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) for full capture from app startup including request/response bodies
+- **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. Note: on a cold start (first app launch), logs emitted before the MCP server connects are missed — subsequent reloads capture everything. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) to buffer logs from the very first line of app startup
+- **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Like logs, early network requests on cold start may be missed before the connection is established. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) for full capture from app startup including request/response bodies
 - **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
 - **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals
 - **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
@@ -259,8 +259,8 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 2. Connects to the main JS runtime via CDP (Chrome DevTools Protocol) WebSocket
 3. Enables `Runtime.enable` to receive `Runtime.consoleAPICalled` events
 4. Network capture via two paths:
-   - **With SDK**: Reads from the SDK's in-app buffer via `Runtime.evaluate` — captures all requests from startup with full headers and bodies
-   - **Without SDK**: Enables CDP `Network.enable` (on supported targets) or injects a JS fetch interceptor as fallback
+   - **With SDK**: Reads from the SDK's in-app buffer via `Runtime.evaluate` — captures all requests from startup with full headers and bodies, including cold-start events that CDP would miss
+   - **Without SDK**: Enables CDP `Network.enable` (on supported targets) or injects a JS fetch interceptor as fallback. On cold start, events emitted before the CDP connection is established are lost; subsequent reloads capture everything
 5. Stores logs and network requests in circular buffers for retrieval
 
 ## Connection Management
@@ -325,6 +325,7 @@ The server prioritizes devices in this order:
 - Ensure the app is actively running (not just Metro)
 - Try `clear_logs` then trigger some actions in the app
 - Check `get_apps` to verify connection status
+- **On cold start (first launch):** The CDP connection is established after the app's early initialization code has already run, so startup logs and network requests are missed. Once connected, use `reload_app` — the subsequent reload captures everything from the beginning because the connection is already in place. To capture startup events on every launch, install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk)
 
 ## Telemetry & Data Collection
 
