@@ -17,6 +17,13 @@ const guides: Guide[] = [
         summary: "Connect to a running React Native app via Metro bundler",
         content: `# Session Setup
 
+## Prerequisites (CRITICAL — install BEFORE using device tools)
+- **iOS UI driver (required for tap, swipe, describe, find_element, and all iOS interaction tools):**
+  - Recommended: AXe — brew install cameroncooke/axe/axe (then set IOS_DRIVER=axe in MCP server env)
+  - Alternative: IDB — brew install idb-companion (used by default)
+  - Without a UI driver, most iOS tools will fail with "not installed" errors
+- **Android:** ADB must be in PATH (comes with Android SDK Platform Tools)
+
 ## Quick Start
 1. scan_metro — auto-discovers Metro on common ports (8081, 8082, 19000-19002) and connects. Note: this occupies the CDP slot, which prevents the built-in React Native debugger from connecting. See "Switch to Native Debugger" below.
 2. get_apps — verify the app appears in connected list
@@ -104,6 +111,12 @@ const guides: Guide[] = [
         title: "Device Interaction",
         summary: "Tap buttons, swipe, type text, and navigate the app UI",
         content: `# Device Interaction
+
+## Prerequisites
+iOS interaction tools (tap, ios_swipe, ios_input_text, ios_button, ios_describe_all, ios_find_element, ios_wait_for_element) require a UI driver:
+- Recommended: AXe — brew install cameroncooke/axe/axe (set IOS_DRIVER=axe in MCP server env)
+- Alternative: IDB — brew install idb-companion (default)
+Without a UI driver installed, these tools will fail.
 
 ## Tapping Elements
 Use tap — it tries multiple strategies automatically and returns a post-tap screenshot:
