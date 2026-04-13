@@ -30,7 +30,7 @@ npm run dev:mcp    # Builds + runs with HTTP transport on port 8600, auto-restar
 Configure Claude Code to connect via HTTP (in `~/.claude.json` mcpServers):
 ```json
 {
-  "rn-debugger-local": {
+  "rn-ai-devtools-local": {
     "type": "http",
     "url": "http://localhost:8600/mcp"
   }
@@ -45,7 +45,7 @@ A SessionStart hook can auto-launch the dev server (in `~/.claude/settings.json`
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "cd /path/to/react-native-ai-devtools && (lsof -ti:8600 > /dev/null 2>&1 || npm run dev:mcp > /tmp/rn-debugger-dev.log 2>&1 &)"
+        "command": "cd /path/to/react-native-ai-devtools && (lsof -ti:8600 > /dev/null 2>&1 || npm run dev:mcp > /tmp/rn-ai-devtools-dev.log 2>&1 &)"
       }]
     }]
   }

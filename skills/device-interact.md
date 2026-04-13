@@ -19,24 +19,24 @@ Use this skill when the task involves:
 ### 1. Discover Available Devices
 
 First, check what devices are running:
-- Use `mcp__rn-debugger-local__list_ios_simulators` to find iOS simulators
-- Use `mcp__rn-debugger-local__list_android_devices` to find Android devices/emulators
+- Use `mcp__rn-ai-devtools__list_ios_simulators` to find iOS simulators
+- Use `mcp__rn-ai-devtools__list_android_devices` to find Android devices/emulators
 
 ### 2. See What's on Screen
 
 Before interacting, understand the current screen:
 
 **Screenshot approach (recommended first step):**
-- Use `mcp__rn-debugger-local__ios_screenshot` or `mcp__rn-debugger-local__android_screenshot` for visual reference
+- Use `mcp__rn-ai-devtools__ios_screenshot` or `mcp__rn-ai-devtools__android_screenshot` for visual reference
 
 **Accessibility tree approach (for finding elements without screenshots):**
-- Use `mcp__rn-debugger-local__ios_describe_all` or `mcp__rn-debugger-local__android_describe_all` for full UI hierarchy
+- Use `mcp__rn-ai-devtools__ios_describe_all` or `mcp__rn-ai-devtools__android_describe_all` for full UI hierarchy
 
 ### 3. Tap Elements
 
 **Use the unified `tap` tool for all tapping — it auto-detects the platform and tries multiple strategies automatically:**
 
-- `mcp__rn-debugger-local__tap` — single cross-platform tool with automatic fallback chain:
+- `mcp__rn-ai-devtools__tap` — single cross-platform tool with automatic fallback chain:
   1. Fiber tree (direct `onPress` invocation)
   2. Accessibility tree (native element matching)
   3. OCR (visual text recognition)
@@ -105,38 +105,38 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 ### 4. Other Interactions
 
 **Long press:**
-- Android: `mcp__rn-debugger-local__android_long_press` with x/y and optional duration
+- Android: `mcp__rn-ai-devtools__android_long_press` with x/y and optional duration
 
 **Swipe/scroll:**
-- iOS: `mcp__rn-debugger-local__ios_swipe` with start/end coordinates
-- Android: `mcp__rn-debugger-local__android_swipe` with start/end coordinates
+- iOS: `mcp__rn-ai-devtools__ios_swipe` with start/end coordinates
+- Android: `mcp__rn-ai-devtools__android_swipe` with start/end coordinates
 
 **Type text:**
-- iOS: `mcp__rn-debugger-local__ios_input_text` (tap input field first)
-- Android: `mcp__rn-debugger-local__android_input_text` (tap input field first)
+- iOS: `mcp__rn-ai-devtools__ios_input_text` (tap input field first)
+- Android: `mcp__rn-ai-devtools__android_input_text` (tap input field first)
 
 **Hardware buttons:**
-- iOS: `mcp__rn-debugger-local__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
-- Android: `mcp__rn-debugger-local__android_key_event` (HOME, BACK, ENTER, DEL, MENU, etc.)
+- iOS: `mcp__rn-ai-devtools__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
+- Android: `mcp__rn-ai-devtools__android_key_event` (HOME, BACK, ENTER, DEL, MENU, etc.)
 
 **Key events:**
-- iOS: `mcp__rn-debugger-local__ios_key_event` / `ios_key_sequence` with keycodes
+- iOS: `mcp__rn-ai-devtools__ios_key_event` / `ios_key_sequence` with keycodes
 
 **Deep links:**
-- iOS: `mcp__rn-debugger-local__ios_open_url` with the full URL (e.g., `myapp://settings/profile` or `https://example.com`)
+- iOS: `mcp__rn-ai-devtools__ios_open_url` with the full URL (e.g., `myapp://settings/profile` or `https://example.com`)
 
 ### 5. Get Screen Dimensions (when needed for coordinates)
 
 When calculating swipe distances or tap positions on an unfamiliar device:
-- Android: `mcp__rn-debugger-local__android_get_screen_size` returns the device's pixel resolution
+- Android: `mcp__rn-ai-devtools__android_get_screen_size` returns the device's pixel resolution
 - Use this before computing percentage-based coordinates (e.g., center = width/2, height/2)
 - For iOS simulators, the resolution is part of the simulator spec — use `list_ios_simulators` to identify the device model
 
 ### 6. Wait for UI Updates
 
 After navigation or interactions that change the screen:
-- iOS: `mcp__rn-debugger-local__ios_wait_for_element` to wait for an element to appear
-- Android: `mcp__rn-debugger-local__android_wait_for_element` to wait for an element to appear
+- iOS: `mcp__rn-ai-devtools__ios_wait_for_element` to wait for an element to appear
+- Android: `mcp__rn-ai-devtools__android_wait_for_element` to wait for an element to appear
 
 ### 7. Verify Results
 
@@ -159,25 +159,25 @@ After interactions, verify the result:
 
 ## MCP Tools Used
 
-- `mcp__rn-debugger-local__tap`
-- `mcp__rn-debugger-local__find_components`
-- `mcp__rn-debugger-local__list_ios_simulators`
-- `mcp__rn-debugger-local__list_android_devices`
-- `mcp__rn-debugger-local__ios_screenshot` / `android_screenshot`
-- `mcp__rn-debugger-local__ios_describe_all` / `android_describe_all`
-- `mcp__rn-debugger-local__android_long_press`
-- `mcp__rn-debugger-local__ios_swipe` / `android_swipe`
-- `mcp__rn-debugger-local__ios_input_text` / `android_input_text`
-- `mcp__rn-debugger-local__ios_button` / `android_key_event`
-- `mcp__rn-debugger-local__ios_key_event` / `ios_key_sequence`
-- `mcp__rn-debugger-local__ios_find_element` / `android_find_element`
-- `mcp__rn-debugger-local__ios_wait_for_element` / `android_wait_for_element`
-- `mcp__rn-debugger-local__ios_open_url`
-- `mcp__rn-debugger-local__android_get_screen_size`
+- `mcp__rn-ai-devtools__tap`
+- `mcp__rn-ai-devtools__find_components`
+- `mcp__rn-ai-devtools__list_ios_simulators`
+- `mcp__rn-ai-devtools__list_android_devices`
+- `mcp__rn-ai-devtools__ios_screenshot` / `android_screenshot`
+- `mcp__rn-ai-devtools__ios_describe_all` / `android_describe_all`
+- `mcp__rn-ai-devtools__android_long_press`
+- `mcp__rn-ai-devtools__ios_swipe` / `android_swipe`
+- `mcp__rn-ai-devtools__ios_input_text` / `android_input_text`
+- `mcp__rn-ai-devtools__ios_button` / `android_key_event`
+- `mcp__rn-ai-devtools__ios_key_event` / `ios_key_sequence`
+- `mcp__rn-ai-devtools__ios_find_element` / `android_find_element`
+- `mcp__rn-ai-devtools__ios_wait_for_element` / `android_wait_for_element`
+- `mcp__rn-ai-devtools__ios_open_url`
+- `mcp__rn-ai-devtools__android_get_screen_size`
 
 ## Notes
 
-- Requires the rn-debugger-local MCP server to be running
+- Requires the rn-ai-devtools MCP server to be running
 - iOS simulator interactions require IDB (`brew install idb-companion`) or AXe CLI (`brew install cameroncooke/axe/axe`). Set `IOS_DRIVER=axe` env var to use AXe.
 - **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically. Use `native=true` for system UI or non-RN apps
 - On failure, follow the `suggestion` field in the tap response — it tells you exactly what to try next

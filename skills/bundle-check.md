@@ -17,12 +17,12 @@ Use this skill when the task involves:
 ### 1. Check Metro Status
 
 Get the current state of the Metro bundler:
-- Use `mcp__rn-debugger-local__get_bundle_status` to check if Metro is running and its build state
+- Use `mcp__rn-ai-devtools__get_bundle_status` to check if Metro is running and its build state
 
 ### 2. Check for Bundle Errors
 
 Look for compilation/bundling errors:
-- Use `mcp__rn-debugger-local__get_bundle_errors` to get captured errors
+- Use `mcp__rn-ai-devtools__get_bundle_errors` to get captured errors
 - These include: import resolution failures, syntax errors, transform errors
 - If no errors are captured via CDP but Metro is running without connected apps, provide `platform` parameter to enable screenshot+OCR fallback to read the error from the device screen
 
@@ -30,12 +30,12 @@ Look for compilation/bundling errors:
 
 Based on the errors found:
 - Fix import paths, syntax issues, or missing modules in the code
-- Use `mcp__rn-debugger-local__clear_bundle_errors` to clear the error buffer after fixing
+- Use `mcp__rn-ai-devtools__clear_bundle_errors` to clear the error buffer after fixing
 
 ### 4. Reload the App
 
 After fixing errors or when changes aren't reflected:
-- Use `mcp__rn-debugger-local__reload_app` to trigger a full JavaScript bundle reload
+- Use `mcp__rn-ai-devtools__reload_app` to trigger a full JavaScript bundle reload
 - This is equivalent to pressing 'r' in Metro terminal
 - Note: React Native has Fast Refresh by default - only reload when:
   - Changes aren't appearing after a few seconds
@@ -45,9 +45,9 @@ After fixing errors or when changes aren't reflected:
 ### 5. Verify Connection
 
 If the app isn't responding:
-- Use `mcp__rn-debugger-local__ensure_connection` with `healthCheck=true` to verify connection
+- Use `mcp__rn-ai-devtools__ensure_connection` with `healthCheck=true` to verify connection
 - Use `forceRefresh=true` if connection seems stale
-- Use `mcp__rn-debugger-local__scan_metro` if no connection exists
+- Use `mcp__rn-ai-devtools__scan_metro` if no connection exists
 
 ### 6. Present Findings
 
@@ -68,16 +68,16 @@ If the app isn't responding:
 
 ## MCP Tools Used
 
-- `mcp__rn-debugger-local__get_bundle_status`
-- `mcp__rn-debugger-local__get_bundle_errors`
-- `mcp__rn-debugger-local__clear_bundle_errors`
-- `mcp__rn-debugger-local__reload_app`
-- `mcp__rn-debugger-local__ensure_connection`
-- `mcp__rn-debugger-local__scan_metro`
+- `mcp__rn-ai-devtools__get_bundle_status`
+- `mcp__rn-ai-devtools__get_bundle_errors`
+- `mcp__rn-ai-devtools__clear_bundle_errors`
+- `mcp__rn-ai-devtools__reload_app`
+- `mcp__rn-ai-devtools__ensure_connection`
+- `mcp__rn-ai-devtools__scan_metro`
 
 ## Notes
 
-- Requires the rn-debugger-local MCP server to be running
+- Requires the rn-ai-devtools MCP server to be running
 - Bundle errors are different from runtime errors - they prevent the JS bundle from loading
 - Fast Refresh handles most code changes automatically - only use reload for specific scenarios
 - The screenshot+OCR fallback for errors requires specifying the `platform` parameter ("ios" or "android")

@@ -19,18 +19,18 @@ Use this skill when the task involves:
 ### 1. Check Existing Connections First
 
 Before doing anything else, check if a connection already exists:
-- Use `mcp__rn-debugger-local__get_apps` to see if any apps are already connected
-- Use `mcp__rn-debugger-local__get_connection_status` to check connection health (uptime, recent disconnects, gaps)
+- Use `mcp__rn-ai-devtools__get_apps` to see if any apps are already connected
+- Use `mcp__rn-ai-devtools__get_connection_status` to check connection health (uptime, recent disconnects, gaps)
 - If a healthy connection exists and `get_connection_status` shows no significant gaps, skip to step 5
 
 ### 2. Discover Available Devices
 
 Find what devices are available:
-- Use `mcp__rn-debugger-local__list_ios_simulators` to find iOS simulators (booted and available)
-- Use `mcp__rn-debugger-local__list_android_devices` to find Android devices/emulators
+- Use `mcp__rn-ai-devtools__list_ios_simulators` to find iOS simulators (booted and available)
+- Use `mcp__rn-ai-devtools__list_android_devices` to find Android devices/emulators
 
 **If no devices are running:**
-- For iOS: use `mcp__rn-debugger-local__ios_boot_simulator` with the desired simulator UDID to boot it
+- For iOS: use `mcp__rn-ai-devtools__ios_boot_simulator` with the desired simulator UDID to boot it
 - For Android: instruct the user to start the Android emulator via Android Studio or `emulator` CLI (no MCP tool for this)
 
 ### 3. Check if the App is Installed
@@ -39,11 +39,11 @@ Before launching, verify the app is present on the device:
 
 **iOS:**
 - If you know the bundle ID, skip to launch; otherwise ask the user
-- If the app is not installed, use `mcp__rn-debugger-local__ios_install_app` with the `.app` bundle path
+- If the app is not installed, use `mcp__rn-ai-devtools__ios_install_app` with the `.app` bundle path
 
 **Android:**
-- Use `mcp__rn-debugger-local__android_list_packages` to verify the package is installed
-- If not installed, use `mcp__rn-debugger-local__android_install_app` with the APK path
+- Use `mcp__rn-ai-devtools__android_list_packages` to verify the package is installed
+- If not installed, use `mcp__rn-ai-devtools__android_install_app` with the APK path
 
 ### 4. Launch the App
 
@@ -51,12 +51,12 @@ Start the React Native app on the device:
 
 **iOS:**
 ```
-mcp__rn-debugger-local__ios_launch_app with bundleId
+mcp__rn-ai-devtools__ios_launch_app with bundleId
 ```
 
 **Android:**
 ```
-mcp__rn-debugger-local__android_launch_app with packageName
+mcp__rn-ai-devtools__android_launch_app with packageName
 ```
 
 Wait 2–3 seconds after launch for Metro to start bundling.
@@ -64,8 +64,8 @@ Wait 2–3 seconds after launch for Metro to start bundling.
 ### 5. Connect to Metro
 
 Scan for and connect to the Metro bundler:
-- Use `mcp__rn-debugger-local__scan_metro` — this automatically finds Metro on common ports (8081, 8082, 19000–19002) and connects
-- If Metro is on a non-standard port, use `mcp__rn-debugger-local__connect_metro` with the specific `port`
+- Use `mcp__rn-ai-devtools__scan_metro` — this automatically finds Metro on common ports (8081, 8082, 19000–19002) and connects
+- If Metro is on a non-standard port, use `mcp__rn-ai-devtools__connect_metro` with the specific `port`
 
 **If scan_metro finds no servers:**
 - Metro may not be running — ask the user to run `npx react-native start` or `npx expo start`
@@ -74,9 +74,9 @@ Scan for and connect to the Metro bundler:
 ### 6. Verify Connection Health
 
 Confirm the connection is stable and ready:
-- Use `mcp__rn-debugger-local__get_apps` to confirm the app appears in the connected list
-- Use `mcp__rn-debugger-local__get_connection_status` and check that `isConnected=true` with no large gaps
-- Use `mcp__rn-debugger-local__ensure_connection` with `healthCheck=true` for a full health probe
+- Use `mcp__rn-ai-devtools__get_apps` to confirm the app appears in the connected list
+- Use `mcp__rn-ai-devtools__get_connection_status` and check that `isConnected=true` with no large gaps
+- Use `mcp__rn-ai-devtools__ensure_connection` with `healthCheck=true` for a full health probe
 
 ### 7. Present Status
 
@@ -90,10 +90,10 @@ Report back to the user:
 ### 8. Disconnect (when switching to native debugger)
 
 If the user wants to use the built-in React Native debugger:
-- Use `mcp__rn-debugger-local__disconnect_metro` to close all CDP connections and stop auto-reconnect
+- Use `mcp__rn-ai-devtools__disconnect_metro` to close all CDP connections and stop auto-reconnect
 - This frees the CDP WebSocket slot for the native debugger
 - Log and network buffers are preserved (cached data remains readable)
-- When done with the native debugger, use `mcp__rn-debugger-local__scan_metro` to reconnect
+- When done with the native debugger, use `mcp__rn-ai-devtools__scan_metro` to reconnect
 
 ## Arguments
 
@@ -109,21 +109,21 @@ If the user wants to use the built-in React Native debugger:
 
 ## MCP Tools Used
 
-- `mcp__rn-debugger-local__get_apps`
-- `mcp__rn-debugger-local__get_connection_status`
-- `mcp__rn-debugger-local__list_ios_simulators`
-- `mcp__rn-debugger-local__list_android_devices`
-- `mcp__rn-debugger-local__ios_boot_simulator`
-- `mcp__rn-debugger-local__ios_install_app`
-- `mcp__rn-debugger-local__ios_launch_app`
-- `mcp__rn-debugger-local__ios_terminate_app`
-- `mcp__rn-debugger-local__android_install_app`
-- `mcp__rn-debugger-local__android_launch_app`
-- `mcp__rn-debugger-local__android_list_packages`
-- `mcp__rn-debugger-local__scan_metro`
-- `mcp__rn-debugger-local__connect_metro`
-- `mcp__rn-debugger-local__ensure_connection`
-- `mcp__rn-debugger-local__disconnect_metro`
+- `mcp__rn-ai-devtools__get_apps`
+- `mcp__rn-ai-devtools__get_connection_status`
+- `mcp__rn-ai-devtools__list_ios_simulators`
+- `mcp__rn-ai-devtools__list_android_devices`
+- `mcp__rn-ai-devtools__ios_boot_simulator`
+- `mcp__rn-ai-devtools__ios_install_app`
+- `mcp__rn-ai-devtools__ios_launch_app`
+- `mcp__rn-ai-devtools__ios_terminate_app`
+- `mcp__rn-ai-devtools__android_install_app`
+- `mcp__rn-ai-devtools__android_launch_app`
+- `mcp__rn-ai-devtools__android_list_packages`
+- `mcp__rn-ai-devtools__scan_metro`
+- `mcp__rn-ai-devtools__connect_metro`
+- `mcp__rn-ai-devtools__ensure_connection`
+- `mcp__rn-ai-devtools__disconnect_metro`
 
 ## Notes
 
