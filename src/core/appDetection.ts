@@ -6,15 +6,15 @@ import type { AppDetectionResult, ConnectedApp } from "./types.js";
 const DETECTION_TIMEOUT_MS = 3000;
 const DETECTION_DELAY_MS = 500;
 
-// Detection expression — returns a Promise (used with awaitPromise: true).
-// The .then() defers to a microtask so the RN module system is fully initialized.
+// Detection expression — synchronous IIFE (awaitPromise does not work reliably with Hermes CDP).
+// Runs after a 500ms delay (see scheduleAppDetection) so the RN module system is initialized.
 // Fallback paths for PlatformConstants:
 // 1. nativeModuleProxy.PlatformConstants (Bridgeless / New Arch)
 // 2. __turboModuleProxy('PlatformConstants') (TurboModules)
 // 3. __fbBatchedBridgeConfig.remoteModuleConfig (Old Arch Bridge — inlined constants)
 // 4. nativeRequireModuleConfig (Old Arch Bridge — lazy load)
 // Always returns arch/engine even when version is unavailable.
-const DETECTION_EXPRESSION = `Promise.resolve().then(function(){
+const DETECTION_EXPRESSION = `(function(){
 var r={},c=null,p=globalThis.nativeModuleProxy;
 if(p&&p.PlatformConstants){c=typeof p.PlatformConstants.getConstants==='function'?p.PlatformConstants.getConstants():p.PlatformConstants}
 if(!c&&typeof globalThis.__turboModuleProxy==='function'){try{var tm=globalThis.__turboModuleProxy('PlatformConstants');if(tm)c=typeof tm.getConstants==='function'?tm.getConstants():tm}catch(e){}}
@@ -25,7 +25,7 @@ r.newArch=typeof globalThis.nativeFabricUIManager==='object';
 r.hermes=typeof globalThis.HermesInternal!=='undefined';
 var ep=p&&p.ExpoConstants;if(!ep&&typeof globalThis.__turboModuleProxy==='function'){try{ep=globalThis.__turboModuleProxy('ExpoConstants')}catch(e){}}
 if(ep){try{var ec=typeof ep.getConstants==='function'?ep.getConstants():ep;if(ec&&ec.expoConfig&&ec.expoConfig.sdkVersion)r.expoSdk=ec.expoConfig.sdkVersion}catch(e){}}
-return r})`;
+return r})()`;
 
 function formatVersion(v: { major: number; minor: number; patch: number }): string {
     return `${v.major}.${v.minor}.${v.patch}`;
@@ -127,7 +127,6 @@ function detectApp(ws: WebSocket): Promise<Record<string, unknown> | null> {
                 params: {
                     expression: DETECTION_EXPRESSION,
                     returnByValue: true,
-                    awaitPromise: true,
                     userGesture: true,
                     generatePreview: false,
                 },

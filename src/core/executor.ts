@@ -197,12 +197,29 @@ async function executeExpressionCore(
     }
 
     const cleanedExpression = validation.expression;
+
+    // Hermes CDP does not support awaitPromise — it serializes the Promise's
+    // internal fields (_A, _x, _y, _z) instead of waiting for resolution.
+    // When the caller wants awaitPromise, we handle it ourselves: wrap the
+    // expression to store the resolved value in a temp global, then poll.
+    if (awaitPromise) {
+        return executeWithManualAwait(app, cleanedExpression, timeoutMs);
+    }
+
+    return executeCDP(app, cleanedExpression, false, timeoutMs);
+}
+
+/**
+ * Execute a CDP Runtime.evaluate call (no promise awaiting).
+ */
+function executeCDP(
+    app: ReturnType<typeof getFirstConnectedApp> & {},
+    cleanedExpression: string,
+    awaitPromise: boolean,
+    timeoutMs: number
+): Promise<ExecutionResult> {
     const TIMEOUT_MS = timeoutMs;
     const currentMessageId = getNextMessageId();
-
-    // Prepend global polyfill for Hermes compatibility
-    // Runtime.evaluate returns the completion value of the last expression naturally,
-    // so no IIFE wrapping is needed (similar to browser console behavior)
     const wrappedExpression = `${GLOBAL_POLYFILL} ${cleanedExpression}`;
 
     return new Promise((resolve) => {
@@ -263,6 +280,74 @@ async function executeExpressionCore(
             });
         }
     });
+}
+
+/**
+ * Hermes workaround for awaitPromise: execute the expression, and if it
+ * returns a Promise, store the resolved/rejected value in a temp global
+ * and read it back with a small number of spaced-out retries.
+ */
+async function executeWithManualAwait(
+    app: ReturnType<typeof getFirstConnectedApp> & {},
+    cleanedExpression: string,
+    timeoutMs: number
+): Promise<ExecutionResult> {
+    const slotId = `__rn_dbg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    // Wrap: run the expression, if result is thenable store resolved value in
+    // a temp global slot; otherwise store the sync value immediately.
+    const wrapperExpr = `(function(){
+var __v=(${cleanedExpression});
+if(__v&&typeof __v==='object'&&typeof __v.then==='function'){
+globalThis['${slotId}']={s:'pending'};
+__v.then(function(r){globalThis['${slotId}']={s:'ok',v:r}},function(e){globalThis['${slotId}']={s:'err',v:String(e)}});
+return '__awaiting__'}
+else{return __v}})()`;
+
+    const initial = await executeCDP(app, wrapperExpr, false, timeoutMs);
+
+    // If the expression didn't return a Promise, return the result directly
+    if (!initial.success || initial.result !== "__awaiting__") {
+        return initial;
+    }
+
+    // Read the settled value with a few spaced-out retries (not aggressive polling).
+    // Most Promises resolve within a microtask or a single event loop tick.
+    const RETRY_DELAYS_MS = [100, 300, 600, 1000, 2000, 3000];
+    const readExpr = `(function(){var s=globalThis['${slotId}'];if(!s||s.s==='pending')return '__pending__';delete globalThis['${slotId}'];return{status:s.s,value:s.v}})()`;
+
+    for (const delayMs of RETRY_DELAYS_MS) {
+        await new Promise((r) => setTimeout(r, delayMs));
+
+        const poll = await executeCDP(app, readExpr, false, 5000);
+
+        if (!poll.success) return poll;
+        if (poll.result === "__pending__") continue;
+
+        // The poll result comes through formatRemoteObject — objects are
+        // JSON.stringified, so we need to parse it back.
+        try {
+            const parsed = typeof poll.result === "string" ? JSON.parse(poll.result) : poll.result;
+            if (parsed?.status === "err") {
+                return { success: false, error: parsed.value || "Promise rejected" };
+            }
+            const value = parsed?.value;
+            return {
+                success: true,
+                result: value === undefined || value === null
+                    ? String(value)
+                    : typeof value === "object"
+                        ? JSON.stringify(value, null, 2)
+                        : String(value)
+            };
+        } catch {
+            return poll;
+        }
+    }
+
+    // Cleanup on timeout
+    await executeCDP(app, `delete globalThis['${slotId}']`, false, 2000).catch(() => {});
+    return { success: false, error: "Timeout: Promise did not resolve within the time limit." };
 }
 
 // Execute JavaScript in the connected React Native app with retry logic
@@ -981,29 +1066,34 @@ export async function getComponentTree(
             }
 
             function extractLayoutStyles(style) {
-                if (!style) return null;
-                const merged = Array.isArray(style)
-                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
-                    : (typeof style === 'object' ? style : {});
+                try {
+                    if (!style) return null;
+                    const merged = Array.isArray(style)
+                        ? Object.assign({}, ...style.filter(Boolean).map(s => {
+                            try { return typeof s === 'object' ? s : {}; }
+                            catch { return {}; }
+                        }))
+                        : (typeof style === 'object' ? style : {});
 
-                const layout = {};
-                const layoutKeys = [
-                    'padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
-                    'paddingHorizontal', 'paddingVertical',
-                    'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
-                    'marginHorizontal', 'marginVertical',
-                    'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
-                    'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
-                    'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
-                    'position', 'top', 'bottom', 'left', 'right',
-                    'gap', 'rowGap', 'columnGap',
-                    'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth'
-                ];
+                    const layout = {};
+                    const layoutKeys = [
+                        'padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
+                        'paddingHorizontal', 'paddingVertical',
+                        'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
+                        'marginHorizontal', 'marginVertical',
+                        'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+                        'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
+                        'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
+                        'position', 'top', 'bottom', 'left', 'right',
+                        'gap', 'rowGap', 'columnGap',
+                        'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth'
+                    ];
 
-                for (const key of layoutKeys) {
-                    if (merged[key] !== undefined) layout[key] = merged[key];
-                }
-                return Object.keys(layout).length > 0 ? layout : null;
+                    for (const key of layoutKeys) {
+                        if (merged[key] !== undefined) layout[key] = merged[key];
+                    }
+                    return Object.keys(layout).length > 0 ? layout : null;
+                } catch { return null; }
             }
 
             function walkFiber(fiber, depth) {
@@ -1032,23 +1122,29 @@ export async function getComponentTree(
                     const props = {};
                     for (const key of Object.keys(fiber.memoizedProps)) {
                         if (key === 'children' || key === 'style') continue;
-                        const val = fiber.memoizedProps[key];
-                        if (typeof val === 'function') {
-                            props[key] = '[Function]';
-                        } else if (typeof val === 'object' && val !== null) {
-                            props[key] = Array.isArray(val) ? '[Array]' : '[Object]';
-                        } else {
-                            props[key] = val;
+                        try {
+                            const val = fiber.memoizedProps[key];
+                            if (typeof val === 'function') {
+                                props[key] = '[Function]';
+                            } else if (typeof val === 'object' && val !== null) {
+                                props[key] = Array.isArray(val) ? '[Array]' : '[Object]';
+                            } else {
+                                props[key] = val;
+                            }
+                        } catch {
+                            props[key] = '[Animated Value]';
                         }
                     }
                     if (Object.keys(props).length > 0) node.props = props;
                 }
 
                 // Include layout styles if requested
-                if (includeStyles && fiber.memoizedProps?.style) {
-                    const layout = extractLayoutStyles(fiber.memoizedProps.style);
-                    if (layout) node.layout = layout;
-                }
+                try {
+                    if (includeStyles && fiber.memoizedProps?.style) {
+                        const layout = extractLayoutStyles(fiber.memoizedProps.style);
+                        if (layout) node.layout = layout;
+                    }
+                } catch { /* animated style — skip */ }
 
                 // Traverse children
                 let child = fiber.child;
@@ -1428,31 +1524,36 @@ export async function getScreenLayout(
             }
 
             function extractLayoutStyles(style) {
-                if (!style) return null;
-                var merged = Array.isArray(style)
-                    ? Object.assign.apply(null, [{}].concat(style.filter(Boolean).map(function(s) { return typeof s === 'object' ? s : {}; })))
-                    : (typeof style === 'object' ? style : {});
+                try {
+                    if (!style) return null;
+                    var merged = Array.isArray(style)
+                        ? Object.assign.apply(null, [{}].concat(style.filter(Boolean).map(function(s) {
+                            try { return typeof s === 'object' ? s : {}; }
+                            catch(e) { return {}; }
+                        })))
+                        : (typeof style === 'object' ? style : {});
 
-                var layout = {};
-                var layoutKeys = [
-                    'padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
-                    'paddingHorizontal', 'paddingVertical',
-                    'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
-                    'marginHorizontal', 'marginVertical',
-                    'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
-                    'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
-                    'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
-                    'position', 'top', 'bottom', 'left', 'right',
-                    'gap', 'rowGap', 'columnGap',
-                    'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth',
-                    'backgroundColor', 'borderColor', 'borderRadius',
-                    'zIndex', 'elevation'
-                ];
+                    var layout = {};
+                    var layoutKeys = [
+                        'padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
+                        'paddingHorizontal', 'paddingVertical',
+                        'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight',
+                        'marginHorizontal', 'marginVertical',
+                        'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+                        'flex', 'flexDirection', 'flexWrap', 'flexGrow', 'flexShrink',
+                        'justifyContent', 'alignItems', 'alignSelf', 'alignContent',
+                        'position', 'top', 'bottom', 'left', 'right',
+                        'gap', 'rowGap', 'columnGap',
+                        'borderWidth', 'borderTopWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRightWidth',
+                        'backgroundColor', 'borderColor', 'borderRadius',
+                        'zIndex', 'elevation'
+                    ];
 
-                for (var k = 0; k < layoutKeys.length; k++) {
-                    if (merged[layoutKeys[k]] !== undefined) layout[layoutKeys[k]] = merged[layoutKeys[k]];
-                }
-                return Object.keys(layout).length > 0 ? layout : null;
+                    for (var k = 0; k < layoutKeys.length; k++) {
+                        if (merged[layoutKeys[k]] !== undefined) layout[layoutKeys[k]] = merged[layoutKeys[k]];
+                    }
+                    return Object.keys(layout).length > 0 ? layout : null;
+                } catch(e) { return null; }
             }
 
             var elements = [];
@@ -1473,13 +1574,15 @@ export async function getScreenLayout(
                 if (!displayName) continue;
                 if (componentsOnly && !info.customName) continue;
 
-                var style = fiber.memoizedProps ? fiber.memoizedProps.style : null;
+                var style = null;
+                try { style = fiber.memoizedProps ? fiber.memoizedProps.style : null; } catch {}
                 var layout = extractLayoutStyles(style);
 
                 // Get text content — use pre-collected text from step 1, or fall back to host fiber
                 var textContent = info.text || null;
                 if (!textContent && (info.hostName === 'RCTText' || info.hostName === 'Text')) {
-                    var children = fiber.memoizedProps ? fiber.memoizedProps.children : null;
+                    var children = null;
+                    try { children = fiber.memoizedProps ? fiber.memoizedProps.children : null; } catch {}
                     if (typeof children === 'string') textContent = children;
                     else if (typeof children === 'number') textContent = String(children);
                 }
@@ -1746,11 +1849,16 @@ export async function inspectComponent(
             }
 
             function extractStyles(style) {
-                if (!style) return null;
-                const merged = Array.isArray(style)
-                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
-                    : (typeof style === 'object' ? style : {});
-                return Object.keys(merged).length > 0 ? merged : null;
+                try {
+                    if (!style) return null;
+                    const merged = Array.isArray(style)
+                        ? Object.assign({}, ...style.filter(Boolean).map(s => {
+                            try { return typeof s === 'object' ? s : {}; }
+                            catch { return {}; }
+                        }))
+                        : (typeof style === 'object' ? style : {});
+                    return Object.keys(merged).length > 0 ? merged : null;
+                } catch { return { _note: '[Contains animated styles]' }; }
             }
 
             function serializeValue(val, depth = 0) {
@@ -1768,7 +1876,11 @@ export async function inspectComponent(
                 if (keys.length > 20) return '[Object(' + keys.length + ' keys)]';
                 const result = {};
                 for (const k of keys) {
-                    result[k] = serializeValue(val[k], depth + 1);
+                    try {
+                        result[k] = serializeValue(val[k], depth + 1);
+                    } catch {
+                        result[k] = '[Animated Value]';
+                    }
                 }
                 return result;
             }
@@ -1836,42 +1948,56 @@ export async function inspectComponent(
                 const props = {};
                 for (const key of Object.keys(fiber.memoizedProps)) {
                     if (key === 'children') continue;
-                    props[key] = serializeValue(fiber.memoizedProps[key]);
+                    try {
+                        props[key] = serializeValue(fiber.memoizedProps[key]);
+                    } catch {
+                        props[key] = '[Animated Value]';
+                    }
                 }
                 result.props = props;
             }
 
             // Style separately for clarity
-            if (fiber.memoizedProps?.style) {
-                result.style = extractStyles(fiber.memoizedProps.style);
+            try {
+                if (fiber.memoizedProps?.style) {
+                    result.style = extractStyles(fiber.memoizedProps.style);
+                }
+            } catch {
+                result.style = { _note: '[Contains animated styles]' };
             }
 
             // State (for hooks, this is a linked list)
             if (includeState && fiber.memoizedState) {
                 // Simplified hook value serialization
                 function serializeHookValue(val, depth = 0) {
-                    if (depth > 2) return '[...]';
-                    if (val === null || val === undefined) return val;
-                    if (typeof val === 'function') return '[Function]';
-                    if (typeof val !== 'object') return val;
-                    // Skip React internal structures (effects, refs with destroy/create)
-                    if (val.create && val.destroy !== undefined) return '[Effect]';
-                    if (val.inst && val.deps) return '[Effect]';
-                    if (val.current !== undefined && Object.keys(val).length === 1) {
-                        // Ref object - just show current value
-                        return { current: serializeHookValue(val.current, depth + 1) };
-                    }
-                    if (Array.isArray(val)) {
-                        if (val.length > 5) return '[Array(' + val.length + ')]';
-                        return val.slice(0, 5).map(v => serializeHookValue(v, depth + 1));
-                    }
-                    const keys = Object.keys(val);
-                    if (keys.length > 10) return '[Object(' + keys.length + ' keys)]';
-                    const result = {};
-                    for (const k of keys.slice(0, 10)) {
-                        result[k] = serializeHookValue(val[k], depth + 1);
-                    }
-                    return result;
+                    try {
+                        if (depth > 2) return '[...]';
+                        if (val === null || val === undefined) return val;
+                        if (typeof val === 'function') return '[Function]';
+                        if (typeof val !== 'object') return val;
+                        // Skip React internal structures (effects, refs with destroy/create)
+                        if (val.create && val.destroy !== undefined) return '[Effect]';
+                        if (val.inst && val.deps) return '[Effect]';
+                        if (val.current !== undefined && Object.keys(val).length === 1) {
+                            // Ref object - just show current value
+                            return { current: serializeHookValue(val.current, depth + 1) };
+                        }
+                        if (Array.isArray(val)) {
+                            if (val.length > 5) return '[Array(' + val.length + ')]';
+                            return val.slice(0, 5).map(v => serializeHookValue(v, depth + 1));
+                        }
+                        const keys = Object.keys(val);
+                        if (keys.length > 10) return '[Object(' + keys.length + ' keys)]';
+                        const result = {};
+                        for (const k of keys.slice(0, 10)) {
+                            try {
+                                result[k] = serializeHookValue(val[k], depth + 1);
+                            } catch {
+                                result[k] = '[Animated Value]';
+                            }
+                        }
+                        return result;
+                    } catch { return '[Animated Value]'; }
                 }
 
                 // For function components with hooks
@@ -1970,20 +2096,25 @@ export async function findComponents(
             }
 
             function extractLayoutStyles(style) {
-                if (!style) return null;
-                const merged = Array.isArray(style)
-                    ? Object.assign({}, ...style.filter(Boolean).map(s => typeof s === 'object' ? s : {}))
-                    : (typeof style === 'object' ? style : {});
+                try {
+                    if (!style) return null;
+                    const merged = Array.isArray(style)
+                        ? Object.assign({}, ...style.filter(Boolean).map(s => {
+                            try { return typeof s === 'object' ? s : {}; }
+                            catch { return {}; }
+                        }))
+                        : (typeof style === 'object' ? style : {});
 
-                const layout = {};
-                const keys = ['padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
-                    'paddingHorizontal', 'paddingVertical', 'margin', 'marginTop', 'marginBottom',
-                    'marginLeft', 'marginRight', 'marginHorizontal', 'marginVertical',
-                    'width', 'height', 'flex', 'flexDirection', 'justifyContent', 'alignItems'];
-                for (const k of keys) {
-                    if (merged[k] !== undefined) layout[k] = merged[k];
-                }
-                return Object.keys(layout).length > 0 ? layout : null;
+                    const layout = {};
+                    const keys = ['padding', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight',
+                        'paddingHorizontal', 'paddingVertical', 'margin', 'marginTop', 'marginBottom',
+                        'marginLeft', 'marginRight', 'marginHorizontal', 'marginVertical',
+                        'width', 'height', 'flex', 'flexDirection', 'justifyContent', 'alignItems'];
+                    for (const k of keys) {
+                        if (merged[k] !== undefined) layout[k] = merged[k];
+                    }
+                    return Object.keys(layout).length > 0 ? layout : null;
+                } catch { return null; }
             }
 
             const results = [];
