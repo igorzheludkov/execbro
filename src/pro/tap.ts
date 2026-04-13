@@ -15,6 +15,7 @@ import { androidTap, androidFindElement, getDefaultAndroidDevice, androidScreens
 import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
 import { connectToDevice, clearReconnectionSuppression } from "../core/connection.js";
+import { notifyDriverMissing } from "../core/logbox.js";
 
 // --- Types ---
 
@@ -1309,6 +1310,9 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     });
 
     if (filteredStrategies.length === 0) {
+        if (uiDriverMissing) {
+            notifyDriverMissing("ios");
+        }
         const errorMessage = uiDriverMissing
             ? `Cannot tap on iOS Simulator — ${getUiDriverInstallHint()}\n\nThe iOS UI driver is required for tapping, swiping, text input, and accessibility queries on iOS Simulators.\n\nAfter installing, retry the tap.`
             : "All strategies require Metro connection, which is unavailable.\n\nTo fix:\n1. Make sure your React Native app is running\n2. Run scan_metro to connect\n3. Or use tap(x, y, native=true) for coordinate-based taps";

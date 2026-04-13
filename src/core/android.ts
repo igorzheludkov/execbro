@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
+import { notifyDriverMissing } from "./logbox.js";
 
 const execAsync = promisify(exec);
 
@@ -49,18 +50,25 @@ export async function isAdbAvailable(): Promise<boolean> {
     }
 }
 
+const ADB_MISSING_ERROR = "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal";
+
+/**
+ * Check ADB availability and push a LogBox notification if missing.
+ * Returns an AdbResult error if ADB is unavailable, or null if ready.
+ */
+async function requireAdb(): Promise<AdbResult | null> {
+    if (await isAdbAvailable()) return null;
+    notifyDriverMissing("android");
+    return { success: false, error: ADB_MISSING_ERROR };
+}
+
 /**
  * List connected Android devices
  */
 export async function listAndroidDevices(): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const { stdout } = await execAsync("adb devices -l", { timeout: ADB_TIMEOUT });
 
@@ -153,13 +161,8 @@ export async function androidScreenshot(
     deviceId?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -248,13 +251,8 @@ export async function androidInstallApp(
     options?: { replace?: boolean; grantPermissions?: boolean }
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         // Verify APK exists
         if (!existsSync(apkPath)) {
@@ -316,13 +314,8 @@ export async function androidLaunchApp(
     deviceId?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -376,13 +369,8 @@ export async function androidListPackages(
     filter?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -470,13 +458,8 @@ export async function androidTap(
     deviceId?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -515,13 +498,8 @@ export async function androidLongPress(
     deviceId?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -567,13 +545,8 @@ export async function androidSwipe(
     deviceId?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -619,13 +592,8 @@ export async function androidInputText(
     deviceId?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -744,13 +712,8 @@ export async function androidKeyEvent(
     deviceId?: string
 ): Promise<AdbResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -982,13 +945,8 @@ export async function androidGetUITree(deviceId?: string): Promise<{
     error?: string;
 }> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -1179,13 +1137,8 @@ export async function androidGetScreenSize(deviceId?: string): Promise<{
     error?: string;
 }> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -1233,13 +1186,8 @@ export async function androidGetDensity(deviceId?: string): Promise<{
     error?: string;
 }> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 
@@ -1559,13 +1507,8 @@ function flattenElements(elements: AndroidAccessibilityElement[]): AndroidAccess
  */
 export async function androidDescribeAll(deviceId?: string): Promise<AndroidDescribeResult> {
     try {
-        const adbAvailable = await isAdbAvailable();
-        if (!adbAvailable) {
-            return {
-                success: false,
-                error: "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal"
-            };
-        }
+        const adbMissing = await requireAdb();
+        if (adbMissing) return adbMissing;
 
         const device = deviceId || (await getDefaultAndroidDevice());
 

@@ -278,6 +278,7 @@ export {
   formatDismissedEntries,
   pushLogBox,
   addLogBoxIgnorePatterns,
+  notifyDriverMissing,
 } from "./logbox.js";
 export type {
   LogBoxState,
