@@ -132,9 +132,9 @@ export async function isUiDriverAvailable(): Promise<boolean> {
 export function getUiDriverInstallHint(): string {
   const driver = getIosDriver();
   if (driver === "axe") {
-    return "AXe is not installed. Install with: brew install cameroncooke/axe/axe";
+    return "AXe is not installed. Install with: brew install cameroncooke/axe/axe\nAXe is the recommended iOS UI driver. See: https://github.com/cameroncooke/AXe";
   }
-  return "IDB is not installed. Install with: brew install idb-companion";
+  return "IDB is not installed. Install with: brew install idb-companion\nTip: Consider switching to AXe (recommended) — brew install cameroncooke/axe/axe and set IOS_DRIVER=axe";
 }
 
 /**
@@ -804,9 +804,11 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
 }
 
 // ============================================================================
-// IDB-Based UI Interaction Tools
-// These tools require Facebook IDB (iOS Development Bridge) to be installed
-// Install with: brew install idb-companion
+// iOS UI Interaction Tools
+// These tools require an iOS UI driver to be installed:
+//   Recommended: AXe — brew install cameroncooke/axe/axe
+//   Alternative: IDB — brew install idb-companion
+// Set IOS_DRIVER=axe env var to use AXe (default is idb)
 // ============================================================================
 
 /**
