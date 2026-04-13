@@ -126,7 +126,9 @@ import {
     iosOpenUrl,
     iosTerminateApp,
     iosBootSimulator,
-    // iOS IDB-based UI tools
+    // iOS UI driver tools
+    isUiDriverAvailable,
+    getUiDriverInstallHint,
     iosTap,
     iosSwipe,
     iosInputText,
@@ -413,6 +415,12 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                     server_version: getServerVersion(),
                     ...(errorMessage && { error: errorMessage.substring(0, 200) }),
                     ...(getTargetPlatform() && { platform: getTargetPlatform() }),
+                    ...(tapStrategy && { tap_strategy: tapStrategy }),
+                    ...(meaningful !== undefined && { meaningful }),
+                    ...(changeRate !== undefined && { change_rate: changeRate }),
+                    ...(iosDriver && { ios_driver: iosDriver }),
+                    ...(emptyResult !== undefined && { empty_result: emptyResult }),
+                    ...(emptyReason && { empty_reason: emptyReason }),
                 },
             });
         }
@@ -576,6 +584,24 @@ registerToolWithTelemetry(
                 results.push(`  - Connected to Metro build events`);
             } catch {
                 // Build events connection is optional
+            }
+        }
+
+        // Proactive check: warn if iOS UI driver is missing
+        const hasIosDevice = Array.from(allDeviceNames.values()).some(
+            ({ device }) => {
+                const title = (device.title || "").toLowerCase();
+                return title.includes("iphone") || title.includes("ipad") || title.includes("ios");
+            }
+        );
+        if (hasIosDevice) {
+            const uiDriverOk = await isUiDriverAvailable();
+            if (!uiDriverOk) {
+                results.push("");
+                results.push("⚠️  WARNING: iOS UI driver is NOT installed. Tools like tap, ios_swipe, ios_input_text, ios_describe_all, and ios_find_element will fail.");
+                results.push("   Install the recommended driver: brew install cameroncooke/axe/axe");
+                results.push("   Then set IOS_DRIVER=axe in your MCP server environment.");
+                results.push("   Alternative: brew install idb-companion (used by default)");
             }
         }
 
@@ -1890,6 +1916,7 @@ registerToolWithTelemetry(
         description:
             "Tap a UI element. Automatically tries multiple strategies: fiber tree (React), accessibility tree (native), and OCR (visual). " +
             "Auto-detects platform (iOS/Android). For coordinates, pass raw pixel values from screenshot — tap handles all coordinate conversion internally (iOS pixel-to-point, scale factor adjustments).\n\n" +
+            "PREREQUISITE: For iOS, an iOS UI driver must be installed — AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Without it, accessibility and coordinate strategies will fail.\n\n" +
             "IMPORTANT: When both iOS and Android devices are connected, specify platform explicitly to avoid tapping on the wrong device.\n\n" +
             "Examples:\n" +
             "- tap(text=\"Submit\") — finds and taps element with matching text\n" +
@@ -4385,8 +4412,9 @@ registerToolWithTelemetry(
 );
 
 // ============================================================================
-// iOS IDB-Based UI Tools (require Facebook IDB)
-// Install with: brew install idb-companion
+// iOS UI Interaction Tools (require an iOS UI driver)
+// Recommended: AXe — brew install cameroncooke/axe/axe (set IOS_DRIVER=axe)
+// Alternative: IDB — brew install idb-companion (default)
 // ============================================================================
 
 // Tool: iOS swipe
@@ -4394,7 +4422,7 @@ server.registerTool(
     "ios_swipe",
     {
         description:
-            "Swipe gesture on an iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
+            "Swipe gesture on an iOS simulator screen. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             startX: z.coerce.number().describe("Starting X coordinate in pixels"),
             startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
@@ -4425,7 +4453,7 @@ server.registerTool(
     "ios_input_text",
     {
         description:
-            "Type text into the active input field on an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
+            "Type text into the active input field on an iOS simulator. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             text: z.string().describe("Text to type into the active input field"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4451,7 +4479,7 @@ server.registerTool(
     "ios_button",
     {
         description:
-            "Press a hardware button on an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
+            "Press a hardware button on an iOS simulator. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             button: z
                 .enum(IOS_BUTTON_TYPES)
@@ -4480,7 +4508,7 @@ server.registerTool(
     "ios_key_event",
     {
         description:
-            "Send a key event to an iOS simulator by keycode. Requires IDB to be installed (brew install idb-companion).",
+            "Send a key event to an iOS simulator by keycode. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             keycode: z.coerce.number().describe("iOS keycode to send"),
             duration: z.coerce.number().optional().describe("Optional key press duration in seconds"),
@@ -4507,7 +4535,7 @@ server.registerTool(
     "ios_key_sequence",
     {
         description:
-            "Send a sequence of key events to an iOS simulator. Requires IDB to be installed (brew install idb-companion).",
+            "Send a sequence of key events to an iOS simulator. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             keycodes: z.array(z.coerce.number()).describe("Array of iOS keycodes to send in sequence"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4533,7 +4561,7 @@ server.registerTool(
     "ios_describe_all",
     {
         description:
-            "Get accessibility information for the entire iOS simulator screen. Returns a nested tree of UI elements with labels, values, and frames. Requires IDB to be installed (brew install idb-companion).",
+            "Get accessibility information for the entire iOS simulator screen. Returns a nested tree of UI elements with labels, values, and frames. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
@@ -4572,7 +4600,7 @@ server.registerTool(
     "ios_describe_point",
     {
         description:
-            "Get accessibility information for the UI element at a specific point on the iOS simulator screen. Requires IDB to be installed (brew install idb-companion).",
+            "Get accessibility information for the UI element at a specific point on the iOS simulator screen. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -4599,7 +4627,7 @@ server.registerTool(
     "ios_find_element",
     {
         description:
-            "Find a UI element on iOS simulator by accessibility label or value. Returns element details including tap coordinates. Requires IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
+            "Find a UI element on iOS simulator by accessibility label or value. Returns element details including tap coordinates. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
             labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
@@ -4656,7 +4684,7 @@ server.registerTool(
     "ios_wait_for_element",
     {
         description:
-            "Wait for a UI element to appear on iOS simulator. Polls until found or timeout. Requires IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
+            "Wait for a UI element to appear on iOS simulator. Polls until found or timeout. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
             labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
