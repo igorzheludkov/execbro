@@ -644,7 +644,14 @@ registerToolWithTelemetry(
             .map(({ app }, i) => {
                 const name = app.deviceInfo.deviceName || app.deviceInfo.title;
                 const appId = app.deviceInfo.appId || app.deviceInfo.title.split(" (")[0] || "unknown";
-                return `  ${i + 1}. ${name} — ${appId} (${app.platform}, port ${app.port})`;
+                const lines = [`  ${i + 1}. ${name} — ${appId} (${app.platform}, port ${app.port})`];
+                if (app.appDetection) {
+                    const d = app.appDetection;
+                    const version = d.reactNativeVersion !== "unknown" ? `RN ${d.reactNativeVersion}` : "RN unknown";
+                    const expo = d.expoSdkVersion ? `, Expo SDK ${d.expoSdkVersion}` : "";
+                    lines.push(`     Environment: ${version}, ${d.architecture} arch, ${d.jsEngine}, ${app.platform} ${d.osVersion}${expo}`);
+                }
+                return lines.join("\n");
             });
 
         const text = [
