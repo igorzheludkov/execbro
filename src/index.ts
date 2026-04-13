@@ -11,7 +11,7 @@ import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/gu
 import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
-import { getInstallationId, getServerVersion, isDevMode, TELEMETRY_JSONL_PATH } from "./core/telemetry.js";
+import { getInstallationId, getServerVersion, isDevMode, TELEMETRY_JSONL_PATH, categorizeError } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { tap, type TapResult } from "./pro/tap.js";
 import {
@@ -414,6 +414,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                     duration,
                     server_version: getServerVersion(),
                     ...(errorMessage && { error: errorMessage.substring(0, 200) }),
+                    ...(errorMessage && { error_category: categorizeError(errorMessage) }),
                     ...(getTargetPlatform() && { platform: getTargetPlatform() }),
                     ...(tapStrategy && { tap_strategy: tapStrategy }),
                     ...(meaningful !== undefined && { meaningful }),
