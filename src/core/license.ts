@@ -4,6 +4,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getInstallationId } from "./telemetry.js";
 import { getDeviceFingerprint, getFingerprintVersion } from "./fingerprint.js";
+import { getPostHogClient } from "./posthog.js";
 
 // ============================================================================
 // Configuration
@@ -238,6 +239,17 @@ async function resolveLicense(): Promise<LicenseResult> {
 
         writeCache(currentStatus);
         source = "api";
+
+        // Identify user in PostHog for segmentation
+        getPostHogClient()?.identify({
+            distinctId: installationId,
+            properties: {
+                platform: platform(),
+                server_version: getServerVersion(),
+                tier: apiResponse.tier,
+                os_version: `${platform()} ${release()}`,
+            },
+        });
 
         // Parse usage info from API response
         if ((apiResponse as any).usage) {
