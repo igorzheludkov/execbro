@@ -35,7 +35,7 @@ export function getServerVersion(): string {
 // Types
 // ============================================================================
 
-type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'unknown';
+type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'driver_missing' | 'unknown';
 
 interface TelemetryEvent {
     name: string;
@@ -63,8 +63,12 @@ interface TelemetryEvent {
 // Error Categorization
 // ============================================================================
 
-function categorizeError(errorMessage: string): ErrorCategory {
+export function categorizeError(errorMessage: string): ErrorCategory {
     const lower = errorMessage.toLowerCase();
+    // UI driver not installed (idb/axe) — must be checked before 'validation' which matches 'missing'/'install'
+    if (lower.includes('not installed') && (lower.includes('idb') || lower.includes('axe') || lower.includes('ui driver'))) {
+        return 'driver_missing';
+    }
     if (lower.includes('websocket') || lower.includes('econnrefused') || lower.includes('socket') || lower.includes('fetch')) {
         return 'network';
     }
