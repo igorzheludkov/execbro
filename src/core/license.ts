@@ -14,7 +14,6 @@ import { API_BASE_URL } from "./config.js";
 const IS_DEV = process.argv.includes("--http");
 const CACHE_TTL_MS = IS_DEV ? 0 : 24 * 60 * 60 * 1000; // No cache in dev, 24h in prod
 const VALIDATION_ENDPOINT = API_BASE_URL;
-const REGISTRATION_ENDPOINT = API_BASE_URL;
 const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 5_000;
 const LICENSE_FILE = join(homedir(), ".rn-ai-debugger", "license.json");
@@ -139,44 +138,6 @@ function createDefaultStatus(installationId: string): LicenseStatus {
     };
 }
 
-// ============================================================================
-// Registration
-// ============================================================================
-
-let registrationAttempted = false;
-
-async function registerInstallation(installationId: string): Promise<void> {
-    if (registrationAttempted || !REGISTRATION_ENDPOINT) return;
-    registrationAttempted = true;
-
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-
-        await fetch(`${REGISTRATION_ENDPOINT}/api/accounts/register`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-API-Key": ACCOUNTS_API_KEY,
-            },
-            body: JSON.stringify({
-                installationId,
-                fingerprint: getDeviceFingerprint(),
-                fingerprintVersion: getFingerprintVersion(),
-                platform: platform(),
-                serverVersion: getServerVersion(),
-                hostname: hostname(),
-                osVersion: `${platform()} ${release()}`,
-            }),
-            signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
-    } catch {
-        registrationAttempted = false;
-    }
-}
-
 function getServerVersion(): string {
     try {
         const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -208,6 +169,11 @@ async function callValidationApi(installationId: string): Promise<ApiResponse | 
             body: JSON.stringify({
                 installationId,
                 fingerprint: getDeviceFingerprint(),
+                fingerprintVersion: getFingerprintVersion(),
+                platform: platform(),
+                serverVersion: getServerVersion(),
+                hostname: hostname(),
+                osVersion: `${platform()} ${release()}`,
             }),
             signal: controller.signal,
         });
@@ -250,9 +216,6 @@ export function ensureLicense(): Promise<LicenseResult> {
 async function resolveLicense(): Promise<LicenseResult> {
     const startTime = Date.now();
     const installationId = getInstallationId();
-
-    // Fire-and-forget registration on first run
-    registerInstallation(installationId);
 
     const cache = readCache();
     let source: "cache" | "api" | "default" = "default";
@@ -330,7 +293,6 @@ export function getDashboardUrl(): string {
 export function resetLicense(): void {
     currentStatus = null;
     licensePromise = null;
-    registrationAttempted = false;
     try {
         if (existsSync(LICENSE_FILE)) {
             unlinkSync(LICENSE_FILE);
