@@ -1696,6 +1696,342 @@ export async function getScreenLayout(
     return result;
 }
 
+// --- get_pressable_elements ---
+
+interface PressableElement {
+    component: string;
+    path: string;
+    center: { x: number; y: number };
+    frame: { x: number; y: number; width: number; height: number };
+    text: string;
+    testID: string | null;
+    accessibilityLabel: string | null;
+    hasLabel: boolean;
+    isInput: boolean;
+}
+
+export async function getPressableElements(
+    options: { device?: string } = {}
+): Promise<ExecutionResult & { parsedElements?: PressableElement[] }> {
+    const { device } = options;
+
+    // --- Step 1: walk fiber tree, find pressable/input elements, dispatch measureInWindow ---
+    const dispatchExpression = `
+        (function() {
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not found.' };
+
+            var roots = [];
+            if (hook.getFiberRoots) {
+                roots = Array.from(hook.getFiberRoots(1) || []);
+            }
+            if (roots.length === 0 && hook.renderers) {
+                for (var entry of hook.renderers) {
+                    var r = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
+                    if (r.length > 0) { roots = r; break; }
+                }
+            }
+            if (roots.length === 0) return { error: 'No fiber roots found.' };
+
+            function getMeasurable(fiber) {
+                var sn = fiber.stateNode;
+                if (!sn) return null;
+                if (typeof sn.measureInWindow === 'function') return sn;
+                if (sn.canonical && sn.canonical.publicInstance &&
+                    typeof sn.canonical.publicInstance.measureInWindow === 'function') {
+                    return sn.canonical.publicInstance;
+                }
+                return null;
+            }
+
+            function findFirstHost(fiber, depth) {
+                if (!fiber || depth > 20) return null;
+                if (typeof fiber.type === 'string' && getMeasurable(fiber)) return fiber;
+                var child = fiber.child;
+                while (child) {
+                    var found = findFirstHost(child, depth + 1);
+                    if (found) return found;
+                    child = child.sibling;
+                }
+                return null;
+            }
+
+            function collectText(fiber, d) {
+                if (!fiber || d > 30) return '';
+                var props = fiber.memoizedProps;
+                if (props) {
+                    var ch = props.children;
+                    if (typeof ch === 'string') return ch;
+                    if (typeof ch === 'number') return String(ch);
+                    if (Array.isArray(ch)) {
+                        var inline = [];
+                        for (var ci = 0; ci < ch.length; ci++) {
+                            if (typeof ch[ci] === 'string') inline.push(ch[ci]);
+                            else if (typeof ch[ci] === 'number') inline.push(String(ch[ci]));
+                        }
+                        if (inline.length > 0) return inline.join('');
+                    }
+                }
+                var parts = [];
+                var child = fiber.child;
+                while (child) {
+                    var t = collectText(child, d + 1);
+                    if (t) parts.push(t);
+                    child = child.sibling;
+                }
+                return parts.join(' ').trim();
+            }
+
+            function getComponentName(fiber) {
+                if (!fiber || !fiber.type) return null;
+                if (typeof fiber.type === 'string') return fiber.type;
+                return fiber.type.displayName || fiber.type.name || null;
+            }
+
+            var RN_PRIMITIVES = /^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/;
+
+            var hostFibers = [];
+            var fiberMeta = [];
+
+            function findMeaningfulAncestorName(fiber) {
+                var cur = fiber.return;
+                var depth = 0;
+                var fallbackName = null;
+                while (cur && depth < 20) {
+                    var name = getComponentName(cur);
+                    if (name && typeof cur.type !== 'string') {
+                        if (!fallbackName) fallbackName = name;
+                        if (!RN_PRIMITIVES.test(name)) return name;
+                    }
+                    cur = cur.return;
+                    depth++;
+                }
+                return fallbackName;
+            }
+
+            function buildPath(fiber) {
+                var parts = [];
+                var cur = fiber;
+                var depth = 0;
+                while (cur && depth < 30) {
+                    var name = getComponentName(cur);
+                    if (name && typeof cur.type !== 'string' && !RN_PRIMITIVES.test(name)) {
+                        parts.unshift(name);
+                    }
+                    cur = cur.return;
+                    depth++;
+                }
+                // Keep last 3 segments
+                if (parts.length > 3) {
+                    parts = parts.slice(-3);
+                    return '... > ' + parts.join(' > ');
+                }
+                return parts.join(' > ');
+            }
+
+            function walkPressables(fiber, depth) {
+                if (!fiber || depth > 5000) return;
+                var name = getComponentName(fiber);
+                var props = fiber.memoizedProps;
+
+                // Skip inactive/unfocused screens
+                if (name === 'MaybeScreen' && props && props.active === 0) return;
+                if (name === 'SceneView' && props && props.focused === false) return;
+                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+
+                var isPressable = props && typeof props.onPress === 'function';
+                var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
+
+                if (isPressable || isInput) {
+                    var host = findFirstHost(fiber, 0);
+                    if (host) {
+                        var text = collectText(fiber, 0);
+                        var componentName = findMeaningfulAncestorName(fiber) || name || 'Unknown';
+                        var path = buildPath(fiber);
+                        var testID = (props && (props.testID || props.nativeID)) || null;
+                        var accessibilityLabel = (props && props.accessibilityLabel) || null;
+
+                        hostFibers.push(host);
+                        fiberMeta.push({
+                            component: componentName,
+                            path: path,
+                            text: text ? text.slice(0, 100) : '',
+                            testID: testID,
+                            accessibilityLabel: accessibilityLabel,
+                            isInput: !!isInput
+                        });
+                    }
+                }
+
+                var child = fiber.child;
+                while (child) {
+                    walkPressables(child, depth + 1);
+                    child = child.sibling;
+                }
+            }
+
+            walkPressables(roots[0].current, 0);
+
+            if (hostFibers.length === 0) return { error: 'No pressable elements found on screen.' };
+
+            // Also measure the root view for viewport detection
+            var rootHost = findFirstHost(roots[0].current, 0);
+            if (rootHost) {
+                hostFibers.unshift(rootHost);
+                fiberMeta.unshift({ component: '__root__', path: '', text: '', testID: null, accessibilityLabel: null, isInput: false });
+            }
+
+            globalThis.__pressableFibers = hostFibers;
+            globalThis.__pressableMeta = fiberMeta;
+            globalThis.__pressableMeasurements = new Array(hostFibers.length).fill(null);
+
+            for (var i = 0; i < hostFibers.length; i++) {
+                try {
+                    (function(idx) {
+                        getMeasurable(hostFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                            globalThis.__pressableMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                        });
+                    })(i);
+                } catch(e) {}
+            }
+
+            return { count: hostFibers.length };
+        })()
+    `;
+
+    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
+    if (!dispatchResult.success) return dispatchResult;
+
+    try {
+        const parsed = JSON.parse(dispatchResult.result || "{}");
+        if (parsed.error) return { success: false, error: parsed.error };
+    } catch {
+        /* ignore */
+    }
+
+    // Wait for measureInWindow callbacks
+    await delay(300);
+
+    // --- Step 2: read measurements, filter visible, build results ---
+    const resolveExpression = `
+        (function() {
+            var fibers = globalThis.__pressableFibers;
+            var meta = globalThis.__pressableMeta;
+            var measurements = globalThis.__pressableMeasurements;
+            globalThis.__pressableFibers = null;
+            globalThis.__pressableMeta = null;
+            globalThis.__pressableMeasurements = null;
+
+            if (!fibers || !measurements || !meta) {
+                return { error: 'No measurement data. Run get_pressable_elements again.' };
+            }
+
+            // Get viewport dimensions
+            var viewportW = 9999, viewportH = 9999;
+            for (var v = 0; v < measurements.length; v++) {
+                if (measurements[v] && measurements[v].x === 0 && measurements[v].y <= 0 &&
+                    measurements[v].width > 0 && measurements[v].height > 0) {
+                    viewportW = measurements[v].width;
+                    viewportH = measurements[v].height + measurements[v].y;
+                    break;
+                }
+            }
+
+            var elements = [];
+
+            for (var i = 0; i < measurements.length; i++) {
+                var m = measurements[i];
+                if (!m) continue;
+
+                var info = meta[i];
+                // Skip the root viewport measurement entry
+                if (info.component === '__root__') continue;
+
+                // Filter: only visible within viewport
+                if (m.width <= 0 || m.height <= 0) continue;
+                if (m.x + m.width < 0 || m.y + m.height < 0) continue;
+                if (m.x > viewportW || m.y > viewportH) continue;
+
+                var text = info.text || '';
+
+                elements.push({
+                    component: info.component,
+                    path: info.path,
+                    center: {
+                        x: Math.round(m.x + m.width / 2),
+                        y: Math.round(m.y + m.height / 2)
+                    },
+                    frame: {
+                        x: Math.round(m.x),
+                        y: Math.round(m.y),
+                        width: Math.round(m.width),
+                        height: Math.round(m.height)
+                    },
+                    text: text,
+                    testID: info.testID,
+                    accessibilityLabel: info.accessibilityLabel,
+                    hasLabel: text.length > 0,
+                    isInput: info.isInput
+                });
+            }
+
+            // Sort top-to-bottom, left-to-right
+            elements.sort(function(a, b) {
+                if (a.center.y !== b.center.y) return a.center.y - b.center.y;
+                return a.center.x - b.center.x;
+            });
+
+            var iconCount = 0;
+            var labeledCount = 0;
+            for (var j = 0; j < elements.length; j++) {
+                if (elements[j].hasLabel) labeledCount++;
+                else iconCount++;
+            }
+
+            return {
+                pressableElements: elements,
+                summary: 'Found ' + elements.length + ' pressable elements (' + iconCount + ' icon-only, ' + labeledCount + ' with text labels)'
+            };
+        })()
+    `;
+
+    const result = await executeInApp(resolveExpression, false, { timeoutMs: 30000 }, device);
+
+    if (result.success && result.result) {
+        try {
+            const parsed = JSON.parse(result.result);
+            if (parsed.error) return { success: false, error: parsed.error };
+
+            const pressableElements: PressableElement[] = parsed.pressableElements || [];
+
+            // Format as readable text
+            const lines: string[] = [parsed.summary, ""];
+            for (const el of pressableElements) {
+                const label = el.hasLabel ? `"${el.text}"` : "(icon/image)";
+                const ids: string[] = [];
+                if (el.testID) ids.push(`testID="${el.testID}"`);
+                if (el.accessibilityLabel) ids.push(`a11y="${el.accessibilityLabel}"`);
+                const idStr = ids.length > 0 ? ` [${ids.join(", ")}]` : "";
+                const inputStr = el.isInput ? " (input)" : "";
+                lines.push(
+                    `${el.component} ${label} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})${idStr}${inputStr}`
+                );
+                if (el.path) lines.push(`  path: ${el.path}`);
+            }
+
+            return {
+                success: true,
+                result: lines.join("\n"),
+                parsedElements: pressableElements
+            };
+        } catch {
+            // If parsing fails, return original result
+        }
+    }
+
+    return result;
+}
+
 interface EnrichedElement {
     component: string;
     frame: { x: number; y: number; width: number; height: number };
@@ -2236,19 +2572,20 @@ export async function pressElement(options: {
     const testIDParam = testID ? `'${esc(testID)}'` : "null";
     const componentParam = component ? `'${esc(component)}'` : "null";
 
-    const expression = `
+    // --- Step 1: Walk fiber tree, collect pressable/input elements, dispatch measureInWindow ---
+    const dispatchExpression = `
         (function() {
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             if (!hook) return { error: 'React DevTools hook not found. Ensure app is running in __DEV__ mode.' };
 
             var roots = [];
             if (hook.getFiberRoots) {
-                var renderers = hook.renderers;
-                if (renderers) {
-                    for (var entry of renderers) {
-                        var r = Array.from(hook.getFiberRoots(entry[0]) || []);
-                        if (r.length > 0) { roots = r; break; }
-                    }
+                roots = Array.from(hook.getFiberRoots(1) || []);
+            }
+            if (roots.length === 0 && hook.renderers) {
+                for (var entry of hook.renderers) {
+                    var r = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
+                    if (r.length > 0) { roots = r; break; }
                 }
             }
             if (roots.length === 0) return { error: 'No fiber roots found. Is a React Native app mounted?' };
@@ -2256,7 +2593,7 @@ export async function pressElement(options: {
             var searchText = ${textParam};
             var searchTestID = ${testIDParam};
             var searchComponent = ${componentParam};
-            var targetIndex = ${index};
+            var maxTraversalUp = ${maxTraversalDepth};
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
@@ -2287,15 +2624,63 @@ export async function pressElement(options: {
                 return parts.join('');
             }
 
-            var matches = [];
+            function getMeasurable(fiber) {
+                var sn = fiber.stateNode;
+                if (!sn) return null;
+                if (typeof sn.measureInWindow === 'function') return sn;
+                if (sn.canonical && sn.canonical.publicInstance &&
+                    typeof sn.canonical.publicInstance.measureInWindow === 'function') {
+                    return sn.canonical.publicInstance;
+                }
+                return null;
+            }
 
-            function walkFiber(fiber, path) {
-                if (!fiber) return;
+            // Find the first measurable host descendant of a fiber.
+            // For inputs, prefer TextInput-specific hosts over generic RCTView.
+            function findFirstHost(fiber, depth, isInput) {
+                if (!fiber || depth > 20) return null;
+                if (typeof fiber.type === 'string' && getMeasurable(fiber)) {
+                    if (isInput) {
+                        var hostType = typeof fiber.type === 'string' ? fiber.type : '';
+                        if (hostType.indexOf('TextInput') !== -1 || hostType.indexOf('textinput') !== -1) {
+                            return fiber;
+                        }
+                    }
+                    return fiber;
+                }
+                var child = fiber.child;
+                var fallback = null;
+                while (child) {
+                    var found = findFirstHost(child, depth + 1, isInput);
+                    if (found) {
+                        if (isInput) {
+                            var ft = typeof found.type === 'string' ? found.type : '';
+                            if (ft.indexOf('TextInput') !== -1 || ft.indexOf('textinput') !== -1) {
+                                return found;
+                            }
+                            if (!fallback) fallback = found;
+                        } else {
+                            return found;
+                        }
+                    }
+                    child = child.sibling;
+                }
+                return fallback;
+            }
+
+            var hostFibers = [];
+            var tapMeta = [];
+
+            // Phase 1: Walk the entire tree, collect all pressable/input elements
+            function walkFiber(fiber, depth, path) {
+                if (!fiber || depth > 5000) return;
                 var name = getComponentName(fiber);
                 var props = fiber.memoizedProps;
 
-                // Skip off-screen subtrees — React Navigation marks hidden screens with aria-hidden
+                // Skip inactive/hidden screens
                 if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+                if (name === 'MaybeScreen' && props && props.active === 0) return;
+                if (name === 'SceneView' && props && props.focused === false) return;
 
                 var isPressable = props && typeof props.onPress === 'function';
                 var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
@@ -2305,33 +2690,24 @@ export async function pressElement(options: {
                     if (isPressable) {
                         text = extractText(fiber, 0);
                     } else {
-                        // For inputs: use child text, value, defaultValue, or placeholder
                         var val = typeof props.value === 'string' ? props.value : '';
                         var defVal = typeof props.defaultValue === 'string' ? props.defaultValue : '';
                         var ph = typeof props.placeholder === 'string' ? props.placeholder : '';
                         text = extractText(fiber, 0) || val || defVal || ph;
                     }
                     var tid = props.testID || props.nativeID || null;
-                    var matched = true;
 
-                    if (searchText !== null) {
-                        matched = matched && text.toLowerCase().indexOf(searchText.toLowerCase()) !== -1;
-                    }
-                    if (searchTestID !== null) {
-                        matched = matched && (tid === searchTestID);
-                    }
-                    if (searchComponent !== null) {
-                        matched = matched && (name || '').toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1;
-                    }
-
-                    if (matched) {
-                        matches.push({
-                            fiber: fiber,
+                    var host = findFirstHost(fiber, 0, isInput);
+                    if (host) {
+                        hostFibers.push(host);
+                        tapMeta.push({
                             name: name || '(anonymous)',
                             text: text.substring(0, 100),
                             testID: tid,
                             path: path.join(' > '),
-                            isInput: isInput
+                            isInput: isInput,
+                            isPressable: isPressable,
+                            source: 'direct'
                         });
                     }
                 }
@@ -2339,151 +2715,256 @@ export async function pressElement(options: {
                 var child = fiber.child;
                 while (child) {
                     var childName = getComponentName(child);
-                    walkFiber(child, childName ? path.concat([childName]) : path);
+                    walkFiber(child, depth + 1, childName ? path.concat([childName]) : path);
                     child = child.sibling;
                 }
             }
 
             for (var ri = 0; ri < roots.length; ri++) {
-                walkFiber(roots[ri].current, []);
+                walkFiber(roots[ri].current, 0, []);
             }
 
-            // Phase 2a: If searching by testID and no match found,
-            // the testID may be on a non-pressable/non-input wrapper — search ALL nodes
-            // for the testID and walk UP to find nearest pressable or input ancestor
-            if (matches.length === 0 && searchTestID !== null) {
-                var testIDCandidates = [];
-
-                function findByTestID(fiber, path) {
-                    if (!fiber) return;
-                    var name = getComponentName(fiber);
-                    var props = fiber.memoizedProps;
-                    if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
-
-                    var tid = props && (props.testID || props.nativeID || null);
-                    if (tid === searchTestID) {
-                        testIDCandidates.push({ fiber: fiber, name: name || '(anonymous)', path: path.join(' > ') });
-                    }
-                    var child = fiber.child;
-                    while (child) {
-                        var childName = getComponentName(child);
-                        findByTestID(child, childName ? path.concat([childName]) : path);
-                        child = child.sibling;
-                    }
+            // Phase 2a: testID on non-pressable wrapper — walk UP to pressable/input parent
+            if (searchTestID !== null) {
+                var hasDirectTestIDMatch = false;
+                for (var di = 0; di < tapMeta.length; di++) {
+                    if (tapMeta[di].testID === searchTestID) { hasDirectTestIDMatch = true; break; }
                 }
 
-                for (var ri3 = 0; ri3 < roots.length; ri3++) {
-                    findByTestID(roots[ri3].current, []);
-                }
+                if (!hasDirectTestIDMatch) {
+                    function findByTestID2a(fiber, path) {
+                        if (!fiber) return;
+                        var name = getComponentName(fiber);
+                        var props = fiber.memoizedProps;
+                        if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+                        if (name === 'MaybeScreen' && props && props.active === 0) return;
+                        if (name === 'SceneView' && props && props.focused === false) return;
 
-                // For each candidate, first check if the node itself is pressable/input,
-                // then walk UP to find nearest pressable/input ancestor
-                var maxDepthTID = ${maxTraversalDepth};
-                for (var ti = 0; ti < testIDCandidates.length; ti++) {
-                    var tCandidate = testIDCandidates[ti];
-                    var tProps = tCandidate.fiber.memoizedProps;
-                    var tIsPressable = tProps && typeof tProps.onPress === 'function';
-                    var tIsInput = !tIsPressable && tProps && (typeof tProps.onChangeText === 'function' || typeof tProps.onFocus === 'function');
+                        var tid = props && (props.testID || props.nativeID || null);
+                        if (tid === searchTestID) {
+                            var nIsPressable = props && typeof props.onPress === 'function';
+                            var nIsInput = !nIsPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
-                    if (tIsPressable || tIsInput) {
-                        var text = extractText(tCandidate.fiber, 0);
-                        if (tIsInput) {
-                            var val = typeof tProps.value === 'string' ? tProps.value : '';
-                            var defVal = typeof tProps.defaultValue === 'string' ? tProps.defaultValue : '';
-                            var ph = typeof tProps.placeholder === 'string' ? tProps.placeholder : '';
-                            text = text || val || defVal || ph;
-                        }
-                        matches.push({
-                            fiber: tCandidate.fiber,
-                            name: tCandidate.name,
-                            text: text.substring(0, 100),
-                            testID: searchTestID,
-                            path: tCandidate.path,
-                            isInput: tIsInput
-                        });
-                        continue;
-                    }
-
-                    // Walk up to find pressable/input ancestor
-                    var tParent = tCandidate.fiber.return;
-                    var tDepth = 0;
-                    while (tParent && tDepth < maxDepthTID) {
-                        var tParentProps = tParent.memoizedProps;
-                        var parentIsPressable = tParentProps && typeof tParentProps.onPress === 'function';
-                        var parentIsInput = !parentIsPressable && tParentProps && (typeof tParentProps.onChangeText === 'function' || typeof tParentProps.onFocus === 'function');
-
-                        if (parentIsPressable || parentIsInput) {
-                            var text = extractText(tParent, 0);
-                            if (parentIsInput) {
-                                var val = typeof tParentProps.value === 'string' ? tParentProps.value : '';
-                                var defVal = typeof tParentProps.defaultValue === 'string' ? tParentProps.defaultValue : '';
-                                var ph = typeof tParentProps.placeholder === 'string' ? tParentProps.placeholder : '';
-                                text = text || val || defVal || ph;
+                            if (nIsPressable || nIsInput) {
+                                var text = nIsPressable ? extractText(fiber, 0) : (extractText(fiber, 0) || (typeof props.value === 'string' ? props.value : '') || (typeof props.defaultValue === 'string' ? props.defaultValue : '') || (typeof props.placeholder === 'string' ? props.placeholder : ''));
+                                var host = findFirstHost(fiber, 0, nIsInput);
+                                if (host) {
+                                    hostFibers.push(host);
+                                    tapMeta.push({
+                                        name: name || '(anonymous)',
+                                        text: text.substring(0, 100),
+                                        testID: searchTestID,
+                                        path: path.join(' > '),
+                                        isInput: nIsInput,
+                                        isPressable: nIsPressable,
+                                        source: 'testID-direct'
+                                    });
+                                }
+                            } else {
+                                // Walk up to find pressable/input ancestor
+                                var parent = fiber.return;
+                                var d = 0;
+                                while (parent && d < maxTraversalUp) {
+                                    var pp = parent.memoizedProps;
+                                    var pIsPressable = pp && typeof pp.onPress === 'function';
+                                    var pIsInput = !pIsPressable && pp && (typeof pp.onChangeText === 'function' || typeof pp.onFocus === 'function');
+                                    if (pIsPressable || pIsInput) {
+                                        var pText = pIsPressable ? extractText(parent, 0) : (extractText(parent, 0) || (typeof pp.value === 'string' ? pp.value : '') || (typeof pp.defaultValue === 'string' ? pp.defaultValue : '') || (typeof pp.placeholder === 'string' ? pp.placeholder : ''));
+                                        var host = findFirstHost(parent, 0, pIsInput);
+                                        if (host) {
+                                            hostFibers.push(host);
+                                            tapMeta.push({
+                                                name: name || '(anonymous)',
+                                                text: pText.substring(0, 100),
+                                                testID: pp.testID || pp.nativeID || searchTestID,
+                                                path: path.join(' > '),
+                                                isInput: pIsInput,
+                                                isPressable: pIsPressable,
+                                                source: 'testID-ancestor'
+                                            });
+                                        }
+                                        break;
+                                    }
+                                    parent = parent.return;
+                                    d++;
+                                }
                             }
-                            matches.push({
-                                fiber: tParent,
-                                name: tCandidate.name,
-                                text: text.substring(0, 100),
-                                testID: tParentProps.testID || tParentProps.nativeID || searchTestID,
-                                path: tCandidate.path,
-                                isInput: parentIsInput
-                            });
-                            break;
                         }
-                        tParent = tParent.return;
-                        tDepth++;
+                        var child = fiber.child;
+                        while (child) {
+                            var childName = getComponentName(child);
+                            findByTestID2a(child, childName ? path.concat([childName]) : path);
+                            child = child.sibling;
+                        }
+                    }
+                    for (var ri2a = 0; ri2a < roots.length; ri2a++) {
+                        findByTestID2a(roots[ri2a].current, []);
                     }
                 }
             }
 
-            // Phase 2b: If searching by component and no match found,
-            // look for the component by name and walk UP to find nearest pressable ancestor
-            if (matches.length === 0 && searchComponent !== null) {
-                var componentCandidates = [];
-
-                function findByName(fiber, path) {
-                    if (!fiber) return;
-                    var name = getComponentName(fiber);
-                    var props = fiber.memoizedProps;
-                    if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
-
-                    if (name && name.toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1) {
-                        componentCandidates.push({ fiber: fiber, name: name, path: path.join(' > ') });
-                    }
-                    var child = fiber.child;
-                    while (child) {
-                        var childName = getComponentName(child);
-                        findByName(child, childName ? path.concat([childName]) : path);
-                        child = child.sibling;
+            // Phase 2b: component name on non-pressable node — walk UP to pressable parent
+            if (searchComponent !== null) {
+                var hasDirectComponentMatch = false;
+                for (var ci = 0; ci < tapMeta.length; ci++) {
+                    if (tapMeta[ci].name.toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1 && tapMeta[ci].source === 'direct') {
+                        hasDirectComponentMatch = true; break;
                     }
                 }
 
-                for (var ri2 = 0; ri2 < roots.length; ri2++) {
-                    findByName(roots[ri2].current, []);
-                }
+                if (!hasDirectComponentMatch) {
+                    function findByName2b(fiber, path) {
+                        if (!fiber) return;
+                        var name = getComponentName(fiber);
+                        var props = fiber.memoizedProps;
+                        if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+                        if (name === 'MaybeScreen' && props && props.active === 0) return;
+                        if (name === 'SceneView' && props && props.focused === false) return;
 
-                // For each candidate, walk up to find pressable ancestor
-                var maxDepth = ${maxTraversalDepth};
-                for (var ci = 0; ci < componentCandidates.length; ci++) {
-                    var candidate = componentCandidates[ci];
-                    var parent = candidate.fiber.return;
-                    var depth = 0;
-                    while (parent && depth < maxDepth) {
-                        var parentProps = parent.memoizedProps;
-                        if (parentProps && typeof parentProps.onPress === 'function') {
-                            var text = extractText(parent, 0);
-                            matches.push({
-                                fiber: parent,
-                                name: candidate.name,
-                                text: text.substring(0, 100),
-                                testID: parentProps.testID || parentProps.nativeID || null,
-                                path: candidate.path
-                            });
-                            break;
+                        if (name && name.toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1) {
+                            var parent = fiber.return;
+                            var d = 0;
+                            while (parent && d < maxTraversalUp) {
+                                var pp = parent.memoizedProps;
+                                if (pp && typeof pp.onPress === 'function') {
+                                    var text = extractText(parent, 0);
+                                    var host = findFirstHost(parent, 0, false);
+                                    if (host) {
+                                        hostFibers.push(host);
+                                        tapMeta.push({
+                                            name: name,
+                                            text: text.substring(0, 100),
+                                            testID: pp.testID || pp.nativeID || null,
+                                            path: path.join(' > '),
+                                            isInput: false,
+                                            isPressable: true,
+                                            source: 'component-ancestor'
+                                        });
+                                    }
+                                    break;
+                                }
+                                parent = parent.return;
+                                d++;
+                            }
                         }
-                        parent = parent.return;
-                        depth++;
+                        var child = fiber.child;
+                        while (child) {
+                            var childName = getComponentName(child);
+                            findByName2b(child, childName ? path.concat([childName]) : path);
+                            child = child.sibling;
+                        }
                     }
+                    for (var ri2b = 0; ri2b < roots.length; ri2b++) {
+                        findByName2b(roots[ri2b].current, []);
+                    }
+                }
+            }
+
+            if (hostFibers.length === 0) {
+                var criteria = [];
+                if (searchText !== null) criteria.push('text="' + searchText + '"');
+                if (searchTestID !== null) criteria.push('testID="' + searchTestID + '"');
+                if (searchComponent !== null) criteria.push('component="' + searchComponent + '"');
+                return { error: 'No pressable or focusable elements found. Searched for: ' + criteria.join(', ') };
+            }
+
+            // Store host fibers and metadata globally for step 2, dispatch measureInWindow
+            globalThis.__tapHostFibers = hostFibers;
+            globalThis.__tapMeta = tapMeta;
+            globalThis.__tapMeasurements = new Array(hostFibers.length).fill(null);
+
+            for (var mi = 0; mi < hostFibers.length; mi++) {
+                try {
+                    (function(idx) {
+                        getMeasurable(hostFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                            globalThis.__tapMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                        });
+                    })(mi);
+                } catch(e) {}
+            }
+
+            return { count: hostFibers.length };
+        })()
+    `;
+
+    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, options.device);
+    if (!dispatchResult.success) return dispatchResult;
+
+    try {
+        const parsed = JSON.parse(dispatchResult.result || "{}");
+        if (parsed.error) return { success: false, error: parsed.error };
+    } catch {
+        /* ignore */
+    }
+
+    // Wait for measureInWindow callbacks
+    await delay(300);
+
+    // --- Step 2: Read measurements, filter visible, match by query ---
+    const resolveExpression = `
+        (function() {
+            var hostFibers = globalThis.__tapHostFibers;
+            var meta = globalThis.__tapMeta;
+            var measurements = globalThis.__tapMeasurements;
+            globalThis.__tapHostFibers = null;
+            globalThis.__tapMeta = null;
+            globalThis.__tapMeasurements = null;
+
+            if (!hostFibers || !measurements || !meta) {
+                return { error: 'No measurement data. Dispatch step may have failed.' };
+            }
+
+            var searchText = ${textParam};
+            var searchTestID = ${testIDParam};
+            var searchComponent = ${componentParam};
+            var targetIndex = ${index};
+
+            // Determine viewport bounds
+            var viewportW = 9999, viewportH = 9999;
+            for (var v = 0; v < measurements.length; v++) {
+                if (measurements[v] && measurements[v].x === 0 && measurements[v].y <= 0 &&
+                    measurements[v].width > 0 && measurements[v].height > 0) {
+                    viewportW = measurements[v].width;
+                    viewportH = measurements[v].height + measurements[v].y;
+                    break;
+                }
+            }
+
+            // Filter visible and match
+            var matches = [];
+            for (var i = 0; i < measurements.length; i++) {
+                var m = measurements[i];
+                if (!m) continue;
+
+                // Visibility filter: positive dimensions, within viewport
+                if (m.width <= 0 || m.height <= 0) continue;
+                if (m.x + m.width < 0 || m.y + m.height < 0) continue;
+                if (m.x > viewportW || m.y > viewportH) continue;
+
+                var info = meta[i];
+
+                // Match by query
+                var matched = true;
+                if (searchText !== null) {
+                    matched = matched && info.text.toLowerCase().indexOf(searchText.toLowerCase()) !== -1;
+                }
+                if (searchTestID !== null) {
+                    matched = matched && (info.testID === searchTestID);
+                }
+                if (searchComponent !== null) {
+                    matched = matched && (info.name || '').toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1;
+                }
+
+                if (matched) {
+                    matches.push({
+                        name: info.name,
+                        text: info.text,
+                        testID: info.testID,
+                        path: info.path,
+                        isInput: info.isInput,
+                        x: Math.round(m.x + m.width / 2),
+                        y: Math.round(m.y + m.height / 2)
+                    });
                 }
             }
 
@@ -2492,12 +2973,12 @@ export async function pressElement(options: {
                 if (searchText !== null) criteria.push('text="' + searchText + '"');
                 if (searchTestID !== null) criteria.push('testID="' + searchTestID + '"');
                 if (searchComponent !== null) criteria.push('component="' + searchComponent + '"');
-                return { error: 'No pressable or focusable elements found matching: ' + criteria.join(', ') };
+                return { error: 'No visible pressable or focusable elements found matching: ' + criteria.join(', ') };
             }
 
             if (targetIndex >= matches.length) {
                 return {
-                    error: 'Found ' + matches.length + ' match(es) but index ' + targetIndex + ' requested (0-based). Use index 0-' + (matches.length - 1) + '.',
+                    error: 'Found ' + matches.length + ' visible match(es) but index ' + targetIndex + ' requested (0-based). Use index 0-' + (matches.length - 1) + '.',
                     matches: matches.map(function(m, i) {
                         return { index: i, component: m.name, text: m.text, testID: m.testID };
                     })
@@ -2505,138 +2986,29 @@ export async function pressElement(options: {
             }
 
             var target = matches[targetIndex];
-            try {
-                // Both pressable and input elements use native tap via measured coordinates.
-                // This ensures onPress wrappers, analytics, debouncing, and state tracking
-                // logic inside components is executed through React's event pipeline,
-                // rather than directly invoking the parent-supplied onPress prop.
-                var baseResult = {
-                    success: true,
-                    pressed: target.name,
-                    matchIndex: targetIndex,
-                    totalMatches: matches.length,
-                    text: target.text,
-                    testID: target.testID,
-                    path: target.path,
-                    isInput: !!target.isInput,
-                    needsNativeTap: true,
-                    nativeTapTarget: null
-                };
-                if (matches.length > 1) {
-                    baseResult.allMatches = matches.map(function(m, i) {
-                        return { index: i, component: m.name, text: m.text, testID: m.testID };
-                    });
-                }
-
-                // Walk down from the matched fiber to find a host component (tag === 5)
-                // whose screen position can be measured for a native tap.
-                // For inputs, prefer TextInput-specific hosts over generic RCTView.
-                var hostFiber = null;
-                var fallbackHost = null;
-                function findHostChild(fiber, depth) {
-                    if (!fiber || depth > 5000 || hostFiber) return;
-                    if (fiber.tag === 5 && fiber.stateNode) {
-                        var hostType = typeof fiber.type === 'string' ? fiber.type : '';
-                        if (target.isInput && (hostType.indexOf('TextInput') !== -1 || hostType.indexOf('textinput') !== -1)) {
-                            hostFiber = fiber;
-                            return;
-                        }
-                        if (!fallbackHost) fallbackHost = fiber;
-                    }
-                    var child = fiber.child;
-                    while (child) { findHostChild(child, depth + 1); child = child.sibling; }
-                }
-                if (target.fiber.tag === 5 && target.fiber.stateNode) {
-                    hostFiber = target.fiber;
-                } else {
-                    findHostChild(target.fiber, 0);
-                    if (!hostFiber) hostFiber = fallbackHost;
-                }
-
-                if (hostFiber && hostFiber.stateNode) {
-                    var sn = hostFiber.stateNode;
-
-                    // Fabric (New Architecture): stateNode.node is the shadow node.
-                    // nativeFabricUIManager.measure callback fires synchronously.
-                    var fabricUI = globalThis.nativeFabricUIManager;
-                    if (sn.node && fabricUI && typeof fabricUI.measure === 'function') {
-                        try {
-                            fabricUI.measure(sn.node, function(x, y, width, height, pageX, pageY) {
-                                if (width > 0 && height > 0) {
-                                    baseResult.nativeTapTarget = {
-                                        x: Math.round(pageX + width / 2),
-                                        y: Math.round(pageY + height / 2),
-                                        unit: 'points'
-                                    };
-                                }
-                            });
-
-                            // Modal offset correction: if the element is inside a native modal
-                            // (RNSModalScreen), measureInWindow returns coordinates relative to
-                            // the modal's window, not the screen. Detect and add the offset.
-                            if (baseResult.nativeTapTarget) {
-                                var modalNode = null;
-                                var screenStackNode = null;
-                                var ancestor = target.fiber.return;
-                                var walkCount = 0;
-                                while (ancestor && walkCount < 200) {
-                                    var aType = typeof ancestor.type === 'string' ? ancestor.type : '';
-                                    if (ancestor.tag === 5 && ancestor.stateNode && ancestor.stateNode.node) {
-                                        if (aType === 'RNSModalScreen' && !modalNode) modalNode = ancestor.stateNode.node;
-                                        if (aType === 'RNSScreenStack') screenStackNode = ancestor.stateNode.node;
-                                    }
-                                    ancestor = ancestor.return;
-                                    walkCount++;
-                                }
-                                if (modalNode && screenStackNode) {
-                                    var modalH = 0, stackH = 0;
-                                    fabricUI.measureInWindow(modalNode, function(mx, my, mw, mh) { modalH = mh; });
-                                    fabricUI.measureInWindow(screenStackNode, function(sx, sy, sw, sh) { stackH = sh; });
-                                    if (stackH > modalH && modalH > 0) {
-                                        baseResult.nativeTapTarget.y += (stackH - modalH);
-                                    }
-                                }
-                            }
-                        } catch (e) {
-                            // Measurement failed — fall through without coordinates
-                        }
-                    }
-
-                    // Old Architecture (Bridge): stateNode._nativeTag
-                    if (!baseResult.nativeTapTarget) {
-                        var nativeTag = sn._nativeTag || sn.__nativeTag;
-                        if (!nativeTag && typeof sn.getNativeTag === 'function') {
-                            nativeTag = sn.getNativeTag();
-                        }
-                        if (nativeTag) {
-                            var UIManager = globalThis.nativeModuleProxy && globalThis.nativeModuleProxy.UIManager;
-                            if (UIManager && typeof UIManager.measureInWindow === 'function') {
-                                try {
-                                    UIManager.measureInWindow(nativeTag, function(x, y, width, height) {
-                                        if (width > 0 && height > 0) {
-                                            baseResult.nativeTapTarget = {
-                                                x: Math.round(x + width / 2),
-                                                y: Math.round(y + height / 2),
-                                                unit: 'points'
-                                            };
-                                        }
-                                    });
-                                } catch (e) {
-                                    // Measurement failed
-                                }
-                            }
-                        }
-                    }
-                }
-
-                return baseResult;
-            } catch (e) {
-                return { error: 'Handler threw: ' + (e.message || String(e)), component: target.name };
+            var result = {
+                success: true,
+                pressed: target.name,
+                matchIndex: targetIndex,
+                totalMatches: matches.length,
+                text: target.text,
+                testID: target.testID,
+                path: target.path,
+                isInput: target.isInput,
+                x: target.x,
+                y: target.y,
+                unit: 'points'
+            };
+            if (matches.length > 1) {
+                result.allMatches = matches.map(function(m, i) {
+                    return { index: i, component: m.name, text: m.text, testID: m.testID };
+                });
             }
+            return result;
         })()
     `;
 
-    return executeInApp(expression, false, {}, options.device);
+    return executeInApp(resolveExpression, false, { timeoutMs: 10000 }, options.device);
 }
 
 // ============================================================================
