@@ -1975,6 +1975,34 @@ export async function getPressableElements(
                 });
             }
 
+            // Deduplicate: multiple nested pressables (View > TouchableOpacity > TouchableOpacity)
+            // often share the same frame. Keep the one with the most meaningful component name.
+            var HOST_NAMES = /^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText)$/;
+            var deduped = {};
+            for (var di = 0; di < elements.length; di++) {
+                var el = elements[di];
+                var key = el.frame.x + ',' + el.frame.y + ',' + el.frame.width + ',' + el.frame.height;
+                var existing = deduped[key];
+                if (!existing) {
+                    deduped[key] = el;
+                } else {
+                    // Prefer non-host/non-primitive name
+                    var existingIsGeneric = HOST_NAMES.test(existing.component);
+                    var newIsGeneric = HOST_NAMES.test(el.component);
+                    if (existingIsGeneric && !newIsGeneric) {
+                        deduped[key] = el;
+                    } else if (existingIsGeneric && newIsGeneric) {
+                        // Both generic — prefer the one with more identifiers
+                        if (!existing.testID && el.testID) deduped[key] = el;
+                        else if (!existing.accessibilityLabel && el.accessibilityLabel) deduped[key] = el;
+                    }
+                }
+            }
+            elements = [];
+            for (var dk in deduped) {
+                elements.push(deduped[dk]);
+            }
+
             // Sort top-to-bottom, left-to-right
             elements.sort(function(a, b) {
                 if (a.center.y !== b.center.y) return a.center.y - b.center.y;
