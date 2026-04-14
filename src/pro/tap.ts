@@ -427,34 +427,13 @@ interface StrategyResult {
 
 // --- Strategy Functions ---
 
-async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number): Promise<StrategyResult> {
-    // Retry with increasing depth if the initial traversal finds nothing
-    const baseDepth = maxTraversalDepth ?? 15;
-    const depthAttempts = [baseDepth];
-    // Only add deeper retries if user didn't explicitly set a high depth
-    if (baseDepth <= 15) {
-        depthAttempts.push(30, 45);
-    } else if (baseDepth <= 30) {
-        depthAttempts.push(baseDepth * 2);
-    }
-
-    let lastResult: StrategyResult | null = null;
-
-    for (const depth of depthAttempts) {
-        const result = await tryFiberAtDepth(query, index, depth);
-        if (result.success || result.matches) {
-            return result;
-        }
-        lastResult = result;
-    }
-
-    return lastResult!;
-}
-
-async function tryFiberAtDepth(
+async function tryFiberStrategy(
     query: TapQuery,
     index: number | undefined,
-    maxTraversalDepth: number
+    maxTraversalDepth: number | undefined,
+    platform: "ios" | "android",
+    targetUdid: string | undefined,
+    deviceName: string | undefined
 ): Promise<StrategyResult> {
     try {
         const result = await pressElement({
@@ -462,7 +441,8 @@ async function tryFiberAtDepth(
             testID: query.testID,
             component: query.component,
             index,
-            maxTraversalDepth
+            maxTraversalDepth,
+            device: deviceName
         });
 
         if (!result.success) {
@@ -486,37 +466,31 @@ async function tryFiberAtDepth(
             return strategyResult;
         }
 
-        // Fiber finds the element by text/testID/component, then measures its
-        // host component's screen position for a native tap. This ensures the tap
-        // goes through React's event pipeline, executing any onPress wrappers
-        // (analytics, debouncing, state tracking) inside the component.
-        if (parsed.needsNativeTap) {
-            const elementType = parsed.isInput ? "input element" : "pressable element";
-            if (parsed.nativeTapTarget && parsed.nativeTapTarget.x && parsed.nativeTapTarget.y) {
-                return {
-                    success: false,
-                    reason: `Found ${parsed.pressed} (${elementType}) — measured coordinates for native tap`,
-                    pressed: parsed.pressed,
-                    text: parsed.text,
-                    path: parsed.path || null,
-                    component: parsed.pressed || null,
-                    convertedTo: {
-                        x: parsed.nativeTapTarget.x,
-                        y: parsed.nativeTapTarget.y,
-                        unit: parsed.nativeTapTarget.unit || "points"
-                    }
-                };
-            }
+        if (!parsed.success || parsed.x == null || parsed.y == null) {
             return {
                 success: false,
-                reason: `Found ${parsed.pressed} (${elementType}) but could not measure coordinates — falling through to next strategy`
+                reason: parsed.error || "pressElement returned no coordinates"
             };
         }
 
-        // All elements now use needsNativeTap — this shouldn't be reached
+        // Perform native tap at the measured coordinates
+        if (platform === "ios") {
+            await iosTap(parsed.x, parsed.y, { udid: targetUdid });
+        } else {
+            const { androidGetDensity } = await import("../core/android.js");
+            const densityResult = await androidGetDensity();
+            const densityScale = (densityResult.density || 420) / 160;
+            await androidTap(Math.round(parsed.x * densityScale), Math.round(parsed.y * densityScale));
+        }
+
         return {
-            success: false,
-            reason: "Unexpected: element did not request native tap"
+            success: true,
+            reason: "Tapped via fiber strategy",
+            pressed: parsed.pressed,
+            text: parsed.text,
+            path: parsed.path || null,
+            component: parsed.pressed || null,
+            convertedTo: { x: parsed.x, y: parsed.y, unit: "points" }
         };
     } catch (err) {
         return {
@@ -1204,10 +1178,21 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // Detect available capabilities
     const allApps = Array.from(connectedApps.values());
     let hasMetro = allApps.length > 0;
-    // If platform is specified, prefer an app matching that platform
-    let app: ConnectedApp | undefined = options.platform
-        ? (allApps.find((a) => a.platform === options.platform) ?? allApps[0])
-        : allApps[0];
+    // If platform is specified, prefer an app matching that platform.
+    // Check platform field first, then simulatorUdid (reliable iOS indicator),
+    // then device name patterns as fallback.
+    let app: ConnectedApp | undefined;
+    if (options.platform && allApps.length > 1) {
+        app = allApps.find((a) => a.platform === options.platform);
+        if (!app && options.platform === "ios") {
+            app = allApps.find((a) => !!a.simulatorUdid);
+        }
+        if (!app) {
+            app = allApps[0];
+        }
+    } else {
+        app = allApps[0];
+    }
 
     // Try to auto-connect to Metro (for fiber strategy), but don't fail if it doesn't work
     if (!hasMetro) {
@@ -1358,7 +1343,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         try {
             switch (strat) {
                 case "fiber":
-                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth), budget, `fiber`);
+                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, platform, targetUdid, deviceName), budget, `fiber`);
                     break;
                 case "accessibility":
                     result = await withTimeout(
@@ -1432,66 +1417,6 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         attempted.push({ strategy: strat, reason: result.reason });
-
-        // If fiber found an element with measured coordinates, do a native tap directly
-        if (strat === "fiber" && result.convertedTo && result.pressed) {
-            try {
-                const coords = result.convertedTo;
-                if (platform === "ios") {
-                    // Fabric returns points — iosTap expects points
-                    await iosTap(coords.x, coords.y, { udid: targetUdid });
-                } else {
-                    // Fabric returns dp — androidTap expects pixels
-                    // Convert dp to pixels using device density
-                    const { androidGetDensity } = await import("../core/android.js");
-                    const densityResult = await androidGetDensity();
-                    const densityScale = (densityResult.density || 420) / 160;
-                    await androidTap(Math.round(coords.x * densityScale), Math.round(coords.y * densityScale));
-                }
-                // fiber+native uses native tap — always verify
-                let screenshot: TapScreenshot | undefined;
-                let verification: TapVerification | undefined;
-                if (options.burst && canVerify && beforeBuffer) {
-                    ({ screenshot, verification } = await burstCaptureAndVerify(
-                        platform,
-                        beforeBuffer,
-                        targetUdid,
-                        beforeScaleFactor
-                    ));
-                } else {
-                    ({ screenshot, verification } = await verifyAndCapture(
-                        platform,
-                        canVerify,
-                        shouldScreenshot,
-                        beforeBuffer,
-                        targetUdid,
-                        beforeScaleFactor
-                    ));
-                }
-                if (screenshot && app) {
-                    app.lastScreenshot = {
-                        originalWidth: screenshot.width,
-                        originalHeight: screenshot.height,
-                        scaleFactor: screenshot.scaleFactor
-                    };
-                }
-                return formatTapSuccess({
-                    method: "fiber+native",
-                    query,
-                    pressed: result.pressed,
-                    text: result.text,
-                    path: result.path,
-                    component: result.component,
-                    convertedTo: coords,
-                    platform,
-                    device: deviceName,
-                    screenshot,
-                    verification
-                });
-            } catch {
-                // Native tap at fiber coordinates failed — continue to next strategy
-            }
-        }
 
         // If we got match suggestions from fiber, carry them forward
         if (result.matches) {

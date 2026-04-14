@@ -2591,7 +2591,7 @@ export async function pressElement(options: {
     maxTraversalDepth?: number;
     device?: string;
 }): Promise<ExecutionResult> {
-    const { text, testID, component, index = 0, maxTraversalDepth = 15 } = options;
+    const { text, testID, component, index = 0, maxTraversalDepth = 15, device } = options;
 
     if (!text && !testID && !component) {
         return { success: false, error: "At least one of text, testID, or component must be provided." };
@@ -2917,7 +2917,7 @@ export async function pressElement(options: {
         })()
     `;
 
-    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, options.device);
+    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
     if (!dispatchResult.success) return dispatchResult;
 
     try {
@@ -3038,7 +3038,7 @@ export async function pressElement(options: {
         })()
     `;
 
-    return executeInApp(resolveExpression, false, { timeoutMs: 10000 }, options.device);
+    return executeInApp(resolveExpression, false, { timeoutMs: 10000 }, device);
 }
 
 // ============================================================================

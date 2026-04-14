@@ -120,8 +120,9 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `ios_open_url`: Open deep links or universal links on iOS simulator
 
 **Screenshots & OCR:**
-- `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
+- `ios_screenshot` / `android_screenshot`: Capture simulator/device screen. If you need to find a pressable element (icon, button) that you can't identify from the screenshot, call `get_pressable_elements`
 - `ocr_screenshot`: Screenshot with OCR text recognition and tap-ready coordinates
+- `get_pressable_elements`: Find all visible pressable (onPress) and input (TextInput) elements on screen. Returns numbered list with component names, tap-ready center coordinates, text labels, testID, and accessibilityLabel. Use when you need to tap an icon or button but can't identify it from a screenshot alone
 - `get_images`: Access shared image buffer containing screenshots from all tools. Returns metadata by default; use `id` or `groupId`+`frameIndex` to retrieve specific images. Tap burst frames are stored here.
 
 **Component Inspection (recommended workflow: get_screen_layout → find_components → inspect_component):**
@@ -180,7 +181,7 @@ When debugging React Native apps through this MCP server:
     7. On failure, follow the `suggestion` field in the response — it tells you exactly what to try next
 - **Best practice — use testID**: Set `testID` on all interactive elements (buttons, inputs, links). It's more stable than text matching (doesn't break with translations), provides exact matching (no ambiguity), and works for TextInput focusing too.
 - **TextInput fields**: `tap` detects TextInput elements (`onChangeText`/`onFocus`) in the fiber tree and falls through to native tap for actual focus. `tap(testID="email-input")` works even though inputs don't have `onPress`.
-- **Icon-only buttons** (no text label inside the pressable): Use `tap(component="ComponentName")` to match by React component name — automatically walks up to the nearest pressable parent. Use `find_components` first to discover actual component names. Use `maxTraversalDepth` param to increase parent search depth for deeply wrapped components (default: 15).
+- **Icon-only buttons** (no text label inside the pressable): Use `get_pressable_elements` to list all visible pressable elements with component names and tap-ready coordinates — this is the best way to discover icon buttons you can't identify from a screenshot. Then use `tap(component="ComponentName")` to match by React component name — automatically walks up to the nearest pressable parent. Use `maxTraversalDepth` param to increase parent search depth for deeply wrapped components (default: 15).
 - **Non-ASCII text** (Cyrillic, CJK, Arabic, etc.): `tap(text="текст")` automatically skips fiber (Hermes limitation) and uses accessibility/OCR. For best results, use `testID` or `component` params instead.
 - **Component Inspection — Understanding what's on screen**:
     1. Call `get_screen_layout` — returns a tree of visible components with positions, text, and identifiers. This is the fastest way to understand the current UI

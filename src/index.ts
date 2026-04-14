@@ -3338,7 +3338,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_screenshot",
     {
-        description: "Take a screenshot from an Android device/emulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail.",
+        description: "Take a screenshot from an Android device/emulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail. If you need to find a pressable element (icon, button) that you can't identify from the screenshot, call get_pressable_elements to list all visible pressable elements with their coordinates and component names.",
         inputSchema: {
             outputPath: z
                 .string()
@@ -4028,7 +4028,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_screenshot",
     {
-        description: "Take a screenshot from an iOS simulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail.",
+        description: "Take a screenshot from an iOS simulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail. If you need to find a pressable element (icon, button) that you can't identify from the screenshot, call get_pressable_elements to list all visible pressable elements with their coordinates and component names.",
         inputSchema: {
             outputPath: z
                 .string()

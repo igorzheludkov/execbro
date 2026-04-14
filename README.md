@@ -210,6 +210,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `get_network_requests`                  | Monitor HTTP requests with method/status filtering                                       |
 | `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
 | `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
+| `get_pressable_elements`                | Find all visible pressable/input elements with tap-ready coordinates and component names  |
 | `execute_in_app`                        | Run JS expressions in the app runtime (REPL-style)                                       |
 | `ios_screenshot` / `android_screenshot` | Take device screenshots                                                                  |
 

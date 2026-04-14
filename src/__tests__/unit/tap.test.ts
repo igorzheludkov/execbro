@@ -274,7 +274,7 @@ describe("formatTapFailure", () => {
 describe("formatTapSuccess with coordinate conversion info", () => {
     it("includes tappedAt and convertedTo when provided", () => {
         const result = formatTapSuccess({
-            method: "fiber+native",
+            method: "fiber",
             query: { text: "Submit" },
             pressed: "PrimaryButton",
             tappedAt: { x: 300, y: 600 },
