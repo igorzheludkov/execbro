@@ -49,6 +49,7 @@ import {
     // React Component Inspection
     getComponentTree,
     getScreenLayout,
+    getPressableElements,
     inspectComponent,
     findComponents,
     inspectAtPoint,
@@ -1781,6 +1782,42 @@ registerToolWithTelemetry(
                 {
                     type: "text",
                     text: `Screen Layout:\n\n${result.result}`
+                }
+            ]
+        };
+    }
+);
+
+// Tool: Get all pressable elements on screen
+registerToolWithTelemetry(
+    "get_pressable_elements",
+    {
+        description:
+            "Find all pressable (onPress) and input (TextInput) elements currently visible on screen. Returns component names, tap-ready center coordinates (in points/dp), text labels, testID, and accessibilityLabel. Useful when you need to tap an icon or button but can't identify it from a screenshot alone. Each element includes hasLabel (true if it contains text) and isInput (true for TextInput fields).",
+        inputSchema: {
+            device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+        }
+    },
+    async ({ device }) => {
+        const result = await getPressableElements({ device });
+
+        if (!result.success) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${result.error}`
+                    }
+                ],
+                isError: true
+            };
+        }
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.result || "No pressable elements found."
                 }
             ]
         };
