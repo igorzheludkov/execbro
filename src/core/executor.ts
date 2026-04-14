@@ -2034,7 +2034,9 @@ export async function getPressableElements(
 
             // Format as readable text
             const lines: string[] = [parsed.summary, ""];
-            for (const el of pressableElements) {
+            for (let i = 0; i < pressableElements.length; i++) {
+                const el = pressableElements[i];
+                const num = i + 1;
                 const label = el.hasLabel ? `"${el.text}"` : "(icon/image)";
                 const ids: string[] = [];
                 if (el.testID) ids.push(`testID="${el.testID}"`);
@@ -2042,9 +2044,9 @@ export async function getPressableElements(
                 const idStr = ids.length > 0 ? ` [${ids.join(", ")}]` : "";
                 const inputStr = el.isInput ? " (input)" : "";
                 lines.push(
-                    `${el.component} ${label} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})${idStr}${inputStr}`
+                    `${num}. ${el.component} ${label} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})${idStr}${inputStr}`
                 );
-                if (el.path) lines.push(`  path: ${el.path}`);
+                if (el.path) lines.push(`   path: ${el.path}`);
             }
 
             return {
@@ -2621,6 +2623,7 @@ export async function pressElement(options: {
             var searchText = ${textParam};
             var searchTestID = ${testIDParam};
             var searchComponent = ${componentParam};
+            var targetIndex = ${index};
             var maxTraversalUp = ${maxTraversalDepth};
 
             function getComponentName(fiber) {
@@ -2789,7 +2792,6 @@ export async function pressElement(options: {
                                     });
                                 }
                             } else {
-                                // Walk up to find pressable/input ancestor
                                 var parent = fiber.return;
                                 var d = 0;
                                 while (parent && d < maxTraversalUp) {
