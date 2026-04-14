@@ -102,6 +102,7 @@ const guides: Guide[] = [
 ## Key Tools
 - ios_screenshot / android_screenshot: visual capture
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
+- get_pressable_elements: find all pressable/input elements with tap-ready coordinates — use when you can't identify an icon or button from the screenshot
 - ocr_screenshot: screenshot with text recognition and tap coordinates
 - inspect_at_point: frame measurements, props, styles
 - get_inspector_selection: component names and source files`
@@ -141,6 +142,7 @@ tap detects TextInput elements (onChangeText/onFocus) in the fiber tree and fall
 
 ## Icon-Only Buttons
 For buttons that contain only an icon (no text):
+- get_pressable_elements — lists ALL visible pressable elements with component names and tap-ready coordinates. Best way to discover icon buttons you can't identify from a screenshot alone. Each element shows hasLabel (true=has text, false=icon-only)
 - tap(component="CartIcon") — finds the icon and walks up the fiber tree to press the nearest pressable parent
 - Use maxTraversalDepth to increase parent search depth (default: 15) for deeply wrapped components
 
