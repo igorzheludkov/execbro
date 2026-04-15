@@ -3006,6 +3006,16 @@ export async function pressElement(options: {
                 return { error: 'No visible pressable or focusable elements found matching: ' + criteria.join(', ') };
             }
 
+            // When searching by text, prefer the most specific match.
+            // A button labeled "Send code" is a better match than a
+            // full-screen TouchableWithoutFeedback whose concatenated
+            // child text happens to contain "Send code".
+            if (searchText !== null && matches.length > 1) {
+                matches.sort(function(a, b) {
+                    return a.text.length - b.text.length;
+                });
+            }
+
             if (targetIndex >= matches.length) {
                 return {
                     error: 'Found ' + matches.length + ' visible match(es) but index ' + targetIndex + ' requested (0-based). Use index 0-' + (matches.length - 1) + '.',

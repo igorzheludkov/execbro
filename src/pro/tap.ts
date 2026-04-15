@@ -225,10 +225,15 @@ export function getAvailableStrategies(query: TapQuery, strategy: TapStrategy): 
     }
     if (query.text) {
         const strategies: string[] = [];
-        strategies.push("accessibility");
+        // Fiber first: iOS accessibility merges labels under wrapper components
+        // (e.g. TouchableWithoutFeedback), making accessibility match the
+        // full-screen parent instead of the actual button.  Fiber uses
+        // measureInWindow on the exact pressable and taps via coordinates,
+        // bypassing the flattened accessibility tree entirely.
         if (!hasProblematicUnicode(query.text)) {
             strategies.push("fiber");
         }
+        strategies.push("accessibility");
         strategies.push("ocr");
         return strategies;
     }
@@ -750,12 +755,22 @@ async function tryCoordinateStrategy(
     udid?: string
 ): Promise<StrategyResult> {
     try {
+        // If no screenshot metadata is available (e.g. first tap in session,
+        // or user called ios_screenshot which doesn't update lastScreenshot),
+        // capture a fresh screenshot to determine the correct scaleFactor.
+        // Without this, scaleFactor defaults to 1 and conversion is wrong
+        // for downscaled screenshots.
+        let resolvedScaleFactor = lastScreenshot?.scaleFactor;
+        if (resolvedScaleFactor == null) {
+            const ref = await captureScreenshot(platform, udid);
+            resolvedScaleFactor = ref?.scaleFactor ?? 1;
+        }
+
         if (platform === "ios") {
-            const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
             const { getDevicePixelRatio } = await import("../core/ios.js");
             const devicePixelRatio = await getDevicePixelRatio(udid);
 
-            const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
+            const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, resolvedScaleFactor);
             const tapResult = await iosTap(converted.x, converted.y, { udid });
             if (!tapResult.success) {
                 return {
@@ -778,8 +793,7 @@ async function tryCoordinateStrategy(
                 convertedTo: { x: converted.x, y: converted.y, unit: "points" }
             };
         } else {
-            const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
-            const converted = convertScreenshotToTapCoords(pixelX, pixelY, "android", 1, scaleFactor);
+            const converted = convertScreenshotToTapCoords(pixelX, pixelY, "android", 1, resolvedScaleFactor);
             await androidTap(converted.x, converted.y);
 
             // Best-effort: identify what was tapped via fiber tree
@@ -1090,42 +1104,38 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         const nativeShouldScreenshot = options.screenshot !== false;
         const nativeShouldVerify = nativeShouldScreenshot && options.verify !== false;
         let nativeBeforeBuffer: Buffer | null = null;
-        let nativeScreenshotMeta: { originalWidth: number; originalHeight: number; scaleFactor: number } | undefined;
         if (nativeShouldVerify) {
             const before = await captureScreenshot(platform, nativeUdid);
             nativeBeforeBuffer = before?.buffer || null;
-            if (before) {
-                nativeScreenshotMeta = {
-                    originalWidth: before.width,
-                    originalHeight: before.height,
-                    scaleFactor: before.scaleFactor
-                };
-            }
         }
 
-        // If no screenshot was taken for verification, take one just for scaleFactor
-        if (!nativeScreenshotMeta) {
-            const ref = await captureScreenshot(platform, nativeUdid);
-            if (ref) {
-                nativeScreenshotMeta = {
-                    originalWidth: ref.width,
-                    originalHeight: ref.height,
-                    scaleFactor: ref.scaleFactor
-                };
-                // Also use it for verification if buffer is needed
-                if (!nativeBeforeBuffer) {
-                    nativeBeforeBuffer = ref.buffer;
-                }
-            }
-        }
-
+        // Native mode: coordinates are already in platform-native units
+        // (points for iOS, pixels for Android) — pass directly to the driver
+        // without screenshot-based conversion.
         let result: StrategyResult;
         try {
-            result = await withTimeout(
-                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta, nativeUdid),
-                remainingMs(),
-                "native-coordinate"
-            );
+            const tapX = Math.round(query.x!);
+            const tapY = Math.round(query.y!);
+
+            if (platform === "ios") {
+                const tapResult = await iosTap(tapX, tapY, { udid: nativeUdid });
+                if (!tapResult.success) {
+                    result = { success: false, reason: `Native tap failed: ${tapResult.error}` };
+                } else {
+                    result = {
+                        success: true,
+                        reason: "Tapped at native coordinates (iOS)",
+                        convertedTo: { x: tapX, y: tapY, unit: "points" }
+                    };
+                }
+            } else {
+                await androidTap(tapX, tapY);
+                result = {
+                    success: true,
+                    reason: "Tapped at native coordinates (Android)",
+                    convertedTo: { x: tapX, y: tapY, unit: "pixels" }
+                };
+            }
         } catch (err) {
             return formatTapFailure({
                 query,
@@ -1145,8 +1155,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 ({ screenshot, verification } = await burstCaptureAndVerify(
                     platform,
                     nativeBeforeBuffer,
-                    nativeUdid,
-                    nativeScreenshotMeta?.scaleFactor
+                    nativeUdid
                 ));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
@@ -1154,8 +1163,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     nativeShouldVerify,
                     nativeShouldScreenshot,
                     nativeBeforeBuffer,
-                    nativeUdid,
-                    nativeScreenshotMeta?.scaleFactor
+                    nativeUdid
                 ));
             }
             return formatTapSuccess({

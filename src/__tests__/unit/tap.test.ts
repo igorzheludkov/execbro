@@ -130,17 +130,17 @@ describe("hasProblematicUnicode", () => {
 });
 
 describe("getAvailableStrategies", () => {
-    it("returns accessibility-first for text query", () => {
-        expect(getAvailableStrategies({ text: "Submit" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
+    it("returns fiber-first for text query", () => {
+        expect(getAvailableStrategies({ text: "Submit" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
     });
     it("includes fiber for non-ASCII accented text", () => {
-        expect(getAvailableStrategies({ text: "Отправить" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
+        expect(getAvailableStrategies({ text: "Отправить" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
     });
     it("includes fiber for Polish text", () => {
-        expect(getAvailableStrategies({ text: "Potwierdź" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
+        expect(getAvailableStrategies({ text: "Potwierdź" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
     });
     it("includes fiber for Vietnamese text", () => {
-        expect(getAvailableStrategies({ text: "Tin nhắn" }, "auto")).toEqual(["accessibility", "fiber", "ocr"]);
+        expect(getAvailableStrategies({ text: "Tin nhắn" }, "auto")).toEqual(["fiber", "accessibility", "ocr"]);
     });
     it("skips fiber for emoji text", () => {
         expect(getAvailableStrategies({ text: "🔥 Fire" }, "auto")).toEqual(["accessibility", "ocr"]);
@@ -164,17 +164,17 @@ describe("getAvailableStrategies", () => {
     it("returns single strategy when explicitly set without text", () => {
         expect(getAvailableStrategies({ testID: "btn" }, "fiber")).toEqual(["fiber"]);
     });
-    it("returns accessibility+fiber+ocr for testID+text combo in auto mode", () => {
+    it("returns fiber+accessibility+ocr for testID+text combo in auto mode", () => {
         expect(getAvailableStrategies({ testID: "btn", text: "Submit" }, "auto")).toEqual([
-            "accessibility",
             "fiber",
+            "accessibility",
             "ocr",
         ]);
     });
     it("returns fallback chain for component+text in auto mode", () => {
         expect(getAvailableStrategies({ component: "Button", text: "OK" }, "auto")).toEqual([
-            "accessibility",
             "fiber",
+            "accessibility",
             "ocr",
         ]);
     });
