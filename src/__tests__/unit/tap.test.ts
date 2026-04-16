@@ -14,7 +14,10 @@ import {
     formatTapSuccess,
     formatTapFailure,
     buildVerificationExplanation,
+    isTapTimeout,
+    findOcrMatch,
 } from "../../pro/tap.js";
+import type { OCRResult } from "../../core/ocr.js";
 
 describe("ConnectedApp type", () => {
     it("accepts platform and lastScreenshot fields", () => {
@@ -610,4 +613,145 @@ describe("tap without Metro connection", () => {
             expect(mentionsMetro).toBe(true);
         }
     }, 15000);
+});
+
+describe("isTapTimeout", () => {
+    it("returns true when a strategy wrapper fired at its cap", () => {
+        expect(
+            isTapTimeout([
+                { strategy: "fiber", reason: "fiber timed out after 5000ms" },
+            ])
+        ).toBe(true);
+    });
+
+    it("returns true when a later strategy was skipped due to exhausted budget", () => {
+        expect(
+            isTapTimeout([
+                { strategy: "fiber", reason: "fiber timed out after 5000ms" },
+                { strategy: "ocr", reason: "Skipped — only 200ms remaining (budget 20000ms)" },
+            ])
+        ).toBe(true);
+    });
+
+    it("returns false when strategy errored quickly with a nested sub-op timeout", () => {
+        expect(
+            isTapTimeout([
+                { strategy: "fiber", reason: "CDP getProperties timed out after 150ms" },
+            ])
+        ).toBe(false);
+    });
+
+    it("returns false when no element was found and no strategy actually timed out", () => {
+        expect(
+            isTapTimeout([
+                { strategy: "fiber", reason: "No element found matching testID=\"foo\"" },
+                { strategy: "ocr", reason: "No OCR text matched" },
+            ])
+        ).toBe(false);
+    });
+
+    it("returns false for an empty attempted list", () => {
+        expect(isTapTimeout([])).toBe(false);
+    });
+
+    it("accepts accessibility, ocr, and coordinate wrapper formats", () => {
+        expect(
+            isTapTimeout([{ strategy: "accessibility", reason: "accessibility timed out after 3000ms" }])
+        ).toBe(true);
+        expect(isTapTimeout([{ strategy: "ocr", reason: "ocr timed out after 5000ms" }])).toBe(true);
+        expect(
+            isTapTimeout([{ strategy: "coordinate", reason: "coordinate timed out after 3000ms" }])
+        ).toBe(true);
+    });
+});
+
+describe("findOcrMatch", () => {
+    function makeWord(text: string, tap: { x: number; y: number }) {
+        return {
+            text,
+            confidence: 0.99,
+            bbox: { x0: 0, y0: 0, x1: 10, y1: 10 },
+            center: tap,
+            tapCenter: tap,
+        };
+    }
+    function makeLine(text: string, tap: { x: number; y: number }) {
+        return {
+            text,
+            confidence: 0.99,
+            bbox: { x0: 0, y0: 0, x1: 100, y1: 10 },
+            center: tap,
+            tapCenter: tap,
+        };
+    }
+    function makeResult(opts: {
+        words?: ReturnType<typeof makeWord>[];
+        lines?: ReturnType<typeof makeLine>[];
+    }): OCRResult {
+        return {
+            success: true,
+            fullText: "",
+            confidence: 0.99,
+            words: opts.words ?? [],
+            lines: opts.lines ?? [],
+            processingTimeMs: 0,
+            engine: "cloud",
+        };
+    }
+
+    it("matches a single-word query against words (regression guard)", () => {
+        const result = makeResult({
+            words: [makeWord("Submit", { x: 50, y: 100 })],
+        });
+        const match = findOcrMatch(result, "Submit");
+        expect(match).not.toBeNull();
+        expect(match!.text).toBe("Submit");
+        expect(match!.tapCenter).toEqual({ x: 50, y: 100 });
+    });
+
+    it("matches a multi-word query against a line when the line equals the phrase", () => {
+        const result = makeResult({
+            words: [makeWord("Save", { x: 10, y: 20 }), makeWord("a", { x: 30, y: 20 })],
+            lines: [makeLine("Save a full copy", { x: 200, y: 300 })],
+        });
+        const match = findOcrMatch(result, "Save a full copy");
+        expect(match).not.toBeNull();
+        expect(match!.tapCenter).toEqual({ x: 200, y: 300 });
+    });
+
+    it("matches a multi-word query against a line that contains the phrase as a substring", () => {
+        const result = makeResult({
+            lines: [makeLine("Please Sign In with Google to continue", { x: 400, y: 500 })],
+        });
+        const match = findOcrMatch(result, "Sign In with Google");
+        expect(match).not.toBeNull();
+        expect(match!.tapCenter).toEqual({ x: 400, y: 500 });
+    });
+
+    it("is case-insensitive on both word and line paths", () => {
+        const wordOnly = makeResult({ words: [makeWord("SUBMIT", { x: 1, y: 2 })] });
+        expect(findOcrMatch(wordOnly, "submit")!.tapCenter).toEqual({ x: 1, y: 2 });
+
+        const lineOnly = makeResult({ lines: [makeLine("save A FULL copy", { x: 3, y: 4 })] });
+        expect(findOcrMatch(lineOnly, "Save a Full Copy")!.tapCenter).toEqual({ x: 3, y: 4 });
+    });
+
+    it("survives whitespace/punctuation differences and non-Latin characters", () => {
+        const result = makeResult({
+            lines: [
+                makeLine("Moeez's    Cookbook", { x: 5, y: 6 }),
+                makeLine("Pozwalaj, gdy używam aplikacji", { x: 7, y: 8 }),
+            ],
+        });
+        expect(findOcrMatch(result, "  Moeez's Cookbook  ")!.tapCenter).toEqual({ x: 5, y: 6 });
+        expect(findOcrMatch(result, "Pozwalaj, gdy używam aplikacji")!.tapCenter).toEqual({ x: 7, y: 8 });
+    });
+
+    it("returns null when neither words nor lines contain the query", () => {
+        const result = makeResult({
+            words: [makeWord("Hello", { x: 0, y: 0 })],
+            lines: [makeLine("World peace", { x: 0, y: 0 })],
+        });
+        expect(findOcrMatch(result, "Sign In with Google")).toBeNull();
+    });
 });

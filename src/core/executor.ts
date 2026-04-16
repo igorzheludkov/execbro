@@ -2666,6 +2666,51 @@ export async function pressElement(options: {
                 return null;
             }
 
+            var RN_PRIMITIVES = /^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/;
+
+            function isScreenHidden(name, props) {
+                if (!props) return false;
+                if (name === 'RNSScreen' && props['aria-hidden'] === true) return true;
+                if (name === 'MaybeScreen' && props.active === 0) return true;
+                if (name === 'SceneView' && props.focused === false) return true;
+                return false;
+            }
+
+            function findMeaningfulAncestorName(fiber) {
+                var cur = fiber.return;
+                var depth = 0;
+                var fallbackName = null;
+                while (cur && depth < 20) {
+                    var aname = getComponentName(cur);
+                    if (aname && typeof cur.type !== 'string') {
+                        if (!fallbackName) fallbackName = aname;
+                        if (!RN_PRIMITIVES.test(aname)) return aname;
+                    }
+                    cur = cur.return;
+                    depth++;
+                }
+                return fallbackName;
+            }
+
+            // Walk UP collecting testID/nativeID from ancestors. Stop at screen boundaries.
+            function collectAncestorTestIDs(fiber, maxUp) {
+                var ids = [];
+                var cur = fiber.return;
+                var d = 0;
+                while (cur && d < maxUp) {
+                    var cname = getComponentName(cur);
+                    if (cname === 'RNSScreen' || cname === 'MaybeScreen' || cname === 'SceneView') break;
+                    var cp = cur.memoizedProps;
+                    if (cp) {
+                        if (typeof cp.testID === 'string' && cp.testID) ids.push(cp.testID);
+                        if (typeof cp.nativeID === 'string' && cp.nativeID) ids.push(cp.nativeID);
+                    }
+                    cur = cur.return;
+                    d++;
+                }
+                return ids;
+            }
+
             // Find the first measurable host descendant of a fiber.
             // For inputs, prefer TextInput-specific hosts over generic RCTView.
             function findFirstHost(fiber, depth, isInput) {
@@ -2708,10 +2753,7 @@ export async function pressElement(options: {
                 var name = getComponentName(fiber);
                 var props = fiber.memoizedProps;
 
-                // Skip inactive/hidden screens
-                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
-                if (name === 'MaybeScreen' && props && props.active === 0) return;
-                if (name === 'SceneView' && props && props.focused === false) return;
+                if (isScreenHidden(name, props)) return;
 
                 var isPressable = props && typeof props.onPress === 'function';
                 var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
@@ -2727,14 +2769,18 @@ export async function pressElement(options: {
                         text = extractText(fiber, 0) || val || defVal || ph;
                     }
                     var tid = props.testID || props.nativeID || null;
+                    var meaningful = findMeaningfulAncestorName(fiber);
+                    var ancestorIDs = collectAncestorTestIDs(fiber, maxTraversalUp);
 
                     var host = findFirstHost(fiber, 0, isInput);
                     if (host) {
                         hostFibers.push(host);
                         tapMeta.push({
                             name: name || '(anonymous)',
+                            meaningfulComponentName: meaningful || null,
                             text: text.substring(0, 100),
                             testID: tid,
+                            ancestorTestIDs: ancestorIDs,
                             path: path.join(' > '),
                             isInput: isInput,
                             isPressable: isPressable,
@@ -2755,21 +2801,40 @@ export async function pressElement(options: {
                 walkFiber(roots[ri].current, 0, []);
             }
 
-            // Phase 2a: testID on non-pressable wrapper — walk UP to pressable/input parent
+            // Phase 2a: testID on non-pressable wrapper — walk UP or DOWN to pressable/input.
+            // Skipped if Phase 1 already matched via own testID or ancestor testID.
             if (searchTestID !== null) {
-                var hasDirectTestIDMatch = false;
+                var hasEnrichedTestIDMatch = false;
                 for (var di = 0; di < tapMeta.length; di++) {
-                    if (tapMeta[di].testID === searchTestID) { hasDirectTestIDMatch = true; break; }
+                    if (tapMeta[di].testID === searchTestID) { hasEnrichedTestIDMatch = true; break; }
+                    var aids = tapMeta[di].ancestorTestIDs || [];
+                    for (var ai = 0; ai < aids.length; ai++) {
+                        if (aids[ai] === searchTestID) { hasEnrichedTestIDMatch = true; break; }
+                    }
+                    if (hasEnrichedTestIDMatch) break;
                 }
 
-                if (!hasDirectTestIDMatch) {
+                if (!hasEnrichedTestIDMatch) {
+                    function findDescendantPressable(fiber, d) {
+                        if (!fiber || d > 10) return null;
+                        var fp = fiber.memoizedProps;
+                        var dIsPressable = fp && typeof fp.onPress === 'function';
+                        var dIsInput = !dIsPressable && fp && (typeof fp.onChangeText === 'function' || typeof fp.onFocus === 'function');
+                        if (dIsPressable || dIsInput) return { fiber: fiber, isPressable: dIsPressable, isInput: dIsInput };
+                        var c = fiber.child;
+                        while (c) {
+                            var r = findDescendantPressable(c, d + 1);
+                            if (r) return r;
+                            c = c.sibling;
+                        }
+                        return null;
+                    }
+
                     function findByTestID2a(fiber, path) {
                         if (!fiber) return;
                         var name = getComponentName(fiber);
                         var props = fiber.memoizedProps;
-                        if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
-                        if (name === 'MaybeScreen' && props && props.active === 0) return;
-                        if (name === 'SceneView' && props && props.focused === false) return;
+                        if (isScreenHidden(name, props)) return;
 
                         var tid = props && (props.testID || props.nativeID || null);
                         if (tid === searchTestID) {
@@ -2783,8 +2848,10 @@ export async function pressElement(options: {
                                     hostFibers.push(host);
                                     tapMeta.push({
                                         name: name || '(anonymous)',
+                                        meaningfulComponentName: findMeaningfulAncestorName(fiber) || null,
                                         text: text.substring(0, 100),
                                         testID: searchTestID,
+                                        ancestorTestIDs: [],
                                         path: path.join(' > '),
                                         isInput: nIsInput,
                                         isPressable: nIsPressable,
@@ -2792,6 +2859,7 @@ export async function pressElement(options: {
                                     });
                                 }
                             } else {
+                                var foundAncestor = false;
                                 var parent = fiber.return;
                                 var d = 0;
                                 while (parent && d < maxTraversalUp) {
@@ -2805,18 +2873,44 @@ export async function pressElement(options: {
                                             hostFibers.push(host);
                                             tapMeta.push({
                                                 name: name || '(anonymous)',
+                                                meaningfulComponentName: findMeaningfulAncestorName(parent) || null,
                                                 text: pText.substring(0, 100),
                                                 testID: pp.testID || pp.nativeID || searchTestID,
+                                                ancestorTestIDs: [],
                                                 path: path.join(' > '),
                                                 isInput: pIsInput,
                                                 isPressable: pIsPressable,
                                                 source: 'testID-ancestor'
                                             });
+                                            foundAncestor = true;
                                         }
                                         break;
                                     }
                                     parent = parent.return;
                                     d++;
+                                }
+
+                                if (!foundAncestor) {
+                                    var desc = findDescendantPressable(fiber, 0);
+                                    if (desc) {
+                                        var dp = desc.fiber.memoizedProps;
+                                        var dText = desc.isPressable ? extractText(desc.fiber, 0) : (extractText(desc.fiber, 0) || (typeof dp.value === 'string' ? dp.value : '') || (typeof dp.defaultValue === 'string' ? dp.defaultValue : '') || (typeof dp.placeholder === 'string' ? dp.placeholder : ''));
+                                        var dhost = findFirstHost(desc.fiber, 0, desc.isInput);
+                                        if (dhost) {
+                                            hostFibers.push(dhost);
+                                            tapMeta.push({
+                                                name: getComponentName(desc.fiber) || '(anonymous)',
+                                                meaningfulComponentName: findMeaningfulAncestorName(desc.fiber) || null,
+                                                text: dText.substring(0, 100),
+                                                testID: dp.testID || dp.nativeID || searchTestID,
+                                                ancestorTestIDs: [searchTestID],
+                                                path: path.join(' > '),
+                                                isInput: desc.isInput,
+                                                isPressable: desc.isPressable,
+                                                source: 'testID-descendant'
+                                            });
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2833,25 +2927,41 @@ export async function pressElement(options: {
                 }
             }
 
-            // Phase 2b: component name on non-pressable node — walk UP to pressable parent
+            // Phase 2b: component name on non-pressable node — walk UP or DOWN to pressable parent.
+            // Skipped if Phase 1 already matched via own name or meaningfulComponentName.
             if (searchComponent !== null) {
-                var hasDirectComponentMatch = false;
+                var scLower = searchComponent.toLowerCase();
+                var hasEnrichedComponentMatch = false;
                 for (var ci = 0; ci < tapMeta.length; ci++) {
-                    if (tapMeta[ci].name.toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1 && tapMeta[ci].source === 'direct') {
-                        hasDirectComponentMatch = true; break;
+                    var cn = (tapMeta[ci].name || '').toLowerCase();
+                    var cm = (tapMeta[ci].meaningfulComponentName || '').toLowerCase();
+                    if (cn.indexOf(scLower) !== -1 || cm.indexOf(scLower) !== -1) {
+                        hasEnrichedComponentMatch = true; break;
                     }
                 }
 
-                if (!hasDirectComponentMatch) {
+                if (!hasEnrichedComponentMatch) {
+                    function findDescendantPressableOnly(fiber, d) {
+                        if (!fiber || d > 10) return null;
+                        var fp = fiber.memoizedProps;
+                        if (fp && typeof fp.onPress === 'function') return fiber;
+                        var c = fiber.child;
+                        while (c) {
+                            var r = findDescendantPressableOnly(c, d + 1);
+                            if (r) return r;
+                            c = c.sibling;
+                        }
+                        return null;
+                    }
+
                     function findByName2b(fiber, path) {
                         if (!fiber) return;
                         var name = getComponentName(fiber);
                         var props = fiber.memoizedProps;
-                        if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
-                        if (name === 'MaybeScreen' && props && props.active === 0) return;
-                        if (name === 'SceneView' && props && props.focused === false) return;
+                        if (isScreenHidden(name, props)) return;
 
-                        if (name && name.toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1) {
+                        if (name && name.toLowerCase().indexOf(scLower) !== -1) {
+                            var foundAncestor = false;
                             var parent = fiber.return;
                             var d = 0;
                             while (parent && d < maxTraversalUp) {
@@ -2863,18 +2973,44 @@ export async function pressElement(options: {
                                         hostFibers.push(host);
                                         tapMeta.push({
                                             name: name,
+                                            meaningfulComponentName: findMeaningfulAncestorName(parent) || null,
                                             text: text.substring(0, 100),
                                             testID: pp.testID || pp.nativeID || null,
+                                            ancestorTestIDs: [],
                                             path: path.join(' > '),
                                             isInput: false,
                                             isPressable: true,
                                             source: 'component-ancestor'
                                         });
+                                        foundAncestor = true;
                                     }
                                     break;
                                 }
                                 parent = parent.return;
                                 d++;
+                            }
+
+                            if (!foundAncestor) {
+                                var descFiber = findDescendantPressableOnly(fiber, 0);
+                                if (descFiber) {
+                                    var dp = descFiber.memoizedProps;
+                                    var dText = extractText(descFiber, 0);
+                                    var dhost = findFirstHost(descFiber, 0, false);
+                                    if (dhost) {
+                                        hostFibers.push(dhost);
+                                        tapMeta.push({
+                                            name: getComponentName(descFiber) || '(anonymous)',
+                                            meaningfulComponentName: name,
+                                            text: dText.substring(0, 100),
+                                            testID: dp.testID || dp.nativeID || null,
+                                            ancestorTestIDs: [],
+                                            path: path.join(' > '),
+                                            isInput: false,
+                                            isPressable: true,
+                                            source: 'component-descendant'
+                                        });
+                                    }
+                                }
                             }
                         }
                         var child = fiber.child;
@@ -2973,16 +3109,25 @@ export async function pressElement(options: {
 
                 var info = meta[i];
 
-                // Match by query
+                // Match by query — OR across own and enriched identifiers
                 var matched = true;
                 if (searchText !== null) {
                     matched = matched && info.text.toLowerCase().indexOf(searchText.toLowerCase()) !== -1;
                 }
                 if (searchTestID !== null) {
-                    matched = matched && (info.testID === searchTestID);
+                    var ownTidMatch = info.testID === searchTestID;
+                    var aTids = info.ancestorTestIDs || [];
+                    var ancestorTidMatch = false;
+                    for (var ti = 0; ti < aTids.length; ti++) {
+                        if (aTids[ti] === searchTestID) { ancestorTidMatch = true; break; }
+                    }
+                    matched = matched && (ownTidMatch || ancestorTidMatch);
                 }
                 if (searchComponent !== null) {
-                    matched = matched && (info.name || '').toLowerCase().indexOf(searchComponent.toLowerCase()) !== -1;
+                    var scq = searchComponent.toLowerCase();
+                    var ownNameMatch = (info.name || '').toLowerCase().indexOf(scq) !== -1;
+                    var meaningfulMatch = (info.meaningfulComponentName || '').toLowerCase().indexOf(scq) !== -1;
+                    matched = matched && (ownNameMatch || meaningfulMatch);
                 }
 
                 if (matched) {

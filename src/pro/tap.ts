@@ -1,5 +1,6 @@
 import { connectedApps, imageBuffer } from "../core/state.js";
 import type { ConnectedApp } from "../core/types.js";
+import type { OCRResult } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
 import {
@@ -204,6 +205,37 @@ export function hasProblematicUnicode(text: string): boolean {
   const emojiPattern =
       /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{FE00}-\u{FE0F}]|[\u{1F900}-\u{1F9FF}]|[\u{200D}]|[\u{20E3}]|[\u{E0020}-\u{E007F}]/u;
   return emojiPattern.test(text);
+}
+
+export interface OcrMatch {
+    text: string;
+    tapCenter: { x: number; y: number };
+}
+
+function normalizeForMatch(text: string): string {
+    return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export function findOcrMatch(ocrResult: OCRResult, query: string): OcrMatch | null {
+    const needle = normalizeForMatch(query);
+    if (!needle) return null;
+
+    const words = ocrResult.words ?? [];
+    const lines = ocrResult.lines ?? [];
+
+    const exactWord = words.find((w) => normalizeForMatch(w.text) === needle);
+    if (exactWord) return { text: exactWord.text, tapCenter: exactWord.tapCenter };
+
+    const exactLine = lines.find((l) => normalizeForMatch(l.text) === needle);
+    if (exactLine) return { text: exactLine.text, tapCenter: exactLine.tapCenter };
+
+    const substringLine = lines.find((l) => normalizeForMatch(l.text).includes(needle));
+    if (substringLine) return { text: substringLine.text, tapCenter: substringLine.tapCenter };
+
+    const substringWord = words.find((w) => normalizeForMatch(w.text).includes(needle));
+    if (substringWord) return { text: substringWord.text, tapCenter: substringWord.tapCenter };
+
+    return null;
 }
 
 export function getAvailableStrategies(query: TapQuery, strategy: TapStrategy): string[] {
@@ -711,12 +743,9 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             platform
         });
 
-        const lowerSearch = searchText.toLowerCase();
-        const matchingWord =
-            ocrResult.words.find((w) => w.text.toLowerCase() === lowerSearch) ||
-            ocrResult.words.find((w) => w.text.toLowerCase().includes(lowerSearch));
+        const match = findOcrMatch(ocrResult, searchText);
 
-        if (!matchingWord) {
+        if (!match) {
             return {
                 success: false,
                 reason: `OCR did not find text "${searchText}" on screen`
@@ -728,31 +757,31 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             const { getDevicePixelRatio } = await import("../core/ios.js");
             const dpr = await getDevicePixelRatio(udid);
             const tapResult = await iosTap(
-                Math.round((matchingWord.tapCenter.x * scaleFactor) / dpr),
-                Math.round((matchingWord.tapCenter.y * scaleFactor) / dpr),
+                Math.round((match.tapCenter.x * scaleFactor) / dpr),
+                Math.round((match.tapCenter.y * scaleFactor) / dpr),
                 { udid }
             );
             if (!tapResult.success) {
                 return {
                     success: false,
-                    reason: `OCR found "${matchingWord.text}" but tap failed: ${tapResult.error}`
+                    reason: `OCR found "${match.text}" but tap failed: ${tapResult.error}`
                 };
             }
         } else {
             // Android: image-pixel → device-pixel (undo downscale), ADB accepts pixels
             await androidTap(
-                Math.round(matchingWord.tapCenter.x * scaleFactor),
-                Math.round(matchingWord.tapCenter.y * scaleFactor)
+                Math.round(match.tapCenter.x * scaleFactor),
+                Math.round(match.tapCenter.y * scaleFactor)
             );
         }
 
         return {
             success: true,
             reason: "Tapped via OCR text recognition",
-            text: matchingWord.text,
+            text: match.text,
             convertedTo: {
-                x: matchingWord.tapCenter.x,
-                y: matchingWord.tapCenter.y,
+                x: match.tapCenter.x,
+                y: match.tapCenter.y,
                 unit: "pixels"
             }
         };
@@ -839,6 +868,17 @@ const MAX_STRATEGY_MS: Record<string, number> = {
     ocr: 5000,
     coordinate: 3000
 };
+
+// Matches only the outer withTimeout wrapper message for a tap strategy.
+// Nested sub-operation errors inside a strategy (e.g. "CDP getProperties timed out after 150ms")
+// must NOT be classified as a tap-level timeout.
+const STRATEGY_TIMEOUT_RE = /^(fiber|accessibility|ocr|coordinate) timed out after \d+ms$/;
+
+export function isTapTimeout(attempted: readonly { reason: string; strategy?: string }[]): boolean {
+    return attempted.some(
+        (a) => STRATEGY_TIMEOUT_RE.test(a.reason) || a.reason.startsWith("Skipped —")
+    );
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -1516,10 +1556,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
     }
 
-    // All strategies failed — check if timeout was the cause
-    const timedOut = attempted.some((a) => a.reason.includes("timed out"));
-    const skipped = attempted.some((a) => a.reason.includes("Skipped"));
-    const hitTimeout = timedOut || skipped;
+    // All strategies failed — check if the tap budget was the cause.
+    // Only outer withTimeout wrapper messages or Skipped entries count; nested
+    // sub-op errors that happen to contain "timed out" do not imply the tap
+    // itself ran out of time.
+    const hitTimeout = isTapTimeout(attempted);
     const elapsed = TAP_TIMEOUT_MS - remainingMs();
 
     const suggestion = buildSuggestion(query, strategies, platform);
