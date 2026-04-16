@@ -63,11 +63,20 @@ interface TelemetryEvent {
 // Error Categorization
 // ============================================================================
 
-export function categorizeError(errorMessage: string): ErrorCategory {
+export function categorizeError(errorMessage: string, errorContext?: string): ErrorCategory {
     const lower = errorMessage.toLowerCase();
     // UI driver not installed (idb/axe) — must be checked before 'validation' which matches 'missing'/'install'
     if (lower.includes('not installed') && (lower.includes('idb') || lower.includes('axe') || lower.includes('ui driver'))) {
         return 'driver_missing';
+    }
+    // Strategy chain may contain driver-missing signals even when the primary error
+    // message doesn't (e.g., strategies skipped due to missing driver, last-resort
+    // strategy fails with "No element found" or "timed out")
+    if (errorContext) {
+        const ctxLower = errorContext.toLowerCase();
+        if (ctxLower.includes('ios ui driver is not instal') || ctxLower.includes('idb is not instal')) {
+            return 'driver_missing';
+        }
     }
     if (lower.includes('websocket') || lower.includes('econnrefused') || lower.includes('socket') || lower.includes('fetch')) {
         return 'network';
@@ -321,7 +330,7 @@ export function trackToolInvocation(
             isFirstRun: false,
         };
         if (!success && errorMessage) {
-            localEvent.errorCategory = categorizeError(errorMessage);
+            localEvent.errorCategory = categorizeError(errorMessage, errorContext);
             localEvent.errorMessage = errorMessage.substring(0, 200);
             if (errorContext) localEvent.errorContext = errorContext.substring(0, 150);
         }
@@ -377,7 +386,7 @@ export function trackToolInvocation(
     };
 
     if (!success && errorMessage) {
-        event.errorCategory = categorizeError(errorMessage);
+        event.errorCategory = categorizeError(errorMessage, errorContext);
         event.errorMessage = errorMessage.substring(0, 200);
         // Store truncated context (e.g., the expression that caused a syntax error)
         if (errorContext) {
