@@ -8,9 +8,16 @@ An MCP server that gives AI assistants real-time access to a running React Nativ
 
 **Positioning:** This is not a debugger. This is not a QA tool. This is a Runtime AI Bridge — the missing layer between AI coding assistants and live mobile applications. Without it, your AI assistant is blind. With it, the AI sees everything happening in your app in real time.
 
+
+## Get started
+
+1. [Setup rn-ai-devtools as an MCP server for your agent of choice](#claude-code-setup)
+2. [Setup UI automation helpers](#ios-simulator--ui-automation-setup)
+
 ## Feedback & Feature Requests
 
 Have an idea or found something that could be better? Head over to [GitHub Discussions](https://github.com/igorzheludkov/react-native-ai-devtools/discussions) to share feedback, request features, and vote on what gets built next.
+
 
 ## Features
 
@@ -46,7 +53,80 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 - **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
 - **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
 
-## Platform Setup
+## Setup
+
+### Claude Code Setup
+
+No installation required - Claude Code uses `npx` to run the latest version automatically.
+
+#### Global (all projects)
+
+```bash
+claude mcp add rn-ai-devtools --scope user -- npx react-native-ai-devtools
+```
+
+#### Project-specific
+
+```bash
+claude mcp add rn-ai-devtools --scope project -- npx react-native-ai-devtools
+```
+
+#### Manual Configuration
+
+Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
+
+```json
+{
+  "mcpServers": {
+    "rn-ai-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["react-native-ai-devtools"]
+    }
+  }
+}
+```
+
+Restart Claude Code after adding the configuration.
+
+### VS Code Copilot Setup
+
+Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)).
+
+**Via Command Palette**: `Cmd+Shift+P` → "MCP: Add Server"
+
+**Manual config** - add to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "rn-ai-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"]
+    }
+  }
+}
+```
+
+### Cursor Setup
+
+[Docs](https://docs.cursor.com/context/model-context-protocol)
+
+**Via Command Palette**: `Cmd+Shift+P` → "View: Open MCP Settings"
+
+**Manual config** - add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "rn-ai-devtools": {
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"]
+    }
+  }
+}
+```
 
 ### Android
 
@@ -121,79 +201,6 @@ IDB is the default driver — no `IOS_DRIVER` env var needed.
 - React Native app running with Metro bundler
 - **iOS UI automation**: [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`) or [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`) — required for tap, swipe, text input, accessibility on iOS Simulator
 - **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
-
-## Claude Code Setup
-
-No installation required - Claude Code uses `npx` to run the latest version automatically.
-
-### Global (all projects)
-
-```bash
-claude mcp add rn-ai-devtools --scope user -- npx react-native-ai-devtools
-```
-
-### Project-specific
-
-```bash
-claude mcp add rn-ai-devtools --scope project -- npx react-native-ai-devtools
-```
-
-### Manual Configuration
-
-Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
-
-```json
-{
-  "mcpServers": {
-    "rn-ai-devtools": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["react-native-ai-devtools"]
-    }
-  }
-}
-```
-
-Restart Claude Code after adding the configuration.
-
-## VS Code Copilot Setup
-
-Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)).
-
-**Via Command Palette**: `Cmd+Shift+P` → "MCP: Add Server"
-
-**Manual config** - add to `.vscode/mcp.json`:
-
-```json
-{
-  "servers": {
-    "rn-ai-devtools": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"]
-    }
-  }
-}
-```
-
-## Cursor Setup
-
-[Docs](https://docs.cursor.com/context/model-context-protocol)
-
-**Via Command Palette**: `Cmd+Shift+P` → "View: Open MCP Settings"
-
-**Manual config** - add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
-
-```json
-{
-  "mcpServers": {
-    "rn-ai-devtools": {
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"]
-    }
-  }
-}
-```
 
 ## Claude Code Skills
 
