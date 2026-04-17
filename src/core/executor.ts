@@ -1708,6 +1708,7 @@ interface PressableElement {
     accessibilityLabel: string | null;
     hasLabel: boolean;
     isInput: boolean;
+    isWrapper?: boolean;
 }
 
 export async function getPressableElements(
@@ -1756,9 +1757,28 @@ export async function getPressableElements(
                 return null;
             }
 
-            function collectText(fiber, d) {
+            function findHostsInSubtree(fiber, depth, hosts, limit) {
+                if (!fiber || depth > 20 || hosts.length >= limit) return;
+                if (typeof fiber.type === 'string' && getMeasurable(fiber)) {
+                    hosts.push(fiber);
+                    return;
+                }
+                var child = fiber.child;
+                while (child && hosts.length < limit) {
+                    findHostsInSubtree(child, depth + 1, hosts, limit);
+                    child = child.sibling;
+                }
+            }
+
+            function collectText(fiber, d, isRoot) {
                 if (!fiber || d > 30) return '';
                 var props = fiber.memoizedProps;
+                // Stop descent at nested pressable/input boundaries — their text belongs to them, not to the outer wrapper.
+                if (!isRoot && props && (typeof props.onPress === 'function' ||
+                                          typeof props.onChangeText === 'function' ||
+                                          typeof props.onFocus === 'function')) {
+                    return '';
+                }
                 if (props) {
                     var ch = props.children;
                     if (typeof ch === 'string') return ch;
@@ -1775,7 +1795,7 @@ export async function getPressableElements(
                 var parts = [];
                 var child = fiber.child;
                 while (child) {
-                    var t = collectText(child, d + 1);
+                    var t = collectText(child, d + 1, false);
                     if (t) parts.push(t);
                     child = child.sibling;
                 }
@@ -1843,22 +1863,28 @@ export async function getPressableElements(
                 var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
                 if (isPressable || isInput) {
-                    var host = findFirstHost(fiber, 0);
-                    if (host) {
-                        var text = collectText(fiber, 0);
+                    var hostsForThis = [];
+                    findHostsInSubtree(fiber, 0, hostsForThis, 16);
+                    if (hostsForThis.length > 0) {
+                        var text = collectText(fiber, 0, true);
                         var componentName = findMeaningfulAncestorName(fiber) || name || 'Unknown';
                         var path = buildPath(fiber);
                         var testID = (props && (props.testID || props.nativeID)) || null;
                         var accessibilityLabel = (props && props.accessibilityLabel) || null;
 
-                        hostFibers.push(host);
+                        var hostIndices = [];
+                        for (var hi = 0; hi < hostsForThis.length; hi++) {
+                            hostIndices.push(hostFibers.length);
+                            hostFibers.push(hostsForThis[hi]);
+                        }
                         fiberMeta.push({
                             component: componentName,
                             path: path,
                             text: text ? text.slice(0, 100) : '',
                             testID: testID,
                             accessibilityLabel: accessibilityLabel,
-                            isInput: !!isInput
+                            isInput: !!isInput,
+                            hostIndices: hostIndices
                         });
                     }
                 }
@@ -1874,16 +1900,18 @@ export async function getPressableElements(
 
             if (hostFibers.length === 0) return { error: 'No pressable elements found on screen.' };
 
-            // Also measure the root view for viewport detection
+            // Also measure the root view for viewport detection (appended; tracked by explicit index to preserve hostIndices)
             var rootHost = findFirstHost(roots[0].current, 0);
+            var rootIdx = -1;
             if (rootHost) {
-                hostFibers.unshift(rootHost);
-                fiberMeta.unshift({ component: '__root__', path: '', text: '', testID: null, accessibilityLabel: null, isInput: false });
+                rootIdx = hostFibers.length;
+                hostFibers.push(rootHost);
             }
 
             globalThis.__pressableFibers = hostFibers;
             globalThis.__pressableMeta = fiberMeta;
             globalThis.__pressableMeasurements = new Array(hostFibers.length).fill(null);
+            globalThis.__pressableRootIdx = rootIdx;
 
             for (var i = 0; i < hostFibers.length; i++) {
                 try {
@@ -1918,34 +1946,53 @@ export async function getPressableElements(
             var fibers = globalThis.__pressableFibers;
             var meta = globalThis.__pressableMeta;
             var measurements = globalThis.__pressableMeasurements;
+            var rootIdx = globalThis.__pressableRootIdx;
             globalThis.__pressableFibers = null;
             globalThis.__pressableMeta = null;
             globalThis.__pressableMeasurements = null;
+            globalThis.__pressableRootIdx = null;
 
             if (!fibers || !measurements || !meta) {
                 return { error: 'No measurement data. Run get_pressable_elements again.' };
             }
 
-            // Get viewport dimensions
+            // Get viewport dimensions from the explicit root measurement (fallback to scanning)
             var viewportW = 9999, viewportH = 9999;
-            for (var v = 0; v < measurements.length; v++) {
-                if (measurements[v] && measurements[v].x === 0 && measurements[v].y <= 0 &&
-                    measurements[v].width > 0 && measurements[v].height > 0) {
-                    viewportW = measurements[v].width;
-                    viewportH = measurements[v].height + measurements[v].y;
-                    break;
+            var rootM = (rootIdx != null && rootIdx >= 0) ? measurements[rootIdx] : null;
+            if (rootM && rootM.width > 0 && rootM.height > 0) {
+                viewportW = rootM.width;
+                viewportH = rootM.height + (rootM.y > 0 ? rootM.y : 0);
+            } else {
+                for (var v = 0; v < measurements.length; v++) {
+                    if (measurements[v] && measurements[v].x === 0 && measurements[v].y <= 0 &&
+                        measurements[v].width > 0 && measurements[v].height > 0) {
+                        viewportW = measurements[v].width;
+                        viewportH = measurements[v].height + measurements[v].y;
+                        break;
+                    }
                 }
             }
 
             var elements = [];
 
-            for (var i = 0; i < measurements.length; i++) {
-                var m = measurements[i];
-                if (!m) continue;
-
+            for (var i = 0; i < meta.length; i++) {
                 var info = meta[i];
-                // Skip the root viewport measurement entry
-                if (info.component === '__root__') continue;
+
+                // Union all host measurements for this pressable to get its true bounds
+                var uMinX = Infinity, uMinY = Infinity, uMaxX = -Infinity, uMaxY = -Infinity;
+                var hasValid = false;
+                var indices = info.hostIndices || [];
+                for (var hi2 = 0; hi2 < indices.length; hi2++) {
+                    var mm = measurements[indices[hi2]];
+                    if (!mm || mm.width <= 0 || mm.height <= 0) continue;
+                    hasValid = true;
+                    if (mm.x < uMinX) uMinX = mm.x;
+                    if (mm.y < uMinY) uMinY = mm.y;
+                    if (mm.x + mm.width > uMaxX) uMaxX = mm.x + mm.width;
+                    if (mm.y + mm.height > uMaxY) uMaxY = mm.y + mm.height;
+                }
+                if (!hasValid) continue;
+                var m = { x: uMinX, y: uMinY, width: uMaxX - uMinX, height: uMaxY - uMinY };
 
                 // Filter: only visible within viewport
                 if (m.width <= 0 || m.height <= 0) continue;
@@ -1976,8 +2023,19 @@ export async function getPressableElements(
             }
 
             // Deduplicate: multiple nested pressables (View > TouchableOpacity > TouchableOpacity)
-            // often share the same frame. Keep the one with the most meaningful component name.
+            // often share the same frame. Keep the one with the most meaningful component name,
+            // but merge text/testID/accessibilityLabel from the loser so stopping collectText
+            // at nested-pressable boundaries does not drop labels across the merge.
             var HOST_NAMES = /^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText)$/;
+            function mergeFields(winner, loser) {
+                if (!winner.text && loser.text) {
+                    winner.text = loser.text;
+                    winner.hasLabel = winner.text.length > 0;
+                }
+                if (!winner.testID && loser.testID) winner.testID = loser.testID;
+                if (!winner.accessibilityLabel && loser.accessibilityLabel) winner.accessibilityLabel = loser.accessibilityLabel;
+                return winner;
+            }
             var deduped = {};
             for (var di = 0; di < elements.length; di++) {
                 var el = elements[di];
@@ -1986,21 +2044,49 @@ export async function getPressableElements(
                 if (!existing) {
                     deduped[key] = el;
                 } else {
-                    // Prefer non-host/non-primitive name
                     var existingIsGeneric = HOST_NAMES.test(existing.component);
                     var newIsGeneric = HOST_NAMES.test(el.component);
+                    var winner, loser;
                     if (existingIsGeneric && !newIsGeneric) {
-                        deduped[key] = el;
-                    } else if (existingIsGeneric && newIsGeneric) {
-                        // Both generic — prefer the one with more identifiers
-                        if (!existing.testID && el.testID) deduped[key] = el;
-                        else if (!existing.accessibilityLabel && el.accessibilityLabel) deduped[key] = el;
+                        winner = el; loser = existing;
+                    } else if (!existingIsGeneric && newIsGeneric) {
+                        winner = existing; loser = el;
+                    } else {
+                        // Both generic or both meaningful — prefer the one with more identifiers.
+                        if (!existing.testID && el.testID) { winner = el; loser = existing; }
+                        else if (!existing.accessibilityLabel && el.accessibilityLabel) { winner = el; loser = existing; }
+                        else { winner = existing; loser = el; }
                     }
+                    deduped[key] = mergeFields(winner, loser);
                 }
             }
             elements = [];
             for (var dk in deduped) {
                 elements.push(deduped[dk]);
+            }
+
+            // Tag wrappers: pressables that cover >=50% of viewport AND geometrically contain another pressable.
+            // These are typically keyboard-dismiss/full-screen Touchable wrappers — agents should skip them.
+            var viewportArea = (viewportW > 0 && viewportH > 0 && viewportW < 9999 && viewportH < 9999)
+                ? viewportW * viewportH : 0;
+            if (viewportArea > 0) {
+                for (var wi = 0; wi < elements.length; wi++) {
+                    var we = elements[wi];
+                    var weArea = we.frame.width * we.frame.height;
+                    if (weArea < viewportArea * 0.5) continue;
+                    for (var wj = 0; wj < elements.length; wj++) {
+                        if (wj === wi) continue;
+                        var other = elements[wj];
+                        if (other.frame.x >= we.frame.x &&
+                            other.frame.y >= we.frame.y &&
+                            other.frame.x + other.frame.width <= we.frame.x + we.frame.width &&
+                            other.frame.y + other.frame.height <= we.frame.y + we.frame.height &&
+                            other.frame.width * other.frame.height < weArea) {
+                            we.isWrapper = true;
+                            break;
+                        }
+                    }
+                }
             }
 
             // Sort top-to-bottom, left-to-right
@@ -2043,8 +2129,9 @@ export async function getPressableElements(
                 if (el.accessibilityLabel) ids.push(`a11y="${el.accessibilityLabel}"`);
                 const idStr = ids.length > 0 ? ` [${ids.join(", ")}]` : "";
                 const inputStr = el.isInput ? " (input)" : "";
+                const wrapperStr = el.isWrapper ? " [wrapper — skip unless dismissing keyboard]" : "";
                 lines.push(
-                    `${num}. ${el.component} ${label} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})${idStr}${inputStr}`
+                    `${num}. ${el.component} ${label} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})${idStr}${inputStr}${wrapperStr}`
                 );
                 if (el.path) lines.push(`   path: ${el.path}`);
             }

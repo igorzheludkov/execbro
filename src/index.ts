@@ -1967,7 +1967,7 @@ registerToolWithTelemetry(
             "- tap(text=\"Submit\") — finds and taps element with matching text\n" +
             "- tap(testID=\"login-btn\") — finds by testID\n" +
             "- tap(component=\"HamburgerIcon\") — finds by React component name\n" +
-            "- tap(x=300, y=600) — taps at pixel coordinates (LAST RESORT — only use if text/testID/component strategies all fail)\n" +
+            "- tap(x=300, y=600) — taps at pixel coordinates; use coordinates from the pressable elements list returned by ios_screenshot/android_screenshot for reliable icon and ambiguous-element taps\n" +
             "- tap(text=\"Menu\", strategy=\"ocr\") — forces OCR strategy only\n" +
             "- tap(x=300, y=600, native=true, platform=\"android\") — taps directly via ADB/simctl without React Native connection\n\n" +
             "Returns a post-tap screenshot by default (set screenshot=false to disable). " +
@@ -3338,7 +3338,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_screenshot",
     {
-        description: "Take a screenshot from an Android device/emulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail.",
+        description: "Take a screenshot from an Android device/emulator. Returns the image plus two lists: (1) pressable elements — the tappable components on screen with ready-to-use pixel tap coordinates, testIDs, and labels; (2) screen layout — all visible React components for context. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the pressables list — this is the most reliable way to tap icons or visually-identified elements. Use component names from the layout for inspect_component/find_components.",
         inputSchema: {
             outputPath: z
                 .string()
@@ -3413,6 +3413,26 @@ registerToolWithTelemetry(
                 // Non-fatal: screenshot works without layout enrichment
             }
 
+            // Enrich with pressable elements (filtered list of tappable components, converted to screenshot pixel coords)
+            let pressablesText: string | null = null;
+            try {
+                const pressables = await getPressableElements({});
+                if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
+                    const screenshotScale = result.scaleFactor || 1;
+                    pressablesText = pressables.parsedElements.map((el) => {
+                        const px = Math.round((el.center.x * androidPixelRatio) / screenshotScale);
+                        const py = Math.round((el.center.y * androidPixelRatio) / screenshotScale);
+                        const label = el.accessibilityLabel || el.text || el.testID || el.component;
+                        const idPart = el.testID ? ` testID="${el.testID}"` : "";
+                        const kindPart = el.isInput ? " [input]" : "";
+                        const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
+                        return `  (${px}, ${py}) ${el.component}: "${label}"${idPart}${kindPart}${wrapPart}`;
+                    }).join("\n");
+                }
+            } catch {
+                // Non-fatal: screenshot works without pressables enrichment
+            }
+
             infoText += `\n📱 Android uses PIXELS for all coordinates`;
 
             if (result.scaleFactor && result.scaleFactor > 1) {
@@ -3424,14 +3444,20 @@ registerToolWithTelemetry(
 
             infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
             infoText += `\n📊 Display density: ${densityDpi}dpi`;
+            if (pressablesText) {
+                infoText += `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
+                infoText += `\n${pressablesText}`;
+            }
             if (layoutText) {
-                infoText += `\n\n📋 Screen Layout (components with tap coordinates in pixels):`;
+                infoText += `\n\n📋 Screen Layout (all components, tap coordinates in pixels):`;
                 infoText += `\n${layoutText}`;
+            }
+            if (pressablesText || layoutText) {
                 infoText += `\n\n💡 Next steps:`;
-                infoText += `\n  • tap(text="Button Label") — tap element by visible text (preferred)`;
-                infoText += `\n  • tap(testID="id") or tap(component="Name") — tap by testID or component name`;
-                infoText += `\n  • tap(x=<px>, y=<px>) — use tap coordinates from layout above ONLY if text/testID/component tap fails`;
-                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout above`;
+                infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
+                infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
+                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout`;
             } else {
                 infoText += `\n\n💡 Next steps:`;
                 infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
@@ -4028,7 +4054,7 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_screenshot",
     {
-        description: "Take a screenshot from an iOS simulator. Returns the image and a screen layout overlay showing visible React components with names, text content, hierarchy, and tap-ready pixel coordinates. Use component names for inspect_component/find_components. Use tap(text=...) for interaction — only fall back to tap(x,y) coordinates from the layout if all tap strategies fail.",
+        description: "Take a screenshot from an iOS simulator. Returns the image plus two lists: (1) pressable elements — the tappable components on screen with ready-to-use pixel tap coordinates, testIDs, and labels; (2) screen layout — all visible React components for context. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the pressables list — this is the most reliable way to tap icons or visually-identified elements. Use component names from the layout for inspect_component/find_components.",
         inputSchema: {
             outputPath: z
                 .string()
@@ -4128,6 +4154,26 @@ registerToolWithTelemetry(
                 // Non-fatal: screenshot works without layout enrichment
             }
 
+            // Enrich with pressable elements (filtered list of tappable components, converted to screenshot pixel coords)
+            let pressablesText: string | null = null;
+            try {
+                const pressables = await getPressableElements({});
+                if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
+                    const screenshotScale = result.scaleFactor || 1;
+                    pressablesText = pressables.parsedElements.map((el) => {
+                        const px = Math.round((el.center.x * scaleFactor) / screenshotScale);
+                        const py = Math.round((el.center.y * scaleFactor) / screenshotScale);
+                        const label = el.accessibilityLabel || el.text || el.testID || el.component;
+                        const idPart = el.testID ? ` testID="${el.testID}"` : "";
+                        const kindPart = el.isInput ? " [input]" : "";
+                        const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
+                        return `  (${px}, ${py}) ${el.component}: "${label}"${idPart}${kindPart}${wrapPart}`;
+                    }).join("\n");
+                }
+            } catch {
+                // Non-fatal: screenshot works without pressables enrichment
+            }
+
             let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
             infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
             infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
@@ -4135,14 +4181,20 @@ registerToolWithTelemetry(
             if (result.scaleFactor && result.scaleFactor > 1) {
                 infoText += `\n🖼️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
             }
+            if (pressablesText) {
+                infoText += `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
+                infoText += `\n${pressablesText}`;
+            }
             if (layoutText) {
-                infoText += `\n\n📋 Screen Layout (components with tap coordinates in pixels):`;
+                infoText += `\n\n📋 Screen Layout (all components, tap coordinates in pixels):`;
                 infoText += `\n${layoutText}`;
+            }
+            if (pressablesText || layoutText) {
                 infoText += `\n\n💡 Next steps:`;
-                infoText += `\n  • tap(text="Button Label") — tap element by visible text (preferred)`;
-                infoText += `\n  • tap(testID="id") or tap(component="Name") — tap by testID or component name`;
-                infoText += `\n  • tap(x=<px>, y=<px>) — use tap coordinates from layout above ONLY if text/testID/component tap fails`;
-                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout above`;
+                infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
+                infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
+                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout`;
             } else {
                 infoText += `\n\n💡 Next steps:`;
                 infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
