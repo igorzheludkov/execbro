@@ -150,6 +150,17 @@ function getServerVersion(): string {
     }
 }
 
+function getPackageName(): string {
+    try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const pkgPath = join(__dirname, "..", "..", "package.json");
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        return pkg.name || "unknown";
+    } catch {
+        return "unknown";
+    }
+}
+
 // ============================================================================
 // API Validation
 // ============================================================================
@@ -246,8 +257,10 @@ async function resolveLicense(): Promise<LicenseResult> {
             properties: {
                 platform: platform(),
                 server_version: getServerVersion(),
+                package_name: getPackageName(),
                 tier: apiResponse.tier,
                 os_version: `${platform()} ${release()}`,
+                $set: { package_name: getPackageName() },
             },
         });
 

@@ -1,13 +1,14 @@
 # React Native AI DevTools
 
-An MCP server that gives AI assistants real-time access to a running React Native app. It bridges the gap between static code and live runtime, turning AI assistants from guessing machines into informed development partners.
+**Give your AI a way to verify its work on React Native.**
+
+Verification is what separates AI that guesses from AI that ships. For backend work, the agent runs the server and hits the endpoints. For web, it drives a browser. For desktop, it uses computer use. **For React Native, the pieces are scattered across separate tools — this package brings them together.**
+
+One MCP server with logs, network capture, component inspection, taps, screenshots, OCR, and JS execution — all tightly integrated so your agent can move fluidly from "what happened?" to "what's on screen?" to "does the fix hold?" — chained into a single feedback loop your agent can drive end-to-end.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/igorzheludkov/react-native-ai-devtools/main/docs/demo/get_logs_demo.gif" alt="React Native AI DevTools demo" width="800" />
 </p>
-
-**Positioning:** This is not a debugger. This is not a QA tool. This is a Runtime AI Bridge — the missing layer between AI coding assistants and live mobile applications. Without it, your AI assistant is blind. With it, the AI sees everything happening in your app in real time.
-
 
 ## Get started
 

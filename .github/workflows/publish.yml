@@ -32,6 +32,6 @@ jobs:
           VERSION=$(npm pkg get version | tr -d '"')
           npm pkg set name=react-native-ai-debugger
           npm publish
-          npm deprecate "react-native-ai-debugger@$VERSION" "Package renamed to react-native-ai-devtools. Please migrate: npm install react-native-ai-devtools"
+          npm deprecate "react-native-ai-debugger@$VERSION" "Renamed to react-native-ai-devtools. Replace \`react-native-ai-debugger\` with \`react-native-ai-devtools\` in your MCP config (Claude Code, Cursor, VS Code)."
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

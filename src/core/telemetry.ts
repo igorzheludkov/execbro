@@ -31,6 +31,18 @@ export function getServerVersion(): string {
     }
 }
 
+// Read package name from package.json — differentiates canonical vs mirror publishes
+export function getPackageName(): string {
+    try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const pkgPath = join(__dirname, "..", "..", "package.json");
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        return pkg.name || "unknown";
+    } catch {
+        return "unknown";
+    }
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -122,6 +134,7 @@ interface TelemetryPayload {
     installationId: string;
     sessionId?: string;
     serverVersion: string;
+    packageName: string;
     nodeVersion: string;
     platform: string;
     events: TelemetryEvent[];
@@ -518,6 +531,7 @@ async function sendEvents(events: TelemetryEvent[]): Promise<void> {
         installationId: getInstallationId(),
         sessionId: sessionId || undefined,
         serverVersion: getServerVersion(),
+        packageName: getPackageName(),
         nodeVersion: process.version,
         platform: process.platform,
         events
