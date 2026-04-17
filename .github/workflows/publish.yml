@@ -26,3 +26,12 @@ jobs:
       - run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Mirror publish to deprecated react-native-ai-debugger
+        run: |
+          VERSION=$(npm pkg get version | tr -d '"')
+          npm pkg set name=react-native-ai-debugger
+          npm publish
+          npm deprecate "react-native-ai-debugger@$VERSION" "Package renamed to react-native-ai-devtools. Please migrate: npm install react-native-ai-devtools"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
