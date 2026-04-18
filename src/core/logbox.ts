@@ -32,11 +32,11 @@ export interface LogBoxDismissResult {
 const FIND_LOGBOX_DATA = `
   var LogBoxData = global.__RN_LOGBOX_DATA__;
   if (!LogBoxData || !LogBoxData.observe) {
-    if (!global.__DEV__) return JSON.stringify(null);
+    if (!global.__DEV__) return JSON.stringify({ __error: 'dev_false' });
     var getModules = global.__r && global.__r.getModules;
-    if (!getModules) return JSON.stringify(null);
+    if (!getModules) return JSON.stringify({ __error: 'no_get_modules' });
     var modules = getModules();
-    if (!modules || typeof modules.forEach !== 'function') return JSON.stringify(null);
+    if (!modules || typeof modules.forEach !== 'function') return JSON.stringify({ __error: 'modules_not_iterable' });
     modules.forEach(function(mod) {
       if (LogBoxData) return;
       if (mod && mod.isInitialized && mod.publicModule && mod.publicModule.exports) {
@@ -46,7 +46,7 @@ const FIND_LOGBOX_DATA = `
         }
       }
     });
-    if (!LogBoxData) return JSON.stringify(null);
+    if (!LogBoxData) return JSON.stringify({ __error: 'logbox_module_not_found' });
     global.__RN_LOGBOX_DATA__ = LogBoxData;
   }
 `;
@@ -164,6 +164,23 @@ ${FIND_LOGBOX_DATA}
 })()`;
 }
 
+// ── Error tracking ──
+// Captures the most recent LogBox failure reason so the MCP tool handler can
+// surface it in user-visible output. Set by any of the public functions below
+// when detection fails with a known reason code.
+let lastLogBoxError: string | null = null;
+
+export function getLastLogBoxError(): string | null {
+    return lastLogBoxError;
+}
+
+function recordLogBoxError(reason: string | null): void {
+    lastLogBoxError = reason;
+    if (reason) {
+        console.error(`[rn-ai-debugger] LogBox operation failed: ${reason}`);
+    }
+}
+
 // ── Public API ──
 
 /**
@@ -173,10 +190,19 @@ ${FIND_LOGBOX_DATA}
 export async function detectLogBox(device?: string): Promise<LogBoxState | null> {
     try {
         const result = await executeInApp(DETECT_EXPRESSION, true, { timeoutMs: 5000 }, device);
-        if (!result.success || !result.result) return null;
+        if (!result.success || !result.result) {
+            recordLogBoxError("execute_failed");
+            return null;
+        }
         const parsed = JSON.parse(result.result);
+        if (parsed && parsed.__error) {
+            recordLogBoxError(parsed.__error);
+            return null;
+        }
+        recordLogBoxError(null);
         return parsed;
-    } catch {
+    } catch (e) {
+        recordLogBoxError("exception");
         return null;
     }
 }
@@ -188,10 +214,19 @@ export async function detectLogBox(device?: string): Promise<LogBoxState | null>
 export async function dismissLogBox(device?: string): Promise<LogBoxDismissResult | null> {
     try {
         const result = await executeInApp(DISMISS_EXPRESSION, true, { timeoutMs: 5000 }, device);
-        if (!result.success || !result.result) return null;
+        if (!result.success || !result.result) {
+            recordLogBoxError("execute_failed");
+            return null;
+        }
         const parsed = JSON.parse(result.result);
+        if (parsed && parsed.__error) {
+            recordLogBoxError(parsed.__error);
+            return null;
+        }
+        recordLogBoxError(null);
         return parsed;
     } catch {
+        recordLogBoxError("exception");
         return null;
     }
 }
@@ -222,10 +257,19 @@ export async function pushLogBox(
     }
     try {
         const result = await executeInApp(buildPushExpression(message, level, expanded, subtitle), true, { timeoutMs: 5000 }, device);
-        if (!result.success || !result.result) return false;
+        if (!result.success || !result.result) {
+            recordLogBoxError("execute_failed");
+            return false;
+        }
         const parsed = JSON.parse(result.result);
+        if (parsed && parsed.__error) {
+            recordLogBoxError(parsed.__error);
+            return false;
+        }
+        recordLogBoxError(null);
         return parsed.success === true;
     } catch {
+        recordLogBoxError("exception");
         return false;
     }
 }
@@ -240,11 +284,23 @@ export async function addLogBoxIgnorePatterns(
 ): Promise<string[] | null> {
     try {
         const result = await executeInApp(buildIgnoreExpression(patterns), true, { timeoutMs: 5000 }, device);
-        if (!result.success || !result.result) return null;
+        if (!result.success || !result.result) {
+            recordLogBoxError("execute_failed");
+            return null;
+        }
         const parsed = JSON.parse(result.result);
-        if (parsed.success) return parsed.patterns;
+        if (parsed && parsed.__error) {
+            recordLogBoxError(parsed.__error);
+            return null;
+        }
+        if (parsed.success) {
+            recordLogBoxError(null);
+            return parsed.patterns;
+        }
+        recordLogBoxError("unknown");
         return null;
     } catch {
+        recordLogBoxError("exception");
         return null;
     }
 }

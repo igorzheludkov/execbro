@@ -65,6 +65,19 @@ export class FakeCDPServer {
             return;
         }
 
+        // Always answer the liveness probe correctly so connectToDevice can proceed.
+        // The probe sends `1+1` with returnByValue; treat any such request as live.
+        if (msg.method === "Runtime.evaluate") {
+            const expr = (msg.params?.expression as string | undefined) ?? "";
+            if (expr === "1+1") {
+                ws.send(JSON.stringify({
+                    id: msg.id,
+                    result: { result: { type: "number", value: 2 } }
+                }));
+                return;
+            }
+        }
+
         // Handle Runtime.evaluate with custom handler
         if (msg.method === "Runtime.evaluate") {
             if (this.evaluateHandler) {

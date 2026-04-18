@@ -5,6 +5,7 @@ import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
+import { probeCdpAlive } from "./probe.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
@@ -15,6 +16,7 @@ import {
     recordConnectionGap,
     closeConnectionGap,
     saveConnectionMetadata,
+    clearConnectionMetadata,
     getConnectionMetadata,
     saveReconnectionTimer,
     cancelReconnectionTimer,
@@ -63,6 +65,12 @@ export function clearReconnectionSuppression(): void {
 
 const STALE_ACTIVITY_THRESHOLD_MS = 30_000;
 const PING_INTERVAL_MS = 1_000; // WebSocket ping/pong keepalive interval
+
+/**
+ * Max time (ms) to wait for a Runtime.evaluate("1+1") reply during liveness probing.
+ * Tight budget: live targets respond in under 50ms; zombie CDP targets never respond.
+ */
+const PROBE_TIMEOUT_MS = 1500;
 const RECONNECT_SETTLE_MS = 500;
 
 /**
@@ -877,6 +885,20 @@ export async function connectToDevice(
 
         try {
             const ws = await createWebSocketWithOriginFallback(device.webSocketDebuggerUrl);
+
+            // Verify the JS context is actually alive. Metro's /json can advertise
+            // zombie CDP pages that complete the WS handshake but no longer execute.
+            // A stale target here causes every downstream tool to time out or return
+            // degenerate state (e.g. __DEV__ === false on a debug bundle).
+            const alive = await probeCdpAlive(ws, PROBE_TIMEOUT_MS);
+            if (!alive) {
+                connectionLocks.delete(appKey);
+                try { ws.terminate(); } catch { /* ignore */ }
+                clearConnectionMetadata(appKey);
+                console.error(`[rn-ai-debugger] Rejecting stale CDP target for ${device.title} (no probe response)`);
+                resolve(`Skipped ${device.deviceName || device.title} (stale CDP target — no response from JS context)`);
+                return;
+            }
 
             // Connection established — run setup
             connectionLocks.delete(appKey);

@@ -280,6 +280,7 @@ export {
   pushLogBox,
   addLogBoxIgnorePatterns,
   notifyDriverMissing,
+  getLastLogBoxError,
 } from "./logbox.js";
 export type {
   LogBoxState,

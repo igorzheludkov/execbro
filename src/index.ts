@@ -156,6 +156,7 @@ import {
     formatDismissedEntries,
     pushLogBox,
     addLogBoxIgnorePatterns,
+    getLastLogBoxError,
     verifyLogPipeline,
     formatIssueBody,
     buildGitHubUrl,
@@ -575,7 +576,9 @@ registerToolWithTelemetry(
                 }
                 try {
                     const connectionResult = await connectToDevice(device, port);
-                    results.push(`  - ${connectionResult}`);
+                    const isStale = connectionResult.includes("stale CDP target");
+                    const prefix = isStale ? "  - STALE" : "  -";
+                    results.push(`${prefix} ${connectionResult}`);
                 } catch (error) {
                     results.push(`  - ${name}: Failed - ${error}`);
                 }
@@ -588,6 +591,14 @@ registerToolWithTelemetry(
             } catch {
                 // Build events connection is optional
             }
+        }
+
+        // Advisory if any CDP targets failed the liveness probe
+        const staleCount = results.filter((r) => r.startsWith("  - STALE")).length;
+        if (staleCount > 0) {
+            results.push("");
+            results.push(`Note: ${staleCount} stale CDP target(s) advertised by Metro were rejected.`);
+            results.push("If you expected one of these to be live, restart Metro: the target is a leftover from a previous device/app session.");
         }
 
         // Proactive check: warn if iOS UI driver is missing
@@ -2935,6 +2946,19 @@ registerToolWithTelemetry(
         }
     },
     async ({ action, message, level, expanded, subtitle, target, patterns, device }) => {
+        const explainLogBoxError = (base: string): string => {
+            const reason = getLastLogBoxError();
+            const reasonHints: Record<string, string> = {
+                dev_false: "__DEV__ is false — either a production build OR a stale/zombie CDP target whose JS context is in a degraded state. Try scan_metro to drop stale connections, then retry.",
+                no_get_modules: "__r.getModules is missing — usually a stale CDP target (not a real runtime). Try scan_metro to refresh.",
+                modules_not_iterable: "Module registry returned an unexpected shape.",
+                logbox_module_not_found: "LogBoxData module not found in the Metro registry — possible if LogBox is tree-shaken or the app overrode it.",
+                execute_failed: "executeInApp failed — no connected app or evaluate timed out.",
+                exception: "Exception thrown during detection.",
+            };
+            const detail = reason ? (reasonHints[reason] ?? reason) : "unknown cause";
+            return `${base}\nReason: ${reason ?? "unknown"} — ${detail}`;
+        };
         if (action === "dismiss") {
             const result = await dismissLogBox(device);
 
@@ -2943,7 +2967,7 @@ registerToolWithTelemetry(
                     content: [
                         {
                             type: "text" as const,
-                            text: "LogBox not available. This can happen if: (1) the app is a production build (__DEV__ is false), (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                            text: explainLogBoxError("LogBox not available.")
                         }
                     ]
                 };
@@ -2990,7 +3014,7 @@ registerToolWithTelemetry(
                     content: [
                         {
                             type: "text" as const,
-                            text: "Failed to push message to LogBox. This can happen if: (1) the app is a production build, (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                            text: explainLogBoxError("Failed to push message to LogBox.")
                         }
                     ]
                 };
@@ -3028,7 +3052,7 @@ registerToolWithTelemetry(
                     content: [
                         {
                             type: "text" as const,
-                            text: "Failed to add ignore patterns. This can happen if: (1) the app is a production build, (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                            text: explainLogBoxError("Failed to add ignore patterns.")
                         }
                     ]
                 };
@@ -3052,7 +3076,7 @@ registerToolWithTelemetry(
                     content: [
                         {
                             type: "text" as const,
-                            text: "LogBox not available. This can happen if: (1) the app is a production build (__DEV__ is false), (2) no React Native app is connected, or (3) the Metro module registry is not accessible."
+                            text: explainLogBoxError("LogBox not available.")
                         }
                     ]
                 };
