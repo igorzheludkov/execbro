@@ -5,6 +5,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { ensureLicense, incrementLocalUsage } from "./license.js";
 import { connectedApps } from "./state.js";
+import { getPostHogClient } from "./posthog.js";
 
 // ============================================================================
 // Configuration
@@ -430,8 +431,59 @@ export function trackToolInvocation(
     // Increment local usage counter
     incrementLocalUsage();
 
+    // Mirror platform-cohort signal to PostHog for native users.
+    // Mirrors the infra's native-user inference (backend/worker.ts:deriveNativePlatform)
+    // so PostHog cohort filters match the Cloudflare dashboard.
+    mirrorNativeCohortToPostHog(toolName);
+
     if (eventQueue.length >= BATCH_SIZE) {
         flush();
+    }
+}
+
+// Track what we've already sent to PostHog so we don't re-identify on every tool call.
+let _nativeKindSet = false;
+let _lastNativePlatformSent: "ios" | "android" | null = null;
+
+function mirrorNativeCohortToPostHog(toolName: string): void {
+    const platform: "ios" | "android" | null = toolName.startsWith("ios_")
+        ? "ios"
+        : toolName.startsWith("android_")
+            ? "android"
+            : null;
+    if (!platform) return;
+
+    // Skip when nothing new to send
+    if (_nativeKindSet && _lastNativePlatformSent === platform) return;
+
+    try {
+        const client = getPostHogClient();
+        if (!client) return;
+
+        const distinctId = getInstallationId();
+        const set: Record<string, unknown> = {};
+        const setOnce: Record<string, unknown> = {};
+
+        if (!_nativeKindSet) {
+            // $set_once: RN users keep platform_kind="rn" (set by trackAppDetection);
+            // native-only users get "native" the first time a platform-prefixed tool fires.
+            setOnce.platform_kind = "native";
+            _nativeKindSet = true;
+        }
+        if (_lastNativePlatformSent !== platform) {
+            set.platform_last_seen = platform;
+            _lastNativePlatformSent = platform;
+        }
+
+        client.identify({
+            distinctId,
+            properties: {
+                ...(Object.keys(set).length > 0 ? { $set: set } : {}),
+                ...(Object.keys(setOnce).length > 0 ? { $set_once: setOnce } : {}),
+            },
+        });
+    } catch {
+        // PostHog errors must never affect tool flow.
     }
 }
 
@@ -489,6 +541,43 @@ export function trackAppDetection(detection: {
     };
 
     eventQueue.push(event);
+
+    // Mirror to PostHog so insights/cohort filters can use kind + platform without custom queries.
+    try {
+        const client = getPostHogClient();
+        if (client) {
+            const distinctId = getInstallationId();
+            client.capture({
+                distinctId,
+                event: "app_detected",
+                properties: {
+                    rn_version: detection.reactNativeVersion,
+                    architecture: detection.architecture,
+                    js_engine: detection.jsEngine,
+                    platform: detection.appPlatform,
+                    os_version: detection.osVersion,
+                    ...(detection.expoSdkVersion ? { expo_sdk: detection.expoSdkVersion } : {}),
+                    platform_kind: "rn",
+                    server_version: getServerVersion(),
+                    package_name: getPackageName(),
+                },
+            });
+            // Person properties so cohort filters work natively in PostHog insights.
+            client.identify({
+                distinctId,
+                properties: {
+                    $set: {
+                        platform_kind: "rn",
+                        platform_last_seen: detection.appPlatform,
+                        rn_version: detection.reactNativeVersion,
+                        architecture: detection.architecture,
+                    },
+                },
+            });
+        }
+    } catch {
+        // PostHog errors must never affect tool flow.
+    }
 
     if (eventQueue.length >= BATCH_SIZE) {
         flush();
