@@ -120,6 +120,15 @@ export type {
   LogPipelineResult,
 } from "./connection.js";
 
+// Native-only hint builder — used when Metro-required tools are called without a Metro connection
+export {
+  hasMetro,
+  detectNativeDevices,
+  buildMetroMissingHint,
+  metroMissingHintIfAbsent,
+} from "./nativeOnlyHints.js";
+export type { NativeDeviceAvailability, MetroMissingHintOptions } from "./nativeOnlyHints.js";
+
 // Executor
 export {
   executeInApp,

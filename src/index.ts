@@ -162,6 +162,9 @@ import {
     buildGitHubUrl,
     shouldShowFeedbackHint,
     markFeedbackHintShown,
+    // Native-only hints — shown when Metro-required tools are called without a connection
+    hasMetro,
+    metroMissingHintIfAbsent,
 } from "./core/index.js";
 
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
@@ -408,6 +411,16 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         } finally {
             const duration = Date.now() - startTime;
             trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason);
+            // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
+            // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
+            let platformKind: "rn" | "native" | null = null;
+            for (const app of connectedApps.values()) {
+                if (app.appDetection) { platformKind = "rn"; break; }
+            }
+            if (!platformKind) {
+                if (toolName.startsWith("ios_") || toolName.startsWith("android_")) platformKind = "native";
+            }
+
             getPostHogClient()?.capture({
                 distinctId: getInstallationId(),
                 event: toolName,
@@ -419,6 +432,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                     ...(errorMessage && { error: errorMessage.substring(0, 200) }),
                     ...(errorMessage && { error_category: categorizeError(errorMessage) }),
                     ...(getTargetPlatform() && { platform: getTargetPlatform() }),
+                    ...(platformKind && { platform_kind: platformKind }),
                     ...(tapStrategy && { tap_strategy: tapStrategy }),
                     ...(meaningful !== undefined && { meaningful }),
                     ...(changeRate !== undefined && { change_rate: changeRate }),
@@ -1070,6 +1084,8 @@ registerToolWithTelemetry(
                         }
                     }
                 }
+
+                connectionWarning += await metroMissingHintIfAbsent("get_logs");
             }
             return {
                 content: [
@@ -1146,6 +1162,8 @@ registerToolWithTelemetry(
                 ];
                 connectionWarning += `\n\n[DIAG] ${diagParts.join(", ")}`;
             }
+
+            connectionWarning += await metroMissingHintIfAbsent("get_logs");
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected
@@ -1267,6 +1285,7 @@ registerToolWithTelemetry(
         if (count === 0) {
             const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
+            connectionWarning += await metroMissingHintIfAbsent("search_logs");
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected
@@ -1775,6 +1794,14 @@ registerToolWithTelemetry(
         }
     },
     async ({ extended, summary, device }) => {
+        if (!hasMetro()) {
+            const hint = await metroMissingHintIfAbsent("get_screen_layout");
+            return {
+                content: [{ type: "text", text: `Screen Layout unavailable.${hint}` }],
+                isError: true
+            };
+        }
+
         const result = await getScreenLayout({ extended, summary, device });
 
         if (!result.success) {
@@ -2205,6 +2232,14 @@ registerToolWithTelemetry(
         }
     },
     async ({ x, y, device }) => {
+        if (!hasMetro()) {
+            const hint = await metroMissingHintIfAbsent("get_inspector_selection");
+            return {
+                content: [{ type: "text", text: `Inspector selection unavailable.${hint}` }],
+                isError: true
+            };
+        }
+
         // If coordinates provided, do the full flow: enable inspector -> tap -> read
         if (x !== undefined && y !== undefined) {
             // Check if inspector is active
@@ -2461,6 +2496,7 @@ registerToolWithTelemetry(
                 if (!sdkAvailable) {
                     connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
                 }
+                connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
             }
             return {
                 content: [
@@ -2487,6 +2523,7 @@ registerToolWithTelemetry(
             if (!sdkAvailable) {
                 connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
             }
+            connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected
@@ -2584,6 +2621,7 @@ registerToolWithTelemetry(
         if (count === 0) {
             const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
+            connectionWarning += await metroMissingHintIfAbsent("search_network");
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected
@@ -2686,7 +2724,8 @@ registerToolWithTelemetry(
 
         if (!request) {
             const status = await checkAndEnsureConnection(device);
-            const connectionNote = status.message ? `\n\n${status.message}` : "";
+            let connectionNote = status.message ? `\n\n${status.message}` : "";
+            connectionNote += await metroMissingHintIfAbsent("get_request_details");
             return {
                 content: [
                     {
@@ -2754,6 +2793,7 @@ registerToolWithTelemetry(
         if (resolveNetworkBuffer(device).size === 0) {
             const status = await checkAndEnsureConnection(device);
             connectionWarning = status.message ? `\n\n${status.message}` : "";
+            connectionWarning += await metroMissingHintIfAbsent("get_network_stats");
         } else {
             const passive = getPassiveConnectionStatus();
             connectionWarning = !passive.connected
