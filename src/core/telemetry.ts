@@ -4,6 +4,7 @@ import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { ensureLicense, incrementLocalUsage } from "./license.js";
+import { connectedApps } from "./state.js";
 
 // ============================================================================
 // Configuration
@@ -379,6 +380,13 @@ export function trackToolInvocation(
             isFirstRun: isFirstRun(),
             firstTool: toolName
         });
+
+        // Re-emit app_detected for any already-connected RN apps so the dashboard's
+        // period-scoped platform classification keeps working on long-lived sessions.
+        // Uses cached detection; no CDP round-trip.
+        for (const app of connectedApps.values()) {
+            if (app.appDetection) trackAppDetection(app.appDetection);
+        }
 
         // Lazy license check — runs once per session, tracked as tool_invocation for analytics
         ensureLicense().then(({ source, status, durationMs }) => {
