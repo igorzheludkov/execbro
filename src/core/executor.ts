@@ -1394,7 +1394,9 @@ export async function getScreenLayout(
                         child = child.sibling;
                     }
                 }
-                walkComponents(roots[0].current, 0, [], -1);
+                for (var ri = 0; ri < roots.length; ri++) {
+                    walkComponents(roots[ri].current, 0, [], -1);
+                }
             } else {
                 // Default mode: collect all host fibers with ancestor info
                 function walkFibers(fiber, depth, path) {
@@ -1444,7 +1446,9 @@ export async function getScreenLayout(
                         child = child.sibling;
                     }
                 }
-                walkFibers(roots[0].current, 0, []);
+                for (var ri = 0; ri < roots.length; ri++) {
+                    walkFibers(roots[ri].current, 0, []);
+                }
             }
 
             if (hostFibers.length === 0) return { error: 'No measurable host components found.' };
