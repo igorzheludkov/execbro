@@ -222,6 +222,7 @@ export {
   iosGetUITree,
   iosFindElement,
   iosWaitForElement,
+  getDevicePixelRatio,
 } from "./ios.js";
 
 // iOS types

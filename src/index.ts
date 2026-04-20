@@ -13,7 +13,7 @@ import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
 import { getInstallationId, getServerVersion, getPackageName, isDevMode, TELEMETRY_JSONL_PATH, categorizeError } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
-import { tap, type TapResult } from "./pro/tap.js";
+import { tap, convertScreenshotToTapCoords, type TapResult } from "./pro/tap.js";
 import {
     getActivateLicenseConfig,
     handleActivateLicense,
@@ -142,6 +142,7 @@ import {
     // iOS Element Finding (no screenshots)
     iosFindElement,
     iosWaitForElement,
+    getDevicePixelRatio,
     // Telemetry
     initTelemetry,
     trackToolInvocation,
@@ -4584,19 +4585,24 @@ server.registerTool(
     "ios_swipe",
     {
         description:
-            "Swipe gesture on an iOS simulator screen. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Swipe gesture on an iOS simulator screen. Pass screenshot pixel coordinates directly — the same values returned by ios_screenshot pressable elements and screen layout. Coordinates are auto-converted to native iOS points internally. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
-            startX: z.coerce.number().describe("Starting X coordinate in pixels"),
-            startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
-            endX: z.coerce.number().describe("Ending X coordinate in pixels"),
-            endY: z.coerce.number().describe("Ending Y coordinate in pixels"),
+            startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels (from ios_screenshot output)"),
+            startY: z.coerce.number().describe("Starting Y coordinate in screenshot pixels (from ios_screenshot output)"),
+            endX: z.coerce.number().describe("Ending X coordinate in screenshot pixels (from ios_screenshot output)"),
+            endY: z.coerce.number().describe("Ending Y coordinate in screenshot pixels (from ios_screenshot output)"),
             duration: z.coerce.number().optional().describe("Optional swipe duration in seconds"),
             delta: z.coerce.number().optional().describe("Optional delta between touch events (step size)"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
     },
     async ({ startX, startY, endX, endY, duration, delta, udid }) => {
-        const result = await iosSwipe(startX, startY, endX, endY, { duration, delta, udid });
+        const dpr = await getDevicePixelRatio(udid);
+        const firstApp = connectedApps.values().next().value;
+        const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
+        const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, scaleFactor);
+        const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, scaleFactor);
+        const result = await iosSwipe(start.x, start.y, end.x, end.y, { duration, delta, udid });
 
         return {
             content: [
