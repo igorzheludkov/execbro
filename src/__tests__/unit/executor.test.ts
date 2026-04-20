@@ -3,6 +3,7 @@ import {
     containsProblematicUnicode,
     stripLeadingComments,
     validateAndPreprocessExpression,
+    formatScreenLayoutTree,
 } from "../../core/executor.js";
 
 describe("containsProblematicUnicode", () => {
@@ -97,5 +98,77 @@ describe("validateAndPreprocessExpression", () => {
     it("accepts multi-statement expression", () => {
         const result = validateAndPreprocessExpression("var x = 1; x");
         expect(result.valid).toBe(true);
+    });
+});
+
+describe("formatScreenLayoutTree off-screen summary", () => {
+    const stubElement = {
+        component: "App",
+        path: "App",
+        frame: { x: 0, y: 0, width: 100, height: 100 },
+        originalIndex: 0,
+        parentIndex: -1,
+        depth: 0,
+    };
+
+    it("omits the summary lines when both arrays are empty", () => {
+        const out = formatScreenLayoutTree([stubElement], false, {
+            offScreenBelow: [],
+            offScreenAbove: [],
+        });
+        expect(out).not.toContain("below fold");
+        expect(out).not.toContain("above fold");
+    });
+
+    it("omits the summary when `offScreen` is undefined", () => {
+        const out = formatScreenLayoutTree([stubElement]);
+        expect(out).not.toContain("below fold");
+        expect(out).not.toContain("above fold");
+    });
+
+    it("emits a single-name line for one below-fold component", () => {
+        const out = formatScreenLayoutTree([stubElement], false, {
+            offScreenBelow: ["DayComponent"],
+        });
+        expect(out).toContain("[... 1 component below fold: DayComponent]");
+    });
+
+    it("emits a multi-name line without truncation for <= 10 components", () => {
+        const names = ["A", "B", "C", "D", "E"];
+        const out = formatScreenLayoutTree([stubElement], false, {
+            offScreenBelow: names,
+        });
+        expect(out).toContain("[... 5 components below fold: A, B, C, D, E]");
+    });
+
+    it("truncates at 10 names with a +N-more tail", () => {
+        const names = Array.from({ length: 14 }, (_, i) => `C${i + 1}`);
+        const out = formatScreenLayoutTree([stubElement], false, {
+            offScreenBelow: names,
+        });
+        expect(out).toContain(
+            "[... 14 components below fold: C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, ... +4 more]"
+        );
+    });
+
+    it("emits above and below lines in that order when both are present", () => {
+        const out = formatScreenLayoutTree([stubElement], false, {
+            offScreenAbove: ["TopHeader"],
+            offScreenBelow: ["FooterBanner"],
+        });
+        const aboveIdx = out.indexOf("above fold");
+        const belowIdx = out.indexOf("below fold");
+        expect(aboveIdx).toBeGreaterThan(-1);
+        expect(belowIdx).toBeGreaterThan(aboveIdx);
+    });
+
+    it("separates the tree from the summary with a blank line", () => {
+        const out = formatScreenLayoutTree([stubElement], false, {
+            offScreenBelow: ["X"],
+        });
+        expect(out.split("\n").length).toBeGreaterThanOrEqual(3);
+        const lines = out.split("\n");
+        const summaryLineIdx = lines.findIndex((l) => l.includes("below fold"));
+        expect(lines[summaryLineIdx - 1]).toBe("");
     });
 });
