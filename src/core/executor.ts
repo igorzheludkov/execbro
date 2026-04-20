@@ -1663,6 +1663,26 @@ export async function getScreenLayout(
                     }
                 }
                 elements = filtered;
+
+                // Second pass: rewrite orphans whose parentIndex points at a non-surviving element.
+                // This happens when an intermediate ancestor was dropped by the viewport filter
+                // (not the full-screen wrapper path). Walk ancestorIndices to the nearest survivor.
+                var surviving = {};
+                for (var si = 0; si < elements.length; si++) {
+                    surviving[elements[si].originalIndex] = true;
+                }
+                for (var oi = 0; oi < elements.length; oi++) {
+                    var e2 = elements[oi];
+                    if (e2.parentIndex === -1 || e2.parentIndex === undefined) continue;
+                    if (surviving[e2.parentIndex]) continue;
+                    var anc = meta[e2.originalIndex] && meta[e2.originalIndex].ancestorIndices;
+                    if (!anc) { e2.parentIndex = -1; continue; }
+                    var found = -1;
+                    for (var ai = 0; ai < anc.length; ai++) {
+                        if (surviving[anc[ai]]) { found = anc[ai]; break; }
+                    }
+                    e2.parentIndex = found;
+                }
             }
 
             if (summaryMode) {
