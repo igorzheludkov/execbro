@@ -2258,8 +2258,11 @@ interface EnrichedElement {
  * Format enriched elements as an indented tree with tap coordinates in pixels.
  * Same tree structure as get_screen_layout but with tap:(x,y) per node.
  */
-function formatEnrichedLayoutTree(elements: EnrichedElement[]): string {
-    return formatLayoutTree(elements, (el, indent, isLeaf) => {
+function formatEnrichedLayoutTree(
+    elements: EnrichedElement[],
+    offScreen?: { offScreenBelow?: string[]; offScreenAbove?: string[] }
+): string {
+    const tree = formatLayoutTree(elements, (el, indent, isLeaf) => {
         const prefix = "  ".repeat(indent);
         const frame = `(${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`;
         const tap = ` tap:(${el.tapX},${el.tapY})`;
@@ -2268,6 +2271,14 @@ function formatEnrichedLayoutTree(elements: EnrichedElement[]): string {
         const textStr = el.text && isLeaf ? ` "${el.text}"` : "";
         return `${prefix}${el.component} ${frame}${tap}${idStr}${textStr}`;
     });
+    const suffix: string[] = [];
+    if (offScreen?.offScreenAbove?.length) {
+        suffix.push(formatOffScreenLine(offScreen.offScreenAbove, "above fold"));
+    }
+    if (offScreen?.offScreenBelow?.length) {
+        suffix.push(formatOffScreenLine(offScreen.offScreenBelow, "below fold"));
+    }
+    return suffix.length > 0 ? `${tree}\n\n${suffix.join("\n")}` : tree;
 }
 
 /**
@@ -2322,7 +2333,10 @@ export async function enrichScreenshotWithLayout(
             };
         });
 
-        return formatEnrichedLayoutTree(elements);
+        return formatEnrichedLayoutTree(elements, {
+            offScreenBelow: result.offScreenBelow,
+            offScreenAbove: result.offScreenAbove,
+        });
     } catch {
         return null; // Non-fatal: screenshot works without layout
     }
