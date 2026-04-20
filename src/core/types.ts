@@ -42,6 +42,10 @@ export interface AppDetectionResult {
     appPlatform: "ios" | "android";
     osVersion: string;
     expoSdkVersion?: string;
+    // "probe" = full Runtime.evaluate succeeded; "device-info" = inferred from
+    // Metro /json DeviceInfo at connect time. Presumptive entries may be upgraded
+    // later when the probe completes.
+    detectionSource?: "probe" | "device-info";
 }
 
 // CDP RemoteObject type (result of Runtime.evaluate)

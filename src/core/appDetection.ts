@@ -58,13 +58,45 @@ function parseDetectionResult(
 }
 
 /**
+ * Presumptive detection from Metro /json DeviceInfo — no JS eval required.
+ * Metro's inspector endpoint only lists RN JS runtimes, so the very fact that
+ * a device appears there is proof of an RN app. Description/title strings
+ * reliably identify Bridgeless (new arch) and Hermes setups.
+ */
+function inferPresumptiveDetection(app: ConnectedApp): AppDetectionResult {
+    const desc = app.deviceInfo.description || "";
+    const title = app.deviceInfo.title || "";
+    return {
+        reactNativeVersion: "unknown",
+        architecture: desc.includes("Bridgeless") ? "new" : "old",
+        jsEngine: title.includes("Hermes") ? "hermes" : "jsc",
+        appPlatform: app.platform,
+        osVersion: "unknown",
+        detectionSource: "device-info",
+    };
+}
+
+/**
  * Detect app characteristics via Runtime.evaluate CDP command.
  * Fire-and-forget — does not block connection flow.
  * Stores result on the ConnectedApp object.
+ *
+ * Emits a presumptive `app_detected` event immediately from DeviceInfo so the
+ * RN signal is recorded even when the Runtime.evaluate probe later times out
+ * or returns a partial result. The probe still runs and upgrades the stored
+ * result when it succeeds.
  */
 export function scheduleAppDetection(app: ConnectedApp): void {
-    // Skip if already detected (e.g., on reconnection)
-    if (app.appDetection) return;
+    // Probe already succeeded — nothing to do.
+    if (app.appDetection?.detectionSource === "probe") return;
+
+    // Fire presumptive event once per ConnectedApp so the user is classified as
+    // RN at the moment of connect, independent of probe success.
+    if (!app.appDetection) {
+        const presumptive = inferPresumptiveDetection(app);
+        app.appDetection = presumptive;
+        trackAppDetection(presumptive);
+    }
 
     setTimeout(async () => {
         try {
@@ -72,6 +104,7 @@ export function scheduleAppDetection(app: ConnectedApp): void {
             if (result) {
                 const parsed = parseDetectionResult(result, app.platform);
                 if (parsed) {
+                    parsed.detectionSource = "probe";
                     app.appDetection = parsed;
                     trackAppDetection(parsed);
                     const versionStr = parsed.reactNativeVersion !== "unknown"
