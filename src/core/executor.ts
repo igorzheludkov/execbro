@@ -1354,7 +1354,7 @@ export async function getScreenLayout(
             if (componentsOnlyMode) {
                 // componentsOnly: walk tree looking for meaningful custom components,
                 // measure their first host child, track parent for tree output
-                function walkComponents(fiber, depth, path, parentIdx) {
+                function walkComponents(fiber, depth, path, parentIdx, ancestors) {
                     if (!fiber || depth > ${maxDepth}) return;
                     var name = getComponentName(fiber);
                     var isHost = typeof fiber.type === 'string';
@@ -1369,6 +1369,7 @@ export async function getScreenLayout(
                     var isMeaningful = name && !isHost && !RN_PRIMITIVES.test(name);
 
                     var myIdx = parentIdx;
+                    var nextAncestors = ancestors;
                     if (isMeaningful) {
                         var host = findFirstHost(fiber, 0);
                         if (host) {
@@ -1382,20 +1383,23 @@ export async function getScreenLayout(
                                 depth: depth,
                                 path: path.concat([name]),
                                 parentIndex: parentIdx,
+                                ancestorIndices: ancestors.slice(),
                                 text: text ? text.slice(0, 80) : null
                             });
+                            // Build the ancestor chain for descendants: [myIdx, ...previous ancestors]
+                            nextAncestors = [myIdx].concat(ancestors);
                         }
                     }
 
                     var child = fiber.child;
                     while (child) {
                         var childName = getComponentName(child);
-                        walkComponents(child, depth + 1, childName ? path.concat([childName]) : path, myIdx);
+                        walkComponents(child, depth + 1, childName ? path.concat([childName]) : path, myIdx, nextAncestors);
                         child = child.sibling;
                     }
                 }
                 for (var ri = 0; ri < roots.length; ri++) {
-                    walkComponents(roots[ri].current, 0, [], -1);
+                    walkComponents(roots[ri].current, 0, [], -1, []);
                 }
             } else {
                 // Default mode: collect all host fibers with ancestor info
