@@ -913,7 +913,8 @@ export async function iosSwipe(
         String(y2),
       ];
       if (options?.duration !== undefined) {
-        args.push("--duration", String(options.duration / 1000));
+        // Both axe and idb expect duration in seconds (matches the MCP tool schema).
+        args.push("--duration", String(options.duration));
       }
       if (options?.delta !== undefined) {
         args.push("--delta", String(options.delta));
