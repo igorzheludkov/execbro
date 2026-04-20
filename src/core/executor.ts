@@ -1565,15 +1565,29 @@ export async function getScreenLayout(
             }
 
             var elements = [];
+            var offScreenBelow = [];
+            var offScreenAbove = [];
 
             for (var i = 0; i < measurements.length; i++) {
                 var m = measurements[i];
                 if (!m) continue;
 
-                // Filter: only visible within viewport (with some tolerance for partial visibility)
+                // Filter: zero-size
                 if (m.width <= 0 || m.height <= 0) continue;
-                if (m.x + m.width < 0 || m.y + m.height < 0) continue;
-                if (m.x > viewportW || m.y > viewportH) continue;
+
+                // Vertical: track off-screen above/below for the summary line
+                if (m.y + m.height < 0) {
+                    if (meta[i] && meta[i].customName) offScreenAbove.push({ idx: i, y: m.y });
+                    continue;
+                }
+                if (m.y > viewportH) {
+                    if (meta[i] && meta[i].customName) offScreenBelow.push({ idx: i, y: m.y });
+                    continue;
+                }
+
+                // Horizontal: center must be inside the viewport (drops phantom slides at x=-411 etc.)
+                var centerX = m.x + m.width / 2;
+                if (centerX < 0 || centerX > viewportW) continue;
 
                 var fiber = fibers[i];
                 var info = meta[i];
@@ -1669,7 +1683,25 @@ export async function getScreenLayout(
             return {
                 viewport: { width: viewportW, height: viewportH },
                 totalElements: elements.length,
-                elements: elements
+                elements: elements,
+                offScreenBelow: (function() {
+                    var seen = {}, out = [];
+                    offScreenBelow.sort(function(a, b) { return a.y - b.y; });
+                    for (var k = 0; k < offScreenBelow.length; k++) {
+                        var n = meta[offScreenBelow[k].idx].customName;
+                        if (n && !seen[n]) { seen[n] = true; out.push(n); }
+                    }
+                    return out;
+                })(),
+                offScreenAbove: (function() {
+                    var seen = {}, out = [];
+                    offScreenAbove.sort(function(a, b) { return b.y - a.y; });
+                    for (var k = 0; k < offScreenAbove.length; k++) {
+                        var n = meta[offScreenAbove[k].idx].customName;
+                        if (n && !seen[n]) { seen[n] = true; out.push(n); }
+                    }
+                    return out;
+                })()
             };
         })()
     `;
