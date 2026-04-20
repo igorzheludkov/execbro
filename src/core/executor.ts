@@ -925,8 +925,12 @@ function formatLayoutTree<T extends LayoutNode>(
     return lines.join("\n");
 }
 
-function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = false): string {
-    return formatLayoutTree(elements, (el, indent, isLeaf) => {
+export function formatScreenLayoutTree(
+    elements: ScreenElement[],
+    extended: boolean = false,
+    offScreen?: { offScreenBelow?: string[]; offScreenAbove?: string[] }
+): string {
+    const tree = formatLayoutTree(elements, (el, indent, isLeaf) => {
         const prefix = "  ".repeat(indent);
         const frame = el.frame
             ? ` (${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`
@@ -939,6 +943,24 @@ function formatScreenLayoutTree(elements: ScreenElement[], extended: boolean = f
             : "";
         return `${prefix}${el.component}${frame}${idStr}${textStr}${layoutStr}`;
     });
+    const suffix: string[] = [];
+    if (offScreen?.offScreenAbove?.length) {
+        suffix.push(formatOffScreenLine(offScreen.offScreenAbove, "above fold"));
+    }
+    if (offScreen?.offScreenBelow?.length) {
+        suffix.push(formatOffScreenLine(offScreen.offScreenBelow, "below fold"));
+    }
+    return suffix.length > 0 ? `${tree}\n\n${suffix.join("\n")}` : tree;
+}
+
+function formatOffScreenLine(names: string[], position: string): string {
+    const total = names.length;
+    const CAP = 10;
+    if (total <= CAP) {
+        return `[... ${total} component${total === 1 ? "" : "s"} ${position}: ${names.join(", ")}]`;
+    }
+    const shown = names.slice(0, CAP).join(", ");
+    return `[... ${total} components ${position}: ${shown}, ... +${total - CAP} more]`;
 }
 
 interface FoundComponent {
@@ -1256,7 +1278,12 @@ export async function getScreenLayout(
         device?: string;
         raw?: boolean;
     } = {}
-): Promise<ExecutionResult & { parsedElements?: ScreenElement[]; viewport?: { width: number; height: number } }> {
+): Promise<ExecutionResult & {
+    parsedElements?: ScreenElement[];
+    viewport?: { width: number; height: number };
+    offScreenBelow?: string[];
+    offScreenAbove?: string[];
+}> {
     const { extended = false, summary = false, device, raw = false } = options;
     const maxDepth = 5000;
     const componentsOnly = true;
@@ -1742,10 +1769,15 @@ export async function getScreenLayout(
                         success: true,
                         result: result.result,
                         parsedElements: parsed.elements,
-                        viewport: parsed.viewport
+                        viewport: parsed.viewport,
+                        offScreenBelow: Array.isArray(parsed.offScreenBelow) ? parsed.offScreenBelow : [],
+                        offScreenAbove: Array.isArray(parsed.offScreenAbove) ? parsed.offScreenAbove : []
                     };
                 }
-                const tree = formatScreenLayoutTree(parsed.elements, extended);
+                const tree = formatScreenLayoutTree(parsed.elements, extended, {
+                    offScreenBelow: Array.isArray(parsed.offScreenBelow) ? parsed.offScreenBelow : [],
+                    offScreenAbove: Array.isArray(parsed.offScreenAbove) ? parsed.offScreenAbove : []
+                });
                 return { success: true, result: tree };
             }
         } catch {
