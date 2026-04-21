@@ -1156,6 +1156,47 @@ function formatAccessibilityTree(
 }
 
 /**
+ * Probe the iOS root accessibility element for the top safe-area inset in points.
+ * React-native-screens modal/sheet presentations cause measureInWindow to return y
+ * relative to the content origin (below the inset) instead of the window. Knowing
+ * the inset lets us detect and correct the shifted coordinate space.
+ *
+ * Cached briefly so a single tap flow doesn't incur multiple describe-ui calls.
+ */
+const SAFE_AREA_CACHE_TTL_MS = 5000;
+const safeAreaTopCache = new Map<string, { value: number; expires: number }>();
+
+export async function getIOSSafeAreaTop(udid?: string): Promise<number> {
+  const cacheKey = udid || "__default__";
+  const cached = safeAreaTopCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.value;
+
+  let value = 0;
+  try {
+    const preflight = await ensureUiDriverReady(udid);
+    if (preflight.ready) {
+      const { driver, targetUdid } = preflight;
+      let stdout: string;
+      if (driver === "axe") {
+        stdout = (await runAxe("describe-ui", "--udid", targetUdid)).stdout;
+      } else {
+        const r = await runIdb("ui", "describe-all", "--udid", targetUdid, "--json", "--nested");
+        stdout = r.stdout;
+      }
+      const data = JSON.parse(stdout);
+      const root = Array.isArray(data) ? data[0] : data;
+      const y = root?.frame?.y;
+      if (typeof y === "number" && y > 0) value = Math.round(y);
+    }
+  } catch {
+    // Fall through: value stays 0 (no correction)
+  }
+
+  safeAreaTopCache.set(cacheKey, { value, expires: Date.now() + SAFE_AREA_CACHE_TTL_MS });
+  return value;
+}
+
+/**
  * Get accessibility info for the entire screen
  */
 export async function iosDescribeAll(

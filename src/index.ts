@@ -30,12 +30,15 @@ import {
     getAllLogs,
     getTotalLogCount,
     getConnectedAppByDevice,
+    getConnectedAppBySimulatorUdid,
+    getConnectedAppByAndroidDeviceId,
     LogBuffer,
     NetworkBuffer,
     bundleErrorBuffer,
     imageBuffer,
     connectedApps,
     getActiveSimulatorUdid,
+    getActiveOrBootedSimulatorUdid,
     scanMetroPorts,
     fetchDevices,
     selectMainDevice,
@@ -96,7 +99,6 @@ import {
     // OCR
     recognizeText,
     inferIOSDevicePixelRatio,
-    enrichScreenshotWithLayout,
     // Android
     listAndroidDevices,
     androidScreenshot,
@@ -143,6 +145,7 @@ import {
     iosFindElement,
     iosWaitForElement,
     getDevicePixelRatio,
+    getIOSSafeAreaTop,
     // Telemetry
     initTelemetry,
     trackToolInvocation,
@@ -1833,7 +1836,7 @@ registerToolWithTelemetry(
     "get_pressable_elements",
     {
         description:
-            "Find all pressable (onPress) and input (TextInput) elements currently visible on screen. Returns component names, tap-ready center coordinates (in points/dp), text labels, testID, and accessibilityLabel. Useful when you need to tap an icon or button but can't identify it from a screenshot alone. Each element includes hasLabel (true if it contains text) and isInput (true for TextInput fields).",
+            "Find all pressable (onPress) and input (TextInput) elements currently visible on screen. Returns component names, ready-to-tap center coordinates in SCREENSHOT PIXELS (same space as ios_screenshot/android_screenshot — pass directly to tap(x, y)), text labels, testID, accessibilityLabel, and a spatial nearbyText hint for icon-only buttons. Each element includes hasLabel (true if it contains text) and isInput (true for TextInput fields).",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
@@ -1853,16 +1856,141 @@ registerToolWithTelemetry(
             };
         }
 
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: result.result || "No pressable elements found."
+        const elements = result.parsedElements;
+        if (!elements || elements.length === 0) {
+            return {
+                content: [{ type: "text", text: result.result || "No pressable elements found." }]
+            };
+        }
+
+        // Resolve target app so we can pick the right simulator / android device
+        const targetApp = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
+        if (!targetApp) {
+            // No connected app — return raw (points) output; better than nothing
+            return {
+                content: [{ type: "text", text: result.result || "No pressable elements found." }]
+            };
+        }
+
+        // Capture a lightweight screenshot to learn scaleFactor (downscale) and dimensions.
+        // Conversion: screenshot_px = native_coord * devicePixelRatio / screenshotScale
+        let lines: string[] = [];
+        try {
+            if (targetApp.platform === "ios") {
+                const udid = targetApp.simulatorUdid;
+                const shot = await iosScreenshot(undefined, udid);
+                const screenshotScale = shot.scaleFactor || 1;
+                const devicePixelRatio =
+                    (shot.originalWidth && shot.originalHeight
+                        ? inferIOSDevicePixelRatio(shot.originalWidth, shot.originalHeight)
+                        : null) ?? (await getDevicePixelRatio(udid)) ?? 3;
+                // Fallback to 59pt (iPhone typical) when the UI driver preflight can't
+                // resolve the true inset — matches ios_screenshot's default. Without this
+                // shift, react-native-screens modal-presented screens report y relative
+                // to content origin and taps land in the status bar instead of the button.
+                const safeAreaTop = (await getIOSSafeAreaTop(udid).catch(() => 0)) || 59;
+                // Keep the app's lastScreenshot metadata in sync so tap(x, y) uses the
+                // same scaleFactor when converting our pixel coords back to points.
+                if (shot.originalWidth && shot.originalHeight) {
+                    targetApp.lastScreenshot = {
+                        originalWidth: shot.originalWidth,
+                        originalHeight: shot.originalHeight,
+                        scaleFactor: screenshotScale
+                    };
                 }
-            ]
+                lines = formatPressablesInPixels(elements, {
+                    platform: "ios",
+                    devicePixelRatio,
+                    screenshotScale,
+                    safeAreaTop
+                });
+            } else {
+                const deviceId = targetApp.deviceInfo?.deviceName;
+                const shot = await androidScreenshot(undefined, deviceId);
+                const screenshotScale = shot.scaleFactor || 1;
+                const density = await androidGetDensity(deviceId).catch(() => ({ density: 160 }));
+                const devicePixelRatio = (density.density || 160) / 160;
+                if (shot.originalWidth && shot.originalHeight) {
+                    targetApp.lastScreenshot = {
+                        originalWidth: shot.originalWidth,
+                        originalHeight: shot.originalHeight,
+                        scaleFactor: screenshotScale
+                    };
+                }
+                lines = formatPressablesInPixels(elements, {
+                    platform: "android",
+                    devicePixelRatio,
+                    screenshotScale,
+                    safeAreaTop: 0
+                });
+            }
+        } catch {
+            // Fallback to points if screenshot/metadata unavailable
+            return {
+                content: [{ type: "text", text: result.result || "No pressable elements found." }]
+            };
+        }
+
+        const iconCount = elements.filter((e) => !e.hasLabel).length;
+        const labeledCount = elements.length - iconCount;
+        const summary = `Found ${elements.length} pressable elements (${iconCount} icon-only, ${labeledCount} with text labels)`;
+        const text = [summary, "", ...lines].join("\n");
+
+        return {
+            content: [{ type: "text", text }]
         };
     }
 );
+
+function formatPressablesInPixels(
+    elements: NonNullable<Awaited<ReturnType<typeof getPressableElements>>["parsedElements"]>,
+    opts: {
+        platform: "ios" | "android";
+        devicePixelRatio: number;
+        screenshotScale: number;
+        safeAreaTop: number;
+    }
+): string[] {
+    const { platform, devicePixelRatio, screenshotScale, safeAreaTop } = opts;
+    const out: string[] = [];
+    for (let i = 0; i < elements.length; i++) {
+        const el = elements[i];
+        // react-native-screens modal presentations report y relative to content origin;
+        // shift into the window frame when the measurement falls inside the safe-area band.
+        let cy = el.center.y;
+        let fy = el.frame.y;
+        if (platform === "ios" && safeAreaTop > 0) {
+            if (cy < safeAreaTop) cy += safeAreaTop;
+            if (fy < safeAreaTop) fy += safeAreaTop;
+        }
+        const toPx = (v: number) => Math.round((v * devicePixelRatio) / screenshotScale);
+        const cx = toPx(el.center.x);
+        const cyPx = toPx(cy);
+        const fx = toPx(el.frame.x);
+        const fyPx = toPx(fy);
+        const fw = toPx(el.frame.width);
+        const fh = toPx(el.frame.height);
+
+        const num = i + 1;
+        const label = el.hasLabel
+            ? `"${el.text}"`
+            : el.intent
+              ? `(${el.intent} icon)`
+              : "(icon/image)";
+        const ids: string[] = [];
+        if (el.testID) ids.push(`testID="${el.testID}"`);
+        if (el.accessibilityLabel) ids.push(`a11y="${el.accessibilityLabel}"`);
+        const idStr = ids.length > 0 ? ` [${ids.join(", ")}]` : "";
+        const inputStr = el.isInput ? " (input)" : "";
+        const wrapperStr = el.isWrapper ? " [wrapper — skip unless dismissing keyboard]" : "";
+        const nearPart = el.nearbyText ? ` near "${el.nearbyText}"` : "";
+        out.push(
+            `${num}. ${el.component} ${label}${nearPart} — center:(${cx},${cyPx}) frame:(${fx},${fyPx} ${fw}x${fh})${idStr}${inputStr}${wrapperStr}`
+        );
+        if (el.path) out.push(`   path: ${el.path}`);
+    }
+    return out;
+}
 
 // Tool: Inspect a specific component by name
 registerToolWithTelemetry(
@@ -2142,8 +2270,8 @@ registerToolWithTelemetry(
 
         return {
             content,
-            isError: !result.success,
-            _errorMessage: !result.success
+            isError: !result.success && !result.ambiguous,
+            _errorMessage: !result.success && !result.ambiguous
                 ? `${JSON.stringify(result.query)}|${result.error || ""}`
                 : undefined,
             _errorContext: errorContext,
@@ -3439,10 +3567,14 @@ registerToolWithTelemetry(
             const pixelWidth = result.originalWidth || 0;
             const pixelHeight = result.originalHeight || 0;
 
-            // Store screenshot metadata for coordinate conversion
-            const firstApp = connectedApps.values().next().value;
-            if (firstApp) {
-                firstApp.lastScreenshot = {
+            // Resolve the RN app running on THIS Android device so enrichment
+            // pulls data from the right app (not whichever app is "first").
+            const targetApp = getConnectedAppByAndroidDeviceId(deviceId);
+            const targetDeviceName = targetApp?.deviceInfo.deviceName;
+
+            // Store screenshot metadata on the matching app (not an arbitrary one)
+            if (targetApp) {
+                targetApp.lastScreenshot = {
                     originalWidth: pixelWidth,
                     originalHeight: pixelHeight,
                     scaleFactor: result.scaleFactor || 1,
@@ -3472,27 +3604,28 @@ registerToolWithTelemetry(
             // Enrich with screen layout data (component names + tap coordinates)
             // Android: density ratio = densityDpi / 160 (160dpi = 1dp = 1px baseline)
             const androidPixelRatio = densityDpi / 160;
-            let layoutText: string | null = null;
-            try {
-                layoutText = await enrichScreenshotWithLayout(androidPixelRatio, result.scaleFactor || 1);
-            } catch {
-                // Non-fatal: screenshot works without layout enrichment
-            }
+            // Skip enrichment when no RN app is connected to this Android device —
+            // otherwise we would pull fiber data from a different device's app.
+            const canEnrich = !!targetApp;
+            let pressablesText: string | null = null;
+            // Screen Layout tree previously appended here was dropped — it was noisy
+            // (nested Svg/G/Path duplicates). Use get_screen_layout when the tree is needed.
 
             // Enrich with pressable elements (filtered list of tappable components, converted to screenshot pixel coords)
-            let pressablesText: string | null = null;
             try {
-                const pressables = await getPressableElements({});
+                if (!canEnrich) throw new Error("skip");
+                const pressables = await getPressableElements({ device: targetDeviceName });
                 if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
                     const screenshotScale = result.scaleFactor || 1;
                     pressablesText = pressables.parsedElements.map((el) => {
                         const px = Math.round((el.center.x * androidPixelRatio) / screenshotScale);
                         const py = Math.round((el.center.y * androidPixelRatio) / screenshotScale);
-                        const label = el.accessibilityLabel || el.text || el.testID || el.component;
+                        const label = el.accessibilityLabel || el.text || el.testID || (el.intent ? `${el.intent} icon` : el.component);
                         const idPart = el.testID ? ` testID="${el.testID}"` : "";
                         const kindPart = el.isInput ? " [input]" : "";
                         const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
-                        return `  (${px}, ${py}) ${el.component}: "${label}"${idPart}${kindPart}${wrapPart}`;
+                        const nearPart = !el.text && !el.accessibilityLabel && el.nearbyText ? ` near "${el.nearbyText}"` : "";
+                        return `  (${px}, ${py}) ${el.component}: "${label}"${nearPart}${idPart}${kindPart}${wrapPart}`;
                     }).join("\n");
                 }
             } catch {
@@ -3513,18 +3646,16 @@ registerToolWithTelemetry(
             if (pressablesText) {
                 infoText += `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
                 infoText += `\n${pressablesText}`;
-            }
-            if (layoutText) {
-                infoText += `\n\n📋 Screen Layout (all components, tap coordinates in pixels):`;
-                infoText += `\n${layoutText}`;
-            }
-            if (pressablesText || layoutText) {
                 infoText += `\n\n💡 Next steps:`;
                 infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
                 infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
                 infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
-                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout`;
+                infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
             } else {
+                if (!canEnrich && connectedApps.size > 0) {
+                    infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to device ${deviceId ?? "(default)"}.`;
+                    infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
+                }
                 infoText += `\n\n💡 Next steps:`;
                 infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
                 infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
@@ -3532,14 +3663,17 @@ registerToolWithTelemetry(
                 infoText += `\n  • android_find_element(text="...") — find element coordinates without tapping`;
             }
 
-            // Check for LogBox overlay (uses default CDP device — native deviceId cannot be mapped to CDP device name)
-            try {
-                const logBoxState = await detectLogBox();
-                if (logBoxState && logBoxState.total > 0) {
-                    infoText += formatLogBoxWarning(logBoxState);
+            // Check for LogBox overlay — only on the matching RN app; skip otherwise
+            // to avoid surfacing warnings from a different device's app.
+            if (canEnrich) {
+                try {
+                    const logBoxState = await detectLogBox(targetDeviceName);
+                    if (logBoxState && logBoxState.total > 0) {
+                        infoText += formatLogBoxWarning(logBoxState);
+                    }
+                } catch {
+                    // Non-fatal: LogBox detection failure should not break screenshot
                 }
-            } catch {
-                // Non-fatal: LogBox detection failure should not break screenshot
             }
 
             imageBuffer.add({
@@ -4153,10 +4287,16 @@ registerToolWithTelemetry(
             const pixelWidth = result.originalWidth || 0;
             const pixelHeight = result.originalHeight || 0;
 
-            // Store screenshot metadata for coordinate conversion
-            const firstApp = connectedApps.values().next().value;
-            if (firstApp) {
-                firstApp.lastScreenshot = {
+            // Resolve the RN app running on THIS simulator so enrichment pulls
+            // fiber/layout data from the right app (not the first-connected one,
+            // which may belong to a different simulator).
+            const resolvedUdid = udid || (await getActiveOrBootedSimulatorUdid());
+            const targetApp = resolvedUdid ? getConnectedAppBySimulatorUdid(resolvedUdid) : null;
+            const targetDeviceName = targetApp?.deviceInfo.deviceName;
+
+            // Store screenshot metadata on the matching app (not an arbitrary one)
+            if (targetApp) {
+                targetApp.lastScreenshot = {
                     originalWidth: pixelWidth,
                     originalHeight: pixelHeight,
                     scaleFactor: result.scaleFactor || 1,
@@ -4212,28 +4352,34 @@ registerToolWithTelemetry(
 
             const safeAreaOffsetPixels = safeAreaTop * scaleFactor;
 
-            // Enrich with screen layout data (component names + tap coordinates)
-            let layoutText: string | null = null;
-            try {
-                layoutText = await enrichScreenshotWithLayout(scaleFactor, result.scaleFactor || 1);
-            } catch {
-                // Non-fatal: screenshot works without layout enrichment
-            }
+            // The Screen Layout tree was previously appended here but produced huge noisy
+            // output (nested Svg/G/Path duplicates). Agents should use get_screen_layout
+            // explicitly when they need the tree. The Pressable elements block below is
+            // the signal most consumers actually want.
+            let pressablesText: string | null = null;
+            const canEnrich = !!targetApp;
 
             // Enrich with pressable elements (filtered list of tappable components, converted to screenshot pixel coords)
-            let pressablesText: string | null = null;
             try {
-                const pressables = await getPressableElements({});
+                if (!canEnrich) throw new Error("skip");
+                const pressables = await getPressableElements({ device: targetDeviceName });
                 if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
                     const screenshotScale = result.scaleFactor || 1;
                     pressablesText = pressables.parsedElements.map((el) => {
+                        // See enrichScreenshotWithLayout: shift y when fiber reports the element
+                        // inside the safe-area band (a react-native-screens modal artifact).
+                        let centerYPoints = el.center.y;
+                        if (safeAreaTop > 0 && centerYPoints < safeAreaTop) {
+                            centerYPoints += safeAreaTop;
+                        }
                         const px = Math.round((el.center.x * scaleFactor) / screenshotScale);
-                        const py = Math.round((el.center.y * scaleFactor) / screenshotScale);
-                        const label = el.accessibilityLabel || el.text || el.testID || el.component;
+                        const py = Math.round((centerYPoints * scaleFactor) / screenshotScale);
+                        const label = el.accessibilityLabel || el.text || el.testID || (el.intent ? `${el.intent} icon` : el.component);
                         const idPart = el.testID ? ` testID="${el.testID}"` : "";
                         const kindPart = el.isInput ? " [input]" : "";
                         const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
-                        return `  (${px}, ${py}) ${el.component}: "${label}"${idPart}${kindPart}${wrapPart}`;
+                        const nearPart = !el.text && !el.accessibilityLabel && el.nearbyText ? ` near "${el.nearbyText}"` : "";
+                        return `  (${px}, ${py}) ${el.component}: "${label}"${nearPart}${idPart}${kindPart}${wrapPart}`;
                     }).join("\n");
                 }
             } catch {
@@ -4250,18 +4396,16 @@ registerToolWithTelemetry(
             if (pressablesText) {
                 infoText += `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
                 infoText += `\n${pressablesText}`;
-            }
-            if (layoutText) {
-                infoText += `\n\n📋 Screen Layout (all components, tap coordinates in pixels):`;
-                infoText += `\n${layoutText}`;
-            }
-            if (pressablesText || layoutText) {
                 infoText += `\n\n💡 Next steps:`;
                 infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
                 infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
                 infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
-                infoText += `\n  • inspect_component("ComponentName") — inspect a component from the layout`;
+                infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
             } else {
+                if (!canEnrich && connectedApps.size > 0) {
+                    infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to simulator ${resolvedUdid}.`;
+                    infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
+                }
                 infoText += `\n\n💡 Next steps:`;
                 infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
                 infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
@@ -4269,14 +4413,17 @@ registerToolWithTelemetry(
                 infoText += `\n  • ios_find_element(label="...") — find element coordinates without tapping`;
             }
 
-            // Check for LogBox overlay (uses default CDP device — native UDID cannot be mapped to CDP device name)
-            try {
-                const logBoxState = await detectLogBox();
-                if (logBoxState && logBoxState.total > 0) {
-                    infoText += formatLogBoxWarning(logBoxState);
+            // Check for LogBox overlay — only on the matching RN app; skip otherwise
+            // to avoid surfacing warnings from a different simulator's app.
+            if (canEnrich) {
+                try {
+                    const logBoxState = await detectLogBox(targetDeviceName);
+                    if (logBoxState && logBoxState.total > 0) {
+                        infoText += formatLogBoxWarning(logBoxState);
+                    }
+                } catch {
+                    // Non-fatal: LogBox detection failure should not break screenshot
                 }
-            } catch {
-                // Non-fatal: LogBox detection failure should not break screenshot
             }
 
             imageBuffer.add({

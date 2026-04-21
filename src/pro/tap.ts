@@ -10,7 +10,8 @@ import {
     getActiveOrBootedSimulatorUdid,
     findSimulatorByName,
     isUiDriverAvailable,
-    getUiDriverInstallHint
+    getUiDriverInstallHint,
+    getIOSSafeAreaTop
 } from "../core/ios.js";
 import { androidTap, androidFindElement, getDefaultAndroidDevice, androidScreenshot } from "../core/android.js";
 import { compareScreenshots } from "./screenshot-diff.js";
@@ -177,7 +178,8 @@ export interface TapResult {
     device?: string;
     error?: string;
     attempted?: TapAttempt[];
-    matches?: Array<{ index: number; component: string; text: string }>;
+    matches?: Array<{ index: number; component: string; text: string; testID?: string | null; x?: number; y?: number }>;
+    ambiguous?: boolean;
     suggestion?: string;
     screenshot?: TapScreenshot;
     verification?: TapVerification;
@@ -409,7 +411,8 @@ export function formatTapFailure(data: {
     attempted: TapAttempt[];
     suggestion: string;
     device?: string;
-    matches?: Array<{ index: number; component: string; text: string }>;
+    matches?: Array<{ index: number; component: string; text: string; testID?: string | null; x?: number; y?: number }>;
+    ambiguous?: boolean;
     screenshot?: TapScreenshot;
     verification?: TapVerification;
 }): TapResult {
@@ -428,6 +431,7 @@ export function formatTapFailure(data: {
         attempted: data.attempted,
         suggestion: data.suggestion,
         matches: data.matches,
+        ...(data.ambiguous && { ambiguous: true }),
         ...(data.device && { device: data.device }),
         ...(data.verification && { verification: data.verification }),
         ...(data.screenshot && { screenshot: data.screenshot }),
@@ -453,7 +457,8 @@ interface StrategyResult {
     screen?: string | null;
     path?: string | null;
     component?: string | null;
-    matches?: Array<{ index: number; component: string; text: string }>;
+    matches?: Array<{ index: number; component: string; text: string; testID?: string | null; x?: number; y?: number }>;
+    ambiguous?: boolean;
     convertedTo?: { x: number; y: number; unit: string };
 }
 
@@ -523,6 +528,17 @@ async function tryFiberAtDepth(
         // goes through React's event pipeline, executing any onPress wrappers
         // (analytics, debouncing, state tracking) inside the component.
         if (parsed.needsNativeTap) {
+            // Ambiguity guard: if multiple elements match and the caller didn't
+            // specify an explicit index, refuse to tap and surface the full list
+            // so the agent can pick the right one.
+            if ((parsed.totalMatches ?? 1) > 1 && index === undefined) {
+                return {
+                    success: false,
+                    reason: `Ambiguous: ${parsed.totalMatches} elements match this query — use index= to pick one`,
+                    matches: parsed.allMatches || [],
+                    ambiguous: true
+                };
+            }
             const elementType = parsed.isInput ? "input element" : "pressable element";
             if (parsed.nativeTapTarget && parsed.nativeTapTarget.x && parsed.nativeTapTarget.y) {
                 return {
@@ -610,13 +626,24 @@ async function tryAccessibilityStrategy(
                 }
             } else {
                 const searchText = query.text!;
+                // Exact label match first to avoid matching dialog titles like "Clear All"
+                // when the query is a single word that happens to be a substring ("Clear").
                 result = await iosFindElement(
                     {
-                        labelContains: searchText,
+                        label: searchText,
                         index
                     },
                     udid
                 );
+                if (!result.success || !result.allMatches || result.allMatches.length === 0) {
+                    result = await iosFindElement(
+                        {
+                            labelContains: searchText,
+                            index
+                        },
+                        udid
+                    );
+                }
             }
 
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
@@ -923,13 +950,94 @@ function screenshotToBase64(buffer: Buffer): string {
   return buffer.toString("base64");
 }
 
+/**
+ * Composite a red crosshair marker onto a screenshot at the given pixel coordinates.
+ * Uses sharp + SVG so we don't need to inject into the app. Coordinates are in the
+ * screenshot's own pixel space (i.e. the space the returned image uses).
+ */
+async function drawTapMarker(input: Buffer, x: number, y: number): Promise<Buffer> {
+    try {
+        const sharp = (await import("sharp")).default;
+        const size = 72;
+        const half = size / 2;
+        const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="${half}" cy="${half}" r="${half - 8}" fill="none" stroke="white" stroke-width="6" opacity="0.85"/>
+  <circle cx="${half}" cy="${half}" r="${half - 8}" fill="none" stroke="#FF2D55" stroke-width="3" opacity="1"/>
+  <line x1="${half}" y1="8" x2="${half}" y2="${size - 8}" stroke="white" stroke-width="6" opacity="0.85"/>
+  <line x1="8" y1="${half}" x2="${size - 8}" y2="${half}" stroke="white" stroke-width="6" opacity="0.85"/>
+  <line x1="${half}" y1="8" x2="${half}" y2="${size - 8}" stroke="#FF2D55" stroke-width="2.5"/>
+  <line x1="8" y1="${half}" x2="${size - 8}" y2="${half}" stroke="#FF2D55" stroke-width="2.5"/>
+  <circle cx="${half}" cy="${half}" r="3" fill="#FF2D55"/>
+</svg>`;
+        const left = Math.round(x - half);
+        const top = Math.round(y - half);
+        return await sharp(input)
+            .composite([{ input: Buffer.from(svg), left, top }])
+            .toBuffer();
+    } catch {
+        return input;
+    }
+}
+
+/**
+ * Compute marker coordinates in screenshot-pixel space (what the returned PNG uses).
+ * Unit rules by strategy, assuming screenshotScale = downscale factor:
+ *   coordinate  : input is already screenshot pixels → pass through
+ *   ocr         : match.tapCenter is image-pixel (= screenshot-pixel) → pass through
+ *   iOS points  : point * DPR / screenshotScale
+ *   android dp  : dp * densityScale / screenshotScale
+ *   android devicePx : devicePx / screenshotScale
+ */
+function computeMarkerPx(args: {
+    strategy: string;
+    input?: { x: number; y: number };
+    convertedTo?: { x: number; y: number; unit: string };
+    platform: "ios" | "android";
+    screenshotScale: number;
+    devicePixelRatio?: number;
+    androidDensityScale?: number;
+}): { x: number; y: number } | undefined {
+    const { strategy, input, convertedTo, platform, screenshotScale, devicePixelRatio, androidDensityScale } = args;
+    const scale = screenshotScale || 1;
+
+    if (strategy === "coordinate" || strategy === "native-coordinate") {
+        return input ? { x: input.x, y: input.y } : undefined;
+    }
+    if (!convertedTo) return undefined;
+    if (strategy === "ocr") {
+        return { x: Math.round(convertedTo.x), y: Math.round(convertedTo.y) };
+    }
+    if (platform === "ios") {
+        // fiber/accessibility on iOS return points
+        const dpr = devicePixelRatio || 3;
+        return {
+            x: Math.round((convertedTo.x * dpr) / scale),
+            y: Math.round((convertedTo.y * dpr) / scale)
+        };
+    }
+    // Android
+    if (strategy === "fiber+native" && androidDensityScale) {
+        // Fabric fiber returns dp; fiber+native path scales to device pixels before tap
+        return {
+            x: Math.round((convertedTo.x * androidDensityScale) / scale),
+            y: Math.round((convertedTo.y * androidDensityScale) / scale)
+        };
+    }
+    // accessibility android: convertedTo is device pixels
+    return {
+        x: Math.round(convertedTo.x / scale),
+        y: Math.round(convertedTo.y / scale)
+    };
+}
+
 async function verifyAndCapture(
     platform: "ios" | "android",
     shouldVerify: boolean,
     shouldScreenshot: boolean,
     beforeBuffer: Buffer | null,
     udid?: string,
-    beforeScaleFactor?: number
+    beforeScaleFactor?: number,
+    markerPx?: { x: number; y: number }
 ): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
     if (!shouldScreenshot) return {};
 
@@ -938,8 +1046,12 @@ async function verifyAndCapture(
     const after = await captureScreenshot(platform, udid);
     if (!after) return {};
 
+    const afterWithMarker = markerPx
+        ? await drawTapMarker(after.buffer, markerPx.x, markerPx.y)
+        : after.buffer;
+
     const screenshot: TapScreenshot = {
-        image: screenshotToBase64(after.buffer),
+        image: screenshotToBase64(afterWithMarker),
         width: after.width,
         height: after.height,
         scaleFactor: after.scaleFactor
@@ -984,7 +1096,7 @@ async function verifyAndCapture(
     }
     imageBuffer.add({
         id: `${verifyGroupId}-after`,
-        image: after.buffer,
+        image: afterWithMarker,
         timestamp: Date.now(),
         source: "tap-verify",
         groupId: verifyGroupId,
@@ -1003,7 +1115,8 @@ async function burstCaptureAndVerify(
     platform: "ios" | "android",
     beforeBuffer: Buffer | null,
     udid?: string,
-    beforeScaleFactor?: number
+    beforeScaleFactor?: number,
+    markerPx?: { x: number; y: number }
 ): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
     if (!beforeBuffer) return {};
 
@@ -1023,13 +1136,24 @@ async function burstCaptureAndVerify(
 
     const rawStatusBar = platform === "ios" ? 177 : 142; // pixels in original screenshot space
     const statusBarHeight = Math.round(rawStatusBar / capturedScaleFactor);
+    // Run the diff on clean frames (no marker) so the cross doesn't register as change.
     const analysis = await analyzeBurstFrames(frames, { statusBarHeight });
 
-    const groupId = `burst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Apply marker to post-tap frames only (frames[0] is the before state).
+    const markedFrames: Buffer[] = [];
     for (let i = 0; i < frames.length; i++) {
+        if (markerPx && i > 0) {
+            markedFrames.push(await drawTapMarker(frames[i], markerPx.x, markerPx.y));
+        } else {
+            markedFrames.push(frames[i]);
+        }
+    }
+
+    const groupId = `burst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    for (let i = 0; i < markedFrames.length; i++) {
         imageBuffer.add({
             id: `${groupId}-f${i}`,
-            image: frames[i],
+            image: markedFrames[i],
             timestamp: Date.now(),
             source: "tap-burst",
             groupId,
@@ -1058,9 +1182,9 @@ async function burstCaptureAndVerify(
 
     // Get dimensions from the last frame using sharp
     const sharp = (await import("sharp")).default;
-    const meta = await sharp(frames[frames.length - 1]).metadata();
+    const meta = await sharp(markedFrames[markedFrames.length - 1]).metadata();
     const screenshot: TapScreenshot = {
-        image: screenshotToBase64(frames[frames.length - 1]),
+        image: screenshotToBase64(markedFrames[markedFrames.length - 1]),
         width: meta.width || 0,
         height: meta.height || 0,
         scaleFactor: 1
@@ -1207,12 +1331,19 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         if (result.success) {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
+            const nativeMarker = computeMarkerPx({
+                strategy: "native-coordinate",
+                input: { x: query.x!, y: query.y! },
+                platform,
+                screenshotScale: nativeScreenshotMeta?.scaleFactor || 1
+            });
             if (options.burst && nativeShouldVerify && nativeBeforeBuffer) {
                 ({ screenshot, verification } = await burstCaptureAndVerify(
                     platform,
                     nativeBeforeBuffer,
                     nativeUdid,
-                    nativeScreenshotMeta?.scaleFactor
+                    nativeScreenshotMeta?.scaleFactor,
+                    nativeMarker
                 ));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
@@ -1221,7 +1352,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     nativeShouldScreenshot,
                     nativeBeforeBuffer,
                     nativeUdid,
-                    nativeScreenshotMeta?.scaleFactor
+                    nativeScreenshotMeta?.scaleFactor,
+                    nativeMarker
                 ));
             }
             return formatTapSuccess({
@@ -1431,12 +1563,28 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         if (result.success) {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
+            let dprForMarker: number | undefined;
+            if (platform === "ios") {
+                try {
+                    const { getDevicePixelRatio } = await import("../core/ios.js");
+                    dprForMarker = await getDevicePixelRatio(targetUdid);
+                } catch { dprForMarker = 3; }
+            }
+            const strategyMarker = computeMarkerPx({
+                strategy: strat,
+                input: strat === "coordinate" ? { x: query.x!, y: query.y! } : undefined,
+                convertedTo: result.convertedTo,
+                platform,
+                screenshotScale: beforeScaleFactor || app?.lastScreenshot?.scaleFactor || 1,
+                devicePixelRatio: dprForMarker
+            });
             if (options.burst && canVerify && beforeBuffer) {
                 ({ screenshot, verification } = await burstCaptureAndVerify(
                     platform,
                     beforeBuffer,
                     targetUdid,
-                    beforeScaleFactor
+                    beforeScaleFactor,
+                    strategyMarker
                 ));
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
@@ -1445,7 +1593,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     shouldScreenshot,
                     beforeBuffer,
                     targetUdid,
-                    beforeScaleFactor
+                    beforeScaleFactor,
+                    strategyMarker
                 ));
             }
             if (screenshot && app) {
@@ -1478,8 +1627,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             try {
                 const coords = result.convertedTo;
                 if (platform === "ios") {
-                    // Fabric returns points — iosTap expects points
-                    await iosTap(coords.x, coords.y, { udid: targetUdid });
+                    // react-native-screens modal/sheet presentations cause measureInWindow to
+                    // return y relative to the screen's content origin, not the window. If the
+                    // measured y falls inside the safe-area band, shift it down by the inset.
+                    const safeAreaTop = await getIOSSafeAreaTop(targetUdid);
+                    const tapY = (safeAreaTop > 0 && coords.y < safeAreaTop) ? coords.y + safeAreaTop : coords.y;
+                    await iosTap(coords.x, tapY, { udid: targetUdid });
+                    coords.y = tapY;
                 } else {
                     // Fabric returns dp — androidTap expects pixels
                     // Convert dp to pixels using device density
@@ -1491,12 +1645,35 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 // fiber+native uses native tap — always verify
                 let screenshot: TapScreenshot | undefined;
                 let verification: TapVerification | undefined;
+                let fnDpr: number | undefined;
+                let fnDensity: number | undefined;
+                if (platform === "ios") {
+                    try {
+                        const { getDevicePixelRatio } = await import("../core/ios.js");
+                        fnDpr = await getDevicePixelRatio(targetUdid);
+                    } catch { fnDpr = 3; }
+                } else {
+                    try {
+                        const { androidGetDensity } = await import("../core/android.js");
+                        const d = await androidGetDensity();
+                        fnDensity = (d.density || 420) / 160;
+                    } catch { fnDensity = undefined; }
+                }
+                const fiberMarker = computeMarkerPx({
+                    strategy: "fiber+native",
+                    convertedTo: coords,
+                    platform,
+                    screenshotScale: beforeScaleFactor || app?.lastScreenshot?.scaleFactor || 1,
+                    devicePixelRatio: fnDpr,
+                    androidDensityScale: fnDensity
+                });
                 if (options.burst && canVerify && beforeBuffer) {
                     ({ screenshot, verification } = await burstCaptureAndVerify(
                         platform,
                         beforeBuffer,
                         targetUdid,
-                        beforeScaleFactor
+                        beforeScaleFactor,
+                        fiberMarker
                     ));
                 } else {
                     ({ screenshot, verification } = await verifyAndCapture(
@@ -1505,7 +1682,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         shouldScreenshot,
                         beforeBuffer,
                         targetUdid,
-                        beforeScaleFactor
+                        beforeScaleFactor,
+                        fiberMarker
                     ));
                 }
                 if (screenshot && app) {
@@ -1533,8 +1711,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             }
         }
 
-        // If we got match suggestions from fiber, carry them forward
-        if (result.matches) {
+        // Ambiguous fiber result — multiple elements matched, no index given.
+        // Return immediately with the full list so the agent can decide.
+        // Do NOT fall through to other strategies (they can't resolve ambiguity).
+        if (result.matches && result.ambiguous) {
             const { screenshot: matchScreenshot } = shouldScreenshot
                 ? await verifyAndCapture(platform, false, true, null, targetUdid)
                 : { screenshot: undefined };
@@ -1548,9 +1728,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             return formatTapFailure({
                 query,
                 attempted,
-                suggestion: `Found ${result.matches.length} match(es) — specify index to select one`,
+                error: `Ambiguous: ${result.matches.length} elements match this query. Tap did not execute.`,
+                suggestion: `Specify index= (0–${result.matches.length - 1}) or add text= to narrow down. See matches[] for position and text of each element.`,
                 device: deviceName,
                 matches: result.matches,
+                ambiguous: true,
                 screenshot: matchScreenshot
             });
         }

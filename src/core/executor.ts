@@ -1315,6 +1315,19 @@ export async function getScreenLayout(
                     typeof sn.canonical.publicInstance.measureInWindow === 'function') {
                     return sn.canonical.publicInstance;
                 }
+                // Fabric leaf nodes like RCTText have no publicInstance. Measure via
+                // the native Fabric UIManager using the shadow node instead — needed
+                // for text bounds that are tight around the glyphs (not the scroll
+                // container the text happens to live inside).
+                if (sn.node && globalThis.nativeFabricUIManager &&
+                    typeof globalThis.nativeFabricUIManager.measureInWindow === 'function') {
+                    var node = sn.node;
+                    return {
+                        measureInWindow: function(cb) {
+                            try { globalThis.nativeFabricUIManager.measureInWindow(node, cb); } catch(e) {}
+                        }
+                    };
+                }
                 return null;
             }
 
@@ -1801,6 +1814,8 @@ interface PressableElement {
     hasLabel: boolean;
     isInput: boolean;
     isWrapper?: boolean;
+    intent?: string;
+    nearbyText?: string;
 }
 
 export async function getPressableElements(
@@ -1833,6 +1848,19 @@ export async function getPressableElements(
                 if (sn.canonical && sn.canonical.publicInstance &&
                     typeof sn.canonical.publicInstance.measureInWindow === 'function') {
                     return sn.canonical.publicInstance;
+                }
+                // Fabric leaf nodes like RCTText have no publicInstance. Measure via
+                // the native Fabric UIManager using the shadow node instead — needed
+                // for text bounds that are tight around the glyphs (not the scroll
+                // container the text happens to live inside).
+                if (sn.node && globalThis.nativeFabricUIManager &&
+                    typeof globalThis.nativeFabricUIManager.measureInWindow === 'function') {
+                    var node = sn.node;
+                    return {
+                        measureInWindow: function(cb) {
+                            try { globalThis.nativeFabricUIManager.measureInWindow(node, cb); } catch(e) {}
+                        }
+                    };
                 }
                 return null;
             }
@@ -1904,6 +1932,8 @@ export async function getPressableElements(
 
             var hostFibers = [];
             var fiberMeta = [];
+            var textFibers = [];
+            var textContents = [];
 
             function findMeaningfulAncestorName(fiber) {
                 var cur = fiber.return;
@@ -1920,6 +1950,30 @@ export async function getPressableElements(
                 }
                 return fallbackName;
             }
+
+            // Layout-only and touch-wrapper components that should be skipped when scanning
+            // children for a meaningful icon/content component name.
+            var SKIP_IN_CHILD_SCAN = /^(View|Text|Image|ImageBackground|ScrollView|FlatList|SectionList|KeyboardAvoidingView|SafeAreaView|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|TouchableNativeFeedback|Pressable|TextInput|ActivityIndicator|Switch|Modal|StatusBar|VirtualizedList|RefreshControl|Animated\\(.*|withAnimated.*|AnimatedComponent.*)$/;
+
+            // Scan children of a pressable for a meaningful component name (e.g. SvgChevronBack inside a View).
+            // Skips generic layout/touch wrappers to find the actual icon or content component.
+            function findMeaningfulChildName(fiber) {
+                function scan(f, d) {
+                    if (!f || d > 12) return null;
+                    var n = getComponentName(f);
+                    if (n && typeof f.type !== 'string' && !RN_PRIMITIVES.test(n) && !SKIP_IN_CHILD_SCAN.test(n)) return n;
+                    var c = f.child;
+                    while (c) {
+                        var r = scan(c, d + 1);
+                        if (r) return r;
+                        c = c.sibling;
+                    }
+                    return null;
+                }
+                return scan(fiber.child, 0);
+            }
+
+            var GENERIC_COMPONENT = /^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText|Unknown)$/;
 
             function buildPath(fiber) {
                 var parts = [];
@@ -1960,6 +2014,12 @@ export async function getPressableElements(
                     if (hostsForThis.length > 0) {
                         var text = collectText(fiber, 0, true);
                         var componentName = findMeaningfulAncestorName(fiber) || name || 'Unknown';
+                        // If name is generic (e.g. View, TouchableOpacity), scan children for a
+                        // meaningful name like SvgChevronBack so icon-only buttons are identifiable.
+                        if (GENERIC_COMPONENT.test(componentName)) {
+                            var childName = findMeaningfulChildName(fiber);
+                            if (childName) componentName = childName;
+                        }
                         var path = buildPath(fiber);
                         var testID = (props && (props.testID || props.nativeID)) || null;
                         var accessibilityLabel = (props && props.accessibilityLabel) || null;
@@ -1990,6 +2050,76 @@ export async function getPressableElements(
 
             walkPressables(roots[0].current, 0);
 
+            // Collect text fibers that are NOT inside a pressable — used later to attach
+            // spatial 'nearbyText' hints to icon-only pressables.
+            function extractTextString(fiber) {
+                var p = fiber.memoizedProps;
+                if (!p) return '';
+                var ch = p.children;
+                if (typeof ch === 'string') return ch;
+                if (typeof ch === 'number') return String(ch);
+                if (Array.isArray(ch)) {
+                    var parts = [];
+                    for (var k = 0; k < ch.length; k++) {
+                        if (typeof ch[k] === 'string') parts.push(ch[k]);
+                        else if (typeof ch[k] === 'number') parts.push(String(ch[k]));
+                    }
+                    if (parts.length > 0) return parts.join('');
+                }
+                return '';
+            }
+
+            function walkTexts(fiber, depth, insidePressable, inHidden) {
+                if (!fiber || depth > 5000) return;
+                var name = getComponentName(fiber);
+                var props = fiber.memoizedProps;
+
+                // Track hidden-screen ancestry without early return — a MaybeScreen wrapper
+                // can enclose BOTH the active and inactive siblings, so we must keep walking
+                // to find the active one while still skipping the inactive subtree's texts.
+                var nextHidden = inHidden;
+                if (name === 'MaybeScreen' && props && props.active === 0) nextHidden = true;
+                if (name === 'SceneView' && props && props.focused === false) nextHidden = true;
+                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) nextHidden = true;
+
+                var hasOnPress = props && typeof props.onPress === 'function';
+                var isInputHere = props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
+                var nextInside = insidePressable || !!hasOnPress || !!isInputHere;
+
+                // Record standalone text when outside any pressable. Detects both stock
+                // Text and custom wrappers (CustomText, ThemedText, etc.) by checking for
+                // direct string/number children. Fabric RCTText has no publicInstance, so
+                // we walk up the fiber chain to the nearest measurable host (the View
+                // enclosing the text) and use its frame as the text's proxy bounds.
+                if (!insidePressable && !nextHidden && name !== 'RCTText' && typeof fiber.type !== 'string') {
+                    var str = extractTextString(fiber);
+                    if (str && str.length > 0 && str.length <= 120) {
+                        var up = fiber;
+                        var upDepth = 0;
+                        var measurable = null;
+                        while (up && upDepth < 20) {
+                            if (typeof up.type === 'string' && getMeasurable(up)) {
+                                measurable = up;
+                                break;
+                            }
+                            up = up.return;
+                            upDepth++;
+                        }
+                        if (measurable) {
+                            textFibers.push(measurable);
+                            textContents.push(str);
+                        }
+                    }
+                }
+
+                var child = fiber.child;
+                while (child) {
+                    walkTexts(child, depth + 1, nextInside, nextHidden);
+                    child = child.sibling;
+                }
+            }
+            walkTexts(roots[0].current, 0, false, false);
+
             if (hostFibers.length === 0) return { error: 'No pressable elements found on screen.' };
 
             // Also measure the root view for viewport detection (appended; tracked by explicit index to preserve hostIndices)
@@ -2015,7 +2145,19 @@ export async function getPressableElements(
                 } catch(e) {}
             }
 
-            return { count: hostFibers.length };
+            globalThis.__pressableTextContents = textContents;
+            globalThis.__pressableTextMeasurements = new Array(textFibers.length).fill(null);
+            for (var ti = 0; ti < textFibers.length; ti++) {
+                try {
+                    (function(idx) {
+                        getMeasurable(textFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                            globalThis.__pressableTextMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                        });
+                    })(ti);
+                } catch(e) {}
+            }
+
+            return { count: hostFibers.length, textCount: textFibers.length };
         })()
     `;
 
@@ -2039,10 +2181,14 @@ export async function getPressableElements(
             var meta = globalThis.__pressableMeta;
             var measurements = globalThis.__pressableMeasurements;
             var rootIdx = globalThis.__pressableRootIdx;
+            var textContents = globalThis.__pressableTextContents || [];
+            var textMeasurements = globalThis.__pressableTextMeasurements || [];
             globalThis.__pressableFibers = null;
             globalThis.__pressableMeta = null;
             globalThis.__pressableMeasurements = null;
             globalThis.__pressableRootIdx = null;
+            globalThis.__pressableTextContents = null;
+            globalThis.__pressableTextMeasurements = null;
 
             if (!fibers || !measurements || !meta) {
                 return { error: 'No measurement data. Run get_pressable_elements again.' };
@@ -2181,6 +2327,65 @@ export async function getPressableElements(
                 }
             }
 
+            // Build a normalized list of visible standalone texts (content + frame)
+            var textBoxes = [];
+            for (var tmi = 0; tmi < textMeasurements.length; tmi++) {
+                var tm = textMeasurements[tmi];
+                var tc = textContents[tmi];
+                if (!tm || !tc) continue;
+                if (tm.width <= 0 || tm.height <= 0) continue;
+                if (tm.x + tm.width < 0 || tm.y + tm.height < 0) continue;
+                if (tm.x > viewportW || tm.y > viewportH) continue;
+                textBoxes.push({
+                    text: tc,
+                    x: tm.x, y: tm.y, width: tm.width, height: tm.height,
+                    cx: tm.x + tm.width / 2, cy: tm.y + tm.height / 2
+                });
+            }
+
+            // Humanize component name → intent (strip Svg/Icon prefixes, split camelCase)
+            function humanize(name) {
+                if (!name) return '';
+                var n = String(name);
+                n = n.replace(/^(Svg|Icon)/, '').replace(/(Svg|Icon)$/, '');
+                n = n.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+                n = n.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+                return n.trim().toLowerCase();
+            }
+
+            // Attach nearbyText for pressables that lack their own text/label.
+            // Nearest text by center-to-center distance, within a reasonable radius.
+            var NEARBY_RADIUS = 120; // points
+            for (var ei = 0; ei < elements.length; ei++) {
+                var pe = elements[ei];
+                pe.intent = humanize(pe.component);
+                // Skip when the pressable already has its own human-readable text or a11y label.
+                // testID alone doesn't suppress nearbyText — the testID may be cryptic and the
+                // surrounding visible text is still a useful handle for an agent.
+                if (pe.hasLabel || pe.accessibilityLabel) continue;
+                if (textBoxes.length === 0) continue;
+
+                var pcx = pe.frame.x + pe.frame.width / 2;
+                var pcy = pe.frame.y + pe.frame.height / 2;
+                var best = null;
+                var bestDist = Infinity;
+                for (var tbi = 0; tbi < textBoxes.length; tbi++) {
+                    var tb = textBoxes[tbi];
+                    // Skip texts contained inside this pressable (shouldn't happen — walkTexts excludes them — but defensive)
+                    if (tb.x >= pe.frame.x && tb.y >= pe.frame.y &&
+                        tb.x + tb.width <= pe.frame.x + pe.frame.width &&
+                        tb.y + tb.height <= pe.frame.y + pe.frame.height) continue;
+                    var dx = tb.cx - pcx;
+                    var dy = tb.cy - pcy;
+                    var d = Math.sqrt(dx * dx + dy * dy);
+                    if (d < bestDist && d <= NEARBY_RADIUS) {
+                        bestDist = d;
+                        best = tb;
+                    }
+                }
+                if (best) pe.nearbyText = best.text;
+            }
+
             // Sort top-to-bottom, left-to-right
             elements.sort(function(a, b) {
                 if (a.center.y !== b.center.y) return a.center.y - b.center.y;
@@ -2215,15 +2420,20 @@ export async function getPressableElements(
             for (let i = 0; i < pressableElements.length; i++) {
                 const el = pressableElements[i];
                 const num = i + 1;
-                const label = el.hasLabel ? `"${el.text}"` : "(icon/image)";
+                const label = el.hasLabel
+                    ? `"${el.text}"`
+                    : el.intent
+                      ? `(${el.intent} icon)`
+                      : "(icon/image)";
                 const ids: string[] = [];
                 if (el.testID) ids.push(`testID="${el.testID}"`);
                 if (el.accessibilityLabel) ids.push(`a11y="${el.accessibilityLabel}"`);
                 const idStr = ids.length > 0 ? ` [${ids.join(", ")}]` : "";
                 const inputStr = el.isInput ? " (input)" : "";
                 const wrapperStr = el.isWrapper ? " [wrapper — skip unless dismissing keyboard]" : "";
+                const nearPart = el.nearbyText ? ` near "${el.nearbyText}"` : "";
                 lines.push(
-                    `${num}. ${el.component} ${label} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})${idStr}${inputStr}${wrapperStr}`
+                    `${num}. ${el.component} ${label}${nearPart} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})${idStr}${inputStr}${wrapperStr}`
                 );
                 if (el.path) lines.push(`   path: ${el.path}`);
             }
@@ -2294,7 +2504,8 @@ function formatEnrichedLayoutTree(
 export async function enrichScreenshotWithLayout(
     pixelRatio: number,
     screenshotScaleFactor: number,
-    device?: string
+    device?: string,
+    safeAreaTopPoints: number = 0
 ): Promise<string | null> {
     try {
         const result = await getScreenLayout({ extended: false, summary: false, device, raw: true });
@@ -2303,18 +2514,24 @@ export async function enrichScreenshotWithLayout(
         const elements: EnrichedElement[] = result.parsedElements.map((el: ScreenElement) => {
             const frame = el.frame || { x: 0, y: 0, width: 0, height: 0 };
 
-            // Convert center point from points/dp to screenshot pixels
-            // Points -> device pixels: multiply by pixelRatio
-            // Device pixels -> screenshot pixels: divide by screenshotScaleFactor (if image was resized)
+            // React-native-screens modal/sheet presentations on iOS cause measureInWindow to return y
+            // relative to the screen's content origin (below safe-area inset), not the window origin.
+            // An element whose center y sits inside the safe-area band is physically impossible for a
+            // visible interactive target — treat that as a sign of the shifted space and add the inset.
             const centerXPoints = frame.x + frame.width / 2;
-            const centerYPoints = frame.y + frame.height / 2;
+            let centerYPoints = frame.y + frame.height / 2;
+            let yPoints = frame.y;
+            if (safeAreaTopPoints > 0 && centerYPoints < safeAreaTopPoints) {
+                centerYPoints += safeAreaTopPoints;
+                yPoints += safeAreaTopPoints;
+            }
+
             const tapX = Math.round((centerXPoints * pixelRatio) / screenshotScaleFactor);
             const tapY = Math.round((centerYPoints * pixelRatio) / screenshotScaleFactor);
 
-            // Convert frame to pixels too
             const pixelFrame = {
                 x: Math.round((frame.x * pixelRatio) / screenshotScaleFactor),
-                y: Math.round((frame.y * pixelRatio) / screenshotScaleFactor),
+                y: Math.round((yPoints * pixelRatio) / screenshotScaleFactor),
                 width: Math.round((frame.width * pixelRatio) / screenshotScaleFactor),
                 height: Math.round((frame.height * pixelRatio) / screenshotScaleFactor),
             };
@@ -2825,27 +3042,35 @@ export async function pressElement(options: {
                 return fiber.type.displayName || fiber.type.name || null;
             }
 
+            // When a fiber holds a string/number child via memoizedProps.children, return it
+            // without recursing — Text > RCTText > NativeText all carry the same string,
+            // and walking through every layer duplicates it (e.g. "CircularsCircularsCirculars").
             function extractText(fiber, depth) {
                 if (!fiber || depth > 5000) return '';
-                var parts = [];
                 var props = fiber.memoizedProps;
                 if (props) {
                     var ch = props.children;
-                    if (typeof ch === 'string') parts.push(ch);
-                    else if (typeof ch === 'number') parts.push(String(ch));
-                    else if (Array.isArray(ch)) {
+                    if (typeof ch === 'string') return ch;
+                    if (typeof ch === 'number') return String(ch);
+                    if (Array.isArray(ch)) {
+                        var allPrimitive = ch.length > 0;
+                        var inline = [];
                         for (var i = 0; i < ch.length; i++) {
-                            if (typeof ch[i] === 'string') parts.push(ch[i]);
-                            else if (typeof ch[i] === 'number') parts.push(String(ch[i]));
+                            if (typeof ch[i] === 'string') inline.push(ch[i]);
+                            else if (typeof ch[i] === 'number') inline.push(String(ch[i]));
+                            else { allPrimitive = false; }
                         }
+                        if (allPrimitive && inline.length > 0) return inline.join('');
                     }
                 }
+                var parts = [];
                 var child = fiber.child;
                 while (child) {
-                    parts.push(extractText(child, depth + 1));
+                    var t = extractText(child, depth + 1);
+                    if (t) parts.push(t);
                     child = child.sibling;
                 }
-                return parts.join('');
+                return parts.join(' ');
             }
 
             function getMeasurable(fiber) {
@@ -2855,6 +3080,19 @@ export async function pressElement(options: {
                 if (sn.canonical && sn.canonical.publicInstance &&
                     typeof sn.canonical.publicInstance.measureInWindow === 'function') {
                     return sn.canonical.publicInstance;
+                }
+                // Fabric leaf nodes like RCTText have no publicInstance. Measure via
+                // the native Fabric UIManager using the shadow node instead — needed
+                // for text bounds that are tight around the glyphs (not the scroll
+                // container the text happens to live inside).
+                if (sn.node && globalThis.nativeFabricUIManager &&
+                    typeof globalThis.nativeFabricUIManager.measureInWindow === 'function') {
+                    var node = sn.node;
+                    return {
+                        measureInWindow: function(cb) {
+                            try { globalThis.nativeFabricUIManager.measureInWindow(node, cb); } catch(e) {}
+                        }
+                    };
                 }
                 return null;
             }
@@ -3355,21 +3593,19 @@ export async function pressElement(options: {
 
             var target = matches[targetIndex];
             var result = {
-                success: true,
+                needsNativeTap: true,
+                nativeTapTarget: { x: target.x, y: target.y, unit: 'points' },
                 pressed: target.name,
                 matchIndex: targetIndex,
                 totalMatches: matches.length,
                 text: target.text,
                 testID: target.testID,
                 path: target.path,
-                isInput: target.isInput,
-                x: target.x,
-                y: target.y,
-                unit: 'points'
+                isInput: target.isInput
             };
             if (matches.length > 1) {
                 result.allMatches = matches.map(function(m, i) {
-                    return { index: i, component: m.name, text: m.text, testID: m.testID };
+                    return { index: i, component: m.name, text: m.text, testID: m.testID, x: m.x, y: m.y };
                 });
             }
             return result;
@@ -3587,6 +3823,19 @@ export async function inspectAtPoint(
                 if (sn.canonical && sn.canonical.publicInstance &&
                     typeof sn.canonical.publicInstance.measureInWindow === 'function') {
                     return sn.canonical.publicInstance;
+                }
+                // Fabric leaf nodes like RCTText have no publicInstance. Measure via
+                // the native Fabric UIManager using the shadow node instead — needed
+                // for text bounds that are tight around the glyphs (not the scroll
+                // container the text happens to live inside).
+                if (sn.node && globalThis.nativeFabricUIManager &&
+                    typeof globalThis.nativeFabricUIManager.measureInWindow === 'function') {
+                    var node = sn.node;
+                    return {
+                        measureInWindow: function(cb) {
+                            try { globalThis.nativeFabricUIManager.measureInWindow(node, cb); } catch(e) {}
+                        }
+                    };
                 }
                 return null;
             }

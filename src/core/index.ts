@@ -102,6 +102,8 @@ export {
   getConnectedApps,
   getFirstConnectedApp,
   getConnectedAppByDevice,
+  getConnectedAppBySimulatorUdid,
+  getConnectedAppByAndroidDeviceId,
   hasConnectedApp,
   runQuickHealthCheck,
   ensureConnection,
@@ -223,6 +225,7 @@ export {
   iosFindElement,
   iosWaitForElement,
   getDevicePixelRatio,
+  getIOSSafeAreaTop,
 } from "./ios.js";
 
 // iOS types

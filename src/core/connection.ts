@@ -1169,6 +1169,56 @@ export function getFirstConnectedApp(): ConnectedApp | null {
     return null;
 }
 
+/**
+ * Find the connected RN app running on a specific iOS simulator (by UDID).
+ * Returns null if no connected app matches — caller should skip any CDP-based
+ * enrichment to avoid pulling data from a different simulator's app.
+ */
+export function getConnectedAppBySimulatorUdid(udid: string): ConnectedApp | null {
+    for (const [key, app] of connectedApps.entries()) {
+        if (app.ws.readyState !== WebSocket.OPEN) {
+            connectedApps.delete(key);
+            continue;
+        }
+        if (app.platform === "ios" && app.simulatorUdid === udid) {
+            return app;
+        }
+    }
+    return null;
+}
+
+/**
+ * Find the connected RN app running on a specific Android device.
+ * Falls back to the sole connected Android app when `deviceId` is not provided
+ * or cannot be resolved via deviceName substring match — this keeps the common
+ * single-device case working while preventing cross-device data leakage when
+ * multiple Android apps are connected.
+ */
+export function getConnectedAppByAndroidDeviceId(deviceId?: string): ConnectedApp | null {
+    const androidApps: ConnectedApp[] = [];
+    for (const [key, app] of connectedApps.entries()) {
+        if (app.ws.readyState !== WebSocket.OPEN) {
+            connectedApps.delete(key);
+            continue;
+        }
+        if (app.platform === "android") androidApps.push(app);
+    }
+
+    if (androidApps.length === 0) return null;
+    if (androidApps.length === 1) return androidApps[0];
+
+    if (deviceId) {
+        const lower = deviceId.toLowerCase();
+        const match = androidApps.find(a => {
+            const name = (a.deviceInfo.deviceName || a.deviceInfo.title || "").toLowerCase();
+            return name.includes(lower) || lower.includes(name);
+        });
+        if (match) return match;
+    }
+
+    return null;
+}
+
 export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
     if (!device) {
         return getFirstConnectedApp();
