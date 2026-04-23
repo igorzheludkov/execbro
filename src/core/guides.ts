@@ -113,7 +113,7 @@ const guides: Guide[] = [
         content: `# Device Interaction
 
 ## Prerequisites
-iOS interaction tools (tap, ios_swipe, ios_input_text, ios_button, ios_describe_all, ios_find_element, ios_wait_for_element) require a UI driver:
+iOS interaction tools (tap, ios_button) require a UI driver:
 - Recommended: AXe — brew install cameroncooke/axe/axe (set IOS_DRIVER=axe in MCP server env)
 - Alternative: IDB — brew install idb-companion (default)
 Without a UI driver installed, these tools will fail.
@@ -148,13 +148,12 @@ For buttons that contain only an icon (no text):
 tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibility/OCR instead. For best results, use testID or coordinates.
 
 ## Other Interactions
-- ios_swipe / android_swipe: swipe/scroll with start/end coordinates
-- ios_input_text / android_input_text: type text (tap input field first)
+- android_swipe: swipe/scroll with start/end coordinates
+- android_input_text: type text (tap input field first; on iOS use tap(testID=...) to focus, then native keyboard)
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)
 - ios_open_url: deep links and universal links
 
 ## After Interactions
-- ios_wait_for_element / android_wait_for_element: wait for UI to update
 - Take a screenshot to verify the result`
     },
     {

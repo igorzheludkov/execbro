@@ -32,8 +32,8 @@ const NATIVE_FALLBACKS: Record<string, string[]> = {
     search_network: [],
     get_network_stats: [],
     get_request_details: [],
-    get_screen_layout: ["ios_describe_all", "android_describe_all"],
-    get_inspector_selection: ["ios_describe_point", "android_describe_point"],
+    get_screen_layout: [],
+    get_inspector_selection: [],
 };
 
 export type MetroMissingHintOptions = {
