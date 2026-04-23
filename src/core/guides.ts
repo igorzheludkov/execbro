@@ -18,7 +18,7 @@ const guides: Guide[] = [
         content: `# Session Setup
 
 ## Prerequisites (CRITICAL — install BEFORE using device tools)
-- **iOS UI driver (required for tap, swipe, describe, find_element, and all iOS interaction tools):**
+- **iOS UI driver (required for tap, ios_button, and all iOS interaction tools):**
   - Recommended: AXe — brew install cameroncooke/axe/axe (then set IOS_DRIVER=axe in MCP server env)
   - Alternative: IDB — brew install idb-companion (used by default)
   - Without a UI driver, most iOS tools will fail with "not installed" errors
@@ -319,12 +319,12 @@ If the user wants to share feedback, request a feature, or report a problem with
  */
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_pressable_elements, get_screen_layout.",
-    "Platform-specific ios_* / android_* tools (describe_all, find_element, input_text, swipe, key_event, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
+    "Platform-specific ios_* / android_* tools (ios_button, android_swipe, android_input_text, android_key_event, android_long_press, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup     — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs      — console debugging (get_logs, search_logs)",
-    "  interact  — device interaction (tap, swipe, screenshots, input_text)",
+    "  interact  — device interaction (tap, android_swipe, screenshots, android_input_text)",
     "  layout    — on-screen layout check (get_screen_layout, get_pressable_elements)",
     "  inspect   — component inspection (find_components, inspect_component, get_inspector_selection)",
     "  network   — network request inspection (get_network_requests, search_network)",
