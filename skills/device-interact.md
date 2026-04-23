@@ -29,8 +29,9 @@ Before interacting, understand the current screen:
 **Screenshot approach (recommended first step):**
 - Use `mcp__rn-ai-devtools__ios_screenshot` or `mcp__rn-ai-devtools__android_screenshot` for visual reference
 
-**Accessibility tree approach (for finding elements without screenshots):**
-- Use `mcp__rn-ai-devtools__ios_describe_all` or `mcp__rn-ai-devtools__android_describe_all` for full UI hierarchy
+**Component tree approach (for finding React Native elements without screenshots):**
+- Use `mcp__rn-ai-devtools__get_screen_layout` for an indented tree of visible components with positions, text, and identifiers
+- Use `mcp__rn-ai-devtools__find_components` to regex-search the fiber tree for a specific component by name
 
 ### 3. Tap Elements
 
@@ -108,19 +109,16 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 - Android: `mcp__rn-ai-devtools__android_long_press` with x/y and optional duration
 
 **Swipe/scroll:**
-- iOS: `mcp__rn-ai-devtools__ios_swipe` with start/end coordinates
 - Android: `mcp__rn-ai-devtools__android_swipe` with start/end coordinates
+- iOS: no dedicated swipe tool — use `tap(x=, y=)` for interactions and scroll by tapping scroll targets, or rely on the app's own navigation
 
 **Type text:**
-- iOS: `mcp__rn-ai-devtools__ios_input_text` (tap input field first)
+- iOS: use `mcp__rn-ai-devtools__tap` with `text=` or `testID=` on the `TextInput` — the fiber tree strategy focuses the input natively. For the value itself, set it via state (e.g., `execute_in_app`) or rely on existing focus + native keyboard
 - Android: `mcp__rn-ai-devtools__android_input_text` (tap input field first)
 
 **Hardware buttons:**
 - iOS: `mcp__rn-ai-devtools__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
 - Android: `mcp__rn-ai-devtools__android_key_event` (HOME, BACK, ENTER, DEL, MENU, etc.)
-
-**Key events:**
-- iOS: `mcp__rn-ai-devtools__ios_key_event` / `ios_key_sequence` with keycodes
 
 **Deep links:**
 - iOS: `mcp__rn-ai-devtools__ios_open_url` with the full URL (e.g., `myapp://settings/profile` or `https://example.com`)
@@ -134,9 +132,9 @@ When calculating swipe distances or tap positions on an unfamiliar device:
 
 ### 6. Wait for UI Updates
 
-After navigation or interactions that change the screen:
-- iOS: `mcp__rn-ai-devtools__ios_wait_for_element` to wait for an element to appear
-- Android: `mcp__rn-ai-devtools__android_wait_for_element` to wait for an element to appear
+After navigation or interactions that change the screen, poll the UI by re-calling
+`mcp__rn-ai-devtools__get_screen_layout` (or `find_components`) in a short retry
+loop until the expected component shows up.
 
 ### 7. Verify Results
 
@@ -164,14 +162,12 @@ After interactions, verify the result:
 - `mcp__rn-ai-devtools__list_ios_simulators`
 - `mcp__rn-ai-devtools__list_android_devices`
 - `mcp__rn-ai-devtools__ios_screenshot` / `android_screenshot`
-- `mcp__rn-ai-devtools__ios_describe_all` / `android_describe_all`
+- `mcp__rn-ai-devtools__get_screen_layout`
+- `mcp__rn-ai-devtools__inspect_at_point`
 - `mcp__rn-ai-devtools__android_long_press`
-- `mcp__rn-ai-devtools__ios_swipe` / `android_swipe`
-- `mcp__rn-ai-devtools__ios_input_text` / `android_input_text`
+- `mcp__rn-ai-devtools__android_swipe`
+- `mcp__rn-ai-devtools__android_input_text`
 - `mcp__rn-ai-devtools__ios_button` / `android_key_event`
-- `mcp__rn-ai-devtools__ios_key_event` / `ios_key_sequence`
-- `mcp__rn-ai-devtools__ios_find_element` / `android_find_element`
-- `mcp__rn-ai-devtools__ios_wait_for_element` / `android_wait_for_element`
 - `mcp__rn-ai-devtools__ios_open_url`
 - `mcp__rn-ai-devtools__android_get_screen_size`
 
@@ -181,7 +177,7 @@ After interactions, verify the result:
 - iOS simulator interactions require IDB (`brew install idb-companion`) or AXe CLI (`brew install cameroncooke/axe/axe`). Set `IOS_DRIVER=axe` env var to use AXe.
 - **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically. Use `native=true` for system UI or non-RN apps
 - On failure, follow the `suggestion` field in the tap response — it tells you exactly what to try next
-- Use `wait_for_element` after navigation to ensure the next screen is ready before interacting
+- Poll with `get_screen_layout` (or `find_components`) after navigation to ensure the next screen is ready before interacting
 - For Android, the Back button is available via `android_key_event` with key "BACK"
 - `ios_open_url` works for both custom scheme deep links (`myapp://`) and universal links (`https://`)
 - Use `android_get_screen_size` before computing swipe coordinates on physical devices where screen resolution varies

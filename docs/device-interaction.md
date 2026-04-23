@@ -2,7 +2,7 @@
 
 Control iOS Simulators and Android devices/emulators — screenshots, tap, swipe, text input, and more.
 
-> **Note:** Many iOS interaction tools (swipe, text input, accessibility queries) require a UI driver — either [IDB](https://github.com/facebook/idb) or [AXe CLI](https://github.com/cameroncooke/AXe). See the [Platform Setup](../README.md#platform-setup) section for installation instructions.
+> **Note:** iOS hardware button presses (`ios_button`) require a UI driver — either [IDB](https://github.com/facebook/idb) or [AXe CLI](https://github.com/cameroncooke/AXe). See the [Platform Setup](../README.md#platform-setup) section for installation instructions.
 
 ## Unified `tap` Tool (Recommended)
 
@@ -36,13 +36,14 @@ On failure, the response includes an actionable `suggestion` telling the agent e
 For gestures beyond tapping, use platform-specific tools:
 
 ```
-# Swipe
-ios_swipe with startX=200 startY=400 endX=200 endY=100
+# Swipe (Android)
 android_swipe with startX=540 startY=1500 endX=540 endY=500
 
-# Text input (tap input field first)
+# Text input on Android (tap input field first)
 tap with text="Email"
-ios_input_text with text="hello@example.com"
+android_input_text with text="hello@example.com"
+
+# On iOS, tap a text field and use `tap(text=...)` — the fiber tree handles TextInput focus.
 
 # Key events
 android_key_event with key="BACK"
@@ -51,10 +52,9 @@ ios_button with button="HOME"
 
 ## Wait for Screen Transitions
 
-```
-android_wait_for_element with text="Dashboard" timeoutMs=15000
-ios_wait_for_element with label="Home" timeoutMs=10000
-```
+Poll for a component to appear using `find_components` inside a short retry loop, or
+re-call `get_screen_layout` after an expected navigation event to confirm the target
+screen is visible.
 
 ## Android (requires ADB)
 

@@ -113,11 +113,10 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 **UI Interaction:**
 - `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `screenshot=false` to disable screenshots, `verify=false` to skip verification. Use `burst=true` to capture rapid sequential screenshots for detecting transient visual feedback (press animations, highlights) — results stored in image buffer accessible via `get_images`.
-- `ios_swipe` / `android_swipe`: Swipe/scroll gestures with start/end coordinates
-- `ios_input_text` / `android_input_text`: Type text into the focused input field
+- `android_swipe`: Swipe/scroll gestures with start/end coordinates
+- `android_input_text`: Type text into the focused input field
 - `ios_button`: Press iOS hardware buttons (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
 - `android_key_event`: Send Android key events (HOME, BACK, ENTER, DEL, MENU, etc.)
-- `ios_key_event` / `ios_key_sequence`: Send key events by keycode to iOS simulator
 - `android_long_press`: Long press at coordinates on Android
 - `ios_open_url`: Open deep links or universal links on iOS simulator
 
@@ -144,11 +143,9 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `android_list_packages`: List installed packages on Android device
 
 **Accessibility Tree (native UI inspection):**
-- `ios_describe_all` / `android_describe_all`: Full UI accessibility tree from device
-- `ios_describe_point` / `android_describe_point`: UI element info at specific coordinates
-- `ios_find_element` / `android_find_element`: Find element by text, label, resource ID
-- `ios_wait_for_element` / `android_wait_for_element`: Wait for element to appear (polling)
 - `android_get_screen_size`: Get device pixel resolution
+
+For React Native UI inspection, prefer the cross-platform tools: `get_screen_layout` (visible component tree), `inspect_at_point` (component at coordinates), `find_components` (regex search by component name), and `tap(text=...)` (tap by visible text).
 
 **Bundle & Errors:**
 - `get_bundle_status`: Check Metro build state

@@ -73,7 +73,7 @@ See [Layout & Component Inspection guide](layout-inspection.md) for detailed wor
 | Tool                          | Description                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tap`                         | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots. Returns a post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps) |
-| `ios_swipe` / `android_swipe` | Swipe gesture with start/end coordinates (scroll lists, navigate between screens, pull-to-refresh)                                                                                                                                                                                                                                                                         |
+| `android_swipe`               | Swipe gesture with start/end coordinates on Android (scroll lists, navigate between screens, pull-to-refresh)                                                                                                                                                                                                                                                              |
 | `ocr_screenshot`              | Extract all visible text with tap-ready coordinates (works on iOS/Android)                                                                                                                                                                                                                                                                                                 |
 
 **Examples:**
@@ -101,10 +101,6 @@ tap with x=300 y=600 native=true          # Taps directly via ADB/simctl (no RN 
 | `android_input_text`       | Type text at current focus point                            |
 | `android_key_event`        | Send key events (HOME, BACK, ENTER, etc.)                   |
 | `android_get_screen_size`  | Get device screen resolution                                |
-| `android_describe_all`     | Get full UI accessibility tree via uiautomator              |
-| `android_describe_point`   | Get UI element info at specific coordinates                 |
-| `android_find_element`     | Find element by text/contentDesc/resourceId (no screenshot) |
-| `android_wait_for_element` | Wait for element to appear (useful for screen transitions)  |
 
 ## iOS (Simulator)
 
@@ -117,12 +113,4 @@ tap with x=300 y=600 native=true          # Taps directly via ADB/simctl (no RN 
 | `ios_open_url`         | Open a URL (deep links or web URLs)                       |
 | `ios_terminate_app`    | Terminate a running app                                   |
 | `ios_boot_simulator`   | Boot a simulator by UDID                                  |
-| `ios_swipe`            | Swipe gesture (requires IDB)                              |
-| `ios_input_text`       | Type text into active field (requires IDB)                |
 | `ios_button`           | Press hardware button: HOME, LOCK, SIRI (requires IDB)    |
-| `ios_key_event`        | Send key event by keycode (requires IDB)                  |
-| `ios_key_sequence`     | Send sequence of key events (requires IDB)                |
-| `ios_describe_all`     | Get full accessibility tree (requires IDB)                |
-| `ios_describe_point`   | Get element at point (requires IDB)                       |
-| `ios_find_element`     | Find element by label/value (requires IDB, no screenshot) |
-| `ios_wait_for_element` | Wait for element to appear (requires IDB)                 |
