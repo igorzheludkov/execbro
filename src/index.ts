@@ -7,7 +7,7 @@ import { createServer as createHttpServer } from "node:http";
 import { existsSync, unlinkSync } from "fs";
 import { z } from "zod";
 
-import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "./core/guides.js";
+import { getGuideOverview, getGuideByTopic, getAvailableTopics, DECISION_TREE } from "./core/guides.js";
 import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
@@ -214,8 +214,13 @@ const server = new McpServer(
         version: "1.0.0"
     },
     {
-        instructions:
-            "React Native debugging MCP server. Call get_usage_guide to learn recommended workflows for all tools. Quick start: scan_metro → get_logs / search_logs (console debugging) → ios_screenshot → tap(text=\"Submit\") or tap(x, y) (interact with UI)."
+        instructions: [
+            "React Native debugging MCP server.",
+            "",
+            DECISION_TREE,
+            "",
+            "Call get_usage_guide with no arguments for the same decision tree plus a summary of every guide."
+        ].join("\n")
     }
 );
 

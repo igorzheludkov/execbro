@@ -312,16 +312,39 @@ If the user wants to share feedback, request a feature, or report a problem with
     }
 ];
 
+/**
+ * Shared quick decision tree body — embedded into the MCP server-level
+ * `instructions` field (src/index.ts) AND into `getGuideOverview()` so agents
+ * see identical guidance regardless of whether their client surfaces
+ * `instructions`. Keep this as the single source of truth.
+ */
+export const DECISION_TREE: string = [
+    "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_pressable_elements, get_screen_layout.",
+    "Platform-specific ios_* / android_* tools (describe_all, find_element, input_text, swipe, key_event, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
+    "",
+    "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
+    "  setup     — session setup (scan_metro, connect_metro, ensure_connection)",
+    "  logs      — console debugging (get_logs, search_logs)",
+    "  interact  — device interaction (tap, swipe, screenshots, input_text)",
+    "  layout    — on-screen layout check (get_screen_layout, get_pressable_elements)",
+    "  inspect   — component inspection (find_components, inspect_component, get_inspector_selection)",
+    "  network   — network request inspection (get_network_requests, search_network)",
+    "  state     — app state & JS execution (execute_in_app, list_debug_globals)",
+    "  bundle    — bundle / Metro error checks (get_bundle_status, get_bundle_errors)",
+    "  feedback  — share feedback, feature requests, or bug reports (send_feedback)"
+].join("\n");
+
 export function getGuideOverview(): string {
-    const lines = ["Available usage guides:\n"];
-    for (const guide of guides) {
-        lines.push(`  ${guide.id} — ${guide.summary}`);
-    }
-    lines.push("\nCall get_usage_guide with a topic parameter for the full guide.");
-    lines.push(
-        "\nQuick start: scan_metro → get_logs / search_logs (console debugging) → ios_screenshot → get_inspector_selection(x, y) (identify components)"
-    );
-    return lines.join("\n");
+    const guideList = guides.map((g) => `  ${g.id} — ${g.summary}`).join("\n");
+    return `Quick decision tree
+-------------------
+${DECISION_TREE}
+
+Available usage guides:
+
+${guideList}
+
+Call get_usage_guide with a topic parameter for the full guide.`;
 }
 
 export function getGuideByTopic(topic: string): string | null {
