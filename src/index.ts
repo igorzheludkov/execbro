@@ -319,8 +319,13 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
     toolRegistry.set(toolName, { config, handler });
     server.registerTool(toolName, config, async (args: any) => {
         // --- Usage limit check (runs on every tool call) ---
+        // Promo is client-enforced: while promotionalPeriodEndsAt is in the future,
+        // never block — even if the backend cached canUse=false before the promo
+        // started, or if a backend bug flips canUse incorrectly.
         const usageInfo = getUsageInfo();
-        if (usageInfo && !usageInfo.canUse) {
+        const inPromo = !!usageInfo?.promotionalPeriodEndsAt
+            && new Date(usageInfo.promotionalPeriodEndsAt).getTime() > Date.now();
+        if (!inPromo && usageInfo && !usageInfo.canUse) {
             const isCredits = usageInfo.creditsRemaining !== null;
             const dashboardUrl = `${API_BASE_URL}/dashboard/usage`;
             const message = isCredits

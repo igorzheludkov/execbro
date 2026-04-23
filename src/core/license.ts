@@ -274,22 +274,20 @@ async function resolveLicense(): Promise<LicenseResult> {
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
-    // API failed — fall back to stale cache (fail open)
+    // API failed — fall back to stale license cache (fail open on tier).
+    // Intentionally do NOT load stale usage.json: a stale `canUse: false` would
+    // block tools during a transient backend outage even when the user should
+    // be allowed (e.g. new month rolled over, or promo period is active).
+    // Leaving currentUsage as null makes the per-tool block in index.ts a no-op.
     if (cache && cache.installationId === installationId) {
         currentStatus = cache;
         source = "cache";
-        if (!currentUsage) {
-            currentUsage = readUsageCache();
-        }
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
     // No cache, no API — default to free
     currentStatus = createDefaultStatus(installationId);
     writeCache(currentStatus);
-    if (!currentUsage) {
-        currentUsage = readUsageCache();
-    }
     return { status: currentStatus, source, durationMs: Date.now() - startTime };
 }
 
