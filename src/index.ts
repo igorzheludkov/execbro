@@ -749,7 +749,14 @@ registerToolWithTelemetry(
     "get_apps",
     {
         description:
-            "List currently connected React Native apps and their connection status. If no apps are connected, run scan_metro first to establish a connection.",
+            "List currently connected React Native apps and their connection status. If no apps are connected, run scan_metro first to establish a connection.\n" +
+            "PURPOSE: Enumerate active debug targets with device names, platforms, ports, and detected RN/Expo versions so you can target the right one.\n" +
+            "WHEN TO USE: After scan_metro to confirm what connected, or before passing a device=\"...\" filter to another tool.\n" +
+            "WORKFLOW: scan_metro -> get_apps -> get_logs / ios_screenshot / tap (with device=\"...\" if multiple).\n" +
+            "LIMITATIONS: Only lists devices the MCP has successfully connected to — stale targets don't appear here, use get_connection_status for health details.\n" +
+            "GOOD: get_apps()\n" +
+            "BAD: Calling get_apps in a tight loop — the list doesn't change without a scan_metro or disconnect_metro.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {}
     },
     async () => {
@@ -1793,7 +1800,14 @@ registerToolWithTelemetry(
     "get_connection_status",
     {
         description:
-            "Get detailed connection health status including uptime, recent disconnects/reconnects, and connection gaps that may indicate missing data.",
+            "Get detailed connection health status including uptime, recent disconnects/reconnects, and connection gaps that may indicate missing data.\n" +
+            "PURPOSE: Diagnose flaky CDP sessions — quantify uptime, count reconnects, and expose gaps where logs/network data could be missing.\n" +
+            "WHEN TO USE: When logs look suspiciously empty, tools complain about disconnect/reconnect, or the app was suspended and resumed.\n" +
+            "WORKFLOW: get_connection_status -> if unhealthy: disconnect_metro -> scan_metro to rebuild a clean session.\n" +
+            "LIMITATIONS: Reports only MCP-side view; doesn't know why Metro dropped the socket (simulator sleep, app backgrounded, etc).\n" +
+            "GOOD: get_connection_status() after noticing stale data.\n" +
+            "BAD: Polling get_connection_status as a heartbeat — use ensure_connection(healthCheck=true) for a live probe.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {}
     },
     async () => {
@@ -2048,7 +2062,9 @@ registerToolWithTelemetry(
     "connect_metro",
     {
         description:
-            "Connect to a Metro server on a specific port. Use this when you know the exact port, otherwise use scan_metro which auto-detects. Establishes the WebSocket connection needed for debugging tools.",
+            "Connect to a Metro server on a specific port.\n" +
+            "[DEPRECATED IN PRACTICE — prefer `scan_metro` which auto-discovers all common ports and connects every Bridgeless target at once. Use `connect_metro` only when you need to target a specific non-default port]\n" +
+            "Use this when you know the exact port, otherwise use scan_metro which auto-detects. Establishes the WebSocket connection needed for debugging tools.",
         inputSchema: {
             port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")
         }
@@ -2112,7 +2128,14 @@ registerToolWithTelemetry(
     "disconnect_metro",
     {
         description:
-            "Disconnect from Metro servers and stop auto-reconnection. Without device param: disconnects ALL devices. With device param: disconnects only the matching device. Use this to remove stale connections or free the CDP slot for the built-in debugger. Log and network buffers are preserved. Reconnect later with scan_metro.",
+            "Disconnect from Metro servers and stop auto-reconnection. Without device param: disconnects ALL devices. With device param: disconnects only the matching device. Use this to remove stale connections or free the CDP slot for the built-in debugger. Log and network buffers are preserved. Reconnect later with scan_metro.\n" +
+            "PURPOSE: Cleanly release CDP slots so another debugger (Flipper, React DevTools, Chrome) can attach, or nuke a stale connection the MCP keeps reviving.\n" +
+            "WHEN TO USE: Before launching a native debugger, when connections keep flapping, or after a simulator/device restart left zombie targets.\n" +
+            "WORKFLOW: disconnect_metro -> attach other debugger / restart app -> scan_metro to reconnect.\n" +
+            "LIMITATIONS: Suppresses auto-reconnect until scan_metro or connect_metro is called again; buffers persist but won't receive new events.\n" +
+            "GOOD: disconnect_metro(); disconnect_metro({ device: \"iPhone\" })\n" +
+            "BAD: Using disconnect_metro to clear logs — use clear_logs instead; disconnect breaks capture.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match) to disconnect. Omit to disconnect all devices. Run get_apps to see connected devices.")
         }
@@ -2301,7 +2324,14 @@ registerToolWithTelemetry(
     "list_debug_globals",
     {
         description:
-            "List globally available debugging objects in the connected React Native app (Apollo Client, Redux store, React DevTools, etc.). Use this to discover what state management and debugging tools are available.",
+            "List globally available debugging objects in the connected React Native app (Apollo Client, Redux store, React DevTools, etc.). Use this to discover what state management and debugging tools are available.\n" +
+            "PURPOSE: Enumerate the app's `globalThis.*` surface so you know which stores, clients, and debug hooks you can drill into.\n" +
+            "WHEN TO USE: Start of a state-debugging session, or when you don't know whether the app exposes a Redux/Apollo/Zustand handle.\n" +
+            "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"...\") -> execute_in_app for reads/mutations.\n" +
+            "LIMITATIONS: Only sees variables explicitly assigned to a global (e.g., `globalThis.store = store`). Module-scoped state is invisible — expose it first.\n" +
+            "GOOD: list_debug_globals()\n" +
+            "BAD: Calling before scan_metro — needs a live connection.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
@@ -2337,7 +2367,14 @@ registerToolWithTelemetry(
     "inspect_global",
     {
         description:
-            "Inspect a global object to see its properties, types, and whether they are callable functions. Use this BEFORE calling methods on unfamiliar objects to avoid errors.",
+            "Inspect a global object to see its properties, types, and whether they are callable functions. Use this BEFORE calling methods on unfamiliar objects to avoid errors.\n" +
+            "PURPOSE: Surface the shape of a global (Apollo client, Redux store, Expo Router, etc.) — keys, types, and which members are callable — without executing arbitrary code.\n" +
+            "WHEN TO USE: After list_debug_globals identifies a promising global and before you try execute_in_app on it.\n" +
+            "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"__APOLLO_CLIENT__\") -> execute_in_app(\"__APOLLO_CLIENT__.cache.extract()\").\n" +
+            "LIMITATIONS: Only reads one level deep; nested objects show as `[object Object]` — re-inspect the child path with execute_in_app. Throws ReferenceError for globals that don't exist.\n" +
+            "GOOD: inspect_global({ objectName: \"__APOLLO_CLIENT__\" })\n" +
+            "BAD: inspect_global({ objectName: \"store.state\" }) — path expressions aren't supported; use execute_in_app for property chains.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
         inputSchema: {
             objectName: z
                 .string()
@@ -2388,7 +2425,14 @@ registerToolWithTelemetry(
     "get_component_tree",
     {
         description:
-            "Get the full React component tree from the running app. Shows the complete fiber hierarchy including providers, navigation wrappers, and internal components. For a screen overview with positions and text, use get_screen_layout instead. Use structureOnly=true for compact names-only output.",
+            "Get the full React component tree from the running app. Shows the complete fiber hierarchy including providers, navigation wrappers, and internal components. For a screen overview with positions and text, use get_screen_layout instead. Use structureOnly=true for compact names-only output.\n" +
+            "PURPOSE: Expose the entire fiber tree — including providers, navigators, and off-screen subtrees — when get_screen_layout's visible-only view isn't enough.\n" +
+            "WHEN TO USE: Debugging context propagation, navigation wrappers, hidden modals, or when you need to understand the full React architecture.\n" +
+            "WORKFLOW: get_component_tree(structureOnly=true) for overview -> find_components for targeted lookup -> inspect_component for props/state.\n" +
+            "LIMITATIONS: Full trees can be large; always start with structureOnly=true. Ignores non-React native views. Minified builds return display names that may be opaque.\n" +
+            "GOOD: get_component_tree({ structureOnly: true })\n" +
+            "BAD: get_component_tree({ includeProps: true, includeStyles: true }) on a large app — likely hits response-size limits. Prefer inspect_component for specific nodes.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
         inputSchema: {
             structureOnly: z
                 .boolean()
@@ -2469,7 +2513,14 @@ registerToolWithTelemetry(
     "get_pressable_elements",
     {
         description:
-            "Find all pressable (onPress) and input (TextInput) elements currently visible on screen. Returns component names, ready-to-tap center coordinates in SCREENSHOT PIXELS (same space as ios_screenshot/android_screenshot — pass directly to tap(x, y)), text labels, testID, accessibilityLabel, and a spatial nearbyText hint for icon-only buttons. Each element includes hasLabel (true if it contains text) and isInput (true for TextInput fields).",
+            "Find all pressable (onPress) and input (TextInput) elements currently visible on screen. Returns component names, ready-to-tap center coordinates in SCREENSHOT PIXELS (same space as ios_screenshot/android_screenshot — pass directly to tap(x, y)), text labels, testID, accessibilityLabel, and a spatial nearbyText hint for icon-only buttons. Each element includes hasLabel (true if it contains text) and isInput (true for TextInput fields).\n" +
+            "PURPOSE: Produce a ready-to-tap inventory of every interactive element on screen with screenshot-pixel coordinates that tap(x, y) accepts directly.\n" +
+            "WHEN TO USE: Before tapping icon-only buttons, when text-based tap keeps failing, or to enumerate what the user can actually interact with.\n" +
+            "WORKFLOW: ios_screenshot / android_screenshot -> get_pressable_elements -> tap(testID=\"...\") or tap(x, y) using the center coordinates.\n" +
+            "LIMITATIONS: Visible-only (off-screen pressables are excluded). Requires a live React connection. Coordinates are in screenshot pixels — the tap tool converts to points internally.\n" +
+            "GOOD: get_pressable_elements()\n" +
+            "BAD: Calling when tap(testID=\"...\") already works — testID matching is faster and more stable.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full interaction playbook.",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
@@ -2774,7 +2825,10 @@ registerToolWithTelemetry(
     "toggle_element_inspector",
     {
         description:
-            "Toggle React Native's Element Inspector overlay on/off. Rarely needed directly — get_inspector_selection auto-enables the inspector when called with coordinates. Use this only when you need manual control over the overlay visibility.",
+            "Toggle React Native's Element Inspector overlay on/off. Rarely needed directly — get_inspector_selection auto-enables the inspector when called with coordinates. Use this only when you need manual control over the overlay visibility.\n" +
+            "PURPOSE: Manual control over the on-device inspector overlay — mostly useful for screenshots that should show the inspector UI or for disabling it after a session.\n" +
+            "WHEN TO USE: Only when get_inspector_selection's auto-enable isn't appropriate (e.g., leaving the overlay on for a user screenshot).\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
@@ -2833,7 +2887,14 @@ registerToolWithTelemetry(
     "get_inspector_selection",
     {
         description:
-            "Identify the React component at a screen location by reading RN's Element Inspector. Returns a clean component hierarchy with file paths — ideal for finding the real component name (e.g. HomeScreen > SneakerCard > PulseActionButton). If x/y provided: auto-enables inspector, taps at coordinates, returns hierarchy. If no coordinates: returns current selection. WORKFLOW: Use ios_screenshot or ocr_screenshot to visually identify the target element, then call this tool with coordinates to get the component tree.",
+            "Identify the React component at a screen location by reading RN's Element Inspector. Returns a clean component hierarchy with file paths — ideal for finding the real component name (e.g. HomeScreen > SneakerCard > PulseActionButton). If x/y provided: auto-enables inspector, taps at coordinates, returns hierarchy. If no coordinates: returns current selection.\n" +
+            "PURPOSE: Map a screen coordinate to a real component name AND source file path, so you know which file to edit.\n" +
+            "WHEN TO USE: You have a screenshot and want to know \"what component renders this pixel?\" — especially for file-path grounding before making code changes.\n" +
+            "WORKFLOW: ios_screenshot / android_screenshot / ocr_screenshot -> get_inspector_selection(x, y) -> edit the returned source file.\n" +
+            "LIMITATIONS: Requires RN dev mode (inspector only exists in __DEV__). x/y are in points/dp, not screenshot pixels — tap-style coordinates are fine since the tool taps internally. Flaky on Bridgeless if the inspector fails to initialize.\n" +
+            "GOOD: get_inspector_selection({ x: 180, y: 420 })\n" +
+            "BAD: Using it for layout measurements — prefer inspect_at_point which returns the exact frame.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
         inputSchema: {
             x: z
                 .number()
@@ -2953,7 +3014,14 @@ registerToolWithTelemetry(
     "inspect_at_point",
     {
         description:
-            "Inspect the React component at specific (x, y) coordinates for layout debugging. Returns component props, measured frame (position/size in dp), and component path. Works on both Paper and Fabric. Coordinates are in dp (density-independent pixels). To convert from screenshot pixels: divide by the device pixel ratio (e.g. 540px / 2.625 = 205dp). Best for: checking layout bounds, reading component props/styles, pixel-perfect debugging. For identifying component names: prefer get_inspector_selection which returns a cleaner hierarchy with file paths.",
+            "Inspect the React component at specific (x, y) coordinates for layout debugging. Returns component props, measured frame (position/size in dp), and component path. Works on both Paper and Fabric. Coordinates are in dp (density-independent pixels). To convert from screenshot pixels: divide by the device pixel ratio (e.g. 540px / 2.625 = 205dp). Best for: checking layout bounds, reading component props/styles, pixel-perfect debugging. For identifying component names: prefer get_inspector_selection which returns a cleaner hierarchy with file paths.\n" +
+            "PURPOSE: Pixel-precise layout diagnosis — returns the exact measured frame, props, and style of whatever renders at a point.\n" +
+            "WHEN TO USE: Checking why a button is clipped, why an element's hit area is wrong, or reading the actual computed size/position of a component.\n" +
+            "WORKFLOW: ios_screenshot -> find suspect pixel -> convert to dp (pixel / pixelRatio) -> inspect_at_point(x, y).\n" +
+            "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — this differs from tap() which accepts either. Wrong unit = wrong component. Requires live React connection.\n" +
+            "GOOD: inspect_at_point({ x: 205, y: 360 }) // dp after dividing\n" +
+            "BAD: inspect_at_point({ x: 540, y: 960 }) // raw screenshot pixels — picks the wrong node.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
         inputSchema: {
             x: z
                 .number()
@@ -3200,7 +3268,14 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "search_network",
     {
-        description: "Search network requests by URL pattern (case-insensitive)",
+        description: "Search network requests by URL pattern (case-insensitive).\n" +
+            "PURPOSE: Filter the network buffer to requests whose URL matches a substring — fast way to find a specific endpoint in a noisy app.\n" +
+            "WHEN TO USE: You know part of the URL (e.g., \"/graphql\", \"users\", a domain) and want matching requests across all devices.\n" +
+            "WORKFLOW: search_network(urlPattern=\"/api/\") -> get_request_details(requestId=\"...\") for full headers/body.\n" +
+            "LIMITATIONS: Matches URL only; for method/status/body filtering use get_network_requests. Bodies are only present when the SDK is installed.\n" +
+            "GOOD: search_network({ urlPattern: \"/graphql\" })\n" +
+            "BAD: search_network({ urlPattern: \"\" }) — empty pattern matches everything; use get_network_requests instead.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
         inputSchema: {
             urlPattern: z.string().describe("URL pattern to search for"),
             maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
@@ -3280,7 +3355,14 @@ registerToolWithTelemetry(
     "get_request_details",
     {
         description:
-            "Get full details of a specific network request including headers, body, and timing. With the SDK installed, includes full request/response bodies. Without SDK, bodies are not available on most targets. Use get_network_requests first to find the request ID.",
+            "Get full details of a specific network request including headers, body, and timing. With the SDK installed, includes full request/response bodies. Without SDK, bodies are not available on most targets. Use get_network_requests first to find the request ID.\n" +
+            "PURPOSE: Drill into a single network entry — full request/response headers, body, status, and timing breakdown.\n" +
+            "WHEN TO USE: After get_network_requests or search_network returns a suspect ID and you need the payload to diagnose.\n" +
+            "WORKFLOW: get_network_requests / search_network -> copy id -> get_request_details(requestId).\n" +
+            "LIMITATIONS: Bodies require the react-native-ai-devtools-sdk in the app; on CDP-only targets response bodies are missing. Large bodies are truncated — raise maxBodyLength.\n" +
+            "GOOD: get_request_details({ requestId: \"42\", maxBodyLength: 4000 })\n" +
+            "BAD: Guessing requestIds — always get them from get_network_requests / search_network first.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
         inputSchema: {
             requestId: z.string().describe("The request ID to get details for"),
             maxBodyLength: z.coerce
@@ -3374,7 +3456,14 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "get_network_stats",
     {
-        description: "Get statistics about captured network requests: counts by method, status code, and domain.",
+        description: "Get statistics about captured network requests: counts by method, status code, and domain.\n" +
+            "PURPOSE: High-level view of traffic shape — totals, error counts, average duration, and top domains — without scanning every request.\n" +
+            "WHEN TO USE: To quickly answer \"is there a spike in 5xx?\", \"which domain is chattiest?\", or to sanity-check capture is working.\n" +
+            "WORKFLOW: get_network_stats -> if errors > 0: get_network_requests(status=\"500\") -> get_request_details.\n" +
+            "LIMITATIONS: Reflects only the buffered window (last 200 entries per device). Resets when clear_network is called.\n" +
+            "GOOD: get_network_stats()\n" +
+            "BAD: Using it to find a specific request — use search_network or get_network_requests.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
         }
@@ -3440,7 +3529,14 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "clear_network",
     {
-        description: "Clear the network request buffer",
+        description: "Clear the network request buffer.\n" +
+            "PURPOSE: Reset the captured request list to isolate new traffic from a specific user action.\n" +
+            "WHEN TO USE: Right before reproducing a bug so the buffer contains only the relevant requests.\n" +
+            "WORKFLOW: clear_network -> trigger action (tap, execute_in_app) -> get_network_requests / search_network.\n" +
+            "LIMITATIONS: Irreversible — cleared requests cannot be recovered. Also clears the SDK's in-app buffer when SDK is present.\n" +
+            "GOOD: clear_network() before a reproduction.\n" +
+            "BAD: Using clear_network as a workaround for stale connections — use scan_metro / ensure_connection instead.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit to clear all devices. Run get_apps to see connected devices.")
         }
@@ -3483,7 +3579,14 @@ registerToolWithTelemetry(
     "get_images",
     {
         description:
-            "Access the shared image buffer containing screenshots from all tools (ios_screenshot, android_screenshot, ocr_screenshot, tap verification). Returns metadata only by default — use id or groupId+frameIndex to retrieve actual image data. Tap burst verification stores frame groups here when burst=true is used.",
+            "Access the shared image buffer containing screenshots from all tools (ios_screenshot, android_screenshot, ocr_screenshot, tap verification). Returns metadata only by default — use id or groupId+frameIndex to retrieve actual image data. Tap burst verification stores frame groups here when burst=true is used.\n" +
+            "PURPOSE: Retrieve prior screenshots — especially tap burst frames — without re-taking them, for visual diffing or reviewing transient UI states.\n" +
+            "WHEN TO USE: After tap(burst=true) reports transientChangeDetected, or to compare before/after frames without another screenshot round-trip.\n" +
+            "WORKFLOW: tap(burst=true) -> note verification.burstGroupId -> get_images(groupId, frameIndex=N) to inspect individual frames.\n" +
+            "LIMITATIONS: Circular buffer (50 entries) — old images are evicted. Metadata is cheap; fetching image data is not — request specific ids, not bulk.\n" +
+            "GOOD: get_images({ list: true }); get_images({ groupId: \"burst-abc\", frameIndex: 2 })\n" +
+            "BAD: get_images() with no filter when buffer is full — floods context. Use list:true or last:N first.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full interaction playbook.",
         inputSchema: {
             list: z.boolean().optional().describe("List all entries and groups (metadata only, no image data)"),
             id: z.string().optional().describe("Retrieve a specific image by ID (returns image data)"),
@@ -3554,7 +3657,9 @@ registerToolWithTelemetry(
     "reload_app",
     {
         description:
-            "Reload the React Native app (triggers JavaScript bundle reload like pressing 'r' in Metro). Will auto-connect to Metro if no connection exists. Note: After reload, the app may take a few seconds to fully restart and become responsive — wait before running other tools. IMPORTANT: React Native has Fast Refresh enabled by default - code changes are automatically applied without needing reload. Only use when: (1) logs/behavior don't reflect code changes after a few seconds, (2) app is in broken/error state, or (3) need to reset app state completely (navigation stack, context, etc.).",
+            "Reload the React Native app (triggers JavaScript bundle reload like pressing 'r' in Metro).\n" +
+            "WHEN TO USE: Only after native code / config changes or a broken app state — NOT after JS/TS edits (Fast Refresh handles those in 1-2s).\n" +
+            "Will auto-connect to Metro if no connection exists. Note: After reload, the app may take a few seconds to fully restart and become responsive — wait before running other tools. IMPORTANT: React Native has Fast Refresh enabled by default - code changes are automatically applied without needing reload. Only use when: (1) logs/behavior don't reflect code changes after a few seconds, (2) app is in broken/error state, or (3) need to reset app state completely (navigation stack, context, etc.).",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
@@ -3595,7 +3700,14 @@ registerToolWithTelemetry(
             '"push" displays a message in the LogBox error banner (visible to the developer watching the device). ' +
             '"ignore" adds patterns to suppress future LogBox entries for this session. ' +
             '"detect" reads current LogBox state without modifying it. ' +
-            "Only works in __DEV__ mode — LogBox does not exist in production builds.",
+            "Only works in __DEV__ mode — LogBox does not exist in production builds.\n" +
+            "PURPOSE: Control RN's on-device red/yellow overlay — clear it when it blocks UI, suppress noisy repeats, or push a message back to the developer.\n" +
+            "WHEN TO USE: Screenshot/tap reports LogBox is obstructing the screen, an error banner prevents interaction, or you want to surface info to the dev watching the simulator.\n" +
+            "WORKFLOW: logbox(action=\"detect\") -> if present: logbox(action=\"dismiss\") to read + clear -> continue UI work. Use action=\"ignore\" with patterns to stop repeat noise.\n" +
+            "LIMITATIONS: Dev-only — no effect in production builds. \"push\" at level=\"warning\" won't show a banner unless LogBox is already open.\n" +
+            "GOOD: logbox({ action: \"dismiss\" }); logbox({ action: \"ignore\", patterns: [\"[APOLLO]\"] })\n" +
+            "BAD: Spamming logbox(action=\"push\") for every tool step — annoys the developer.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full logs playbook.",
         inputSchema: {
             action: z.enum(["dismiss", "push", "ignore", "detect"]).describe('Action to perform: "dismiss", "push", "ignore", or "detect"'),
             message: z.string().optional().describe('Message to push into LogBox (required when action="push")'),
@@ -3796,7 +3908,14 @@ registerToolWithTelemetry(
     "get_bundle_status",
     {
         description:
-            "Get the current Metro bundler status including build state and any recent bundling errors. Use this to check if there are compilation/bundling errors that prevent the app from loading.",
+            "Get the current Metro bundler status including build state and any recent bundling errors. Use this to check if there are compilation/bundling errors that prevent the app from loading.\n" +
+            "PURPOSE: Snapshot Metro's current build state (idle / transforming / error) together with any captured errors — a fast \"is the bundler healthy?\" check.\n" +
+            "WHEN TO USE: Before diving into runtime debugging — rules out compile-time failures that would make get_logs and tap pointless.\n" +
+            "WORKFLOW: get_bundle_status -> if errors present: get_bundle_errors for detail -> fix -> clear_bundle_errors.\n" +
+            "LIMITATIONS: Relies on Metro's WebSocket event stream; if Metro isn't running or the connection dropped, status may be stale.\n" +
+            "GOOD: get_bundle_status() at the start of a debug session.\n" +
+            "BAD: Polling every second — Metro events are push-based; just call once and act on the result.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"bundle\") for the full bundle-check playbook.",
         inputSchema: {}
     },
     async () => {
@@ -3985,7 +4104,10 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "clear_bundle_errors",
     {
-        description: "Clear the bundle error buffer",
+        description: "Clear the bundle error buffer.\n" +
+            "PURPOSE: Reset captured Metro build errors after a fix so get_bundle_status/get_bundle_errors reflect the current state.\n" +
+            "WHEN TO USE: After fixing a bundling error and before re-triggering Metro to confirm the error is gone.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"bundle\") for the full bundle-check playbook.",
         inputSchema: {}
     },
     async () => {
@@ -4010,7 +4132,10 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "list_android_devices",
     {
-        description: "List connected Android devices and emulators via ADB",
+        description: "List connected Android devices and emulators via ADB.\n" +
+            "PURPOSE: Discover which physical devices and emulators are visible to adb so you can pick a target UDID/serial.\n" +
+            "WHEN TO USE: Before android_install_app / android_launch_app, or when a tool reports \"no device\" and you need to confirm visibility.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {}
     },
     async () => {
@@ -4033,7 +4158,10 @@ registerToolWithTelemetry(
     "android_install_app",
     {
         description: "Install an APK on an Android device/emulator" +
-            platformUniqueBanner("installing an Android APK"),
+            platformUniqueBanner("installing an Android APK") +
+            "\nPURPOSE: Push a built APK to a connected Android device or emulator via adb." +
+            "\nWHEN TO USE: After producing a fresh build, when switching app variants, or when preparing a clean test run." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             apkPath: z.string().describe("Path to the APK file to install"),
             deviceId: z
@@ -4072,7 +4200,10 @@ registerToolWithTelemetry(
     "android_launch_app",
     {
         description: "Launch an app on an Android device/emulator by package name" +
-            platformUniqueBanner("launching an Android app by package name"),
+            platformUniqueBanner("launching an Android app by package name") +
+            "\nPURPOSE: Start an installed Android app by its package (and optional activity) so the next tool calls hit a running process." +
+            "\nWHEN TO USE: After android_install_app, after a force-stop, or when the app isn't foregrounded before interaction." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             packageName: z.string().describe("Package name of the app (e.g., com.example.myapp)"),
             activityName: z
@@ -4107,7 +4238,10 @@ registerToolWithTelemetry(
     "android_list_packages",
     {
         description: "List installed packages on an Android device/emulator" +
-            platformUniqueBanner("listing installed Android packages"),
+            platformUniqueBanner("listing installed Android packages") +
+            "\nPURPOSE: Enumerate package names visible to adb so you can confirm installation or pick the right target for android_launch_app." +
+            "\nWHEN TO USE: Before android_launch_app when you don't know the exact package name, or to verify an install succeeded." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             deviceId: z
                 .string()
@@ -4140,7 +4274,10 @@ registerToolWithTelemetry(
     "android_long_press",
     {
         description: "Long press at specific coordinates on an Android device/emulator screen" +
-            platformFallbackBanner("`tap` for short taps; keep android_long_press for long-press gestures specifically"),
+            platformFallbackBanner("`tap` for short taps; keep android_long_press for long-press gestures specifically") +
+            "\nPURPOSE: Emit a sustained touch at raw pixel coordinates to trigger long-press handlers (context menus, drag starts, multi-select)." +
+            "\nWHEN TO USE: Only when a long-press gesture is required — regular taps should go through `tap`." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -4171,7 +4308,10 @@ registerToolWithTelemetry(
     "android_swipe",
     {
         description: "Swipe from one point to another on an Android device/emulator screen" +
-            platformFallbackBanner("`tap` for targeted interactions; keep android_swipe for raw-coordinate gestures"),
+            platformFallbackBanner("`tap` for targeted interactions; keep android_swipe for raw-coordinate gestures") +
+            "\nPURPOSE: Perform a raw-coordinate swipe gesture for scrolling, paging, dismissing sheets, or drawer opens on Android." +
+            "\nWHEN TO USE: When you need a gesture rather than a tap — scroll lists, swipe carousels, or pull-to-refresh." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             startX: z.coerce.number().describe("Starting X coordinate in pixels"),
             startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
@@ -4206,7 +4346,10 @@ registerToolWithTelemetry(
         description:
             "Type text on an Android device/emulator." +
             platformFallbackBanner("`tap(text=...)` — it auto-focuses TextInput via the fiber tree") +
-            " The text will be input at the current focus point (tap an input field first).",
+            " The text will be input at the current focus point (tap an input field first)." +
+            "\nPURPOSE: Send keystrokes to whichever input currently has focus on Android — the tool does NOT focus a field itself." +
+            "\nWHEN TO USE: Only after an input is already focused, or when `tap(text=...)` on the input didn't take focus for some reason." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             text: z.string().describe("Text to type"),
             deviceId: z
@@ -4236,7 +4379,10 @@ registerToolWithTelemetry(
     {
         description: "Send a key event to an Android device/emulator." +
             platformUniqueBanner("sending Android key events (BACK, HOME, MENU, etc.)") +
-            ` Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}`,
+            ` Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}` +
+            "\nPURPOSE: Dispatch Android system keys (BACK, HOME, MENU, ENTER, DEL, etc.) that aren't reachable via on-screen tap." +
+            "\nWHEN TO USE: Navigate back from a screen, submit a form with ENTER, dismiss the keyboard, or press hardware-style keys during a flow." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             key: z.string().describe(`Key name (${Object.keys(ANDROID_KEY_EVENTS).join(", ")}) or numeric keycode`),
             deviceId: z
@@ -4268,7 +4414,10 @@ registerToolWithTelemetry(
     "android_get_screen_size",
     {
         description: "Get the screen size (resolution) of an Android device/emulator" +
-            platformUniqueBanner("reading Android device pixel resolution"),
+            platformUniqueBanner("reading Android device pixel resolution") +
+            "\nPURPOSE: Return the device's pixel width and height so you can compute safe tap/swipe coordinates." +
+            "\nWHEN TO USE: Before scripting raw-coordinate gestures on an unfamiliar device, or when normalizing coordinates across devices." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             deviceId: z
                 .string()
@@ -4313,7 +4462,10 @@ server.registerTool(
         description:
             "Get the full UI accessibility tree from the Android device using uiautomator." +
             platformFallbackBanner("`get_screen_layout`") +
-            " Returns a hierarchical view of all UI elements with their text, content-description, resource-id, bounds, and tap coordinates.",
+            " Returns a hierarchical view of all UI elements with their text, content-description, resource-id, bounds, and tap coordinates." +
+            "\nPURPOSE: Read the native Android accessibility tree when the React fiber tree isn't available or is missing the target (e.g., WebViews, system dialogs)." +
+            "\nWHEN TO USE: When `get_screen_layout` doesn't show the element you need — typically non-RN UI, system prompts, or native-only widgets." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"layout\") for the full screen-layout playbook.",
         inputSchema: {
             deviceId: z
                 .string()
@@ -4357,7 +4509,10 @@ server.registerTool(
         description:
             "Get UI element info at specific coordinates on an Android device." +
             platformFallbackBanner("`inspect_at_point`") +
-            " Returns the element's text, content-description, resource-id, bounds, and state flags.",
+            " Returns the element's text, content-description, resource-id, bounds, and state flags." +
+            "\nPURPOSE: Identify the native Android accessibility node at a screen coordinate when the React fiber tree can't resolve it." +
+            "\nWHEN TO USE: Coordinate-level inspection of non-RN UI — system dialogs, WebViews, or widgets that don't appear in the fiber tree." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspection playbook.",
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -4389,7 +4544,10 @@ server.registerTool(
         description:
             "Find a UI element on Android screen by text, content description, or resource ID." +
             platformFallbackBanner("`tap(text=...)` or `find_components`") +
-            " Returns element details including tap coordinates. Use this to check if an element exists without tapping it. Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
+            " Returns element details including tap coordinates. Use this to check if an element exists without tapping it. Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps." +
+            "\nPURPOSE: Locate an Android UI element via accessibility and return its tap coordinates without performing the tap." +
+            "\nWHEN TO USE: When `tap(text=...)` or `find_components` can't match — typically non-RN UI, or when you need coordinates for a later tap." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspection playbook.",
         inputSchema: {
             text: z.string().optional().describe("Exact text match for the element"),
             textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
@@ -4458,7 +4616,10 @@ server.registerTool(
         description:
             "Wait for a UI element to appear on Android screen." +
             "\n[PLATFORM FALLBACK — prefer `find_components` + `tap`; reach for this tool only when you need to block until an element appears]" +
-            " Polls the accessibility tree until the element is found or timeout is reached. Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
+            " Polls the accessibility tree until the element is found or timeout is reached. Use this FIRST after navigation to ensure screen is ready, then use find_element + tap." +
+            "\nPURPOSE: Block until an Android accessibility node matching your criteria shows up, avoiding flakiness from racing the UI." +
+            "\nWHEN TO USE: After navigation/launch when the target screen takes unknown time to render, before `android_find_element` + tap." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspection playbook.",
         inputSchema: {
             text: z.string().optional().describe("Exact text match for the element"),
             textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
@@ -4557,7 +4718,10 @@ server.registerTool(
 registerToolWithTelemetry(
     "list_ios_simulators",
     {
-        description: "List available iOS simulators",
+        description: "List available iOS simulators.\n" +
+            "PURPOSE: Enumerate installed iOS simulators with their UDIDs and boot state so you can boot or install into the right one.\n" +
+            "WHEN TO USE: Before ios_boot_simulator / ios_install_app, or when you need a UDID for a specific device name.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             onlyBooted: z
                 .boolean()
@@ -4725,7 +4889,10 @@ registerToolWithTelemetry(
     "ios_install_app",
     {
         description: "Install an app bundle (.app) on an iOS simulator" +
-            platformUniqueBanner("installing an iOS .app/.ipa bundle"),
+            platformUniqueBanner("installing an iOS .app/.ipa bundle") +
+            "\nPURPOSE: Deploy a built .app bundle onto a booted iOS simulator via simctl." +
+            "\nWHEN TO USE: After producing a fresh simulator build, when switching app variants, or when preparing a clean test run." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             appPath: z.string().describe("Path to the .app bundle to install"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4751,7 +4918,10 @@ registerToolWithTelemetry(
     "ios_launch_app",
     {
         description: "Launch an app on an iOS simulator by bundle ID" +
-            platformUniqueBanner("launching an iOS app by bundle ID"),
+            platformUniqueBanner("launching an iOS app by bundle ID") +
+            "\nPURPOSE: Start an installed iOS app by its bundle ID so the next tool calls hit a running process." +
+            "\nWHEN TO USE: After ios_install_app, after ios_terminate_app, or when the app isn't foregrounded before interaction." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             bundleId: z.string().describe("Bundle ID of the app (e.g., com.example.myapp)"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4776,7 +4946,13 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_open_url",
     {
-        description: "Open a URL in the iOS simulator (opens in default handler or Safari)" +
+        description: "Open a URL in the iOS simulator (opens in default handler or Safari).\n" +
+            "PURPOSE: Drive an iOS simulator into a deep link or universal link entry point so you can exercise routing from an external entry.\n" +
+            "WHEN TO USE: Testing deep-link handlers, universal link routing, OAuth/SSO callback URLs, or any flow that enters the app via a URL.\n" +
+            "WORKFLOW: ios_boot_simulator -> ios_launch_app (or have the app running) -> ios_open_url -> ios_screenshot / get_screen_layout to verify the target screen rendered.\n" +
+            "GOOD: ios_open_url(url=\"myapp://product/42\") to land directly on a product screen.\n" +
+            "BAD: ios_open_url(url=\"...\") used as a substitute for in-app navigation when the user would normally tap — prefer `tap` for normal interaction flows.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook." +
             platformUniqueBanner("testing iOS deep links or universal links"),
         inputSchema: {
             url: z.string().describe("URL to open (e.g., https://example.com or myapp://path)"),
@@ -4803,7 +4979,10 @@ registerToolWithTelemetry(
     "ios_terminate_app",
     {
         description: "Terminate a running app on an iOS simulator" +
-            platformUniqueBanner("force-terminating an iOS app"),
+            platformUniqueBanner("force-terminating an iOS app") +
+            "\nPURPOSE: Force-kill an iOS app process so the next launch starts from a cold state." +
+            "\nWHEN TO USE: To reset app state fully (beyond what reload_app does), or before reinstalling a new build." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
         inputSchema: {
             bundleId: z.string().describe("Bundle ID of the app to terminate"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4828,7 +5007,10 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_boot_simulator",
     {
-        description: "Boot an iOS simulator by UDID." +
+        description: "Boot an iOS simulator by UDID.\n" +
+            "PURPOSE: Bring a specific simulator online so you can install/launch an app in it.\n" +
+            "WHEN TO USE: At session start when no simulator is running, or after switching between device models.\n" +
+            "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook." +
             platformUniqueBanner("booting an iOS simulator") +
             " Use list_ios_simulators to find available simulators.",
         inputSchema: {
@@ -4863,7 +5045,10 @@ server.registerTool(
         description:
             "Swipe gesture on an iOS simulator screen." +
             platformFallbackBanner("`tap` for targeted interactions; keep ios_swipe for raw-coordinate gestures") +
-            " Pass screenshot pixel coordinates directly — the same values returned by ios_screenshot pressable elements and screen layout. Coordinates are auto-converted to native iOS points internally. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            " Pass screenshot pixel coordinates directly — the same values returned by ios_screenshot pressable elements and screen layout. Coordinates are auto-converted to native iOS points internally. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+            "\nPURPOSE: Perform a raw-coordinate swipe gesture for scrolling, paging, dismissing sheets, or drawer opens on iOS." +
+            "\nWHEN TO USE: When you need a gesture rather than a tap — scroll lists, swipe carousels, or pull-to-refresh." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels (from ios_screenshot output)"),
             startY: z.coerce.number().describe("Starting Y coordinate in screenshot pixels (from ios_screenshot output)"),
@@ -4901,7 +5086,10 @@ server.registerTool(
         description:
             "Type text into the active input field on an iOS simulator." +
             platformFallbackBanner("`tap(text=...)` — it auto-focuses TextInput via the fiber tree") +
-            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+            "\nPURPOSE: Send keystrokes to whichever input currently has focus on iOS — the tool does NOT focus a field itself." +
+            "\nWHEN TO USE: Only after an input is already focused, or when `tap(text=...)` on the input didn't take focus for some reason." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             text: z.string().describe("Text to type into the active input field"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4929,7 +5117,10 @@ server.registerTool(
         description:
             "Press a hardware button on an iOS simulator." +
             platformUniqueBanner("pressing iOS hardware buttons (HOME, LOCK, SIRI, APPLE_PAY)") +
-            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+            "\nPURPOSE: Trigger iOS hardware buttons (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY) that aren't reachable via on-screen tap." +
+            "\nWHEN TO USE: Send the app to background (HOME), lock the simulator (LOCK), or exercise Siri/Apple Pay flows." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             button: z
                 .enum(IOS_BUTTON_TYPES)
@@ -4960,7 +5151,10 @@ server.registerTool(
         description:
             "Send a key event to an iOS simulator by keycode." +
             platformFallbackBanner("`ios_button` for common hardware buttons; keep ios_key_event for arbitrary keycodes") +
-            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+            "\nPURPOSE: Dispatch a single raw iOS keycode when no hardware-button or text-input alternative covers what you need." +
+            "\nWHEN TO USE: Exotic keys not in `ios_button` (arrow keys, ESC, function keys) that can't be driven via tap or ios_input_text." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             keycode: z.coerce.number().describe("iOS keycode to send"),
             duration: z.coerce.number().optional().describe("Optional key press duration in seconds"),
@@ -4989,7 +5183,10 @@ server.registerTool(
         description:
             "Send a sequence of key events to an iOS simulator." +
             platformFallbackBanner("`ios_button` or `tap(text=...)` for most cases; keep ios_key_sequence only for multi-keycode sequences") +
-            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+            "\nPURPOSE: Replay an ordered list of iOS keycodes in one call — the batched equivalent of repeated ios_key_event calls." +
+            "\nWHEN TO USE: Scripted multi-key sequences (keyboard shortcuts, rapid nav patterns) where timing between keys matters." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             keycodes: z.array(z.coerce.number()).describe("Array of iOS keycodes to send in sequence"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -5017,7 +5214,10 @@ server.registerTool(
         description:
             "Get accessibility information for the entire iOS simulator screen." +
             platformFallbackBanner("`get_screen_layout`") +
-            " Returns a nested tree of UI elements with labels, values, and frames. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            " Returns a nested tree of UI elements with labels, values, and frames. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+            "\nPURPOSE: Read the native iOS accessibility tree when the React fiber tree isn't available or is missing the target (e.g., WebViews, system alerts)." +
+            "\nWHEN TO USE: When `get_screen_layout` doesn't show the element you need — typically non-RN UI, system prompts, or native-only widgets." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"layout\") for the full screen-layout playbook.",
         inputSchema: {
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
@@ -5058,7 +5258,10 @@ server.registerTool(
         description:
             "Get accessibility information for the UI element at a specific point on the iOS simulator screen." +
             platformFallbackBanner("`inspect_at_point`") +
-            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+            "\nPURPOSE: Identify the native iOS accessibility element at a screen coordinate when the React fiber tree can't resolve it." +
+            "\nWHEN TO USE: Coordinate-level inspection of non-RN UI — system dialogs, WebViews, or widgets that don't appear in the fiber tree." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspection playbook.",
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -5087,7 +5290,10 @@ server.registerTool(
         description:
             "Find a UI element on iOS simulator by accessibility label or value." +
             platformFallbackBanner("`tap(text=...)` or `find_components`") +
-            " Returns element details including tap coordinates. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
+            " Returns element details including tap coordinates. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps." +
+            "\nPURPOSE: Locate an iOS UI element via accessibility and return its tap coordinates without performing the tap." +
+            "\nWHEN TO USE: When `tap(text=...)` or `find_components` can't match — typically non-RN UI, or when you need coordinates for a later tap." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspection playbook.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
             labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
@@ -5146,7 +5352,10 @@ server.registerTool(
         description:
             "Wait for a UI element to appear on iOS simulator." +
             "\n[PLATFORM FALLBACK — prefer `find_components` + `tap`; reach for this tool only when you need to block until an element appears]" +
-            " Polls until found or timeout. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
+            " Polls until found or timeout. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap." +
+            "\nPURPOSE: Block until an iOS accessibility element matching your criteria shows up, avoiding flakiness from racing the UI." +
+            "\nWHEN TO USE: After navigation/launch when the target screen takes unknown time to render, before `ios_find_element` + tap." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspection playbook.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
             labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
