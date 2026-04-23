@@ -316,6 +316,17 @@ const NON_METRO_TOOLS = new Set([
     "send_feedback"
 ]);
 
+// Banner helpers for platform-specific tool descriptions. Appended after the
+// verbatim first sentence of every ios_*/android_* tool to steer agents toward
+// cross-platform primaries (tap, get_screen_layout, etc) unless native-only
+// behavior is required. See src/core/nativeOnlyHints.ts for the complementary
+// runtime hint shown when Metro is absent.
+const platformFallbackBanner = (prefer: string) =>
+    `\n[PLATFORM FALLBACK — prefer ${prefer} unless you specifically need native-only behavior]`;
+
+const platformUniqueBanner = (useCase: string) =>
+    `\n[PLATFORM-SPECIFIC — no cross-platform equivalent; use when ${useCase}]`;
+
 // Registry for dev meta-tool — stores handlers and configs for dynamic dispatch
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const toolRegistry = new Map<string, { config: any; handler: (args: any) => Promise<any> }>();
@@ -4021,7 +4032,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_install_app",
     {
-        description: "Install an APK on an Android device/emulator",
+        description: "Install an APK on an Android device/emulator" +
+            platformUniqueBanner("installing an Android APK"),
         inputSchema: {
             apkPath: z.string().describe("Path to the APK file to install"),
             deviceId: z
@@ -4059,7 +4071,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_launch_app",
     {
-        description: "Launch an app on an Android device/emulator by package name",
+        description: "Launch an app on an Android device/emulator by package name" +
+            platformUniqueBanner("launching an Android app by package name"),
         inputSchema: {
             packageName: z.string().describe("Package name of the app (e.g., com.example.myapp)"),
             activityName: z
@@ -4093,7 +4106,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_list_packages",
     {
-        description: "List installed packages on an Android device/emulator",
+        description: "List installed packages on an Android device/emulator" +
+            platformUniqueBanner("listing installed Android packages"),
         inputSchema: {
             deviceId: z
                 .string()
@@ -4125,7 +4139,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_long_press",
     {
-        description: "Long press at specific coordinates on an Android device/emulator screen",
+        description: "Long press at specific coordinates on an Android device/emulator screen" +
+            platformFallbackBanner("`tap` for short taps; keep android_long_press for long-press gestures specifically"),
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -4155,7 +4170,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_swipe",
     {
-        description: "Swipe from one point to another on an Android device/emulator screen",
+        description: "Swipe from one point to another on an Android device/emulator screen" +
+            platformFallbackBanner("`tap` for targeted interactions; keep android_swipe for raw-coordinate gestures"),
         inputSchema: {
             startX: z.coerce.number().describe("Starting X coordinate in pixels"),
             startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
@@ -4188,7 +4204,9 @@ registerToolWithTelemetry(
     "android_input_text",
     {
         description:
-            "Type text on an Android device/emulator. The text will be input at the current focus point (tap an input field first).",
+            "Type text on an Android device/emulator." +
+            platformFallbackBanner("`tap(text=...)` — it auto-focuses TextInput via the fiber tree") +
+            " The text will be input at the current focus point (tap an input field first).",
         inputSchema: {
             text: z.string().describe("Text to type"),
             deviceId: z
@@ -4216,7 +4234,9 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_key_event",
     {
-        description: `Send a key event to an Android device/emulator. Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}`,
+        description: "Send a key event to an Android device/emulator." +
+            platformUniqueBanner("sending Android key events (BACK, HOME, MENU, etc.)") +
+            ` Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}`,
         inputSchema: {
             key: z.string().describe(`Key name (${Object.keys(ANDROID_KEY_EVENTS).join(", ")}) or numeric keycode`),
             deviceId: z
@@ -4247,7 +4267,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "android_get_screen_size",
     {
-        description: "Get the screen size (resolution) of an Android device/emulator",
+        description: "Get the screen size (resolution) of an Android device/emulator" +
+            platformUniqueBanner("reading Android device pixel resolution"),
         inputSchema: {
             deviceId: z
                 .string()
@@ -4290,7 +4311,9 @@ server.registerTool(
     "android_describe_all",
     {
         description:
-            "Get the full UI accessibility tree from the Android device using uiautomator. Returns a hierarchical view of all UI elements with their text, content-description, resource-id, bounds, and tap coordinates.",
+            "Get the full UI accessibility tree from the Android device using uiautomator." +
+            platformFallbackBanner("`get_screen_layout`") +
+            " Returns a hierarchical view of all UI elements with their text, content-description, resource-id, bounds, and tap coordinates.",
         inputSchema: {
             deviceId: z
                 .string()
@@ -4332,7 +4355,9 @@ server.registerTool(
     "android_describe_point",
     {
         description:
-            "Get UI element info at specific coordinates on an Android device. Returns the element's text, content-description, resource-id, bounds, and state flags.",
+            "Get UI element info at specific coordinates on an Android device." +
+            platformFallbackBanner("`inspect_at_point`") +
+            " Returns the element's text, content-description, resource-id, bounds, and state flags.",
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -4362,7 +4387,9 @@ server.registerTool(
     "android_find_element",
     {
         description:
-            "Find a UI element on Android screen by text, content description, or resource ID. Returns element details including tap coordinates. Use this to check if an element exists without tapping it. Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
+            "Find a UI element on Android screen by text, content description, or resource ID." +
+            platformFallbackBanner("`tap(text=...)` or `find_components`") +
+            " Returns element details including tap coordinates. Use this to check if an element exists without tapping it. Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
         inputSchema: {
             text: z.string().optional().describe("Exact text match for the element"),
             textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
@@ -4429,7 +4456,9 @@ server.registerTool(
     "android_wait_for_element",
     {
         description:
-            "Wait for a UI element to appear on Android screen. Polls the accessibility tree until the element is found or timeout is reached. Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
+            "Wait for a UI element to appear on Android screen." +
+            "\n[PLATFORM FALLBACK — prefer `find_components` + `tap`; reach for this tool only when you need to block until an element appears]" +
+            " Polls the accessibility tree until the element is found or timeout is reached. Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
         inputSchema: {
             text: z.string().optional().describe("Exact text match for the element"),
             textContains: z.string().optional().describe("Partial text match (case-insensitive)"),
@@ -4695,7 +4724,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_install_app",
     {
-        description: "Install an app bundle (.app) on an iOS simulator",
+        description: "Install an app bundle (.app) on an iOS simulator" +
+            platformUniqueBanner("installing an iOS .app/.ipa bundle"),
         inputSchema: {
             appPath: z.string().describe("Path to the .app bundle to install"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4720,7 +4750,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_launch_app",
     {
-        description: "Launch an app on an iOS simulator by bundle ID",
+        description: "Launch an app on an iOS simulator by bundle ID" +
+            platformUniqueBanner("launching an iOS app by bundle ID"),
         inputSchema: {
             bundleId: z.string().describe("Bundle ID of the app (e.g., com.example.myapp)"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4745,7 +4776,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_open_url",
     {
-        description: "Open a URL in the iOS simulator (opens in default handler or Safari)",
+        description: "Open a URL in the iOS simulator (opens in default handler or Safari)" +
+            platformUniqueBanner("testing iOS deep links or universal links"),
         inputSchema: {
             url: z.string().describe("URL to open (e.g., https://example.com or myapp://path)"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4770,7 +4802,8 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_terminate_app",
     {
-        description: "Terminate a running app on an iOS simulator",
+        description: "Terminate a running app on an iOS simulator" +
+            platformUniqueBanner("force-terminating an iOS app"),
         inputSchema: {
             bundleId: z.string().describe("Bundle ID of the app to terminate"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4795,7 +4828,9 @@ registerToolWithTelemetry(
 registerToolWithTelemetry(
     "ios_boot_simulator",
     {
-        description: "Boot an iOS simulator by UDID. Use list_ios_simulators to find available simulators.",
+        description: "Boot an iOS simulator by UDID." +
+            platformUniqueBanner("booting an iOS simulator") +
+            " Use list_ios_simulators to find available simulators.",
         inputSchema: {
             udid: z.string().describe("UDID of the simulator to boot (from list_ios_simulators)")
         }
@@ -4826,7 +4861,9 @@ server.registerTool(
     "ios_swipe",
     {
         description:
-            "Swipe gesture on an iOS simulator screen. Pass screenshot pixel coordinates directly — the same values returned by ios_screenshot pressable elements and screen layout. Coordinates are auto-converted to native iOS points internally. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Swipe gesture on an iOS simulator screen." +
+            platformFallbackBanner("`tap` for targeted interactions; keep ios_swipe for raw-coordinate gestures") +
+            " Pass screenshot pixel coordinates directly — the same values returned by ios_screenshot pressable elements and screen layout. Coordinates are auto-converted to native iOS points internally. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels (from ios_screenshot output)"),
             startY: z.coerce.number().describe("Starting Y coordinate in screenshot pixels (from ios_screenshot output)"),
@@ -4862,7 +4899,9 @@ server.registerTool(
     "ios_input_text",
     {
         description:
-            "Type text into the active input field on an iOS simulator. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Type text into the active input field on an iOS simulator." +
+            platformFallbackBanner("`tap(text=...)` — it auto-focuses TextInput via the fiber tree") +
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             text: z.string().describe("Text to type into the active input field"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4888,7 +4927,9 @@ server.registerTool(
     "ios_button",
     {
         description:
-            "Press a hardware button on an iOS simulator. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Press a hardware button on an iOS simulator." +
+            platformUniqueBanner("pressing iOS hardware buttons (HOME, LOCK, SIRI, APPLE_PAY)") +
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             button: z
                 .enum(IOS_BUTTON_TYPES)
@@ -4917,7 +4958,9 @@ server.registerTool(
     "ios_key_event",
     {
         description:
-            "Send a key event to an iOS simulator by keycode. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Send a key event to an iOS simulator by keycode." +
+            platformFallbackBanner("`ios_button` for common hardware buttons; keep ios_key_event for arbitrary keycodes") +
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             keycode: z.coerce.number().describe("iOS keycode to send"),
             duration: z.coerce.number().optional().describe("Optional key press duration in seconds"),
@@ -4944,7 +4987,9 @@ server.registerTool(
     "ios_key_sequence",
     {
         description:
-            "Send a sequence of key events to an iOS simulator. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Send a sequence of key events to an iOS simulator." +
+            platformFallbackBanner("`ios_button` or `tap(text=...)` for most cases; keep ios_key_sequence only for multi-keycode sequences") +
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             keycodes: z.array(z.coerce.number()).describe("Array of iOS keycodes to send in sequence"),
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
@@ -4970,7 +5015,9 @@ server.registerTool(
     "ios_describe_all",
     {
         description:
-            "Get accessibility information for the entire iOS simulator screen. Returns a nested tree of UI elements with labels, values, and frames. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Get accessibility information for the entire iOS simulator screen." +
+            platformFallbackBanner("`get_screen_layout`") +
+            " Returns a nested tree of UI elements with labels, values, and frames. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
         }
@@ -5009,7 +5056,9 @@ server.registerTool(
     "ios_describe_point",
     {
         description:
-            "Get accessibility information for the UI element at a specific point on the iOS simulator screen. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
+            "Get accessibility information for the UI element at a specific point on the iOS simulator screen." +
+            platformFallbackBanner("`inspect_at_point`") +
+            " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion).",
         inputSchema: {
             x: z.coerce.number().describe("X coordinate in pixels"),
             y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -5036,7 +5085,9 @@ server.registerTool(
     "ios_find_element",
     {
         description:
-            "Find a UI element on iOS simulator by accessibility label or value. Returns element details including tap coordinates. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
+            "Find a UI element on iOS simulator by accessibility label or value." +
+            platformFallbackBanner("`tap(text=...)` or `find_components`") +
+            " Returns element details including tap coordinates. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Workflow: 1) wait_for_element, 2) find_element, 3) tap with returned coordinates. Prefer this over screenshots for button taps.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
             labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
@@ -5093,7 +5144,9 @@ server.registerTool(
     "ios_wait_for_element",
     {
         description:
-            "Wait for a UI element to appear on iOS simulator. Polls until found or timeout. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
+            "Wait for a UI element to appear on iOS simulator." +
+            "\n[PLATFORM FALLBACK — prefer `find_components` + `tap`; reach for this tool only when you need to block until an element appears]" +
+            " Polls until found or timeout. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion). Use this FIRST after navigation to ensure screen is ready, then use find_element + tap.",
         inputSchema: {
             label: z.string().optional().describe("Exact accessibility label match"),
             labelContains: z.string().optional().describe("Partial label match (case-insensitive)"),
