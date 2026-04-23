@@ -330,9 +330,21 @@ const platformUniqueBanner = (useCase: string) =>
 const primaryInteractionBanner = () =>
     `\n[PRIMARY INTERACTION TOOL — works on iOS and Android; prefer over ios_*/android_* siblings]`;
 
-// Registry for dev meta-tool — stores handlers and configs for dynamic dispatch
+// Registry for dev meta-tool — stores handlers and configs for dynamic dispatch.
+// Also exported so unit tests can enumerate every registered tool without booting
+// the server. Populated by registerToolWithTelemetry AND by the server.registerTool
+// interceptor installed below, so it captures every registration site.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const toolRegistry = new Map<string, { config: any; handler: (args: any) => Promise<any> }>();
+export const toolRegistry = new Map<string, { config: any; handler: (args: any) => Promise<any> }>();
+
+// Interceptor: capture every direct server.registerTool call into toolRegistry so
+// tests and the dev meta-tool see the full surface (including platform-native tools
+// and the dev meta-tool itself that bypass registerToolWithTelemetry).
+const _originalRegisterTool = server.registerTool.bind(server);
+(server as any).registerTool = (name: string, config: any, handler: any) => {
+    toolRegistry.set(name, { config, handler });
+    return _originalRegisterTool(name, config, handler);
+};
 
 function registerToolWithTelemetry(toolName: string, config: any, handler: (args: any) => Promise<any>, emptyResultDetector?: (result: any) => boolean): void {
     toolRegistry.set(toolName, { config, handler });
@@ -2069,7 +2081,9 @@ registerToolWithTelemetry(
         description:
             "Connect to a Metro server on a specific port.\n" +
             "[DEPRECATED IN PRACTICE — prefer `scan_metro` which auto-discovers all common ports and connects every Bridgeless target at once. Use `connect_metro` only when you need to target a specific non-default port]\n" +
-            "Use this when you know the exact port, otherwise use scan_metro which auto-detects. Establishes the WebSocket connection needed for debugging tools.",
+            "PURPOSE: Establish a CDP WebSocket connection to a single Metro server on a known, non-default port.\n" +
+            "WHEN TO USE: Only when the Metro bundler is running on a port outside the common 8081/8082/19000-19002 range that `scan_metro` already covers — otherwise always prefer `scan_metro`.\n" +
+            "SEE ALSO: call scan_metro for auto-discovery; call get_apps afterwards to confirm the device attached.",
         inputSchema: {
             port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")
         }
@@ -5571,10 +5585,15 @@ async function main() {
 
 }
 
-main().catch((error) => {
-    console.error("[rn-ai-debugger] Fatal error:", error);
-    process.exit(1);
-});
+// Skip boot when loaded by unit tests — tests import this module purely to
+// enumerate `toolRegistry`. Jest sets JEST_WORKER_ID; RN_AI_DEVTOOLS_TEST_MODE
+// is a manual escape hatch. Production + dev:mcp leave both unset and boot.
+if (!process.env.RN_AI_DEVTOOLS_TEST_MODE && !process.env.JEST_WORKER_ID) {
+    main().catch((error) => {
+        console.error("[rn-ai-debugger] Fatal error:", error);
+        process.exit(1);
+    });
+}
 
 // Graceful shutdown: close CDP connections so the slot is freed for other sessions
 function gracefulShutdown() {
