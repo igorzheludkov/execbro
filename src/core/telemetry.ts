@@ -14,8 +14,6 @@ import { getPostHogClient } from "./posthog.js";
 const TELEMETRY_ENDPOINT = "https://rn-debugger-telemetry.500griven.workers.dev";
 const TELEMETRY_API_KEY = "6a630181cb391ed5c42a188428cc2d2623dfe9333ec048193bb711ab58afe85e";
 
-const BATCH_SIZE = 10;
-const BATCH_INTERVAL_MS = 30_000; // 30 seconds
 const REQUEST_TIMEOUT_MS = 5_000;
 const CONFIG_DIR = join(homedir(), ".rn-ai-debugger");
 const CONFIG_FILE = join(CONFIG_DIR, "telemetry.json");
@@ -148,8 +146,6 @@ interface TelemetryPayload {
 
 let telemetryEnabled = true;
 let config: TelemetryConfig | null = null;
-let eventQueue: TelemetryEvent[] = [];
-let batchTimer: NodeJS.Timeout | null = null;
 let sessionStartTime: number | null = null;
 let sessionId: string | null = null;
 let isFirstRunSession = false;
@@ -258,21 +254,14 @@ export function initTelemetry(): void {
         isFirstRun: isFirstRun()
     });
 
-    // Start batch timer
-    startBatchTimer();
-
-    // Flush on process exit
-    process.on("beforeExit", () => {
-        flushSync();
-    });
-
-    // Track session end on SIGINT/SIGTERM
+    // Track session end on SIGINT/SIGTERM. Each event is dispatched immediately
+    // with keepalive, so no flush is needed — the OS completes the request even
+    // if the process exits right after.
     const handleExit = () => {
         if (sessionStarted && sessionStartTime) {
             trackEvent("session_end", {
                 duration: Date.now() - sessionStartTime
             });
-            flushSync();
         }
         process.exit(0);
     };
@@ -302,19 +291,12 @@ export function isDevMode(): boolean {
 function trackEvent(name: string, properties?: Record<string, string | number | boolean>): void {
     if (!telemetryEnabled) return;
 
-    const event: TelemetryEvent = {
+    dispatch({
         name,
         timestamp: Date.now(),
         isFirstRun: isFirstRun(),
         properties
-    };
-
-    eventQueue.push(event);
-
-    // Flush immediately if batch size reached
-    if (eventQueue.length >= BATCH_SIZE) {
-        flush();
-    }
+    });
 }
 
 export function trackToolInvocation(
@@ -426,7 +408,7 @@ export function trackToolInvocation(
     if (iosDriver) event.iosDriver = iosDriver;
     if (emptyReason) event.emptyReason = emptyReason;
 
-    eventQueue.push(event);
+    dispatch(event);
 
     // Increment local usage counter
     incrementLocalUsage();
@@ -435,10 +417,6 @@ export function trackToolInvocation(
     // Mirrors the infra's native-user inference (backend/worker.ts:deriveNativePlatform)
     // so PostHog cohort filters match the Cloudflare dashboard.
     mirrorNativeCohortToPostHog(toolName);
-
-    if (eventQueue.length >= BATCH_SIZE) {
-        flush();
-    }
 }
 
 // Track what we've already sent to PostHog so we don't re-identify on every tool call.
@@ -494,7 +472,7 @@ function mirrorNativeCohortToPostHog(toolName: string): void {
 function trackLicenseCheck(source: string, tier: string, durationMs: number): void {
     if (!telemetryEnabled) return;
 
-    const event: TelemetryEvent = {
+    dispatch({
         name: "tool_invocation",
         timestamp: Date.now(),
         toolName: "_license_check",
@@ -502,13 +480,7 @@ function trackLicenseCheck(source: string, tier: string, durationMs: number): vo
         duration: durationMs,
         isFirstRun: isFirstRun(),
         errorContext: `${source}:${tier}`
-    };
-
-    eventQueue.push(event);
-
-    if (eventQueue.length >= BATCH_SIZE) {
-        flush();
-    }
+    });
 }
 
 /**
@@ -525,7 +497,7 @@ export function trackAppDetection(detection: {
 }): void {
     if (!telemetryEnabled) return;
 
-    const event: TelemetryEvent = {
+    dispatch({
         name: "app_detected",
         timestamp: Date.now(),
         isFirstRun: isFirstRun(),
@@ -538,9 +510,7 @@ export function trackAppDetection(detection: {
             ...(detection.expoSdkVersion ? { expo: detection.expoSdkVersion } : {}),
         }),
         targetPlatform: detection.appPlatform,
-    };
-
-    eventQueue.push(event);
+    });
 
     // Mirror to PostHog so insights/cohort filters can use kind + platform without custom queries.
     try {
@@ -578,52 +548,17 @@ export function trackAppDetection(detection: {
     } catch {
         // PostHog errors must never affect tool flow.
     }
-
-    if (eventQueue.length >= BATCH_SIZE) {
-        flush();
-    }
 }
 
 // ============================================================================
-// Batch Sending
+// Event Dispatch
 // ============================================================================
 
-function startBatchTimer(): void {
-    if (batchTimer) return;
-
-    batchTimer = setInterval(() => {
-        flush();
-    }, BATCH_INTERVAL_MS);
-
-    // Unref so it doesn't keep the process alive
-    batchTimer.unref();
-}
-
-async function flush(): Promise<void> {
-    if (!telemetryEnabled || eventQueue.length === 0) return;
-
-    const eventsToSend = [...eventQueue];
-    eventQueue = [];
-
-    try {
-        await sendEvents(eventsToSend);
-    } catch {
-        // Silently fail - telemetry should never impact the user
-    }
-}
-
-function flushSync(): void {
-    if (!telemetryEnabled || eventQueue.length === 0) return;
-
-    const eventsToSend = [...eventQueue];
-    eventQueue = [];
-
-    // Use a synchronous-ish approach for exit handlers
-    // This won't actually wait, but queues the request
-    sendEvents(eventsToSend).catch(() => {});
-}
-
-async function sendEvents(events: TelemetryEvent[]): Promise<void> {
+// One event per HTTP request, fired immediately. `keepalive: true` (undici,
+// Node 18+) tells the runtime to complete the request even if the process
+// exits right after — the Node equivalent of navigator.sendBeacon. No queue,
+// no flush timer, no data loss on abrupt exit.
+function dispatch(event: TelemetryEvent): void {
     const payload: TelemetryPayload = {
         installationId: getInstallationId(),
         sessionId: sessionId || undefined,
@@ -631,23 +566,19 @@ async function sendEvents(events: TelemetryEvent[]): Promise<void> {
         packageName: getPackageName(),
         nodeVersion: process.version,
         platform: process.platform,
-        events
+        events: [event]
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-        await fetch(TELEMETRY_ENDPOINT, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-API-Key": TELEMETRY_API_KEY
-            },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-        });
-    } finally {
-        clearTimeout(timeoutId);
-    }
+    fetch(TELEMETRY_ENDPOINT, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": TELEMETRY_API_KEY
+        },
+        body: JSON.stringify(payload),
+        keepalive: true,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    }).catch(() => {
+        // Silent: telemetry must never impact the user.
+    });
 }
