@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.6.0 (upcoming)
+## 1.6.0
 
 ### BREAKING CHANGES
 
