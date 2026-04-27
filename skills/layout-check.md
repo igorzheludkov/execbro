@@ -48,8 +48,10 @@ Based on what's running, capture screenshots:
 ### 4. Optional: Inspect Layout Details
 
 If a screenshot reveals a layout issue and you need precise measurements:
-- Use `mcp__rn-ai-devtools__inspect_at_point` with x/y coordinates (in points) to get the component's frame (position/size), props, and styles at that location
-- Use `mcp__rn-ai-devtools__get_inspector_selection` with x/y coordinates to identify the component name and source file path — helps you find the exact file to fix
+- Pick by question:
+  - **Layout/measurement question** ("why is this clipped?", "what's the actual size?", "what handler fires here?") → `mcp__rn-ai-devtools__inspect_at_point(x, y)`. Returns FRAME PER ANCESTOR plus PROPS (handlers, refs, testID). Pure JS hit test — no overlay flicker, fast.
+  - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__rn-ai-devtools__get_inspector_selection(x, y)`. Returns RN's curated hierarchy with merged style per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.). Briefly toggles RN's Element Inspector on→off around the capture.
+- Both tools work on Bridgeless / new arch and on Paper/Fabric.
 
 ### 5. Optional: Compare with Design
 
@@ -75,9 +77,9 @@ If the user provides a Figma URL or design reference:
 - `mcp__rn-ai-devtools__list_android_devices`
 - `mcp__rn-ai-devtools__ios_screenshot`
 - `mcp__rn-ai-devtools__android_screenshot`
-- `mcp__rn-ai-devtools__inspect_at_point` (optional: layout detail drill-down)
+- `mcp__rn-ai-devtools__inspect_at_point` (optional: per-ancestor frames + props at coordinates)
 - `mcp__rn-ai-devtools__ocr_screenshot` (screenshot + OCR text with tap coordinates)
-- `mcp__rn-ai-devtools__get_inspector_selection` (optional: identify component name/source file)
+- `mcp__rn-ai-devtools__get_inspector_selection` (optional: identity + rich style per ancestor at coordinates)
 
 ## Notes
 

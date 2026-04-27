@@ -12,9 +12,9 @@ Tools for understanding the structure and layout of your React Native screens. U
 | `get_component_tree`       | Full React fiber tree including providers, navigation, and internal components       |
 | `find_components`          | Search for components by name pattern across the entire tree                         |
 | `inspect_component`        | Deep dive into a specific component's props, state, and hooks                        |
-| `inspect_at_point`         | Inspect the component at specific (x, y) coordinates for layout debugging            |
-| `get_inspector_selection`  | Identify the React component at a screen location with file paths                    |
-| `toggle_element_inspector` | Toggle RN's built-in Element Inspector overlay on/off                                |
+| `inspect_at_point`         | Per-ancestor frames + props at (x, y) — pure JS, no overlay flicker                   |
+| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y) — briefly toggles RN inspector          |
+| `toggle_element_inspector` | Manually toggle RN's Element Inspector overlay (rarely needed)                       |
 | `get_images`               | Access the shared image buffer (screenshots from all tools, tap verification frames) |
 
 ## get_screen_layout
@@ -79,32 +79,43 @@ inspect_component with name="ProductCard"
 
 ## inspect_at_point
 
-Inspect the React component at specific (x, y) coordinates. Returns component props, measured frame (position/size in dp), and component path.
+Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point) plus the innermost component's PROPS (handlers as `[Function]`, refs, testID, custom props). Pure JS hit test via fiber tree + `measureInWindow` — no on-device overlay toggled, zero visual side effect.
 
 ```
 inspect_at_point with x=150 y=300
 ```
 
-Coordinates are in dp (density-independent pixels). To convert from screenshot pixels: divide by the device pixel ratio (e.g., 540px / 2.625 = 205dp).
+Coordinates are in dp (density-independent pixels). Convert from screenshot pixels by dividing by the device pixel ratio (e.g., 540px / 2.625 = 205dp).
 
-Works on both Paper and Fabric (New Architecture). Skips RN primitives and common library wrappers (Expo, SVG, gesture handlers) to surface meaningful components.
+Works on Paper, Fabric, and Bridgeless / new arch. Skips RN primitives and common library wrappers to surface meaningful components.
 
-**Best for:** checking layout bounds, reading component props/styles, pixel-perfect debugging. For identifying component names with file paths, prefer `get_inspector_selection`.
+**Best for:** layout debugging ("where exactly is each ancestor positioned?"), props/handler inspection ("what fires when this Pressable is pressed?"), and rapid/repeated calls (no overlay flicker).
 
 ## get_inspector_selection
 
-Identify the React component at a screen location by reading RN's Element Inspector. Returns a clean component hierarchy with source file paths.
+Identity + RICH STYLE per ancestor at (x, y). Invokes RN's Element Inspector programmatically (briefly toggles the overlay on, captures, hides it again — no screenshot pollution). Returns the same data the on-device overlay shows: full curated hierarchy where each entry has its own merged style (paddingHorizontal, borderRadius, fontFamily, etc.), plus the inspected element's frame and merged style.
 
 ```
 get_inspector_selection with x=200 y=450
 ```
 
-Example output: `HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton`
+Coordinates are in points/dp. Works on Paper, Fabric, and Bridgeless / new arch (uses RN's owner-tree internals, not adb-tap routing).
 
-- **With x/y:** auto-enables the inspector, taps at the coordinates, returns the hierarchy
-- **Without coordinates:** returns the current inspector selection
+- **With x/y:** toggles overlay on, captures the selection programmatically, hides overlay
+- **Without coordinates:** returns the current selection from a manually-driven overlay
 
-**Workflow:** Take a screenshot to identify the target element visually, then call this tool with coordinates.
+**Best for:** visual/styling debugging ("why is borderRadius 14 instead of 16?", "what padding does this card have?"). Use `inspect_at_point` if you need per-ancestor frames or non-style props.
+
+## inspect_at_point vs get_inspector_selection — at a glance
+
+| | `inspect_at_point` | `get_inspector_selection` |
+|---|---|---|
+| Frame | Per ancestor | Inspected element only |
+| Style | Reference (no merging) | RICH per ancestor (padding, margin, border, layout) |
+| Props | Full (handlers, refs, testID, custom) | None |
+| Source paths | None | Pre-wired (null on React 19) |
+| Overlay flicker | None — pure JS | ~600ms on→off |
+| Best for | Layout, props, tight loops | Style, visual debugging |
 
 ## toggle_element_inspector
 
@@ -114,7 +125,7 @@ Toggle React Native's built-in Element Inspector overlay on/off.
 toggle_element_inspector
 ```
 
-Rarely needed directly — `get_inspector_selection` auto-enables the inspector when called with coordinates. Use this only when you need manual control over the overlay visibility.
+Rarely needed directly — `get_inspector_selection` auto-toggles the overlay around its capture and hides it afterward. Use this only when you want the overlay to remain visible (e.g., capturing a user-facing screenshot of the inspector itself).
 
 ## get_images
 

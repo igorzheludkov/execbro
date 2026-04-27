@@ -1,8 +1,9 @@
 import WebSocket from "ws";
 import { ExecutionResult, ExecuteOptions } from "./types.js";
 import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
-import { getFirstConnectedApp, getConnectedAppByDevice, connectToDevice } from "./connection.js";
-import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
+import { getFirstConnectedApp, getConnectedAppByDevice, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
+import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
+import type { DeviceInfo } from "./types.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
@@ -117,10 +118,73 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         };
     }
 
+    // Check for multi-statement expressions. Runtime.evaluate compiles input as
+    // a single expression — `console.log('x'); 1+1` raises `')' expected at end
+    // of parenthesized expression`. Internal callers wrap in (function(){...})()
+    // so any `;` they use is at brace depth 1 and won't be flagged.
+    if (hasTopLevelStatementSeparator(trimmed)) {
+        return {
+            valid: false,
+            expression: cleaned,
+            error:
+                "Multi-statement expressions are not supported by Hermes Runtime.evaluate " +
+                "(compiles input as a single expression). " +
+                "Wrap the body in an IIFE: `(function(){ stmt1; stmt2; return result; })()`."
+        };
+    }
+
     return {
         valid: true,
         expression: cleaned
     };
+}
+
+// Walk `src` tracking string/template/comment and bracket depth. Returns true
+// iff a `;` appears at depth 0 with non-whitespace following it (i.e. it
+// separates two top-level statements rather than terminating a single one).
+function hasTopLevelStatementSeparator(src: string): boolean {
+    let i = 0;
+    let parens = 0;
+    let braces = 0;
+    let brackets = 0;
+    while (i < src.length) {
+        const ch = src[i];
+        const next = src[i + 1];
+        if (ch === "/" && next === "/") {
+            const nl = src.indexOf("\n", i + 2);
+            if (nl === -1) return false;
+            i = nl + 1;
+            continue;
+        }
+        if (ch === "/" && next === "*") {
+            const end = src.indexOf("*/", i + 2);
+            if (end === -1) return false;
+            i = end + 2;
+            continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") {
+            const quote = ch;
+            i++;
+            while (i < src.length) {
+                if (src[i] === "\\") { i += 2; continue; }
+                if (src[i] === quote) { i++; break; }
+                i++;
+            }
+            continue;
+        }
+        if (ch === "(") parens++;
+        else if (ch === ")") parens--;
+        else if (ch === "{") braces++;
+        else if (ch === "}") braces--;
+        else if (ch === "[") brackets++;
+        else if (ch === "]") brackets--;
+        else if (ch === ";" && parens === 0 && braces === 0 && brackets === 0) {
+            const rest = src.slice(i + 1).trim();
+            if (rest.length > 0) return true;
+        }
+        i++;
+    }
+    return false;
 }
 
 // Error patterns that indicate a stale/destroyed context
@@ -519,11 +583,15 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
     // Get current connection info before reload
     let app = getConnectedAppByDevice(device);
 
-    // Auto-connect if no connection exists
+    // Auto-connect if no connection exists. Mirrors scan_metro's flow
+    // (clearReconnectionSuppression + filterDebuggableDevices + purge +
+    // connectToDevice per device) — earlier attempts that used ensureConnection
+    // here raced with WS close events on first connect and reported
+    // "Connection succeeded but app is not available". scan_metro's pattern
+    // is the empirically-stable path.
     if (!app) {
         console.error("[rn-ai-debugger] No connection for reload, attempting auto-connect...");
 
-        // Try to find and connect to a Metro server
         const ports = await scanMetroPorts();
         if (ports.length === 0) {
             return {
@@ -532,23 +600,30 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
             };
         }
 
-        // Try to connect to the first available Metro server
+        clearReconnectionSuppression();
+
+        const portDevices = new Map<number, DeviceInfo[]>();
         for (const port of ports) {
             const devices = await fetchDevices(port);
-            const mainDevice = selectMainDevice(devices);
-            if (mainDevice) {
+            const debuggable = filterDebuggableDevices(devices);
+            if (debuggable.length > 0) {
+                portDevices.set(port, debuggable);
+            }
+        }
+
+        purgeStaleConnectionsForPorts(portDevices);
+
+        for (const [port, devices] of portDevices) {
+            for (const dev of devices) {
                 try {
-                    await connectToDevice(mainDevice, port);
-                    console.error(`[rn-ai-debugger] Auto-connected to ${mainDevice.title} on port ${port}`);
-                    app = getConnectedAppByDevice(device);
-                    break;
+                    await connectToDevice(dev, port);
                 } catch (error) {
-                    console.error(`[rn-ai-debugger] Failed to connect to port ${port}: ${error}`);
+                    console.error(`[rn-ai-debugger] Auto-connect failed for ${dev.title} on port ${port}: ${error}`);
                 }
             }
         }
 
-        // Check if auto-connect succeeded
+        app = getConnectedAppByDevice(device);
         if (!app) {
             return {
                 success: false,
@@ -1517,15 +1592,43 @@ export async function getScreenLayout(
         })()
     `;
 
-    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
+    let dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
     if (!dispatchResult.success) return dispatchResult;
 
+    let dispatchError: string | undefined;
     try {
         const parsed = JSON.parse(dispatchResult.result || "{}");
-        if (parsed.error) return { success: false, error: parsed.error };
+        if (parsed.error) dispatchError = parsed.error;
     } catch {
         /* ignore */
     }
+
+    // Retry once on the early-startup race where the React DevTools hook
+    // isn't registered yet. Production / non-__DEV__ builds will still fail
+    // after the retry — surface an actionable error pointing at OCR/screenshot.
+    if (dispatchError && /React DevTools hook not found/.test(dispatchError)) {
+        await delay(400);
+        dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
+        if (!dispatchResult.success) return dispatchResult;
+        dispatchError = undefined;
+        try {
+            const parsed = JSON.parse(dispatchResult.result || "{}");
+            if (parsed.error) dispatchError = parsed.error;
+        } catch {
+            /* ignore */
+        }
+        if (dispatchError && /React DevTools hook not found/.test(dispatchError)) {
+            return {
+                success: false,
+                error:
+                    "React DevTools hook not registered (likely a production / non-__DEV__ build). " +
+                    "Fiber-based layout is unavailable. Use ocr_screenshot for text + tap coordinates, " +
+                    "or ios_screenshot / android_screenshot for a visual snapshot.",
+            };
+        }
+    }
+
+    if (dispatchError) return { success: false, error: dispatchError };
 
     // Wait for measureInWindow callbacks
     await delay(300);
@@ -3769,6 +3872,240 @@ export async function getInspectorSelection(device?: string): Promise<ExecutionR
     `;
 
     return executeInApp(expression, false, {}, device);
+}
+
+/**
+ * Resolve the component at (x, y) using RN's built-in Element Inspector.
+ *
+ * Strategy: programmatically toggle the inspector overlay on (if needed),
+ * then call InspectorOverlay.props.onTouchPoint(x, y) directly — bypassing
+ * the broken adb-tap → PanResponder route on Bridgeless / new-arch RN.
+ * This populates InspectorPanel with RN's full curated hierarchy, the
+ * inspected element's frame, and per-component style data (margin, padding,
+ * border, layout) — exactly what the on-device overlay shows.
+ *
+ * Returns the rich hierarchy with style merged from each entry's
+ * getInspectorData(...).props.style, plus the inspected frame and style.
+ *
+ * Auto-hides the overlay after capture so subsequent screenshots stay clean.
+ */
+export async function getInspectorSelectionAtPoint(
+    x: number,
+    y: number,
+    device?: string
+): Promise<ExecutionResult> {
+    // Step 1: ensure the inspector overlay is mounted (toggle on if currently off).
+    const setupExpression = `
+        (function() {
+            var ds = globalThis.nativeModuleProxy && globalThis.nativeModuleProxy.DevSettings;
+            if (!ds) return { error: 'DevSettings native module not available.' };
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { error: 'React DevTools hook not available. Make sure you are running a development build.' };
+
+            function findOverlays() {
+                var roots = [];
+                if (hook.renderers) {
+                    for (var entry of hook.renderers) {
+                        try { roots = roots.concat(Array.from(hook.getFiberRoots(entry[0]) || [])); } catch(e) {}
+                    }
+                }
+                var overlays = [];
+                function walk(f, d) {
+                    if (!f || d > 800) return;
+                    if (f.type && typeof f.type !== 'string' &&
+                        (f.type.displayName || f.type.name) === 'InspectorOverlay') {
+                        overlays.push(f);
+                    }
+                    var c = f.child;
+                    while (c) { walk(c, d + 1); c = c.sibling; }
+                }
+                for (var r of roots) { walk(r.current, 0); }
+                return overlays;
+            }
+
+            var overlays = findOverlays();
+            // Two overlays expected when active: one per fiber root (LogBox + app).
+            var wasActive = overlays.length >= 2;
+            if (!wasActive) {
+                var proto = Object.getPrototypeOf(ds);
+                if (typeof proto.toggleElementInspector !== 'function') {
+                    return { error: 'toggleElementInspector not found on DevSettings.' };
+                }
+                proto.toggleElementInspector.call(ds);
+            }
+            return { wasActive: wasActive };
+        })()
+    `;
+
+    const setup = await executeInApp(setupExpression, false, {}, device);
+    if (!setup.success) return setup;
+    try {
+        const parsed = JSON.parse(setup.result || "{}");
+        if (parsed.error) return { success: false, error: parsed.error };
+    } catch {
+        /* ignore */
+    }
+
+    // Allow the inspector overlay to mount.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+
+    // Step 2: locate the app InspectorOverlay (skip LogBox at index 0) and dispatch onTouchPoint.
+    const tapExpression = `
+        (function() {
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            var roots = [];
+            for (var entry of hook.renderers) {
+                try { roots = roots.concat(Array.from(hook.getFiberRoots(entry[0]) || [])); } catch(e) {}
+            }
+            var overlays = [];
+            function walk(f, d) {
+                if (!f || d > 800) return;
+                if (f.type && typeof f.type !== 'string' &&
+                    (f.type.displayName || f.type.name) === 'InspectorOverlay') {
+                    overlays.push(f);
+                }
+                var c = f.child;
+                while (c) { walk(c, d + 1); c = c.sibling; }
+            }
+            for (var r of roots) { walk(r.current, 0); }
+
+            // The LogBox renderer's overlay is mounted first; the app overlay is the last one.
+            var overlay = overlays[overlays.length - 1];
+            if (!overlay || !overlay.memoizedProps || typeof overlay.memoizedProps.onTouchPoint !== 'function') {
+                return { error: 'InspectorOverlay.onTouchPoint unavailable. Inspector may not be mounted.' };
+            }
+            try {
+                overlay.memoizedProps.onTouchPoint(${x}, ${y});
+            } catch (e) {
+                return { error: 'onTouchPoint failed: ' + (e && e.message || String(e)) };
+            }
+            return { ok: true };
+        })()
+    `;
+
+    const tap = await executeInApp(tapExpression, false, {}, device);
+    if (!tap.success) return tap;
+    try {
+        const parsed = JSON.parse(tap.result || "{}");
+        if (parsed.error) return { success: false, error: parsed.error };
+    } catch {
+        /* ignore */
+    }
+
+    // Allow setState/render to propagate before reading panel props.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    // Step 3: read the populated InspectorPanel and shape the response.
+    const readExpression = `
+        (function() {
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            var roots = [];
+            for (var entry of hook.renderers) {
+                try { roots = roots.concat(Array.from(hook.getFiberRoots(entry[0]) || [])); } catch(e) {}
+            }
+            var panels = [];
+            function walk(f, d) {
+                if (!f || d > 800) return;
+                if (f.type && typeof f.type !== 'string' &&
+                    (f.type.displayName || f.type.name) === 'InspectorPanel') {
+                    panels.push(f);
+                }
+                var c = f.child;
+                while (c) { walk(c, d + 1); c = c.sibling; }
+            }
+            for (var r of roots) { walk(r.current, 0); }
+
+            var withSel = panels.filter(function(p) {
+                return p.memoizedProps && p.memoizedProps.hierarchy && p.memoizedProps.hierarchy.length > 0;
+            });
+            if (withSel.length === 0) {
+                return { error: 'Inspector did not select an element at (${x}, ${y}). Coordinates may be outside the app bounds.' };
+            }
+            var props = withSel[withSel.length - 1].memoizedProps;
+
+            function flattenStyle(raw) {
+                if (!raw) return null;
+                var arr = Array.isArray(raw) ? raw : [raw];
+                var merged = {};
+                for (var i = 0; i < arr.length; i++) {
+                    var v = arr[i];
+                    if (v && typeof v === 'object') {
+                        var keys = Object.keys(v);
+                        for (var k = 0; k < keys.length; k++) merged[keys[k]] = v[keys[k]];
+                    }
+                }
+                return Object.keys(merged).length > 0 ? merged : null;
+            }
+
+            var idFn = function(x) { return x; };
+            // Build hierarchy with style + source per entry; dedupe consecutive duplicates.
+            var hierarchy = [];
+            var prevName = null;
+            for (var i = 0; i < props.hierarchy.length; i++) {
+                var h = props.hierarchy[i];
+                var name = h.name;
+                if (!name || name === prevName) continue;
+                prevName = name;
+                var data = h.getInspectorData ? h.getInspectorData(idFn) : null;
+                var style = data && data.props ? flattenStyle(data.props.style) : null;
+                var entry = { name: name };
+                if (style) entry.style = style;
+                if (data && data.source && data.source.fileName) {
+                    entry.source = data.source.fileName + (data.source.lineNumber ? (':' + data.source.lineNumber) : '');
+                }
+                hierarchy.push(entry);
+            }
+
+            var element = hierarchy.length > 0 ? hierarchy[hierarchy.length - 1].name : 'Unknown';
+            var path = hierarchy.map(function(e) { return e.name; }).join(' > ') || element;
+
+            return {
+                element: element,
+                path: path,
+                frame: props.inspected ? props.inspected.frame : null,
+                style: props.inspected ? flattenStyle(props.inspected.style) : null,
+                hierarchy: hierarchy,
+                selection: props.selection
+            };
+        })()
+    `;
+
+    const readResult = await executeInApp(readExpression, false, {}, device);
+
+    // Step 4: hide the overlay so it doesn't pollute subsequent screenshots.
+    // We always hide after a successful capture — agents don't manually toggle.
+    const teardownExpression = `
+        (function() {
+            var ds = globalThis.nativeModuleProxy && globalThis.nativeModuleProxy.DevSettings;
+            if (!ds) return { skipped: true };
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook) return { skipped: true };
+            var roots = [];
+            for (var entry of hook.renderers) {
+                try { roots = roots.concat(Array.from(hook.getFiberRoots(entry[0]) || [])); } catch(e) {}
+            }
+            var overlays = 0;
+            function walk(f, d) {
+                if (!f || d > 800) return;
+                if (f.type && typeof f.type !== 'string' &&
+                    (f.type.displayName || f.type.name) === 'InspectorOverlay') overlays++;
+                var c = f.child;
+                while (c) { walk(c, d + 1); c = c.sibling; }
+            }
+            for (var r of roots) { walk(r.current, 0); }
+            if (overlays >= 2) {
+                try { Object.getPrototypeOf(ds).toggleElementInspector.call(ds); } catch(e) {}
+            }
+            return { ok: true };
+        })()
+    `;
+    try {
+        await executeInApp(teardownExpression, false, {}, device);
+    } catch {
+        /* best-effort hide; don't fail the call */
+    }
+
+    return readResult;
 }
 
 /**

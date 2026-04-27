@@ -53,9 +53,9 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `get_component_tree`       | Full React fiber tree. Use `structureOnly=true` for compact output                                              |
 | `find_components`          | Find components by name pattern. Use `includeLayout=true` for styles                                            |
 | `inspect_component`        | Inspect a component's props, state (hooks), and children                                                        |
-| `inspect_at_point`         | Inspect component at (x, y) coordinates — frame, props, styles                                                  |
-| `get_inspector_selection`  | Identify component at screen location with file paths and hierarchy                                             |
-| `toggle_element_inspector` | Toggle RN's built-in Element Inspector overlay                                                                  |
+| `inspect_at_point`         | Per-ancestor frames + props at (x, y) — pure JS, no overlay flicker. Best for layout/handler debugging          |
+| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y) — briefly toggles RN inspector. Best for visual/styling debugging  |
+| `toggle_element_inspector` | Manually toggle RN's Element Inspector overlay — rarely needed; `get_inspector_selection` auto-toggles          |
 | `get_images`               | Access shared image buffer (screenshots, tap verification frames)                                               |
 
 See [Layout & Component Inspection guide](layout-inspection.md) for detailed workflows.

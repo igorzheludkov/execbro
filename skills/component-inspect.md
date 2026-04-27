@@ -41,11 +41,13 @@ Based on the task, inspect individual components:
 - Use `mcp__rn-ai-devtools__find_components` with regex `pattern` to find components
 - Use `includeLayout=true` to get padding/margin/flex styles for matched components
 
-**By screen coordinates (preferred for identifying components):**
+**By screen coordinates — pick the tool by what you need:**
 1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
 2. Identify the target element visually and estimate its coordinates (convert screenshot pixels to points: divide by device pixel ratio)
-3. Use `mcp__rn-ai-devtools__get_inspector_selection` with x/y coordinates — returns a clean component hierarchy with file paths (e.g. `HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton`). Auto-enables the Element Inspector overlay, taps at coordinates, and reads the result.
-4. If you also need layout details (frame bounds, props, styles), use `mcp__rn-ai-devtools__inspect_at_point` with the same coordinates
+3. Pick by question:
+   - **"What is this and how is it styled?"** → `mcp__rn-ai-devtools__get_inspector_selection(x, y)`. Invokes RN's Element Inspector programmatically (briefly toggles overlay on, captures, hides it). Returns identity + RICH STYLE per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.) — same data the on-device overlay shows. Best for visual/styling debugging.
+   - **"Where exactly are ancestors positioned, and what props does this component expose?"** → `mcp__rn-ai-devtools__inspect_at_point(x, y)`. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR plus full PROPS (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props/handler inspection, and rapid/repeated calls.
+4. The two overlap on identity (component name + path). Use both if you need style AND props/per-ancestor frames.
 
 ### 4. Get Layout Details
 
@@ -56,12 +58,12 @@ For layout debugging:
 
 ### 5. Element Inspector Mode
 
-`get_inspector_selection` auto-enables the inspector when called with coordinates, so `toggle_element_inspector` is rarely needed directly. Use it only when you want manual control over the overlay visibility.
+`get_inspector_selection` auto-toggles RN's Element Inspector on for capture and back off afterward (no screenshot pollution), so `toggle_element_inspector` is rarely needed directly. Use it only when you want the overlay to remain visible (e.g., capturing a user-facing screenshot of the inspector itself).
 
 **When to use which inspection tool:**
-- `get_inspector_selection(x, y)` → finding component names and screen structure (returns clean hierarchy with file paths, like RN's Element Inspector overlay)
-- `inspect_at_point(x, y)` → layout debugging with component props, exact frame measurements (position/size in dp), and component path
-- `find_components(pattern)` → searching for components by name pattern across the entire fiber tree
+- `get_inspector_selection(x, y)` → identity + RICH STYLE per ancestor (padding, margin, border, layout) — answers "what is this and why does it look this way?". Briefly toggles the on-device overlay around the capture.
+- `inspect_at_point(x, y)` → identity + FRAME PER ANCESTOR + PROPS (handlers, refs, testID) — answers "where exactly is each ancestor and what does this Pressable do?". Pure JS, no overlay flicker.
+- `find_components(pattern)` → searching for components by name pattern across the entire fiber tree.
 
 ### 6. Present Findings
 
@@ -97,8 +99,9 @@ For layout debugging:
 
 - Requires the rn-ai-devtools MCP server to be running and connected to the app
 - Always start with `structureOnly=true` to get an overview before drilling down
-- Both `inspect_at_point` and `get_inspector_selection` work on Paper and Fabric (New Architecture)
-- `inspect_at_point` returns the nearest user-defined component (skipping RN primitives and common library wrappers like Expo, SVG, gesture handler components)
-- `get_inspector_selection` returns the most complete hierarchy with source file paths — prefer it when you need to find the exact component name to edit
+- Both `inspect_at_point` and `get_inspector_selection` work on Paper, Fabric, and Bridgeless / new arch.
+- `inspect_at_point` returns frame per ancestor + props (handlers, refs, custom props). Pure JS — no overlay toggle, no visual side effect, fastest. Style is shown as a flat reference (no rich merging).
+- `get_inspector_selection` returns RN's curated hierarchy with merged style per ancestor (padding, margin, border, layout) — same rich data as the on-device overlay. Briefly toggles the inspector overlay on→off (~600ms total).
+- Source file paths in `get_inspector_selection` are pre-wired but currently null on React 19 (where `_debugSource` was dropped); identity + style are always returned.
 - Layout data can be large for complex screens - use `find_components` with `includeLayout=true` for targeted queries
 - Use `device` param on any tool to target a specific device when multiple are connected (case-insensitive substring match, e.g. `device="iPhone"`)

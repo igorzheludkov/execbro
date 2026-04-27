@@ -223,8 +223,7 @@ async function ensureUiDriverReady(
       ready: false,
       error: {
         success: false,
-        error:
-          "No iOS simulator is currently running. Start a simulator first.",
+        error: await buildNoSimulatorError(),
       },
     };
   }
@@ -283,16 +282,40 @@ export interface iOSDescribeResult extends iOSResult {
   elements?: iOSAccessibilityElement[];
 }
 
+// Shared message for callers that hit a missing-Xcode preflight. Includes
+// the actual install command so the agent (or user) can act without guessing.
+export const XCODE_MISSING_ERROR =
+  "Xcode command line tools are not installed or not selected. " +
+  "Run `xcode-select --install` for the CLT, or install full Xcode from the App Store " +
+  "and run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`. " +
+  "simctl ships with full Xcode (the standalone CLT does not include it).";
+
+// Memoized result — Xcode CLT presence does not change mid-session in
+// practice, and `xcrun simctl help` adds 50–200 ms per ios_* call without
+// caching. Re-resolve once per process; restart the MCP server after install.
+let simctlAvailableCache: Promise<boolean> | null = null;
+
 /**
- * Check if simctl is available
+ * Check if simctl is available (cached for the lifetime of the process).
  */
 export async function isSimctlAvailable(): Promise<boolean> {
-  try {
-    await execAsync("xcrun simctl help", { timeout: 5000 });
-    return true;
-  } catch {
-    return false;
-  }
+  if (simctlAvailableCache) return simctlAvailableCache;
+  simctlAvailableCache = (async () => {
+    try {
+      await execAsync("xcrun simctl help", { timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  return simctlAvailableCache;
+}
+
+/**
+ * Reset the cached simctl availability check. Test-only.
+ */
+export function resetSimctlAvailableCache(): void {
+  simctlAvailableCache = null;
 }
 
 /**
@@ -307,7 +330,7 @@ export async function listIOSSimulators(
       return {
         success: false,
         error:
-          "Xcode command line tools not available. Install Xcode from the App Store.",
+          XCODE_MISSING_ERROR,
       };
     }
 
@@ -383,6 +406,40 @@ export async function listIOSSimulators(
       success: false,
       error: `Failed to list simulators: ${error instanceof Error ? error.message : String(error)}`,
     };
+  }
+}
+
+/**
+ * Build the actionable "no booted simulator" error message. Lists up to 6
+ * recently-available shutdown simulators by name+UDID and points the agent
+ * at `ios_boot_simulator`, so it can recover instead of giving up.
+ */
+export async function buildNoSimulatorError(): Promise<string> {
+  const base =
+    "No iOS simulator is currently running. " +
+    "Boot one with `ios_boot_simulator` (pass udid or name), " +
+    "or run `xcrun simctl boot <udid>` directly.";
+  try {
+    const { stdout } = await execAsync("xcrun simctl list devices -j", {
+      timeout: SIMCTL_TIMEOUT,
+    });
+    const data = JSON.parse(stdout) as {
+      devices: Record<string, Array<{ udid: string; name: string; state: string; isAvailable?: boolean }>>;
+    };
+    const shutdown: Array<{ name: string; udid: string }> = [];
+    for (const list of Object.values(data.devices)) {
+      if (!Array.isArray(list)) continue;
+      for (const d of list) {
+        if (d.isAvailable === false) continue;
+        if (d.state === "Shutdown") shutdown.push({ name: d.name, udid: d.udid });
+      }
+    }
+    if (shutdown.length === 0) return base;
+    const top = shutdown.slice(0, 6).map((d) => `  - ${d.name} (${d.udid})`).join("\n");
+    const more = shutdown.length > 6 ? `\n  ...and ${shutdown.length - 6} more (run list_ios_simulators)` : "";
+    return `${base}\n\nAvailable simulators (shutdown):\n${top}${more}`;
+  } catch {
+    return base;
   }
 }
 
@@ -496,7 +553,7 @@ export async function iosScreenshot(
       return {
         success: false,
         error:
-          "Xcode command line tools not available. Install Xcode from the App Store.",
+          XCODE_MISSING_ERROR,
       };
     }
 
@@ -505,8 +562,7 @@ export async function iosScreenshot(
     if (!targetUdid) {
       return {
         success: false,
-        error:
-          "No iOS simulator is currently running. Start a simulator first.",
+        error: await buildNoSimulatorError(),
       };
     }
 
@@ -577,7 +633,7 @@ export async function iosInstallApp(
       return {
         success: false,
         error:
-          "Xcode command line tools not available. Install Xcode from the App Store.",
+          XCODE_MISSING_ERROR,
       };
     }
 
@@ -594,8 +650,7 @@ export async function iosInstallApp(
     if (!targetUdid) {
       return {
         success: false,
-        error:
-          "No iOS simulator is currently running. Start a simulator first.",
+        error: await buildNoSimulatorError(),
       };
     }
 
@@ -628,7 +683,7 @@ export async function iosLaunchApp(
       return {
         success: false,
         error:
-          "Xcode command line tools not available. Install Xcode from the App Store.",
+          XCODE_MISSING_ERROR,
       };
     }
 
@@ -637,8 +692,7 @@ export async function iosLaunchApp(
     if (!targetUdid) {
       return {
         success: false,
-        error:
-          "No iOS simulator is currently running. Start a simulator first.",
+        error: await buildNoSimulatorError(),
       };
     }
 
@@ -677,7 +731,7 @@ export async function iosOpenUrl(
       return {
         success: false,
         error:
-          "Xcode command line tools not available. Install Xcode from the App Store.",
+          XCODE_MISSING_ERROR,
       };
     }
 
@@ -686,8 +740,7 @@ export async function iosOpenUrl(
     if (!targetUdid) {
       return {
         success: false,
-        error:
-          "No iOS simulator is currently running. Start a simulator first.",
+        error: await buildNoSimulatorError(),
       };
     }
 
@@ -729,7 +782,7 @@ export async function iosTerminateApp(
       return {
         success: false,
         error:
-          "Xcode command line tools not available. Install Xcode from the App Store.",
+          XCODE_MISSING_ERROR,
       };
     }
 
@@ -738,8 +791,7 @@ export async function iosTerminateApp(
     if (!targetUdid) {
       return {
         success: false,
-        error:
-          "No iOS simulator is currently running. Start a simulator first.",
+        error: await buildNoSimulatorError(),
       };
     }
 
@@ -769,7 +821,7 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
       return {
         success: false,
         error:
-          "Xcode command line tools not available. Install Xcode from the App Store.",
+          XCODE_MISSING_ERROR,
       };
     }
 
@@ -1803,9 +1855,7 @@ export async function getDevicePixelRatio(udid?: string): Promise<number> {
 
   const resolvedUdid = udid || (await getActiveOrBootedSimulatorUdid());
   if (!resolvedUdid) {
-    throw new Error(
-      "No iOS simulator is currently running. Start a simulator first.",
-    );
+    throw new Error(await buildNoSimulatorError());
   }
 
   // Take screenshot to get pixel dimensions

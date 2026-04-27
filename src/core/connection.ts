@@ -1511,9 +1511,39 @@ export async function ensureConnection(options: {
         }
 
         try {
-            await connectToDevice(mainDevice, targetPort);
-            app = getFirstConnectedApp();
+            // Clear any prior reconnection suppression — without this a stale
+            // suppression entry from a previous disconnect_metro keeps the
+            // close-handler from auto-recovering if Metro drops the WS just
+            // after probe.
+            clearReconnectionSuppression();
+
+            const connectResult = await connectToDevice(mainDevice, targetPort);
             wasReconnected = true;
+
+            // connectToDevice resolves with a status string for non-throw
+            // outcomes including "Skipped X (stale CDP target …)". Surface
+            // that explicitly instead of falling through to the generic
+            // "Connection succeeded but app is not available" below.
+            if (connectResult.includes("stale CDP target")) {
+                return {
+                    connected: false,
+                    wasReconnected: false,
+                    healthCheckPassed: false,
+                    connectionInfo: null,
+                    error: `${connectResult}. The CDP page advertised by Metro is no longer responsive — restart the React Native app, then retry.`,
+                };
+            }
+
+            // Race window: connectToDevice may resolve with the WS open and
+            // connectedApps populated, but Metro can immediately close the
+            // socket (single-connection limit, transient hiccup). The close
+            // handler then deletes the entry and getFirstConnectedApp returns
+            // null. Settle briefly and retry a few times before giving up.
+            app = getFirstConnectedApp();
+            for (let i = 0; !app && i < 5; i++) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                app = getFirstConnectedApp();
+            }
         } catch (error) {
             // Ensure we always have a meaningful error message
             let errorMessage: string;

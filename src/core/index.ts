@@ -150,6 +150,7 @@ export {
   toggleElementInspector,
   isInspectorActive,
   getInspectorSelection,
+  getInspectorSelectionAtPoint,
 } from "./executor.js";
 
 // Android (ADB)

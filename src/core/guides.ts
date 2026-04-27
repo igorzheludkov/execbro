@@ -57,21 +57,39 @@ const guides: Guide[] = [
 1. Take a screenshot (ios_screenshot / android_screenshot) or use ocr_screenshot
 2. Identify the target element visually, estimate its coordinates
 3. Convert screenshot pixels to points: divide by device pixel ratio (e.g. pixel_x / 3 for @3x iPhones)
-4. Call get_inspector_selection(x, y) — returns clean component hierarchy with file paths
-   Example output: HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton
-5. If you also need layout details, call inspect_at_point(x, y) on the same coordinates
+4. Pick the right tool (see decision below) and call it with (x, y)
 
-## When to Use Which Tool
-- get_inspector_selection(x, y) — finding component NAMES and screen structure. Returns hierarchy with source file paths. Auto-enables the Element Inspector, taps at coordinates, reads the result.
-- inspect_at_point(x, y) — layout debugging. Returns component props, measured frame (position/size in dp), and path. Skips RN primitives and common library wrappers (Expo, SVG, gesture handlers).
-- find_components(pattern) — search for components by name regex across the entire fiber tree.
-- get_component_tree — full tree overview. Use focusedOnly=true and structureOnly=true for a compact view.
+## get_inspector_selection vs inspect_at_point — DECISION GUIDE
+
+Both answer "what is at (x, y)?" but surface different supplementary data. Pick by what you need next.
+
+| Question you're asking | Use |
+|---|---|
+| "Why is the borderRadius wrong?" / "What's the padding here?" | get_inspector_selection — RICH STYLE per ancestor |
+| "Why is this hit area so small?" / "Where exactly is each ancestor?" | inspect_at_point — FRAME PER ANCESTOR |
+| "What handler is wired to this Pressable?" / "What testID does it have?" | inspect_at_point — full PROPS (including [Function] handlers) |
+| "Which file owns this component?" | get_inspector_selection (source paths pre-wired; null on React 19 today) |
+| "I need to call this multiple times rapidly" or "before/after a transition" | inspect_at_point — pure JS, no overlay flicker |
+
+### get_inspector_selection(x, y)
+- Invokes RN's Element Inspector programmatically (auto toggles overlay on, captures, toggles back off — ~600ms total, brief flicker).
+- Returns: element name, full owner-tree path, frame of the inspected element, merged style of the inspected element, AND a hierarchy where each entry has its own resolved style (paddingHorizontal, borderRadius, fontFamily, etc.).
+- Best for visual/style debugging where you want to see exactly what RN's on-device overlay shows.
+
+### inspect_at_point(x, y)
+- Pure fiber-tree hit test via measureInWindow. NO overlay, zero visual side effect.
+- Returns: element name, path, hit-tested ancestors with FRAME PER ANCESTOR, and PROPS (handlers, refs, testID, custom props, style as a flat reference).
+- Best for layout measurements, props inspection, and any rapid/repeated calls.
+
+### Other inspection tools
+- find_components(pattern) — regex search by component name across the fiber tree.
+- get_component_tree — full tree overview. Use focusedOnly=true and structureOnly=true for compact output.
 - inspect_component(name) — deep dive into a specific component's props, state, and hooks.
 
 ## Tips
-- Both inspect_at_point and get_inspector_selection work on Paper and Fabric (New Architecture)
-- get_inspector_selection returns the most complete hierarchy — prefer it for finding component names
-- toggle_element_inspector is rarely needed — get_inspector_selection auto-enables the inspector`
+- Both tools work on Paper, Fabric, and Bridgeless / new arch.
+- toggle_element_inspector is rarely needed — get_inspector_selection auto-toggles the overlay around its capture and hides it afterward.
+- Coordinates: get_inspector_selection accepts points/dp; inspect_at_point accepts dp (divide screenshot pixels by pixel ratio).`
     },
     {
         id: "layout",
@@ -84,15 +102,16 @@ const guides: Guide[] = [
 2. Compare visually against expected result or Figma design
 3. If an issue is spotted, drill down with inspection tools
 
-## Inspect Layout at a Point
-1. inspect_at_point(x, y) — returns component frame (position, size in dp), props, and styles
-2. Use includeProps=true (default) to see style objects, colors, flex properties
-3. Use includeFrame=true (default) to see exact position and dimensions
+## Inspect at a Point — Pick the Right Tool
+- Style/identity ("what is this and how is it styled?") → get_inspector_selection(x, y)
+  - Returns RN's curated hierarchy with merged style PER ANCESTOR (padding, margin, border, layout).
+  - Briefly toggles the on-device overlay (auto-hidden after capture).
+- Layout/props ("frames per ancestor, handler functions, refs") → inspect_at_point(x, y)
+  - Returns frame for each hit ancestor + full props (handlers as [Function], testID, refs).
+  - Pure JS hit test, no overlay flicker — preferred for rapid calls or before/after comparisons.
 
-## Identify Component to Fix
-1. get_inspector_selection(x, y) — returns hierarchy with file paths
-   Example: HomeScreen(./(tabs)/index.tsx) > SneakerCard > PulseActionButton
-2. Use the file path to find and edit the source code
+Most layout-debugging questions ("why is this clipped?", "what's the actual size?") fit inspect_at_point.
+Most styling questions ("why does this border look wrong?") fit get_inspector_selection.
 
 ## Full Screen Layout
 - get_screen_layout — full layout data for all components
@@ -103,8 +122,8 @@ const guides: Guide[] = [
 - ios_screenshot / android_screenshot: visual capture
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - ocr_screenshot: screenshot with text recognition and tap coordinates
-- inspect_at_point: frame measurements, props, styles
-- get_inspector_selection: component names and source files`
+- inspect_at_point: frames per ancestor + props (no overlay, fast)
+- get_inspector_selection: rich style per ancestor (briefly toggles RN inspector overlay)`
     },
     {
         id: "interact",

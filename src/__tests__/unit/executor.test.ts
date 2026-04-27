@@ -95,8 +95,41 @@ describe("validateAndPreprocessExpression", () => {
         expect(result.expression).toBe("__DEV__");
     });
 
-    it("accepts multi-statement expression", () => {
+    it("rejects multi-statement expression", () => {
         const result = validateAndPreprocessExpression("var x = 1; x");
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain("Multi-statement");
+        expect(result.error).toContain("IIFE");
+    });
+
+    it("rejects multi-statement with console.log", () => {
+        const result = validateAndPreprocessExpression("console.log('[TEST] hello'); 1+1");
+        expect(result.valid).toBe(false);
+        expect(result.error).toContain("Multi-statement");
+    });
+
+    it("accepts trailing semicolon on a single statement", () => {
+        const result = validateAndPreprocessExpression("1 + 1;");
+        expect(result.valid).toBe(true);
+    });
+
+    it("accepts semicolons inside an IIFE body", () => {
+        const result = validateAndPreprocessExpression("(function(){ var x = 1; return x; })()");
+        expect(result.valid).toBe(true);
+    });
+
+    it("accepts semicolons inside a for-loop header", () => {
+        const result = validateAndPreprocessExpression("(function(){ for (var i = 0; i < 3; i++) {} return i; })()");
+        expect(result.valid).toBe(true);
+    });
+
+    it("accepts semicolons inside string literals", () => {
+        const result = validateAndPreprocessExpression("'a;b;c'");
+        expect(result.valid).toBe(true);
+    });
+
+    it("accepts semicolons inside template literals", () => {
+        const result = validateAndPreprocessExpression("`a;b;c`");
         expect(result.valid).toBe(true);
     });
 });

@@ -142,9 +142,9 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `find_components`: Fast regex search across the fiber tree by component name pattern. Returns all matching instances with path and depth. Use after `get_screen_layout` to locate specific components
 - `inspect_component`: Deep dive into a specific component's props, state (hooks), and optionally children tree. Use after finding a component name via `get_screen_layout` or `find_components`
 - `get_component_tree`: Full React fiber tree including all providers, navigation wrappers, and internal components. Use when you need to understand the complete React architecture, not just what's visible. Use `structureOnly=true` for compact names-only output
-- `get_inspector_selection`: Identify component at screen coordinates — returns clean hierarchy with file paths (e.g. `HomeScreen > SneakerCard > PulseActionButton`)
-- `inspect_at_point`: Layout debugging at coordinates — returns component props, frame (position/size), and path
-- `toggle_element_inspector`: Toggle RN's Element Inspector overlay (auto-enabled by `get_inspector_selection`)
+- `get_inspector_selection`: Identity + RICH STYLE per ancestor at screen coordinates. Invokes RN's Element Inspector programmatically (briefly toggles overlay on, captures, hides it). Returns merged style for each ancestor (paddingHorizontal, borderRadius, fontFamily, etc.) — same data the on-device overlay shows. Best for visual/styling debugging.
+- `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in dp) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
+- `toggle_element_inspector`: Toggle RN's Element Inspector overlay manually (rarely needed — `get_inspector_selection` toggles on→off automatically around its capture).
 
 **Device Management:**
 - `list_ios_simulators` / `list_android_devices`: Find available simulators and devices
@@ -200,15 +200,16 @@ When debugging React Native apps through this MCP server:
     4. To see the full React architecture (providers, navigation, hidden modals), use `get_component_tree(structureOnly=true)`
 - **Component Inspection — Identifying elements at coordinates**: When you need to find which React component renders at a specific screen position:
     1. Take a screenshot (`ios_screenshot` / `android_screenshot`) to see the current screen
-    2. Use `get_inspector_selection(x, y)` to get the component hierarchy with file paths at those coordinates
-    3. Use `inspect_at_point(x, y)` for layout details (frame bounds, props, styles) at those coordinates
+    2. Pick `get_inspector_selection(x, y)` if you want **identity + rich style** (padding, margin, border, layout) — answers "what is this and why does it look this way?"
+    3. Pick `inspect_at_point(x, y)` if you want **per-ancestor frames + props** (handlers, refs, testID) — answers "where exactly is each ancestor and what props does the touched component expose?"
+    4. The two tools overlap on identity (component name + path) but their supplementary data is different. Both work on Bridgeless / new arch.
 - **When to use which inspection tool**:
     - `get_screen_layout` → **start here** — screen map with component tree, real positions, and text content
     - `find_components` → fast regex search by component name across the entire fiber tree
     - `inspect_component` → deep dive into props, hooks, and state of a specific component
     - `get_component_tree` → full React fiber tree including internals, providers, hidden components
-    - `get_inspector_selection` → finding component names and file paths at specific screen coordinates
-    - `inspect_at_point` → layout debugging with props and exact frame measurements at specific coordinates
+    - `get_inspector_selection` → identity + rich per-ancestor style at coordinates (briefly toggles RN inspector overlay)
+    - `inspect_at_point` → per-ancestor frames + props at coordinates (no overlay, fast — preferred for tight loops)
 - **Multi-Device Debugging**: When multiple devices are connected:
     1. Use `get_apps` to see all connected devices and their names
     2. Use `device="iPhone"` or `device="sdk_gphone"` to target specific devices (case-insensitive substring match)

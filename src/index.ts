@@ -57,8 +57,8 @@ import {
     findComponents,
     inspectAtPoint,
     toggleElementInspector,
-    isInspectorActive,
     getInspectorSelection,
+    getInspectorSelectionAtPoint,
     getFirstConnectedApp,
     getLogs,
     searchLogs,
@@ -107,7 +107,6 @@ import {
     androidListPackages,
     // Android UI Input (Phase 2)
     ANDROID_KEY_EVENTS,
-    androidTap,
     androidLongPress,
     androidSwipe,
     androidInputText,
@@ -126,7 +125,6 @@ import {
     // iOS UI driver tools
     isUiDriverAvailable,
     getUiDriverInstallHint,
-    iosTap,
     iosButton,
     iosDescribeAll,
     IOS_BUTTON_TYPES,
@@ -2831,9 +2829,9 @@ registerToolWithTelemetry(
     "toggle_element_inspector",
     {
         description:
-            "Toggle React Native's Element Inspector overlay on/off. Rarely needed directly — get_inspector_selection auto-enables the inspector when called with coordinates. Use this only when you need manual control over the overlay visibility.\n" +
-            "PURPOSE: Manual control over the on-device inspector overlay — mostly useful for screenshots that should show the inspector UI or for disabling it after a session.\n" +
-            "WHEN TO USE: Only when get_inspector_selection's auto-enable isn't appropriate (e.g., leaving the overlay on for a user screenshot).\n" +
+            "Toggle React Native's Element Inspector overlay on/off. Rarely needed directly — get_inspector_selection auto-toggles the overlay on for capture and back off afterward. Use only for edge cases (e.g., leaving the overlay visible on screen for a user-facing screenshot).\n" +
+            "PURPOSE: Manual control over the on-device inspector overlay.\n" +
+            "WHEN TO USE: Only for special cases like capturing a screenshot WITH the inspector visible. Normal inspection workflows should call get_inspector_selection directly.\n" +
             "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
         inputSchema: {
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
@@ -2893,13 +2891,14 @@ registerToolWithTelemetry(
     "get_inspector_selection",
     {
         description:
-            "Identify the React component at a screen location by reading RN's Element Inspector. Returns a clean component hierarchy with file paths — ideal for finding the real component name (e.g. HomeScreen > SneakerCard > PulseActionButton). If x/y provided: auto-enables inspector, taps at coordinates, returns hierarchy. If no coordinates: returns current selection.\n" +
-            "PURPOSE: Map a screen coordinate to a real component name AND source file path, so you know which file to edit.\n" +
-            "WHEN TO USE: You have a screenshot and want to know \"what component renders this pixel?\" — especially for file-path grounding before making code changes.\n" +
-            "WORKFLOW: ios_screenshot / android_screenshot / ocr_screenshot -> get_inspector_selection(x, y) -> edit the returned source file.\n" +
-            "LIMITATIONS: Requires RN dev mode (inspector only exists in __DEV__). x/y are in points/dp, not screenshot pixels — tap-style coordinates are fine since the tool taps internally. Flaky on Bridgeless if the inspector fails to initialize.\n" +
-            "GOOD: get_inspector_selection({ x: 180, y: 420 })\n" +
-            "BAD: Using it for layout measurements — prefer inspect_at_point which returns the exact frame.\n" +
+            "Identify the React component at a screen location AND read its full styling. Returns RN's curated owner-tree hierarchy with PER-COMPONENT STYLE (padding, margin, border, layout, colors, fontSize, etc.) — the same rich data the on-device Element Inspector shows. Works on Bridgeless / new arch by invoking RN's inspector programmatically. If x/y provided: toggles the overlay on, captures the selection, and toggles it back off (no screenshot pollution). If no coordinates: reads the current selection from a manually-driven overlay.\n" +
+            "PURPOSE: Identity + styling. Answers \"what is this and how is it styled?\" — the primary tool for visual/style debugging at a coordinate.\n" +
+            "WHEN TO USE: You see a visual issue at a pixel and want the component name AND its style values (e.g. \"why is borderRadius 14 instead of 16?\"). Best for style/CSS-style debugging.\n" +
+            "WORKFLOW: ios_screenshot / android_screenshot -> note the suspect pixel -> get_inspector_selection(x, y) -> edit the returned style values.\n" +
+            "LIMITATIONS: Requires RN dev mode (__DEV__). x/y are in points/dp. Brief overlay flicker (~600ms total). Source file paths are pre-wired but null on React 19 (where _debugSource was dropped); component name + style is always returned.\n" +
+            "DIFFERENCE vs inspect_at_point: get_inspector_selection returns RICH STYLE per ancestor (the inspector's curated view) but only ONE frame (the inspected element). inspect_at_point returns FRAME PER ANCESTOR plus PROPS (handlers, refs, non-style props) but no rich style merging. Use this tool for style/identity; use inspect_at_point for layout measurements and props.\n" +
+            "GOOD: get_inspector_selection({ x: 180, y: 420 }) // \"what is this gradient card and what's its borderRadius?\"\n" +
+            "BAD: Calling it in a tight loop — prefer inspect_at_point (no overlay toggle, faster, no visual side effect).\n" +
             "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
         inputSchema: {
             x: z
@@ -2922,58 +2921,13 @@ registerToolWithTelemetry(
             };
         }
 
-        // If coordinates provided, do the full flow: enable inspector -> tap -> read
-        if (x !== undefined && y !== undefined) {
-            // Check if inspector is active
-            const inspectorActive = await isInspectorActive(device);
-
-            // Enable inspector if not active
-            if (!inspectorActive) {
-                await toggleElementInspector(device);
-                // Wait for inspector to initialize
-                await new Promise((resolve) => setTimeout(resolve, 300));
-            }
-
-            // Detect platform from connected app
-            const app = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
-            if (!app) {
-                return {
-                    content: [{ type: "text", text: "No app connected. Run scan_metro first." }],
-                    isError: true
-                };
-            }
-
-            const isIOS =
-                app.deviceInfo.title?.toLowerCase().includes("iphone") ||
-                app.deviceInfo.title?.toLowerCase().includes("ipad") ||
-                app.deviceInfo.deviceName?.toLowerCase().includes("simulator") ||
-                app.deviceInfo.description?.toLowerCase().includes("ios");
-
-            // Tap at coordinates
-            try {
-                if (isIOS) {
-                    await iosTap(x, y, {});
-                } else {
-                    await androidTap(x, y);
-                }
-            } catch (tapError) {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Failed to tap at (${x}, ${y}): ${tapError instanceof Error ? tapError.message : String(tapError)}`
-                        }
-                    ],
-                    isError: true
-                };
-            }
-
-            // Wait for selection to update
-            await new Promise((resolve) => setTimeout(resolve, 200));
-        }
-
-        // Read the current selection
-        const result = await getInspectorSelection(device);
+        // Coordinate path: use fiber-based hit testing (works on Bridgeless / new arch
+        // where RN's built-in inspector cannot populate hierarchy via UIManager.findSubviewIn).
+        // Avoids toggling the on-device overlay so screenshots stay clean.
+        const result =
+            x !== undefined && y !== undefined
+                ? await getInspectorSelectionAtPoint(x, y, device)
+                : await getInspectorSelection(device);
 
         if (!result.success) {
             return {
@@ -2992,17 +2946,27 @@ registerToolWithTelemetry(
                 };
             }
 
-            // Format the output nicely
             let output = `Element: ${parsed.element}\n`;
             output += `Path: ${parsed.path}\n`;
             if (parsed.frame) {
-                output += `Frame: (${parsed.frame.left?.toFixed(1)}, ${parsed.frame.top?.toFixed(1)}) ${parsed.frame.width}x${parsed.frame.height}\n`;
+                const f = parsed.frame;
+                output += `Frame: (${f.left?.toFixed(1)}, ${f.top?.toFixed(1)}) ${f.width?.toFixed?.(1) ?? f.width}x${f.height?.toFixed?.(1) ?? f.height}\n`;
             }
             if (parsed.style) {
                 output += `Style: ${JSON.stringify(parsed.style, null, 2)}\n`;
             }
-
-
+            if (Array.isArray(parsed.hierarchy) && parsed.hierarchy.length > 0) {
+                output += `\nHierarchy:\n`;
+                for (const h of parsed.hierarchy as Array<{ name: string; source?: string; style?: Record<string, unknown> }>) {
+                    output += `  - ${h.name}`;
+                    if (h.source) output += `  (${h.source})`;
+                    output += `\n`;
+                    if (h.style && Object.keys(h.style).length > 0) {
+                        const styleStr = JSON.stringify(h.style);
+                        output += `      style: ${styleStr.length > 300 ? styleStr.slice(0, 300) + "…" : styleStr}\n`;
+                    }
+                }
+            }
 
             return {
                 content: [{ type: "text", text: output }]
@@ -3020,12 +2984,13 @@ registerToolWithTelemetry(
     "inspect_at_point",
     {
         description:
-            "Inspect the React component at specific (x, y) coordinates for layout debugging. Returns component props, measured frame (position/size in dp), and component path. Works on both Paper and Fabric. Coordinates are in dp (density-independent pixels). To convert from screenshot pixels: divide by the device pixel ratio (e.g. 540px / 2.625 = 205dp). Best for: checking layout bounds, reading component props/styles, pixel-perfect debugging. For identifying component names: prefer get_inspector_selection which returns a cleaner hierarchy with file paths.\n" +
-            "PURPOSE: Pixel-precise layout diagnosis — returns the exact measured frame, props, and style of whatever renders at a point.\n" +
-            "WHEN TO USE: Checking why a button is clipped, why an element's hit area is wrong, or reading the actual computed size/position of a component.\n" +
+            "Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point), plus the innermost component's PROPS (handlers as `[Function]`, refs, custom props like onPress/data/testID). Pure JS hit-test via fiber tree + measureInWindow — no on-device overlay toggled, zero visual side effect. Works on Paper and Fabric.\n" +
+            "PURPOSE: Layout/props diagnosis. Answers \"where is each ancestor positioned, and what props does the touched component expose?\"\n" +
+            "WHEN TO USE: A button is clipped, an element's hit area is wrong, an animated frame is unexpected — or you need handler/ref/non-style props that the inspector doesn't surface. Also preferred for tight loops or before/after comparisons (no overlay flicker).\n" +
             "WORKFLOW: ios_screenshot -> find suspect pixel -> convert to dp (pixel / pixelRatio) -> inspect_at_point(x, y).\n" +
-            "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — this differs from tap() which accepts either. Wrong unit = wrong component. Requires live React connection.\n" +
-            "GOOD: inspect_at_point({ x: 205, y: 360 }) // dp after dividing\n" +
+            "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong component. Style is shown as a reference (no rich merging) — for style debugging use get_inspector_selection.\n" +
+            "DIFFERENCE vs get_inspector_selection: inspect_at_point returns FRAME PER ANCESTOR + PROPS, no overlay flicker, no rich style. get_inspector_selection returns RICH STYLE per ancestor (padding/margin/border) but only ONE frame and toggles the overlay briefly. Use get_inspector_selection for style/identity; use this tool for layout measurements and props.\n" +
+            "GOOD: inspect_at_point({ x: 205, y: 360 }) // \"why is this button's hit area too small?\"\n" +
             "BAD: inspect_at_point({ x: 540, y: 960 }) // raw screenshot pixels — picks the wrong node.\n" +
             "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
         inputSchema: {
@@ -3436,11 +3401,30 @@ registerToolWithTelemetry(
             const status = await checkAndEnsureConnection(device);
             let connectionNote = status.message ? `\n\n${status.message}` : "";
             connectionNote += await metroMissingHintIfAbsent("get_request_details");
+
+            // Enrich with up to 5 recent ids so the agent can pick a real one
+            // instead of retrying with the same stale / made-up id (telemetry
+            // shows ids like "latest", "js-x6e0-1208", "261" passed in).
+            const recent = resolveNetworkBuffer(device).getAll({ count: 5 });
+            let recentNote = "";
+            if (recent.length > 0) {
+                const lines = recent
+                    .slice()
+                    .reverse()
+                    .map((r) => `  - ${r.requestId} — ${r.method} ${r.url}`)
+                    .join("\n");
+                recentNote = `\n\nRecent request ids in buffer (most recent first):\n${lines}\n\nIds are opaque strings — use one of the above, or call get_network_requests / search_network to discover more.`;
+            } else {
+                recentNote =
+                    "\n\nNo network requests in the buffer for this device. " +
+                    "Reproduce the action and call get_network_requests first to discover request ids.";
+            }
+
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Request not found: ${requestId}${connectionNote}`
+                        text: `Request not found: ${requestId}${connectionNote}${recentNote}`
                     }
                 ],
                 isError: true
