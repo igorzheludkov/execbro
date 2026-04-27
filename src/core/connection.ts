@@ -1226,6 +1226,7 @@ export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
 
     const lowerDevice = device.toLowerCase();
     const matches: ConnectedApp[] = [];
+    const allOpenNames: string[] = [];
 
     for (const [key, app] of connectedApps.entries()) {
         if (app.ws.readyState !== WebSocket.OPEN) {
@@ -1233,19 +1234,29 @@ export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
             continue;
         }
         const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "";
+        allOpenNames.push(deviceName);
         if (deviceName.toLowerCase().includes(lowerDevice)) {
             matches.push(app);
         }
     }
+
+    // Prefer exact (case-insensitive) match when present — disambiguates
+    // "iPhone 17 Pro" from "iPhone 17 Pro Max" when both are connected.
+    const exact = matches.find(a => {
+        const name = a.deviceInfo.deviceName || a.deviceInfo.title || "";
+        return name.toLowerCase() === lowerDevice;
+    });
+    if (exact) return exact;
 
     if (matches.length === 1) {
         return matches[0];
     }
     if (matches.length > 1) {
         const names = matches.map(a => a.deviceInfo.deviceName || a.deviceInfo.title).join(", ");
-        throw new Error(`Multiple devices match "${device}": ${names}. Be more specific.`);
+        throw new Error(`Multiple devices match "${device}": ${names}. Be more specific (use the full device name for an exact match).`);
     }
-    throw new Error(`No connected device matches "${device}". Run get_apps to see available devices.`);
+    const available = allOpenNames.length > 0 ? ` Available: ${allOpenNames.join(", ")}.` : "";
+    throw new Error(`No connected device matches "${device}".${available} Run get_apps to see available devices.`);
 }
 
 // Check if any app is connected with an OPEN WebSocket
