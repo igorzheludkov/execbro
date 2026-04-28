@@ -509,6 +509,61 @@ describe("tap orchestrator", () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain("Both x and y");
     });
+
+    it("rejects udid combined with platform=android (non-native)", async () => {
+        const { tap } = await import("../../pro/tap.js");
+        const result = await tap({
+            text: "Submit",
+            platform: "android",
+            udid: "ABC-123",
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("udid is only valid for iOS");
+    });
+
+    it("rejects udid combined with platform=android (native)", async () => {
+        const { tap } = await import("../../pro/tap.js");
+        const result = await tap({
+            x: 100,
+            y: 200,
+            native: true,
+            platform: "android",
+            udid: "ABC-123",
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("udid is only valid for iOS");
+    });
+
+    it("surfaces ambiguous-device errors from getConnectedAppByDevice", async () => {
+        const { tap } = await import("../../pro/tap.js");
+        const { connectedApps } = await import("../../core/state.js");
+        const WebSocket = (await import("ws")).default;
+        connectedApps.clear();
+
+        const fakeWs = { readyState: WebSocket.OPEN } as any;
+        const make = (key: string, deviceName: string): ConnectedApp => ({
+            ws: fakeWs,
+            deviceInfo: {
+                id: key,
+                title: "Hermes React Native",
+                description: "",
+                appId: "com.test",
+                type: "node",
+                webSocketDebuggerUrl: `ws://localhost:8081/${key}`,
+                deviceName,
+            },
+            port: 8081,
+            platform: "ios",
+        });
+        connectedApps.set("a", make("a", "iPhone 17 Pro"));
+        connectedApps.set("b", make("b", "iPhone 17 Pro Max"));
+
+        const result = await tap({ text: "Submit", device: "iPhone 17" });
+        connectedApps.clear();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Multiple devices match");
+    });
 });
 
 describe("verification thresholds", () => {

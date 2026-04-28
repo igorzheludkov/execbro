@@ -879,6 +879,21 @@ registerToolWithTelemetry(
                 .describe(
                     "Target platform. Required when both iOS and Android devices are connected. Auto-detected if only one platform is available."
                 ),
+            device: z
+                .string()
+                .optional()
+                .describe(
+                    "Target device name (substring match against the connected RN app's device name). " +
+                    "Use to pin the tap to a specific device when multiple are connected (e.g. \"iPhone SE\"). " +
+                    "Run get_apps to see connected device names. For iOS, the matched device's simulatorUdid is used to scope the tap."
+                ),
+            udid: z
+                .string()
+                .optional()
+                .describe(
+                    "iOS simulator UDID (from list_ios_simulators). Takes precedence over device/platform when set. " +
+                    "iOS-only — pairing with platform=\"android\" returns an error."
+                ),
             screenshot: z
                 .boolean()
                 .optional()
@@ -918,6 +933,8 @@ registerToolWithTelemetry(
             maxTraversalDepth: args.maxTraversalDepth,
             native: args.native,
             platform: args.platform,
+            device: args.device,
+            udid: args.udid,
             screenshot: args.screenshot,
             verify: args.verify,
             burst: args.burst,
