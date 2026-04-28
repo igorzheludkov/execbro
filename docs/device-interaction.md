@@ -27,6 +27,8 @@ tap with text="Menu" strategy="ocr"
 
 **Fallback chain:** fiber tree (direct `onPress`) → accessibility tree → OCR → error with suggestion.
 
+**Multi-device targeting:** when multiple simulators or devices are connected, pin the tap with `device` (substring match against the connected app's name, e.g. `device="iPhone SE"`) or `udid` (iOS simulator UDID from `list_ios_simulators`, takes precedence). This mirrors `get_screen_layout`/`ios_screenshot` so the layout, screenshot, and follow-up tap all land on the same device.
+
 On failure, the response includes an actionable `suggestion` telling the agent exactly what to try next.
 
 **Screenshot & verification:** By default, `tap` captures and returns a post-tap screenshot (`screenshot=true`). For coordinate, accessibility, and OCR strategies, it also runs a before/after screenshot diff to verify the tap had a meaningful visual effect (`verify=true` by default for these strategies, `false` for fiber). Set `screenshot=false` to skip screenshots entirely for fastest execution, or `verify=false` to skip the diff check.

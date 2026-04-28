@@ -72,6 +72,13 @@ tap(x=300, y=600, native=true, platform="android")  # explicit platform
 ```
 Use `native=true` when tapping system dialogs, non-RN apps, or before establishing a React Native connection. Requires x/y coordinates. Platform is auto-detected if not specified.
 
+**Pin to a specific device when multiple are connected:**
+```
+tap(text="Submit", device="iPhone SE")        # substring match on connected RN app's deviceName
+tap(text="Submit", udid="ABC-123-...")        # iOS simulator UDID (from list_ios_simulators)
+```
+`device` mirrors the `device` parameter on `get_screen_layout`/`ios_screenshot`. `udid` mirrors `ios_screenshot`/`ios_swipe` and takes precedence over `device`/`platform`. `udid` is iOS-only — pairing it with `platform="android"` returns an error. Without these, `tap` follows the platform default, which can land on the wrong simulator when multiple are booted.
+
 **Force a specific strategy:**
 ```
 tap(text="Settings", strategy="ocr")           # skip fiber/accessibility
