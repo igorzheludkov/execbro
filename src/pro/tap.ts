@@ -16,7 +16,7 @@ import {
 import { androidTap, androidFindElement, getDefaultAndroidDevice, androidScreenshot } from "../core/android.js";
 import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
-import { connectToDevice, clearReconnectionSuppression } from "../core/connection.js";
+import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice } from "../core/connection.js";
 import { notifyDriverMissing } from "../core/logbox.js";
 
 // --- Types ---
@@ -45,6 +45,18 @@ export interface TapOptions {
     screenshot?: boolean;
     verify?: boolean;
     burst?: boolean;
+    /**
+     * Target device by name (substring match against the connected RN app's device name).
+     * Mirrors the `device` parameter on get_screen_layout, get_pressable_elements, etc.
+     * For iOS, the resolved device's simulatorUdid is used to scope screenshots and taps.
+     */
+    device?: string;
+    /**
+     * iOS simulator UDID to target directly. Takes precedence over `device` and over the
+     * Metro-connected app's simulatorUdid. Mirrors the `udid` parameter on ios_screenshot,
+     * ios_swipe, etc.
+     */
+    udid?: string;
 }
 
 export interface TapAttempt {
@@ -1247,34 +1259,61 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     if (options.native && hasCoordinates) {
         let platform = options.platform as "ios" | "android" | undefined;
 
+        // Explicit udid forces iOS targeting. If platform is also explicit and conflicts,
+        // surface a clear error rather than silently overriding.
+        if (options.udid && platform === "android") {
+            return {
+                success: false,
+                query,
+                error: 'udid is only valid for iOS. Got platform: "android".'
+            };
+        }
+
         // Auto-detect platform if not specified
         let nativeUdid: string | undefined;
-        if (!platform) {
-            const [androidDevice, iosSimulator] = await Promise.all([
-                getDefaultAndroidDevice().catch(() => null),
-                getActiveOrBootedSimulatorUdid().catch(() => null)
-            ]);
-            if (androidDevice && iosSimulator) {
-                return {
-                    success: false,
-                    query,
-                    error: 'Multiple platforms detected (both Android and iOS). Specify platform: "android" or platform: "ios" to target the correct device.'
-                };
-            }
-            if (androidDevice) {
-                platform = "android";
-            } else if (iosSimulator) {
+        if (options.udid) {
+            platform = "ios";
+            nativeUdid = options.udid;
+        } else if (!platform) {
+            // If `device` is provided, try resolving it as an iOS simulator name first —
+            // otherwise the auto-detect would fall through to getActiveOrBootedSimulatorUdid()
+            // and ignore the caller's targeting hint when multiple simulators are booted.
+            const deviceMatchedUdid = options.device
+                ? await findSimulatorByName(options.device).catch(() => null)
+                : null;
+            if (deviceMatchedUdid) {
                 platform = "ios";
-                nativeUdid = iosSimulator;
+                nativeUdid = deviceMatchedUdid;
             } else {
-                return {
-                    success: false,
-                    query,
-                    error: "No Android device or iOS simulator found. Connect a device or start a simulator."
-                };
+                const [androidDevice, iosSimulator] = await Promise.all([
+                    getDefaultAndroidDevice().catch(() => null),
+                    getActiveOrBootedSimulatorUdid().catch(() => null)
+                ]);
+                if (androidDevice && iosSimulator) {
+                    return {
+                        success: false,
+                        query,
+                        error: 'Multiple platforms detected (both Android and iOS). Specify platform: "android" or platform: "ios" to target the correct device.'
+                    };
+                }
+                if (androidDevice) {
+                    platform = "android";
+                } else if (iosSimulator) {
+                    platform = "ios";
+                    nativeUdid = iosSimulator;
+                } else {
+                    return {
+                        success: false,
+                        query,
+                        error: "No Android device or iOS simulator found. Connect a device or start a simulator."
+                    };
+                }
             }
         } else if (platform === "ios") {
-            nativeUdid = (await getActiveOrBootedSimulatorUdid()) ?? undefined;
+            nativeUdid =
+                (options.device ? await findSimulatorByName(options.device) : null) ??
+                (await getActiveOrBootedSimulatorUdid()) ??
+                undefined;
         }
 
         const nativeShouldScreenshot = options.screenshot !== false;
@@ -1373,13 +1412,46 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         });
     }
 
+    // udid is iOS-only. Reject early if combined with android.
+    if (options.udid && options.platform === "android") {
+        return {
+            success: false,
+            query,
+            error: 'udid is only valid for iOS. Got platform: "android".'
+        };
+    }
+
     // Detect available capabilities
     const allApps = Array.from(connectedApps.values());
     let hasMetro = allApps.length > 0;
-    // If platform is specified, prefer an app matching that platform
-    let app: ConnectedApp | undefined = options.platform
-        ? (allApps.find((a) => a.platform === options.platform) ?? allApps[0])
-        : allApps[0];
+
+    // Pick the connected app to bias platform/strategy selection.
+    // Precedence:
+    //   1. udid → match the iOS app whose simulatorUdid equals udid (if any)
+    //   2. device → substring match against connected app's deviceName/title
+    //   3. platform → first app on that platform
+    //   4. first connected app
+    let app: ConnectedApp | undefined;
+    if (options.udid) {
+        app = allApps.find((a) => a.platform === "ios" && a.simulatorUdid === options.udid);
+    }
+    if (!app && options.device) {
+        try {
+            app = getConnectedAppByDevice(options.device) ?? undefined;
+        } catch (err) {
+            // getConnectedAppByDevice throws on ambiguous matches — surface that to the caller
+            return {
+                success: false,
+                query,
+                error: err instanceof Error ? err.message : String(err)
+            };
+        }
+    }
+    if (!app) {
+        app = options.platform
+            ? (allApps.find((a) => a.platform === options.platform) ?? allApps[0])
+            : allApps[0];
+    }
 
     // Try to auto-connect to Metro (for fiber strategy), but don't fail if it doesn't work
     if (!hasMetro) {
@@ -1439,12 +1511,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         };
     }
 
-    // Resolve target iOS simulator UDID from the connected app
-    // This ensures taps go to the correct device when multiple simulators are booted
+    // Resolve target iOS simulator UDID.
+    // Precedence: explicit udid → connected app's simulatorUdid → findSimulatorByName(device or app deviceName)
+    // This ensures taps go to the correct device when multiple simulators are booted.
     let targetUdid: string | undefined;
     if (platform === "ios") {
         targetUdid =
+            options.udid ??
             app?.simulatorUdid ??
+            (options.device ? await findSimulatorByName(options.device) : null) ??
             (app?.deviceInfo?.deviceName ? await findSimulatorByName(app.deviceInfo.deviceName) : null) ??
             undefined;
     }
