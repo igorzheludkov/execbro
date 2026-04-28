@@ -1275,28 +1275,39 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             platform = "ios";
             nativeUdid = options.udid;
         } else if (!platform) {
-            const [androidDevice, iosSimulator] = await Promise.all([
-                getDefaultAndroidDevice().catch(() => null),
-                getActiveOrBootedSimulatorUdid().catch(() => null)
-            ]);
-            if (androidDevice && iosSimulator) {
-                return {
-                    success: false,
-                    query,
-                    error: 'Multiple platforms detected (both Android and iOS). Specify platform: "android" or platform: "ios" to target the correct device.'
-                };
-            }
-            if (androidDevice) {
-                platform = "android";
-            } else if (iosSimulator) {
+            // If `device` is provided, try resolving it as an iOS simulator name first —
+            // otherwise the auto-detect would fall through to getActiveOrBootedSimulatorUdid()
+            // and ignore the caller's targeting hint when multiple simulators are booted.
+            const deviceMatchedUdid = options.device
+                ? await findSimulatorByName(options.device).catch(() => null)
+                : null;
+            if (deviceMatchedUdid) {
                 platform = "ios";
-                nativeUdid = iosSimulator;
+                nativeUdid = deviceMatchedUdid;
             } else {
-                return {
-                    success: false,
-                    query,
-                    error: "No Android device or iOS simulator found. Connect a device or start a simulator."
-                };
+                const [androidDevice, iosSimulator] = await Promise.all([
+                    getDefaultAndroidDevice().catch(() => null),
+                    getActiveOrBootedSimulatorUdid().catch(() => null)
+                ]);
+                if (androidDevice && iosSimulator) {
+                    return {
+                        success: false,
+                        query,
+                        error: 'Multiple platforms detected (both Android and iOS). Specify platform: "android" or platform: "ios" to target the correct device.'
+                    };
+                }
+                if (androidDevice) {
+                    platform = "android";
+                } else if (iosSimulator) {
+                    platform = "ios";
+                    nativeUdid = iosSimulator;
+                } else {
+                    return {
+                        success: false,
+                        query,
+                        error: "No Android device or iOS simulator found. Connect a device or start a simulator."
+                    };
+                }
             }
         } else if (platform === "ios") {
             nativeUdid =
