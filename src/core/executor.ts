@@ -242,9 +242,10 @@ async function attemptQuickReconnect(preferredPort?: number): Promise<boolean> {
 async function executeExpressionCore(
     expression: string,
     awaitPromise: boolean,
-    timeoutMs: number = 10000
+    timeoutMs: number = 10000,
+    targetApp?: ReturnType<typeof getFirstConnectedApp>
 ): Promise<ExecutionResult> {
-    const app = getFirstConnectedApp();
+    const app = targetApp ?? getFirstConnectedApp();
 
     if (!app) {
         return { success: false, error: "No apps connected. Run 'scan_metro' first." };
@@ -476,7 +477,7 @@ export async function executeInApp(
         }
 
         // Execute the expression
-        const result = await executeExpressionCore(expression, awaitPromise, timeoutMs);
+        const result = await executeExpressionCore(expression, awaitPromise, timeoutMs, app);
 
         // Success - return result
         if (result.success) {
