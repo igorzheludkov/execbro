@@ -362,6 +362,11 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         let iosDriver: string | undefined;
         let responsePreview: string | undefined;
         let emptyReason: string | undefined;
+        let artifactKey: string | undefined;
+        let ocrClosestMatch: string | undefined;
+        let fiberPressableCount: string | undefined;
+        let accessibilityMatchCount: string | undefined;
+        let appRoute: string | undefined;
 
         try {
             inputTokens = Math.ceil(JSON.stringify(args).length / 4);
@@ -393,6 +398,11 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             if (result?._tapStrategy) tapStrategy = result._tapStrategy;
             if (result?._iosDriver) iosDriver = result._iosDriver;
             if (result?._emptyReason) emptyReason = result._emptyReason;
+            if (result?._artifactKey) artifactKey = result._artifactKey;
+            if (result?._ocrClosestMatch) ocrClosestMatch = result._ocrClosestMatch;
+            if (result?._fiberPressableCount) fiberPressableCount = result._fiberPressableCount;
+            if (result?._accessibilityMatchCount) accessibilityMatchCount = result._accessibilityMatchCount;
+            if (result?._appRoute) appRoute = result._appRoute;
             if (Array.isArray(result?.content)) {
                 let totalTokens = 0;
                 for (const item of result.content) {
@@ -434,7 +444,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute);
             // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
             // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
             let platformKind: "rn" | "native" | null = null;
@@ -972,6 +982,11 @@ registerToolWithTelemetry(
             _changeRate: result.verification?.changeRate,
             _tapStrategy: result.method,
             _iosDriver: result.platform === "ios" ? (process.env.IOS_DRIVER?.toLowerCase() || "idb") : undefined,
+            _artifactKey: result.artifactKey,
+            _ocrClosestMatch: result.ocrClosestMatch,
+            _fiberPressableCount: result.fiberPressableCount,
+            _accessibilityMatchCount: result.accessibilityMatchCount,
+            _appRoute: result.appRoute,
         };
     }
 );

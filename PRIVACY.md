@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** March 29, 2026
+**Last updated:** April 30, 2026
 
 React Native AI DevTools ("the Tool") is an MCP server for AI-powered React Native debugging. This document explains what data the Tool collects, how it is used, and how you can control it.
 
@@ -12,6 +12,7 @@ React Native AI DevTools ("the Tool") is an MCP server for AI-powered React Nati
 | **Auto-registration** | Installation ID, device fingerprint, platform, hostname, OS version, server version | Once on first tool use per session | `RN_DEBUGGER_TELEMETRY=false` |
 | **License validation** | Installation ID, device fingerprint | Once per session (cached 24 hours) | Cannot be disabled (required for license check) |
 | **OCR screenshots** | Screenshot image for text recognition | Only when `ocr_screenshot` tool is called | Don't use the tool, or use local fallback |
+| **Tap failure artifacts** | JSON bundle + up to 3 downscaled PNG screenshots | On `tap` failure or unmeaningful tap (`changeRate < 0.1%`) | `RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS=1` |
 | **Installation ID** | Random UUID (not linked to your identity) | With telemetry, registration, and OCR requests | Delete `~/.rn-ai-debugger/` |
 
 ## 1. Anonymous Telemetry
@@ -127,7 +128,54 @@ If the cloud OCR service is unavailable (timeout, network error), the Tool autom
 - Use `ios_screenshot` or `android_screenshot` instead of `ocr_screenshot`
 - If cloud OCR fails, the local fallback processes everything on your machine
 
-## 4. Local Storage
+## 4. Tap Failure Diagnostic Artifacts
+
+### What we collect
+
+When the `tap` tool fails or produces no visible change on screen (`changeRate < 0.1%`), the Tool uploads diagnostic evidence so we can reproduce and fix tap reliability issues:
+
+- **JSON bundle** (~5–30 KB, gzipped): the predicate (text/testID/component/coordinates), error category and message, the strategy chain that ran (accessibility / fiber / OCR / coordinate with reasons), the chosen tap point if any, and device metadata (platform, driver, screen size).
+- **Up to three downscaled PNG screenshots** (50% scale, ~50 KB each):
+  - `before.png` — the screen captured before the tap was attempted.
+  - `after.png` — the screen after the tap (only if a tap actually fired).
+  - `after-with-marker.png` — the post-tap screenshot with a red-cross marker drawn at the exact pixel where the tap landed.
+
+### When
+
+- Only on `tap` failures (predicate-not-found, timeout, strategy chain exhausted) and `tap` successes that produced no visible change (`changeRate < 0.001`).
+- Successful, meaningful taps upload nothing.
+- No artifacts are uploaded for unactionable errors (UI driver missing, no connected device, pre-strategy Metro errors).
+
+### Where stored
+
+- Cloudflare R2 storage (same Cloudflare account as the telemetry endpoint).
+- Accessed only via authenticated dashboard endpoint by the maintainer.
+
+### Retention
+
+**10 days.** Objects are auto-deleted by an R2 lifecycle policy.
+
+### Use
+
+- Solely to diagnose and improve the `tap` tool.
+- **Not used to train AI models.**
+- **Not shared with or sold to any third party.**
+
+### Scope note
+
+The Tool only operates against development environments (simulators, emulators, dev builds). Screenshots may include whatever is on your screen at the time of the tap. We do not run against production or release builds.
+
+### How to opt out
+
+Add to your MCP server configuration:
+
+```json
+"env": { "RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS": "1" }
+```
+
+Disabling telemetry (`RN_DEBUGGER_TELEMETRY=false`) also disables artifact upload. When opted out, anonymous structured signals (sense counts, closest-match scores) still flow under the existing telemetry policy; PNGs and JSON bundles are not uploaded.
+
+## 5. Local Storage
 
 The Tool creates the following files on your machine:
 
@@ -144,7 +192,7 @@ rm -rf ~/.rn-ai-debugger/
 
 A new installation ID will be generated on the next server startup.
 
-## 5. Accounts & Authentication
+## 6. Accounts & Authentication
 
 ### Free tier (no account required)
 
@@ -184,7 +232,7 @@ You can also delete local data manually:
 rm -rf ~/.rn-ai-debugger/
 ```
 
-## 6. Data Retention
+## 7. Data Retention
 
 | Data | Retention |
 |------|-----------|
@@ -193,9 +241,10 @@ rm -rf ~/.rn-ai-debugger/
 | **Account records** | Stored in Firebase Firestore. Retained while the account exists. Deleted on account deletion. |
 | **Activation tokens** | Stored in Firebase Firestore. Expired tokens (24h) are cleaned up lazily on new token creation. |
 | **OCR images** | Not retained. Processed in memory and discarded immediately. |
+| **Tap failure artifacts** | Stored in Cloudflare R2. Auto-deleted after 10 days. Not used for AI training; not shared with third parties. |
 | **Local files** | Remain on your machine until you delete them. |
 
-## 7. Infrastructure
+## 8. Infrastructure
 
 External services used by the Tool:
 
@@ -206,29 +255,33 @@ External services used by the Tool:
 | Registration & license API | Firebase (Google Cloud) | Installation registration, license validation |
 | Account storage | Firebase Firestore (Google Cloud) | Installation records, account data, activation tokens |
 | Authentication | Firebase Authentication (Google Cloud) | Optional Google sign-in for web dashboard |
+| Tap artifact storage | Cloudflare R2 | Short-term storage of diagnostic screenshots and JSON bundles for failed/unmeaningful taps (10-day retention) |
 
 API keys embedded in the source code are **write-only tokens** — they cannot be used to read or access any stored data.
 
-## 8. Disabling All External Communication
+## 9. Disabling All External Communication
 
 To run the Tool with zero external data transmission, add to your MCP server config:
 
 ```json
-"env": { "RN_DEBUGGER_TELEMETRY": "false" }
+"env": {
+  "RN_DEBUGGER_TELEMETRY": "false",
+  "RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS": "1"
+}
 ```
 
 `ocr_screenshot` will automatically fall back to local OCR (EasyOCR) when cloud is unavailable.
 
 All debugging tools will continue to work normally — external calls are never required for core functionality. License validation falls back to local cache, then defaults to the free tier.
 
-## 9. Children's Privacy
+## 10. Children's Privacy
 
 The Tool is a developer tool and is not directed at children under 13. We do not knowingly collect data from children.
 
-## 10. Changes to This Policy
+## 11. Changes to This Policy
 
 We may update this privacy policy from time to time. Changes will be reflected in the "Last updated" date at the top of this document and committed to the repository.
 
-## 11. Contact
+## 12. Contact
 
 If you have questions about this privacy policy or data practices, please open an issue on [GitHub](https://github.com/igorzheludkov/react-native-ai-devtools/issues).

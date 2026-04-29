@@ -18,6 +18,7 @@ import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
 import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice } from "../core/connection.js";
 import { notifyDriverMissing } from "../core/logbox.js";
+import { captureFailureArtifact, type ArtifactOutcome, type CaptureSignals } from "../core/failureArtifact.js";
 
 // --- Types ---
 
@@ -196,6 +197,13 @@ export interface TapResult {
     screenshot?: TapScreenshot;
     verification?: TapVerification;
     warning?: string;
+    // Failure-artifact signals (populated by captureFailureArtifact when outcome warrants).
+    // Forwarded to telemetry blobs 16-20 by the index.ts wrapper.
+    artifactKey?: string;
+    ocrClosestMatch?: string;
+    fiberPressableCount?: string;
+    accessibilityMatchCount?: string;
+    appRoute?: string;
 }
 
 // --- Helpers ---
@@ -474,30 +482,140 @@ interface StrategyResult {
     convertedTo?: { x: number; y: number; unit: string };
 }
 
+export interface EvidenceSink {
+    fiber: {
+        ran: boolean;
+        durationMs: number;
+        metroConnected: boolean;
+        pressables: Array<{
+            label?: string;
+            testID?: string;
+            componentName?: string;
+            bounds?: { x: number; y: number; width: number; height: number };
+        }>;
+    };
+    accessibility: {
+        ran: boolean;
+        durationMs: number;
+        elements: Array<{
+            label?: string;
+            testID?: string;
+            frame?: { x: number; y: number; width: number; height: number };
+        }>;
+    };
+    ocr: {
+        ran: boolean;
+        durationMs: number;
+        detections: Array<{
+            text: string;
+            bbox: [number, number, number, number];
+            conf: number;
+        }>;
+        closestMatch: { text: string; score: number } | null;
+    };
+}
+
+export function makeEmptyEvidenceSink(): EvidenceSink {
+    return {
+        fiber: { ran: false, durationMs: 0, metroConnected: false, pressables: [] },
+        accessibility: { ran: false, durationMs: 0, elements: [] },
+        ocr: { ran: false, durationMs: 0, detections: [], closestMatch: null }
+    };
+}
+
+function ocrSimilarity(a: string, b: string): number {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    // Dice coefficient over character bigrams (case/space-insensitive)
+    const bigrams = (s: string): Map<string, number> => {
+        const m = new Map<string, number>();
+        if (s.length < 2) {
+            if (s) m.set(s, 1);
+            return m;
+        }
+        for (let i = 0; i < s.length - 1; i++) {
+            const bg = s.slice(i, i + 2);
+            m.set(bg, (m.get(bg) ?? 0) + 1);
+        }
+        return m;
+    };
+    const ag = bigrams(a);
+    const bg = bigrams(b);
+    let intersection = 0;
+    for (const [k, va] of ag) {
+        const vb = bg.get(k);
+        if (vb) intersection += Math.min(va, vb);
+    }
+    const total = Array.from(ag.values()).reduce((s, v) => s + v, 0)
+        + Array.from(bg.values()).reduce((s, v) => s + v, 0);
+    if (!total) return 0;
+    return (2 * intersection) / total;
+}
+
+export function findClosestOcrText(
+    ocrResult: OCRResult,
+    query: string
+): { text: string; score: number } | null {
+    if (!query) return null;
+    const needle = normalizeForMatch(query);
+    if (!needle) return null;
+    const candidates: Array<{ text: string }> = [];
+    if (ocrResult?.words?.length) candidates.push(...ocrResult.words.map(w => ({ text: w.text })));
+    if (ocrResult?.lines?.length) candidates.push(...ocrResult.lines.map(l => ({ text: l.text })));
+    if (!candidates.length) return null;
+    let best: { text: string; score: number } | null = null;
+    for (const c of candidates) {
+        const norm = normalizeForMatch(c.text);
+        if (!norm) continue;
+        const score = ocrSimilarity(needle, norm);
+        if (!best || score > best.score) best = { text: c.text, score };
+    }
+    return best;
+}
+
 // --- Strategy Functions ---
 
-async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number): Promise<StrategyResult> {
-    // Retry with increasing depth if the initial traversal finds nothing
-    const baseDepth = maxTraversalDepth ?? 15;
-    const depthAttempts = [baseDepth];
-    // Only add deeper retries if user didn't explicitly set a high depth
-    if (baseDepth <= 15) {
-        depthAttempts.push(30, 45);
-    } else if (baseDepth <= 30) {
-        depthAttempts.push(baseDepth * 2);
+async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number, sink?: EvidenceSink): Promise<StrategyResult> {
+    if (sink) {
+        sink.fiber.ran = true;
+        sink.fiber.metroConnected = connectedApps.size > 0;
     }
-
-    let lastResult: StrategyResult | null = null;
-
-    for (const depth of depthAttempts) {
-        const result = await tryFiberAtDepth(query, index, depth);
-        if (result.success || result.matches) {
-            return result;
+    const startedAt = Date.now();
+    try {
+        // Retry with increasing depth if the initial traversal finds nothing
+        const baseDepth = maxTraversalDepth ?? 15;
+        const depthAttempts = [baseDepth];
+        // Only add deeper retries if user didn't explicitly set a high depth
+        if (baseDepth <= 15) {
+            depthAttempts.push(30, 45);
+        } else if (baseDepth <= 30) {
+            depthAttempts.push(baseDepth * 2);
         }
-        lastResult = result;
-    }
 
-    return lastResult!;
+        let lastResult: StrategyResult | null = null;
+
+        for (const depth of depthAttempts) {
+            const result = await tryFiberAtDepth(query, index, depth);
+            if (sink && result.matches?.length) {
+                sink.fiber.pressables = result.matches.slice(0, 50).map(m => ({
+                    label: m.text || undefined,
+                    testID: m.testID ?? undefined,
+                    componentName: m.component,
+                    bounds: (m.x !== undefined && m.y !== undefined)
+                        ? { x: m.x, y: m.y, width: 0, height: 0 }
+                        : undefined
+                }));
+            }
+            if (result.success || result.matches) {
+                return result;
+            }
+            lastResult = result;
+        }
+
+        return lastResult!;
+    } finally {
+        if (sink) sink.fiber.durationMs = Date.now() - startedAt;
+    }
 }
 
 async function tryFiberAtDepth(
@@ -590,8 +708,11 @@ async function tryAccessibilityStrategy(
     query: TapQuery,
     index: number | undefined,
     platform: "ios" | "android",
-    udid?: string
+    udid?: string,
+    sink?: EvidenceSink
 ): Promise<StrategyResult> {
+    if (sink) sink.accessibility.ran = true;
+    const startedAt = Date.now();
     try {
         const hasTestID = !!query.testID;
         const hasText = !!query.text;
@@ -658,6 +779,16 @@ async function tryAccessibilityStrategy(
                 }
             }
 
+            if (sink && result.allMatches?.length) {
+                sink.accessibility.elements = result.allMatches.slice(0, 50).map(el => ({
+                    label: el.label || undefined,
+                    testID: el.identifier || undefined,
+                    frame: el.frame
+                        ? { x: el.frame.x, y: el.frame.y, width: el.frame.width, height: el.frame.height }
+                        : undefined
+                }));
+            }
+
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                 return {
                     success: false,
@@ -709,6 +840,16 @@ async function tryAccessibilityStrategy(
                 });
             }
 
+            if (sink && result.allMatches?.length) {
+                sink.accessibility.elements = result.allMatches.slice(0, 50).map(el => ({
+                    label: el.text || el.contentDesc || undefined,
+                    testID: el.resourceId || undefined,
+                    frame: el.bounds
+                        ? { x: el.bounds.left, y: el.bounds.top, width: el.bounds.width, height: el.bounds.height }
+                        : undefined
+                }));
+            }
+
             if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                 return {
                     success: false,
@@ -740,10 +881,14 @@ async function tryAccessibilityStrategy(
             success: false,
             reason: `Accessibility strategy error: ${err instanceof Error ? err.message : String(err)}`
         };
+    } finally {
+        if (sink) sink.accessibility.durationMs = Date.now() - startedAt;
     }
 }
 
-async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string): Promise<StrategyResult> {
+async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink): Promise<StrategyResult> {
+    if (sink) sink.ocr.ran = true;
+    const ocrStartedAt = Date.now();
     try {
         const searchText = query.text;
         if (!searchText) {
@@ -781,6 +926,19 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             scaleFactor,
             platform
         });
+
+        if (sink && ocrResult) {
+            const allDetections = [
+                ...(ocrResult.words ?? []),
+                ...(ocrResult.lines ?? [])
+            ];
+            sink.ocr.detections = allDetections.slice(0, 100).map(r => ({
+                text: r.text,
+                bbox: [r.bbox.x0, r.bbox.y0, r.bbox.x1 - r.bbox.x0, r.bbox.y1 - r.bbox.y0] as [number, number, number, number],
+                conf: r.confidence ?? 0
+            }));
+            sink.ocr.closestMatch = findClosestOcrText(ocrResult, searchText);
+        }
 
         const match = findOcrMatch(ocrResult, searchText);
 
@@ -829,6 +987,8 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             success: false,
             reason: `OCR strategy error: ${err instanceof Error ? err.message : String(err)}`
         };
+    } finally {
+        if (sink) sink.ocr.durationMs = Date.now() - ocrStartedAt;
     }
 }
 
@@ -1050,7 +1210,7 @@ async function verifyAndCapture(
     udid?: string,
     beforeScaleFactor?: number,
     markerPx?: { x: number; y: number }
-): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
+): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification; afterBuffer?: Buffer; afterWithMarkerBuffer?: Buffer }> {
     if (!shouldScreenshot) return {};
 
     await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
@@ -1115,7 +1275,7 @@ async function verifyAndCapture(
         metadata: { phase: "after", changeRate: verification?.changeRate }
     });
 
-    return { screenshot, verification };
+    return { screenshot, verification, afterBuffer: after.buffer, afterWithMarkerBuffer: afterWithMarker };
 }
 
 // --- Burst Capture ---
@@ -1129,7 +1289,7 @@ async function burstCaptureAndVerify(
     udid?: string,
     beforeScaleFactor?: number,
     markerPx?: { x: number; y: number }
-): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification }> {
+): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification; afterBuffer?: Buffer; afterWithMarkerBuffer?: Buffer }> {
     if (!beforeBuffer) return {};
 
     const frames: Buffer[] = [beforeBuffer];
@@ -1222,7 +1382,137 @@ async function burstCaptureAndVerify(
         })
     };
 
-    return { screenshot, verification };
+    const lastFrameIdx = frames.length - 1;
+    return {
+        screenshot,
+        verification,
+        afterBuffer: frames[lastFrameIdx],
+        afterWithMarkerBuffer: markedFrames[lastFrameIdx]
+    };
+}
+
+// --- Failure artifact capture ---
+
+interface ArtifactCaptureContext {
+    query: TapQuery;
+    outcome: ArtifactOutcome;
+    errorMessage?: string;
+    errorCategory?: string;
+    attempted: TapAttempt[];
+    platform: "ios" | "android";
+    iosDriver?: string;
+    deviceName?: string;
+    screenshotMeta?: { width: number; height: number };
+    screenshotBuffer?: Buffer | null;
+    afterBuffer?: Buffer | null;
+    afterWithMarker?: Buffer | null;
+    chosenTapPoint?: { x: number; y: number } | null;
+    verification?: TapVerification;
+    fiberMatches?: TapResult["matches"];
+    evidence?: EvidenceSink;
+}
+
+async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureSignals | undefined> {
+    try {
+        const { getServerVersion } = await import("../core/telemetry.js");
+        const strategyChain = ctx.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|");
+        const result = await captureFailureArtifact({
+            outcome: ctx.outcome,
+            predicate: ctx.query as Record<string, unknown>,
+            errorMessage: ctx.errorMessage,
+            errorCategory: ctx.errorCategory,
+            strategyChain,
+            sessionId: "",
+            version: getServerVersion(),
+            changeRate: ctx.verification?.changeRate,
+            meaningful: ctx.verification?.meaningful,
+            senses: ctx.evidence
+                ? {
+                    ocr: ctx.evidence.ocr,
+                    fiber: {
+                        ran: ctx.evidence.fiber.ran,
+                        durationMs: ctx.evidence.fiber.durationMs,
+                        metroConnected: ctx.evidence.fiber.metroConnected,
+                        pressables: ctx.evidence.fiber.pressables.map(p => ({
+                            label: p.label,
+                            testID: p.testID,
+                            componentName: p.componentName,
+                            bounds: p.bounds
+                                ? [p.bounds.x, p.bounds.y, p.bounds.width, p.bounds.height]
+                                : undefined
+                        }))
+                    },
+                    accessibility: {
+                        ran: ctx.evidence.accessibility.ran,
+                        durationMs: ctx.evidence.accessibility.durationMs,
+                        elements: ctx.evidence.accessibility.elements.map(el => ({
+                            label: el.label,
+                            testID: el.testID,
+                            frame: el.frame
+                                ? [el.frame.x, el.frame.y, el.frame.width, el.frame.height]
+                                : undefined
+                        }))
+                    }
+                }
+                : {
+                    ocr: { ran: false, durationMs: 0, detections: [], closestMatch: null },
+                    fiber: {
+                        ran: ctx.attempted.some(a => a.strategy === "fiber"),
+                        durationMs: 0,
+                        metroConnected: connectedApps.size > 0,
+                        pressables: (ctx.fiberMatches || []).slice(0, 10).map(m => ({
+                            label: m.text || undefined,
+                            testID: m.testID || undefined,
+                            componentName: m.component
+                        }))
+                    },
+                    accessibility: {
+                        ran: ctx.attempted.some(a => a.strategy === "accessibility"),
+                        durationMs: 0,
+                        elements: []
+                    }
+                },
+            chosenTapPoint: ctx.chosenTapPoint ?? null,
+            chosenElement: null,
+            screenshots: {
+                before: ctx.screenshotBuffer ?? null,
+                after: ctx.afterBuffer ?? null,
+                afterWithMarker: ctx.afterWithMarker ?? null
+            },
+            deviceMeta: {
+                platform: ctx.platform,
+                driver: ctx.iosDriver,
+                screenSize: { w: ctx.screenshotMeta?.width || 0, h: ctx.screenshotMeta?.height || 0 }
+            }
+        });
+        return result.signals;
+    } catch {
+        return undefined;
+    }
+}
+
+function attachArtifactSignals(result: TapResult, signals: CaptureSignals | undefined): TapResult {
+    if (!signals) return result;
+    if (signals.artifactKey) result.artifactKey = signals.artifactKey;
+    if (signals.ocrClosestMatch) result.ocrClosestMatch = signals.ocrClosestMatch;
+    if (signals.fiberPressableCount) result.fiberPressableCount = signals.fiberPressableCount;
+    if (signals.accessibilityMatchCount) result.accessibilityMatchCount = signals.accessibilityMatchCount;
+    if (signals.appRoute) result.appRoute = signals.appRoute;
+    // Append agent-facing hints to error message
+    if (result.error) {
+        if (signals.ocrClosestMatch) {
+            result.error = `${result.error}\nClosest OCR match: ${signals.ocrClosestMatch}`;
+        }
+        if (signals.nearbyPressables.length > 0) {
+            const labels = signals.nearbyPressables
+                .map(p => p.testID || p.label)
+                .filter(Boolean)
+                .slice(0, 3)
+                .join(", ");
+            if (labels) result.error = `${result.error}\nNearby pressables: ${labels}`;
+        }
+    }
+    return result;
 }
 
 // --- Orchestrator ---
@@ -1529,6 +1819,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // Determine strategies
     const strategies = getAvailableStrategies(query, strategy);
     const attempted: TapAttempt[] = [];
+    const evidence = makeEmptyEvidenceSink();
 
     // Early UI driver check for iOS — fail fast instead of falling through every strategy
     const UI_DRIVER_REQUIRED_STRATEGIES = ["accessibility", "ocr", "coordinate"];
@@ -1605,17 +1896,17 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         try {
             switch (strat) {
                 case "fiber":
-                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth), budget, `fiber`);
+                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence), budget, `fiber`);
                     break;
                 case "accessibility":
                     result = await withTimeout(
-                        tryAccessibilityStrategy(query, index, platform, targetUdid),
+                        tryAccessibilityStrategy(query, index, platform, targetUdid, evidence),
                         budget,
                         `accessibility`
                     );
                     break;
                 case "ocr":
-                    result = await withTimeout(tryOcrStrategy(query, platform, targetUdid), budget, `ocr`);
+                    result = await withTimeout(tryOcrStrategy(query, platform, targetUdid, evidence), budget, `ocr`);
                     break;
                 case "coordinate":
                     result = await withTimeout(
@@ -1638,6 +1929,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         if (result.success) {
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
+            let afterBuffer: Buffer | undefined;
+            let afterWithMarkerBuffer: Buffer | undefined;
             let dprForMarker: number | undefined;
             if (platform === "ios") {
                 try {
@@ -1654,7 +1947,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 devicePixelRatio: dprForMarker
             });
             if (options.burst && canVerify && beforeBuffer) {
-                ({ screenshot, verification } = await burstCaptureAndVerify(
+                ({ screenshot, verification, afterBuffer, afterWithMarkerBuffer } = await burstCaptureAndVerify(
                     platform,
                     beforeBuffer,
                     targetUdid,
@@ -1662,7 +1955,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     strategyMarker
                 ));
             } else {
-                ({ screenshot, verification } = await verifyAndCapture(
+                ({ screenshot, verification, afterBuffer, afterWithMarkerBuffer } = await verifyAndCapture(
                     platform,
                     canVerify,
                     shouldScreenshot,
@@ -1679,7 +1972,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     scaleFactor: screenshot.scaleFactor
                 };
             }
-            return formatTapSuccess({
+            const successResult = formatTapSuccess({
                 method: strat,
                 query,
                 pressed: result.pressed,
@@ -1693,6 +1986,27 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 screenshot,
                 verification
             });
+            // Capture an artifact for "successful but unmeaningful" taps so we can
+            // diagnose taps that landed wrong or hit non-responsive elements.
+            if (verification && verification.changeRate < 0.001) {
+                const unmeaningfulSignals = await captureTapArtifact({
+                    query,
+                    outcome: "unmeaningful",
+                    attempted: [...attempted, { strategy: strat, reason: "success" }],
+                    platform,
+                    iosDriver: platform === "ios" ? (process.env.IOS_DRIVER?.toLowerCase() || "idb") : undefined,
+                    deviceName,
+                    screenshotMeta: screenshot ? { width: screenshot.width, height: screenshot.height } : undefined,
+                    screenshotBuffer: beforeBuffer,
+                    afterBuffer: afterBuffer ?? null,
+                    afterWithMarker: afterWithMarkerBuffer ?? null,
+                    chosenTapPoint: strategyMarker ? { x: strategyMarker.x, y: strategyMarker.y } : null,
+                    verification,
+                    evidence
+                });
+                attachArtifactSignals(successResult, unmeaningfulSignals);
+            }
+            return successResult;
         }
 
         attempted.push({ strategy: strat, reason: result.reason });
@@ -1831,7 +2145,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             scaleFactor: failScreenshot.scaleFactor
         };
     }
-    return formatTapFailure({
+    const failureResult = formatTapFailure({
         query,
         attempted,
         error: hitTimeout ? `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)` : undefined,
@@ -1839,6 +2153,21 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         device: deviceName,
         screenshot: failScreenshot
     });
+    const failSignals = await captureTapArtifact({
+        query,
+        outcome: "failure",
+        errorMessage: failureResult.error,
+        attempted,
+        platform,
+        iosDriver: platform === "ios" ? (process.env.IOS_DRIVER?.toLowerCase() || "idb") : undefined,
+        deviceName,
+        screenshotMeta: failScreenshot ? { width: failScreenshot.width, height: failScreenshot.height } : undefined,
+        screenshotBuffer: beforeBuffer,
+        afterWithMarker: null,
+        chosenTapPoint: null,
+        evidence
+    });
+    return attachArtifactSignals(failureResult, failSignals);
 }
 
 function buildSuggestion(query: TapQuery, triedStrategies: string[], platform: string): string {

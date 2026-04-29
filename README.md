@@ -391,6 +391,16 @@ To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `
 
 All debugging tools work normally with telemetry disabled. For the complete privacy policy, see [PRIVACY.md](./PRIVACY.md).
 
+### Tap failure artifacts
+
+When the `tap` tool fails or produces no visible change on screen, the package uploads a small JSON bundle and up to three downscaled PNG screenshots (before, after, and after-with-marker showing exactly where the tap landed) to a 10-day-retention store so we can diagnose and fix tap reliability issues. We do **not** use this data to train AI models and do **not** share it with third parties. See [PRIVACY.md](./PRIVACY.md#4-tap-failure-diagnostic-artifacts) for details.
+
+To opt out while keeping the rest of the package working:
+
+```json
+"env": { "RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS": "1" }
+```
+
 ## License
 
 MIT

@@ -14,6 +14,9 @@ import { getPostHogClient } from "./posthog.js";
 const TELEMETRY_ENDPOINT = "https://rn-debugger-telemetry.500griven.workers.dev";
 const TELEMETRY_API_KEY = "6a630181cb391ed5c42a188428cc2d2623dfe9333ec048193bb711ab58afe85e";
 
+export function getTelemetryEndpoint(): string { return TELEMETRY_ENDPOINT; }
+export function getTelemetryApiKey(): string { return TELEMETRY_API_KEY; }
+
 const REQUEST_TIMEOUT_MS = 5_000;
 const CONFIG_DIR = join(homedir(), ".rn-ai-debugger");
 const CONFIG_FILE = join(CONFIG_DIR, "telemetry.json");
@@ -68,6 +71,11 @@ interface TelemetryEvent {
     tapStrategy?: string; // tap: winning strategy (fiber, ocr, accessibility, coordinate, etc.)
     iosDriver?: string; // tap: which iOS UI driver was used (idb, axe)
     emptyReason?: string; // get_logs: why the result was empty (no_logs, post_reconnect, pipeline_recovered, pipeline_failed, disconnected)
+    artifactKey?: string; // tap: R2 key prefix `<YYYY-MM-DD>/<uuid>` for the failure artifact bundle
+    ocrClosestMatch?: string; // tap: OCR's closest fuzzy hit `"text"@score`
+    fiberPressableCount?: string; // tap: count of visible pressables fiber found
+    accessibilityMatchCount?: string; // tap: count of accessibility elements found
+    appRoute?: string; // tap: best-effort screen identifier (route name or bundle id)
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -314,7 +322,12 @@ export function trackToolInvocation(
     tapStrategy?: string,
     iosDriver?: string,
     responsePreview?: string,
-    emptyReason?: string
+    emptyReason?: string,
+    artifactKey?: string,
+    ocrClosestMatch?: string,
+    fiberPressableCount?: string,
+    accessibilityMatchCount?: string,
+    appRoute?: string
 ): void {
     // Append to local JSONL file for local dashboard (dev mode only)
     if (isDevMode()) try {
@@ -339,6 +352,11 @@ export function trackToolInvocation(
         if (iosDriver) localEvent.iosDriver = iosDriver;
         if (emptyReason) localEvent.emptyReason = emptyReason;
         if (responsePreview) localEvent.responsePreview = responsePreview;
+        if (artifactKey) localEvent.artifactKey = artifactKey;
+        if (ocrClosestMatch) localEvent.ocrClosestMatch = ocrClosestMatch;
+        if (fiberPressableCount) localEvent.fiberPressableCount = fiberPressableCount;
+        if (accessibilityMatchCount) localEvent.accessibilityMatchCount = accessibilityMatchCount;
+        if (appRoute) localEvent.appRoute = appRoute;
         appendFileSync(TELEMETRY_JSONL_PATH, JSON.stringify(localEvent) + "\n");
     } catch {
         // Non-critical — local file sink failure should never affect tool execution
@@ -407,6 +425,11 @@ export function trackToolInvocation(
     if (tapStrategy) event.tapStrategy = tapStrategy;
     if (iosDriver) event.iosDriver = iosDriver;
     if (emptyReason) event.emptyReason = emptyReason;
+    if (artifactKey) event.artifactKey = artifactKey;
+    if (ocrClosestMatch) event.ocrClosestMatch = ocrClosestMatch;
+    if (fiberPressableCount) event.fiberPressableCount = fiberPressableCount;
+    if (accessibilityMatchCount) event.accessibilityMatchCount = accessibilityMatchCount;
+    if (appRoute) event.appRoute = appRoute;
 
     dispatch(event);
 
