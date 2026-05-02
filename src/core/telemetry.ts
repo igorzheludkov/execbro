@@ -85,8 +85,11 @@ interface TelemetryEvent {
 
 export function categorizeError(errorMessage: string, errorContext?: string): ErrorCategory {
     const lower = errorMessage.toLowerCase();
-    // UI driver not installed (idb/axe) — must be checked before 'validation' which matches 'missing'/'install'
-    if (lower.includes('not installed') && (lower.includes('idb') || lower.includes('axe') || lower.includes('ui driver'))) {
+    // UI driver not installed — must be checked before 'validation' which matches 'missing'/'install'.
+    // Covers iOS (idb/axe) and Android (adb): on Android, ADB plays the same role as a UI driver
+    // (required for accessibility enumeration, screenshots, and input). Treating it identically keeps
+    // the "driver_missing" bucket platform-agnostic and prevents these from polluting tap-tool error rates.
+    if (lower.includes('not installed') && (lower.includes('idb') || lower.includes('axe') || lower.includes('ui driver') || lower.includes('adb'))) {
         return 'driver_missing';
     }
     // Strategy chain may contain driver-missing signals even when the primary error
@@ -94,7 +97,7 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
     // strategy fails with "No element found" or "timed out")
     if (errorContext) {
         const ctxLower = errorContext.toLowerCase();
-        if (ctxLower.includes('ios ui driver is not instal') || ctxLower.includes('idb is not instal')) {
+        if (ctxLower.includes('ios ui driver is not instal') || ctxLower.includes('idb is not instal') || ctxLower.includes('adb is not installed') || ctxLower.includes('adb is not in path')) {
             return 'driver_missing';
         }
     }

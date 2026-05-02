@@ -1414,13 +1414,24 @@ interface ArtifactCaptureContext {
 
 async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureSignals | undefined> {
     try {
-        const { getServerVersion } = await import("../core/telemetry.js");
+        const { getServerVersion, categorizeError } = await import("../core/telemetry.js");
         const strategyChain = ctx.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|");
+
+        // Resolve error category up-front so we can short-circuit driver-missing failures.
+        // These aren't tap-tool bugs — they're host setup problems (no idb/axe/adb on PATH).
+        // Skipping the artifact upload saves R2 storage and stops these from polluting the
+        // failure dashboard, which is the signal we use to triage genuine tap regressions.
+        const errorCategory = ctx.errorCategory
+            ?? categorizeError(ctx.errorMessage ?? "", strategyChain);
+        if (errorCategory === "driver_missing") {
+            return undefined;
+        }
+
         const result = await captureFailureArtifact({
             outcome: ctx.outcome,
             predicate: ctx.query as Record<string, unknown>,
             errorMessage: ctx.errorMessage,
-            errorCategory: ctx.errorCategory,
+            errorCategory,
             strategyChain,
             sessionId: "",
             version: getServerVersion(),
@@ -2170,6 +2181,16 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     return attachArtifactSignals(failureResult, failSignals);
 }
 
+// Matches testIDs typical of virtualized list items: trailing `-<digits>` (e.g. `store-item-0`,
+// `route-item-6`) or containing a UUID v4 fragment (e.g. `group-card-e4566bc6-9164-4fd0-...`).
+// Used by buildSuggestion() to tell the agent to scroll first when a list-item testID
+// can't be found in the visible fiber tree.
+const VIRTUALIZED_TESTID_RE = /(-\d+$)|([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
+function looksLikeVirtualizedListItem(testID: string): boolean {
+    return VIRTUALIZED_TESTID_RE.test(testID);
+}
+
 function buildSuggestion(query: TapQuery, triedStrategies: string[], platform: string): string {
     const suggestions: string[] = [];
 
@@ -2194,6 +2215,17 @@ function buildSuggestion(query: TapQuery, triedStrategies: string[], platform: s
     if (query.testID && !triedStrategies.includes("ocr")) {
         suggestions.push(
             "testID not found in fiber/accessibility tree — verify the element is on the current screen with a screenshot"
+        );
+    }
+
+    // List-item testIDs (suffix `-N` or containing a UUID) are typically rendered inside a
+    // virtualized list — items beyond the viewport are unmounted, so the fiber tree genuinely
+    // doesn't contain them. Adding the hint as a separate suggestion (rather than rewriting
+    // the error) keeps the existing message stable for tooling that parses it.
+    if (query.testID && looksLikeVirtualizedListItem(query.testID)) {
+        suggestions.push(
+            "testID looks like a virtualized list item — scroll it on-screen first " +
+            `(${platform === "ios" ? "ios_button arrow keys / swipe" : "android_swipe"}) before tapping`
         );
     }
 

@@ -38,16 +38,88 @@ export interface AdbResult {
     devices?: AndroidDevice[];
 }
 
+// Module-level cache for ADB availability — checked once per session.
+// `null` = unchecked, boolean = decided. Reset only via `resetAdbAvailabilityCache()` (tests).
+let adbAvailableCache: boolean | null = null;
+let adbPathFixApplied = false;
+
 /**
- * Check if ADB is available in PATH
+ * Standard locations where the Android SDK platform-tools may live when adb is
+ * installed but not on the spawned process's PATH (very common on macOS where
+ * users add platform-tools only to ~/.zshrc, which GUI-spawned processes don't read).
+ */
+function candidateAdbDirs(): string[] {
+    const dirs: string[] = [];
+    const env = process.env;
+    if (env.ANDROID_HOME) dirs.push(path.join(env.ANDROID_HOME, "platform-tools"));
+    if (env.ANDROID_SDK_ROOT) dirs.push(path.join(env.ANDROID_SDK_ROOT, "platform-tools"));
+    const home = os.homedir();
+    if (process.platform === "darwin") {
+        dirs.push(path.join(home, "Library", "Android", "sdk", "platform-tools"));
+    } else if (process.platform === "win32") {
+        if (env.LOCALAPPDATA) dirs.push(path.join(env.LOCALAPPDATA, "Android", "Sdk", "platform-tools"));
+    } else {
+        dirs.push(path.join(home, "Android", "Sdk", "platform-tools"));
+    }
+    return dirs;
+}
+
+function adbBinaryName(): string {
+    return process.platform === "win32" ? "adb.exe" : "adb";
+}
+
+/**
+ * Check if ADB is reachable. Caches the result for the lifetime of the process.
+ *
+ * Resolution order:
+ *   1. `adb version` against the inherited PATH.
+ *   2. Standard SDK install paths (ANDROID_HOME, ~/Library/Android/sdk/..., etc).
+ *      If found, prepend the directory to process.env.PATH so subsequent bare
+ *      `adb` invocations work without any call-site changes.
+ *
+ * The recovery path covers the common case of macOS users with Android Studio
+ * installed but adb missing from PATH because ~/.zshrc isn't sourced by GUI-spawned
+ * processes (Claude Code, VS Code MCP, etc).
  */
 export async function isAdbAvailable(): Promise<boolean> {
+    if (adbAvailableCache !== null) return adbAvailableCache;
+
     try {
         await execAsync("adb version", { timeout: 5000 });
+        adbAvailableCache = true;
         return true;
     } catch {
-        return false;
+        // Fall through to path discovery below.
     }
+
+    if (!adbPathFixApplied) {
+        for (const dir of candidateAdbDirs()) {
+            const candidate = path.join(dir, adbBinaryName());
+            if (!existsSync(candidate)) continue;
+            const sep = process.platform === "win32" ? ";" : ":";
+            process.env.PATH = `${dir}${sep}${process.env.PATH ?? ""}`;
+            adbPathFixApplied = true;
+            try {
+                await execAsync("adb version", { timeout: 5000 });
+                adbAvailableCache = true;
+                return true;
+            } catch {
+                // Found the binary but it didn't run — try next candidate.
+                continue;
+            }
+        }
+    }
+
+    adbAvailableCache = false;
+    return false;
+}
+
+/**
+ * Test-only: clear the ADB availability cache so the next call re-probes.
+ */
+export function resetAdbAvailabilityCache(): void {
+    adbAvailableCache = null;
+    adbPathFixApplied = false;
 }
 
 const ADB_MISSING_ERROR = "ADB is not installed or not in PATH. To fix:\n1. Install Android SDK Platform Tools: https://developer.android.com/tools/releases/platform-tools\n2. Add to PATH: export PATH=$PATH:~/Library/Android/sdk/platform-tools\n3. Verify: run 'adb devices' in terminal";
