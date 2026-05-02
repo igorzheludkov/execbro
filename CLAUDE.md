@@ -18,7 +18,21 @@ This repo is part of the **react-native-ai-devtools** monorepo at `~/rn-devtools
 
 ## Project Overview
 
-An MCP (Model Context Protocol) server for AI-powered React Native debugging. It connects to Metro bundler via CDP (Chrome DevTools Protocol) WebSocket, captures console logs and network requests, and enables JavaScript execution in running React Native apps.
+An MCP (Model Context Protocol) server that gives AI agents end-to-end control of a running React Native app across the iOS Simulator and Android emulators/devices. It is the agent-facing counterpart to React Native's developer tools — combining what Flipper, Chrome DevTools, the Element Inspector, `xcrun simctl`, and `adb` expose into a single tool surface designed for LLMs.
+
+Capabilities:
+
+- **Metro + CDP bridge**: Discovers Metro bundlers, connects to all Bridgeless/Hermes targets via Chrome DevTools Protocol WebSockets, and keeps connections healthy across reloads.
+- **Observability**: Streams console logs (filterable, searchable) and network requests (via SDK in-app buffer, CDP `Network` domain, or injected fetch interceptor — auto-selected per RN version).
+- **JS execution & app state**: REPL-style `Runtime.evaluate` against the app's JS context, plus discovery/inspection of `global` debug objects and app reload control.
+- **UI automation**: Cross-platform `tap` with fiber tree → accessibility → OCR → coordinate fallback, plus swipes, text input, hardware buttons, key events, long press, and deep links.
+- **Visual capture**: iOS/Android screenshots, OCR with tap-ready coordinates, burst-frame capture for transient feedback, and a shared image buffer for retrieval.
+- **Component inspection**: Fiber-tree-backed screen layout map, regex component search, deep prop/hook/state inspection, full React tree dumps, and coordinate-based hit-testing with per-ancestor frames and styles (mirrors RN's Element Inspector).
+- **Device & app management**: List/boot iOS simulators, list Android devices, install/launch/terminate apps, list packages.
+- **Build diagnostics**: Metro bundle status, bundling/compilation errors with screenshot+OCR fallback when CDP is unavailable, and LogBox overlay control (dismiss, push, ignore, detect).
+- **Account & telemetry**: License activation, anonymous usage telemetry to a Cloudflare Worker, and a `dev` meta-tool for hot-reload tool development.
+
+Transport modes: stdio (default, production) and HTTP (dev, hot-reload friendly).
 
 ## Common Commands
 
