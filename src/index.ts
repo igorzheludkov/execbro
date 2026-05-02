@@ -381,7 +381,10 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
                 success = false;
                 // Prefer concise _errorMessage over full response text (which may be large JSON)
                 errorMessage = result._errorMessage || result.content?.[0]?.text || "Unknown error";
-                // Extract error context if provided (e.g., the expression that caused a syntax error)
+            }
+            // Always propagate _errorContext when the tool provides it (e.g. tap predicate
+            // for unmeaningful outcomes where isError is false but we still want triage context).
+            if (result?._errorContext) {
                 errorContext = result._errorContext;
             }
             // Check for empty result (only on success, only if detector provided)
@@ -952,12 +955,24 @@ registerToolWithTelemetry(
 
         const { screenshot: screenshotData, ...resultWithoutScreenshot } = result;
         const text = JSON.stringify(resultWithoutScreenshot, null, 2);
-        // Pack strategy mode + attempted strategies into errorContext for telemetry
-        // e.g. "s=ocr|fiber:no_pressable|ocr:no_match" or "s=auto|fiber:no_pressable|accessibility:not_found|ocr:no_match"
+        // Pack predicate + strategy mode + attempted strategies into errorContext for telemetry.
+        // Always include the predicate so unmeaningful outcomes (no isError, no _errorMessage) still
+        // carry triage context — otherwise blob8 ends up blank and the dashboard shows empty rows.
+        // e.g. "p={\"text\":\"Save\"}|s=ocr|fiber:no_pressable|ocr:no_match"
         const stratPrefix = args.strategy && args.strategy !== "auto" ? `s=${args.strategy}|` : "";
-        const errorContext = result.attempted?.length
-            ? stratPrefix + result.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|")
-            : undefined;
+        let predicatePrefix = "";
+        try {
+            if (result.query !== undefined) {
+                predicatePrefix = `p=${JSON.stringify(result.query)}|`;
+            }
+        } catch {
+            // query may contain non-serializable values — drop the prefix rather than fail.
+        }
+        const attemptedPart = result.attempted?.length
+            ? result.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|")
+            : "";
+        const ctxParts = `${predicatePrefix}${stratPrefix}${attemptedPart}`;
+        const errorContext = ctxParts ? ctxParts.replace(/\|$/, "") : undefined;
 
         const content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [
             { type: "text" as const, text },
