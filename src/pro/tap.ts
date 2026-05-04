@@ -796,6 +796,27 @@ async function tryAccessibilityStrategy(
                 };
             }
 
+            // Ambiguity guard: when the predicate matches multiple a11y elements
+            // (e.g. text="My Events" hits both the header title AND the bottom tab),
+            // refuse to tap without an explicit index — picking allMatches[0] silently
+            // landed on non-interactive header elements in production telemetry.
+            // Mirrors the fiber-strategy guard further up the file.
+            if (result.allMatches.length > 1 && index === undefined) {
+                return {
+                    success: false,
+                    reason: `Ambiguous: ${result.allMatches.length} elements match this query — use index= to pick one`,
+                    matches: result.allMatches.map((m, i) => ({
+                        index: i,
+                        component: m.type ?? "",
+                        text: m.label ?? "",
+                        testID: m.identifier ?? null,
+                        x: m.center?.x,
+                        y: m.center?.y
+                    })),
+                    ambiguous: true
+                };
+            }
+
             const match = result.allMatches[index ?? 0];
             if (!match) {
                 return {
@@ -854,6 +875,23 @@ async function tryAccessibilityStrategy(
                 return {
                     success: false,
                     reason: result.error ?? "No Android accessibility match"
+                };
+            }
+
+            // Ambiguity guard — see iOS branch above for rationale.
+            if (result.allMatches.length > 1 && index === undefined) {
+                return {
+                    success: false,
+                    reason: `Ambiguous: ${result.allMatches.length} elements match this query — use index= to pick one`,
+                    matches: result.allMatches.map((m, i) => ({
+                        index: i,
+                        component: m.className ?? "",
+                        text: m.text ?? m.contentDesc ?? "",
+                        testID: m.resourceId ?? null,
+                        x: m.center?.x,
+                        y: m.center?.y
+                    })),
+                    ambiguous: true
                 };
             }
 
