@@ -238,7 +238,7 @@ export function initTelemetry(): void {
     const envValue = process.env.RN_DEBUGGER_TELEMETRY;
     if (envValue === "false" || envValue === "0" || envValue === "off") {
         telemetryEnabled = false;
-        console.error("[rn-ai-debugger] Telemetry disabled via RN_DEBUGGER_TELEMETRY");
+        console.error("[execbro] Telemetry disabled via RN_DEBUGGER_TELEMETRY");
         return;
     }
 

@@ -203,7 +203,7 @@ function resolveNetworkBuffer(device?: string): NetworkBuffer {
 // Create MCP server
 const server = new McpServer(
     {
-        name: "react-native-ai-devtools",
+        name: "ExecBro (Mobile DevTools)",
         version: "1.0.0"
     },
     {
@@ -2019,7 +2019,7 @@ registerToolWithTelemetry(
     "send_feedback",
     {
         description:
-            "Create a feedback report (bug, feature request, or general feedback) for the react-native-ai-devtools team. " +
+            "Create a feedback report (bug, feature request, or general feedback) for the ExecBro team. " +
             "Auto-collects environment info. Returns a pre-filled GitHub issue URL and formatted issue body. " +
             "Ask the user to open the URL and paste the body to submit.",
         inputSchema: {
@@ -4996,13 +4996,13 @@ async function main() {
         });
 
         httpServer.listen(httpPort, () => {
-            console.error(`[rn-ai-debugger] MCP HTTP server listening on http://localhost:${httpPort}/mcp`);
+            console.error(`[execbro] MCP HTTP server listening on http://localhost:${httpPort}/mcp`);
         });
     } else {
         // Stdio transport mode — default for production
         const transport = new StdioServerTransport();
         await server.connect(transport);
-        console.error("[rn-ai-debugger] Server started on stdio");
+        console.error("[execbro] Server started on stdio");
     }
 
 }
@@ -5012,7 +5012,7 @@ async function main() {
 // is a manual escape hatch. Production + dev:mcp leave both unset and boot.
 if (!process.env.RN_AI_DEVTOOLS_TEST_MODE && !process.env.JEST_WORKER_ID) {
     main().catch((error) => {
-        console.error("[rn-ai-debugger] Fatal error:", error);
+        console.error("[execbro] Fatal error:", error);
         process.exit(1);
     });
 }
