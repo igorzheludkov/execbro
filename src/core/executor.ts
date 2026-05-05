@@ -530,43 +530,143 @@ export async function executeInApp(
     };
 }
 
-// List globally available debugging objects in the app
+// List globally available debugging objects in the app.
+// Uses Object.getOwnPropertyNames + Object.keys to catch non-enumerable globals
+// (Hermes does not always make `globalThis.x = ...` assignments enumerable),
+// and probes __RN_AI_DEVTOOLS__ directly so the SDK's registered stores/
+// navigation/custom objects surface as ready-to-use dotted paths.
 export async function listDebugGlobals(device?: string): Promise<ExecutionResult> {
     const expression = `
         (function() {
-            const globals = Object.keys(globalThis);
-            const categories = {
-                'Apollo Client': globals.filter(k => k.includes('APOLLO')),
-                'Redux': globals.filter(k => k.includes('REDUX')),
-                'React DevTools': globals.filter(k => k.includes('REACT_DEVTOOLS')),
-                'Reanimated': globals.filter(k => k.includes('reanimated') || k.includes('worklet')),
-                'Expo': globals.filter(k => k.includes('Expo') || k.includes('expo')),
-                'Metro': globals.filter(k => k.includes('METRO')),
-                'Other Debug': globals.filter(k => k.startsWith('__') && !k.includes('APOLLO') && !k.includes('REDUX') && !k.includes('REACT_DEVTOOLS') && !k.includes('reanimated') && !k.includes('worklet') && !k.includes('Expo') && !k.includes('expo') && !k.includes('METRO'))
+            var names;
+            try {
+                var enumNames = Object.keys(globalThis);
+                var ownNames = Object.getOwnPropertyNames(globalThis);
+                var seen = {};
+                names = [];
+                for (var i = 0; i < ownNames.length; i++) { if (!seen[ownNames[i]]) { seen[ownNames[i]] = 1; names.push(ownNames[i]); } }
+                for (var j = 0; j < enumNames.length; j++) { if (!seen[enumNames[j]]) { seen[enumNames[j]] = 1; names.push(enumNames[j]); } }
+            } catch (e) {
+                names = Object.keys(globalThis);
+            }
+
+            var categories = {
+                'Apollo Client': [],
+                'Redux': [],
+                'React DevTools': [],
+                'Reanimated': [],
+                'Expo': [],
+                'Metro': [],
+                'Other Debug': []
             };
-            return categories;
+            for (var k = 0; k < names.length; k++) {
+                var key = names[k];
+                if (key.indexOf('APOLLO') >= 0) categories['Apollo Client'].push(key);
+                else if (key.indexOf('REDUX') >= 0) categories['Redux'].push(key);
+                else if (key.indexOf('REACT_DEVTOOLS') >= 0) categories['React DevTools'].push(key);
+                else if (key.indexOf('reanimated') >= 0 || key.indexOf('worklet') >= 0) categories['Reanimated'].push(key);
+                else if (key.indexOf('Expo') >= 0 || key.indexOf('expo') >= 0) categories['Expo'].push(key);
+                else if (key.indexOf('METRO') >= 0) categories['Metro'].push(key);
+                else if (key.indexOf('__') === 0) categories['Other Debug'].push(key);
+            }
+
+            // SDK probe: detect __RN_AI_DEVTOOLS__ even when not enumerable on
+            // globalThis, and flatten its registered objects into dotted paths
+            // the agent can hand straight to inspect_global / execute_in_app.
+            var sdk = null;
+            try {
+                if (typeof globalThis.__RN_AI_DEVTOOLS__ !== 'undefined' && globalThis.__RN_AI_DEVTOOLS__) {
+                    var dt = globalThis.__RN_AI_DEVTOOLS__;
+                    var paths = [];
+                    // Map well-known store keys back into the legacy category
+                    // buckets so SDK-registered stores don't appear missing to
+                    // agents that scan categories.Redux / categories["Apollo Client"].
+                    var storeCategory = {
+                        redux: 'Redux',
+                        apollo: 'Apollo Client',
+                        apolloclient: 'Apollo Client',
+                        reactdevtools: 'React DevTools'
+                    };
+                    if (dt.stores && typeof dt.stores === 'object') {
+                        var sk = Object.keys(dt.stores);
+                        for (var a = 0; a < sk.length; a++) {
+                            var storeKey = sk[a];
+                            var path = '__RN_AI_DEVTOOLS__.stores.' + storeKey;
+                            paths.push(path);
+                            var bucket = storeCategory[storeKey.toLowerCase()];
+                            if (bucket && categories[bucket].indexOf(path) < 0) {
+                                categories[bucket].push(path);
+                            }
+                        }
+                    }
+                    if (dt.navigation) paths.push('__RN_AI_DEVTOOLS__.navigation');
+                    if (dt.custom && typeof dt.custom === 'object') {
+                        var ck = Object.keys(dt.custom);
+                        for (var b = 0; b < ck.length; b++) paths.push('__RN_AI_DEVTOOLS__.custom.' + ck[b]);
+                    }
+                    sdk = {
+                        version: dt.version || 'unknown',
+                        capabilities: dt.capabilities || null,
+                        paths: paths,
+                        hint: 'These paths are inspect_global / execute_in_app ready (dotted paths supported).'
+                    };
+                    // Make sure the root global also appears in the listing,
+                    // even if Hermes hid it from Object.keys.
+                    if (categories['Other Debug'].indexOf('__RN_AI_DEVTOOLS__') < 0) {
+                        categories['Other Debug'].push('__RN_AI_DEVTOOLS__');
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            return { sdk: sdk, categories: categories };
         })()
     `;
 
     return executeInApp(expression, false, {}, device);
 }
 
-// Inspect a global object to see its properties and types
+// Inspect a global object (or a dotted path into one) to see its properties
+// and types. Accepts plain identifiers (`__APOLLO_CLIENT__`) and dotted paths
+// (`__RN_AI_DEVTOOLS__.stores.redux`) so the discovery output from
+// listDebugGlobals can be passed straight back in.
 export async function inspectGlobal(objectName: string, device?: string): Promise<ExecutionResult> {
+    // Reject anything that isn't a safe dotted identifier path. This both
+    // prevents accidental code execution via objectName and produces a clear
+    // error instead of a confusing Hermes parse failure.
+    if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(objectName)) {
+        return {
+            success: false,
+            error: `Invalid objectName: '${objectName}'. Expected an identifier or dotted path like '__APOLLO_CLIENT__' or '__RN_AI_DEVTOOLS__.stores.redux'. For arbitrary expressions, use execute_in_app.`
+        };
+    }
+
     const expression = `
         (function() {
-            const obj = ${objectName};
+            var obj;
+            try { obj = ${objectName}; } catch (e) { return { error: 'NotFound: ' + (e && e.message ? e.message : String(e)) }; }
             if (obj === undefined) return { error: 'Object not found' };
-            const result = {};
-            for (const key of Object.keys(obj)) {
-                const val = obj[key];
-                const type = typeof val;
+            if (obj === null) return { error: 'Value is null' };
+            var t = typeof obj;
+            if (t !== 'object' && t !== 'function') {
+                return { __value: obj, __type: t };
+            }
+            var result = {};
+            var keys;
+            try { keys = Object.keys(obj); } catch (e) { keys = []; }
+            for (var i = 0; i < keys.length; i++) {
+                var key = keys[i];
+                var val;
+                try { val = obj[key]; } catch (e) { result[key] = { type: 'unknown', callable: false, error: 'getter threw' }; continue; }
+                var type = typeof val;
                 if (type === 'function') {
                     result[key] = { type: 'function', callable: true };
                 } else if (type === 'object' && val !== null) {
-                    result[key] = { type: Array.isArray(val) ? 'array' : 'object', callable: false, preview: JSON.stringify(val).slice(0, 100) };
+                    var preview;
+                    try { preview = JSON.stringify(val); } catch (e) { preview = '[unserializable]'; }
+                    if (preview && preview.length > 100) preview = preview.slice(0, 100) + '...';
+                    result[key] = { type: Array.isArray(val) ? 'array' : 'object', callable: false, preview: preview };
                 } else {
-                    result[key] = { type, callable: false, value: val };
+                    result[key] = { type: type, callable: false, value: val };
                 }
             }
             return result;

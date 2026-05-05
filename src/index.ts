@@ -181,11 +181,20 @@ function resolveNetworkBuffer(device?: string): NetworkBuffer {
         const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
         return getNetworkBuffer(deviceName);
     }
-    // Merge all network requests into a temporary buffer for read operations
+    // Merge all network requests into a temporary buffer for read operations.
+    // Key by the request's own id so get(requestId) works — earlier this used
+    // Math.random() which made every direct lookup miss while listings still
+    // appeared correct (listings render req.requestId from the value).
+    // Multiple devices can share a request id; suffix with deviceName for
+    // collisions so we don't lose entries.
     const merged = new NetworkBuffer(5000);
-    for (const buffer of networkBuffers.values()) {
+    const seen = new Set<string>();
+    for (const [deviceName, buffer] of networkBuffers.entries()) {
         for (const req of buffer.getAll({})) {
-            merged.set(`${Math.random()}`, req);
+            let key = req.requestId;
+            if (seen.has(key)) key = `${req.requestId}@${deviceName}`;
+            seen.add(key);
+            merged.set(key, req);
         }
     }
     return merged;
@@ -2376,7 +2385,9 @@ registerToolWithTelemetry(
             "PURPOSE: Enumerate the app's `globalThis.*` surface so you know which stores, clients, and debug hooks you can drill into.\n" +
             "WHEN TO USE: Start of a state-debugging session, or when you don't know whether the app exposes a Redux/Apollo/Zustand handle.\n" +
             "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"...\") -> execute_in_app for reads/mutations.\n" +
-            "LIMITATIONS: Only sees variables explicitly assigned to a global (e.g., `globalThis.store = store`). Module-scoped state is invisible — expose it first.\n" +
+            "SDK INTEGRATION: If the app uses `react-native-ai-devtools-sdk` and called `init({ stores, navigation, custom })`, the response includes an `sdk.paths` array of ready-to-use dotted paths (e.g. `__RN_AI_DEVTOOLS__.stores.redux`, `__RN_AI_DEVTOOLS__.custom.mmkv`). Pass these straight to inspect_global or execute_in_app.\n" +
+            "OUTPUT SHAPE: { sdk: { version, capabilities, paths, hint } | null, categories: { 'Apollo Client': [...], 'Redux': [...], 'Other Debug': [...], ... } }\n" +
+            "LIMITATIONS: Only sees variables explicitly assigned to a global (e.g., `globalThis.store = store`). Module-scoped state is invisible — expose it first or use the SDK's init().\n" +
             "GOOD: list_debug_globals()\n" +
             "BAD: Calling before scan_metro — needs a live connection.\n" +
             "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
@@ -2415,18 +2426,19 @@ registerToolWithTelemetry(
     "inspect_global",
     {
         description:
-            "Inspect a global object to see its properties, types, and whether they are callable functions. Use this BEFORE calling methods on unfamiliar objects to avoid errors.\n" +
-            "PURPOSE: Surface the shape of a global (Apollo client, Redux store, Expo Router, etc.) — keys, types, and which members are callable — without executing arbitrary code.\n" +
+            "Inspect a global object (or a dotted path into one) to see its properties, types, and whether they are callable functions. Use this BEFORE calling methods on unfamiliar objects to avoid errors.\n" +
+            "PURPOSE: Surface the shape of a global (Apollo client, Redux store, Expo Router, SDK-registered store, etc.) — keys, types, and which members are callable — without executing arbitrary code.\n" +
             "WHEN TO USE: After list_debug_globals identifies a promising global and before you try execute_in_app on it.\n" +
             "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"__APOLLO_CLIENT__\") -> execute_in_app(\"__APOLLO_CLIENT__.cache.extract()\").\n" +
-            "LIMITATIONS: Only reads one level deep; nested objects show as `[object Object]` — re-inspect the child path with execute_in_app. Throws ReferenceError for globals that don't exist.\n" +
-            "GOOD: inspect_global({ objectName: \"__APOLLO_CLIENT__\" })\n" +
-            "BAD: inspect_global({ objectName: \"store.state\" }) — path expressions aren't supported; use execute_in_app for property chains.\n" +
+            "DOTTED PATHS: Pass dotted paths to drill into the SDK surface, e.g. inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\" }) or \"__RN_AI_DEVTOOLS__.custom.mmkv\". Only identifier paths are accepted — for arbitrary expressions, use execute_in_app.\n" +
+            "LIMITATIONS: Only reads one level deep; nested objects show as a 100-char JSON preview — re-inspect the child path. Returns an error object (not a throw) when the path doesn't resolve.\n" +
+            "GOOD: inspect_global({ objectName: \"__APOLLO_CLIENT__\" }) | inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\" })\n" +
+            "BAD: inspect_global({ objectName: \"store.getState()\" }) — call expressions aren't supported; use execute_in_app.\n" +
             "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
         inputSchema: {
             objectName: z
                 .string()
-                .describe("Name of the global object to inspect (e.g., '__EXPO_ROUTER__', '__APOLLO_CLIENT__')"),
+                .describe("Identifier or dotted path of the global to inspect (e.g., '__APOLLO_CLIENT__', '__RN_AI_DEVTOOLS__.stores.redux', '__RN_AI_DEVTOOLS__.custom.mmkv')"),
             device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
         }
     },
@@ -2436,10 +2448,17 @@ registerToolWithTelemetry(
         if (!result.success) {
             let errorText = `Error: ${result.error}`;
 
-            // If the error is a ReferenceError (accessing a global that doesn't exist),
-            // guide the agent to expose the variable as a global first
-            if (result.error?.includes("ReferenceError")) {
-                errorText += `\n\nNOTE: '${objectName}' is not exposed as a global variable. To inspect it, first assign it to a global in your app code (e.g., \`globalThis.${objectName} = ${objectName.replace(/^__/, "").replace(/__$/, "")};\`), then call inspect_global again. Use list_debug_globals to see what globals ARE currently available.`;
+            // If the global (or path) doesn't resolve, guide the agent toward
+            // either exposing it manually or registering it via the SDK.
+            const looksMissing = result.error?.includes("ReferenceError") || result.error?.includes("NotFound") || result.error?.includes("not found");
+            if (looksMissing) {
+                const isPath = objectName.includes(".");
+                if (isPath) {
+                    errorText += `\n\nNOTE: '${objectName}' did not resolve. Call list_debug_globals to confirm the path. If you expected the SDK to expose it, verify init({ stores, navigation, custom }) was called and check the sdk.paths array.`;
+                } else {
+                    const suggested = objectName.replace(/^__/, "").replace(/__$/, "");
+                    errorText += `\n\nNOTE: '${objectName}' is not exposed as a global variable. Either (a) assign it in app code (\`globalThis.${objectName} = ${suggested};\`), or (b) register it via react-native-ai-devtools-sdk's init({ custom: { ${suggested}: ${suggested} } }) and access it as __RN_AI_DEVTOOLS__.custom.${suggested}. Then call list_debug_globals to confirm.`;
+                }
             }
 
             return {
@@ -3399,7 +3418,10 @@ registerToolWithTelemetry(
         }
     },
     async ({ requestId, maxBodyLength, verbose, device }) => {
-        // Check SDK first — it has full headers and body
+        // Resolve once per call so a mid-call SDK socket flap can't flip
+        // routing partway through. Try SDK first (richer data), but ALWAYS
+        // fall back to the CDP buffer on a miss — CDP records carry numeric
+        // ids the SDK store doesn't know about, and vice versa.
         const sdkAvailable = await isSDKInstalled();
         if (sdkAvailable) {
             const sdkResult = await getSDKNetworkEntry(requestId);
