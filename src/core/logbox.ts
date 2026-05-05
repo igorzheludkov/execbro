@@ -177,7 +177,7 @@ export function getLastLogBoxError(): string | null {
 function recordLogBoxError(reason: string | null): void {
     lastLogBoxError = reason;
     if (reason) {
-        console.error(`[rn-ai-debugger] LogBox operation failed: ${reason}`);
+        console.error(`[execbro] LogBox operation failed: ${reason}`);
     }
 }
 

@@ -110,12 +110,12 @@ export function scheduleAppDetection(app: ConnectedApp): void {
                     const versionStr = parsed.reactNativeVersion !== "unknown"
                         ? `RN ${parsed.reactNativeVersion}, ` : "";
                     console.error(
-                        `[rn-ai-debugger] App detected: ${versionStr}${parsed.architecture} arch, ${parsed.jsEngine}, ${parsed.appPlatform} ${parsed.osVersion}`
+                        `[execbro] App detected: ${versionStr}${parsed.architecture} arch, ${parsed.jsEngine}, ${parsed.appPlatform} ${parsed.osVersion}`
                     );
                 }
             }
         } catch (e) {
-            console.error(`[rn-ai-debugger] App detection failed: ${e}`);
+            console.error(`[execbro] App detection failed: ${e}`);
         }
     }, DETECTION_DELAY_MS);
 }
