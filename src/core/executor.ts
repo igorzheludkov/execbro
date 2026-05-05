@@ -440,7 +440,7 @@ export async function executeInApp(
         if (!app) {
             if (autoReconnect && attempt < maxRetries) {
                 console.error(
-                    `[rn-ai-debugger] No connection, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
+                    `[execbro] No connection, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
                 );
                 const reconnected = await attemptQuickReconnect(preferredPort);
                 if (reconnected) {
@@ -455,7 +455,7 @@ export async function executeInApp(
         if (app.ws.readyState !== WebSocket.OPEN) {
             if (autoReconnect && attempt < maxRetries) {
                 console.error(
-                    `[rn-ai-debugger] WebSocket not open, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
+                    `[execbro] WebSocket not open, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
                 );
                 // Close stale connection
                 const appKey = `${app.port}-${app.deviceInfo.id}`;
@@ -490,7 +490,7 @@ export async function executeInApp(
         if (isContextError(result.error)) {
             if (autoReconnect && attempt < maxRetries) {
                 console.error(
-                    `[rn-ai-debugger] Context error detected, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
+                    `[execbro] Context error detected, attempting reconnect (attempt ${attempt + 1}/${maxRetries})...`
                 );
 
                 // Close and reconnect
@@ -691,7 +691,7 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
     // "Connection succeeded but app is not available". scan_metro's pattern
     // is the empirically-stable path.
     if (!app) {
-        console.error("[rn-ai-debugger] No connection for reload, attempting auto-connect...");
+        console.error("[execbro] No connection for reload, attempting auto-connect...");
 
         const ports = await scanMetroPorts();
         if (ports.length === 0) {
@@ -719,7 +719,7 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
                 try {
                     await connectToDevice(dev, port);
                 } catch (error) {
-                    console.error(`[rn-ai-debugger] Auto-connect failed for ${dev.title} on port ${port}: ${error}`);
+                    console.error(`[execbro] Auto-connect failed for ${dev.title} on port ${port}: ${error}`);
                 }
             }
         }

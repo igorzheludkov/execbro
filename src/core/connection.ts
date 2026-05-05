@@ -150,7 +150,7 @@ export function createWebSocketWithOriginFallback(url: string, timeoutMs = 5000)
                         if (settled) return;
                         if (ws.readyState === WebSocket.OPEN) {
                             settled = true;
-                            console.error("[rn-ai-debugger] WebSocket connected with Origin header");
+                            console.error("[execbro] WebSocket connected with Origin header");
                             resolve(ws);
                         }
                         // If not OPEN, the close handler will trigger fallback
@@ -158,7 +158,7 @@ export function createWebSocketWithOriginFallback(url: string, timeoutMs = 5000)
                 } else {
                     if (settled) return;
                     settled = true;
-                    console.error("[rn-ai-debugger] WebSocket connected without Origin header");
+                    console.error("[execbro] WebSocket connected without Origin header");
                     resolve(ws);
                 }
             });
@@ -169,7 +169,7 @@ export function createWebSocketWithOriginFallback(url: string, timeoutMs = 5000)
                 ws.terminate();
                 if (withOrigin) {
                     const reason = opened ? "immediately closed after open" : "rejected before open";
-                    console.error(`[rn-ai-debugger] Origin header connection ${reason}, retrying without...`);
+                    console.error(`[execbro] Origin header connection ${reason}, retrying without...`);
                     tryConnect(false);
                 } else {
                     settled = true;
@@ -242,7 +242,7 @@ export function purgeStaleConnectionsForPorts(
             const reason = !matchingDevice
                 ? "device no longer in Metro /json"
                 : `appId changed: ${app.deviceInfo.appId} → ${matchingDevice.appId}`;
-            console.error(`[rn-ai-debugger] Purging stale connection: ${name} (port ${app.port}, id ${app.deviceInfo.id}) — ${reason}`);
+            console.error(`[execbro] Purging stale connection: ${name} (port ${app.port}, id ${app.deviceInfo.id}) — ${reason}`);
 
             // Suppress reconnection so close handler doesn't try to reconnect
             reconnectionSuppressed.add(appKey);
@@ -633,7 +633,7 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                 const wasPresent = app.sdkPresent === true;
                 app.sdkPresent = present;
                 if (present !== wasPresent) {
-                    console.error(`[rn-ai-debugger] SDK ${present ? "detected" : "no longer detected"} on ${app.deviceInfo.title}; CDP/JS-interceptor buffer writes ${present ? "suppressed" : "restored"}`);
+                    console.error(`[execbro] SDK ${present ? "detected" : "no longer detected"} on ${app.deviceInfo.title}; CDP/JS-interceptor buffer writes ${present ? "suppressed" : "restored"}`);
                     // Toggle the in-app interceptor's emit flag so it stops
                     // (or resumes) producing console.debug lines and CDP
                     // traffic. Fire-and-forget — the flag is idempotent.
@@ -667,10 +667,10 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                 if (app) {
                     if (message.error) {
                         app.cdpNetworkSupported = false;
-                        console.error(`[rn-ai-debugger] CDP Network domain not supported, using JS interceptor`);
+                        console.error(`[execbro] CDP Network domain not supported, using JS interceptor`);
                     } else {
                         app.cdpNetworkSupported = true;
-                        console.error(`[rn-ai-debugger] CDP Network domain supported`);
+                        console.error(`[execbro] CDP Network domain supported`);
                     }
                 }
             }
@@ -874,7 +874,7 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
         if (method === "Runtime.executionContextCreated") {
             const params = message.params as { context: { id: number; name?: string } };
             markContextHealthy(appKey, params.context.id);
-            console.error(`[rn-ai-debugger] Context created: ${params.context.id}`);
+            console.error(`[execbro] Context created: ${params.context.id}`);
 
             // Re-inject network interceptor and re-check CDP Network support
             const ctxApp = connectedApps.get(appKey);
@@ -888,13 +888,13 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
         // Handle Runtime.executionContextDestroyed
         if (method === "Runtime.executionContextDestroyed") {
             markContextStale(appKey);
-            console.error(`[rn-ai-debugger] Context destroyed`);
+            console.error(`[execbro] Context destroyed`);
         }
 
         // Handle Runtime.executionContextsCleared
         if (method === "Runtime.executionContextsCleared") {
             markContextStale(appKey);
-            console.error(`[rn-ai-debugger] All contexts cleared`);
+            console.error(`[execbro] All contexts cleared`);
         }
     }
 }
@@ -937,7 +937,7 @@ export async function connectToDevice(
                 }
 
                 // Ping failed — connection is dead, clean up
-                console.error(`[rn-ai-debugger] Existing connection to ${device.title} failed liveness check (no pong), reconnecting`);
+                console.error(`[execbro] Existing connection to ${device.title} failed liveness check (no pong), reconnecting`);
                 reconnectionSuppressed.add(appKey);
                 try { existingApp.ws.terminate(); } catch { /* ignore */ }
                 connectedApps.delete(appKey);
@@ -945,7 +945,7 @@ export async function connectToDevice(
                 clearActiveSimulatorIfSource(appKey);
             } else {
                 // WebSocket exists but not OPEN - clean up stale entry
-                console.error(`[rn-ai-debugger] Cleaning up stale connection for ${device.title} (state: ${getWebSocketStateName(existingApp.ws.readyState)})`);
+                console.error(`[execbro] Cleaning up stale connection for ${device.title} (state: ${getWebSocketStateName(existingApp.ws.readyState)})`);
                 connectedApps.delete(appKey);
             }
         }
@@ -992,7 +992,7 @@ export async function connectToDevice(
                 connectionLocks.delete(appKey);
                 try { ws.terminate(); } catch { /* ignore */ }
                 clearConnectionMetadata(appKey);
-                console.error(`[rn-ai-debugger] Rejecting stale CDP target for ${device.title} (no probe response)`);
+                console.error(`[execbro] Rejecting stale CDP target for ${device.title} (no probe response)`);
                 resolve(`Skipped ${device.deviceName || device.title} (stale CDP target — no response from JS context)`);
                 return;
             }
@@ -1013,11 +1013,11 @@ export async function connectToDevice(
                 });
                 // Reset context health for reconnection
                 initContextHealth(appKey);
-                console.error(`[rn-ai-debugger] Reconnected to ${device.title}`);
+                console.error(`[execbro] Reconnected to ${device.title}`);
             } else {
                 initConnectionState(appKey);
                 initContextHealth(appKey);
-                console.error(`[rn-ai-debugger] Connected to ${device.title}`);
+                console.error(`[execbro] Connected to ${device.title}`);
             }
 
             // Enable Runtime domain to receive console messages
@@ -1055,7 +1055,7 @@ export async function connectToDevice(
                         connectedApp.platform = "ios";
                         connectedApp.simulatorUdid = simulatorUdid;
                     }
-                    console.error(`[rn-ai-debugger] Linked to iOS simulator: ${simulatorUdid}`);
+                    console.error(`[execbro] Linked to iOS simulator: ${simulatorUdid}`);
                 }
             }
 
@@ -1075,7 +1075,7 @@ export async function connectToDevice(
             let pongReceived = true;
             const pingInterval = setInterval(() => {
                 if (!pongReceived) {
-                    console.error(`[rn-ai-debugger] No pong from ${device.title}, terminating connection`);
+                    console.error(`[execbro] No pong from ${device.title}, terminating connection`);
                     clearInterval(pingInterval);
                     ws.terminate();
                     return;
@@ -1120,7 +1120,7 @@ export async function connectToDevice(
                     if (wasStable) {
                         // Connection was stable - reset attempts for fresh start
                         updateConnectionState(appKey, { reconnectionAttempts: 0 });
-                        console.error(`[rn-ai-debugger] Connection was stable for ${Math.round(connectionDuration / 1000)}s, resetting reconnection attempts`);
+                        console.error(`[execbro] Connection was stable for ${Math.round(connectionDuration / 1000)}s, resetting reconnection attempts`);
                     }
                 }
 
@@ -1131,19 +1131,19 @@ export async function connectToDevice(
                     lastDisconnectTime: new Date()
                 });
 
-                console.error(`[rn-ai-debugger] Disconnected from ${device.title}`);
+                console.error(`[execbro] Disconnected from ${device.title}`);
 
                 // Schedule auto-reconnection if enabled (skip if intentionally disconnected)
                 if (reconnectionConfig.enabled && !reconnectionSuppressed.has(appKey)) {
                     scheduleReconnection(appKey, reconnectionConfig);
                 } else if (reconnectionSuppressed.has(appKey)) {
                     reconnectionSuppressed.delete(appKey);
-                    console.error(`[rn-ai-debugger] Reconnection suppressed for ${device.title} (intentional disconnect)`);
+                    console.error(`[execbro] Reconnection suppressed for ${device.title} (intentional disconnect)`);
                 }
             });
 
             ws.on("error", (error: Error) => {
-                console.error(`[rn-ai-debugger] WebSocket error for ${device.title}: ${error?.message || error}`);
+                console.error(`[execbro] WebSocket error for ${device.title}: ${error?.message || error}`);
             });
 
             resolve(`Connected to ${device.title} (${device.deviceName})`);
@@ -1159,7 +1159,7 @@ export async function connectToDevice(
             if (!isReconnection) {
                 reject(`Failed to connect to ${device.title}: ${errorMsg}`);
             } else {
-                console.error(`[rn-ai-debugger] Reconnection error: ${errorMsg}`);
+                console.error(`[execbro] Reconnection error: ${errorMsg}`);
             }
         }
     });
@@ -1177,13 +1177,13 @@ function scheduleReconnection(
 
     const attempts = state.reconnectionAttempts;
     if (attempts >= config.maxAttempts) {
-        console.error(`[rn-ai-debugger] Max reconnection attempts (${config.maxAttempts}) reached for ${appKey}`);
+        console.error(`[execbro] Max reconnection attempts (${config.maxAttempts}) reached for ${appKey}`);
         updateConnectionState(appKey, { status: "disconnected" });
         return;
     }
 
     const delay = calculateBackoffDelay(attempts, config);
-    console.error(`[rn-ai-debugger] Scheduling reconnection attempt ${attempts + 1}/${config.maxAttempts} in ${delay}ms`);
+    console.error(`[execbro] Scheduling reconnection attempt ${attempts + 1}/${config.maxAttempts} in ${delay}ms`);
 
     updateConnectionState(appKey, {
         status: "reconnecting",
@@ -1206,7 +1206,7 @@ async function attemptReconnection(
 ): Promise<boolean> {
     const metadata = getConnectionMetadata(appKey);
     if (!metadata) {
-        console.error(`[rn-ai-debugger] No metadata for reconnection: ${appKey}`);
+        console.error(`[execbro] No metadata for reconnection: ${appKey}`);
         return false;
     }
 
@@ -1214,7 +1214,7 @@ async function attemptReconnection(
     const { scanMetroPorts } = await import("./metro.js");
     const openPorts = await scanMetroPorts(metadata.port, metadata.port);
     if (openPorts.length === 0) {
-        console.error(`[rn-ai-debugger] Metro not running on port ${metadata.port}, stopping reconnection for ${appKey}`);
+        console.error(`[execbro] Metro not running on port ${metadata.port}, stopping reconnection for ${appKey}`);
         updateConnectionState(appKey, { status: "disconnected" });
         return false;
     }
@@ -1228,7 +1228,7 @@ async function attemptReconnection(
             || selectMainDevice(devices);
 
         if (!device) {
-            console.error(`[rn-ai-debugger] Device no longer available for ${appKey}`);
+            console.error(`[execbro] Device no longer available for ${appKey}`);
             // Schedule next attempt
             scheduleReconnection(appKey, config);
             return false;
@@ -1237,7 +1237,7 @@ async function attemptReconnection(
         await connectToDevice(device, metadata.port, { isReconnection: true, reconnectionConfig: config });
         return true;
     } catch (error) {
-        console.error(`[rn-ai-debugger] Reconnection failed: ${error}`);
+        console.error(`[execbro] Reconnection failed: ${error}`);
         // Schedule next attempt
         scheduleReconnection(appKey, config);
         return false;
@@ -1265,7 +1265,7 @@ export function getFirstConnectedApp(): ConnectedApp | null {
             return app;
         }
         // Clean up stale entry
-        console.error(`[rn-ai-debugger] Cleaning up stale connection in getFirstConnectedApp: ${key} (state: ${getWebSocketStateName(app.ws.readyState)})`);
+        console.error(`[execbro] Cleaning up stale connection in getFirstConnectedApp: ${key} (state: ${getWebSocketStateName(app.ws.readyState)})`);
         connectedApps.delete(key);
     }
     return null;
@@ -1683,7 +1683,7 @@ export async function ensureConnection(options: {
 
         // If health check failed and we haven't just reconnected, try reconnecting
         if (!healthCheckPassed && !wasReconnected) {
-            console.error(`[rn-ai-debugger] Health check failed, attempting reconnection...`);
+            console.error(`[execbro] Health check failed, attempting reconnection...`);
 
             // Close and reconnect
             const appKey = `${app.port}-${app.deviceInfo.id}`;

@@ -46,7 +46,7 @@ export function getDeviceFingerprint(): string {
     const machineId = getMachineId();
 
     if (!machineId) {
-        console.warn("[rn-ai-debugger] Device fingerprint: machineId unavailable, using degraded fingerprint");
+        console.warn("[execbro] Device fingerprint: machineId unavailable, using degraded fingerprint");
     }
 
     const input = username + cpuModel + machineId;
