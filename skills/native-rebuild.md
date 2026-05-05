@@ -46,6 +46,10 @@ Wait for the build to complete and the app to launch on the Android emulator. If
 
 Use MCP tools to take a screenshot of the Android device/emulator and verify the app is running correctly. Report what you see.
 
+## Notes
+
+- **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.
+
 ## Step 6 — Summary
 
 Provide a summary:

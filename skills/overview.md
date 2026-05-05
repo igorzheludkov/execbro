@@ -50,6 +50,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 - `/layout-check` auto-triggers after any style/layout code change — no need to invoke it manually in that case.
 - Most skills accept optional arguments to narrow scope (e.g., `/debug-logs error`, `/network-inspect 500`). See individual skill files for details.
 - To switch to the built-in React Native debugger, use `disconnect_metro` to free the CDP connection. Use `scan_metro` to reconnect afterward.
+- **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.
 
 ## Multi-Device Debugging
 

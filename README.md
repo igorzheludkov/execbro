@@ -12,7 +12,7 @@ ExecBro is the runtime bridge that gives your AI coding assistant live access to
 
 ## Get started
 
-1. [Setup rn-ai-devtools as an MCP server for your agent of choice](#claude-code-setup)
+1. [Setup ExecBro as an MCP server for your agent of choice](#claude-code-setup)
 2. [Setup UI automation helpers](#ios-simulator--ui-automation-setup)
 
 ## Feedback & Feature Requests
@@ -63,13 +63,13 @@ No installation required - Claude Code uses `npx` to run the latest version auto
 #### Global (all projects)
 
 ```bash
-claude mcp add rn-ai-devtools --scope user -- npx react-native-ai-devtools
+claude mcp add execbro --scope user -- npx react-native-ai-devtools
 ```
 
 #### Project-specific
 
 ```bash
-claude mcp add rn-ai-devtools --scope project -- npx react-native-ai-devtools
+claude mcp add execbro --scope project -- npx react-native-ai-devtools
 ```
 
 #### Manual Configuration
@@ -79,7 +79,7 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
 ```json
 {
   "mcpServers": {
-    "rn-ai-devtools": {
+    "execbro": {
       "type": "stdio",
       "command": "npx",
       "args": ["react-native-ai-devtools"]
@@ -101,7 +101,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 ```json
 {
   "servers": {
-    "rn-ai-devtools": {
+    "execbro": {
       "type": "stdio",
       "command": "npx",
       "args": ["-y", "react-native-ai-devtools"]
@@ -121,7 +121,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 ```json
 {
   "mcpServers": {
-    "rn-ai-devtools": {
+    "execbro": {
       "command": "npx",
       "args": ["-y", "react-native-ai-devtools"]
     }
@@ -156,7 +156,7 @@ Add `env` to your MCP server configuration:
 ```json
 {
   "mcpServers": {
-    "rn-ai-devtools": {
+    "execbro": {
       "type": "stdio",
       "command": "npx",
       "args": ["react-native-ai-devtools"],
@@ -379,7 +379,7 @@ To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `
 ```json
 {
   "mcpServers": {
-    "rn-ai-devtools": {
+    "execbro": {
       "type": "stdio",
       "command": "npx",
       "args": ["react-native-ai-devtools"],
