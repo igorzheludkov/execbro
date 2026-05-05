@@ -32,6 +32,13 @@ export interface ConnectedApp {
         scaleFactor: number;
     };
     cdpNetworkSupported?: boolean;
+    // True when the in-app react-native-ai-devtools-sdk is detected
+    // (globalThis.__RN_AI_DEVTOOLS__). When true, we skip CDP/JS-interceptor
+    // buffer writes since the SDK becomes the single source of truth and
+    // would otherwise duplicate every entry. Probed periodically because the
+    // SDK's init() may run after we connect.
+    sdkPresent?: boolean;
+    sdkProbeTimer?: NodeJS.Timeout;
     appDetection?: AppDetectionResult;
 }
 

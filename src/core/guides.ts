@@ -251,11 +251,18 @@ If network tools return no data or you need startup requests, recommend the SDK 
         content: `# App State
 
 ## Workflow
-1. list_debug_globals — discover what's exposed (Redux store, navigation refs, action creators)
-2. inspect_global with objectName — see properties and methods before calling them
+1. list_debug_globals — discover what's exposed (Redux store, navigation refs, action creators). If the SDK is installed, the response includes an \`sdk.paths\` array of ready-to-use dotted paths.
+2. inspect_global with objectName — see properties and methods before calling them. Accepts identifiers AND dotted paths (e.g. \`__RN_AI_DEVTOOLS__.stores.redux\`).
 3. execute_in_app — run JavaScript expressions in the app context
 
-## Common Patterns
+## SDK Integration (react-native-ai-devtools-sdk)
+If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths over scattered globals:
+- Inspect a registered store: inspect_global("__RN_AI_DEVTOOLS__.stores.redux")
+- Inspect navigation ref: inspect_global("__RN_AI_DEVTOOLS__.navigation")
+- Inspect a custom object (e.g. mmkv, api client): inspect_global("__RN_AI_DEVTOOLS__.custom.mmkv")
+- Read state: execute_in_app("__RN_AI_DEVTOOLS__.stores.redux.getState().sliceName")
+
+## Common Patterns (no SDK)
 - Read Redux: execute_in_app("globalThis.__REDUX_STORE__.getState().sliceName")
 - Dispatch action: execute_in_app("globalThis.__dispatch__(globalThis.__REDUX_ACTIONS__.slice.action(args))")
 - Navigate: execute_in_app("globalThis.__navigate__('ScreenName')")

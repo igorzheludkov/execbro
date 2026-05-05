@@ -26,6 +26,10 @@ export function getInterceptorScript(): string {
     }
 
     function _report(evt) {
+      // Suppressed when the in-app SDK is the source of truth — the MCP
+      // flips this flag via Runtime.evaluate once it detects __RN_AI_DEVTOOLS__,
+      // so the wrapper stops emitting debug lines and CDP traffic.
+      if (globalThis.__RN_NET_DISABLED__) return;
       try {
         console.debug('__RN_NET__:' + JSON.stringify(evt));
       } catch(e) {}

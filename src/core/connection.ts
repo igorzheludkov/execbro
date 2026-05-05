@@ -35,6 +35,54 @@ const connectionLocks: Set<string> = new Set();
 // Track Network.enable message IDs to detect CDP network support
 const pendingNetworkEnableIds: Set<number> = new Set();
 
+// Track SDK-probe message IDs so we can decode their responses and set
+// app.sdkPresent. The probe runs on connect and then periodically because
+// the SDK's init() may execute after we attach.
+const pendingSdkProbeIds: Map<number, string> = new Map(); // msgId -> appKey
+const SDK_PROBE_INITIAL_DELAY_MS = 200;
+const SDK_PROBE_INTERVAL_MS = 3000;
+
+function sendSdkProbe(ws: WebSocket, appKey: string): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const id = getNextMessageId();
+    pendingSdkProbeIds.set(id, appKey);
+    try {
+        ws.send(
+            JSON.stringify({
+                id,
+                method: "Runtime.evaluate",
+                params: {
+                    expression: 'typeof globalThis.__RN_AI_DEVTOOLS__?.getNetworkEntries === "function"',
+                    returnByValue: true
+                }
+            })
+        );
+    } catch {
+        pendingSdkProbeIds.delete(id);
+    }
+}
+
+function startSdkProbeLoop(ws: WebSocket, appKey: string): void {
+    const initial = setTimeout(() => sendSdkProbe(ws, appKey), SDK_PROBE_INITIAL_DELAY_MS);
+    const interval = setInterval(() => {
+        const app = connectedApps.get(appKey);
+        if (!app || ws.readyState !== WebSocket.OPEN) {
+            clearInterval(interval);
+            return;
+        }
+        sendSdkProbe(ws, appKey);
+    }, SDK_PROBE_INTERVAL_MS);
+    const app = connectedApps.get(appKey);
+    if (app) {
+        app.sdkProbeTimer = interval;
+    }
+    // Best-effort cleanup if the socket closes before the initial probe fires
+    ws.once("close", () => {
+        clearTimeout(initial);
+        clearInterval(interval);
+    });
+}
+
 // Suppress auto-reconnection for intentionally disconnected devices
 const reconnectionSuppressed: Set<string> = new Set();
 
@@ -574,6 +622,42 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
 
             pending.resolve({ success: true, result: "undefined" });
         }
+        // Track SDK-probe responses
+        if (pendingSdkProbeIds.has(message.id as number)) {
+            const appKey = pendingSdkProbeIds.get(message.id as number)!;
+            pendingSdkProbeIds.delete(message.id as number);
+            const app = connectedApps.get(appKey);
+            if (app) {
+                const result = (message.result as { result?: { value?: unknown } } | undefined)?.result;
+                const present = result?.value === true;
+                const wasPresent = app.sdkPresent === true;
+                app.sdkPresent = present;
+                if (present !== wasPresent) {
+                    console.error(`[rn-ai-debugger] SDK ${present ? "detected" : "no longer detected"} on ${app.deviceInfo.title}; CDP/JS-interceptor buffer writes ${present ? "suppressed" : "restored"}`);
+                    // Toggle the in-app interceptor's emit flag so it stops
+                    // (or resumes) producing console.debug lines and CDP
+                    // traffic. Fire-and-forget — the flag is idempotent.
+                    if (app.ws.readyState === WebSocket.OPEN) {
+                        try {
+                            app.ws.send(
+                                JSON.stringify({
+                                    id: getNextMessageId(),
+                                    method: "Runtime.evaluate",
+                                    params: {
+                                        expression: `globalThis.__RN_NET_DISABLED__ = ${present ? "true" : "false"}`,
+                                        returnByValue: true
+                                    }
+                                })
+                            );
+                        } catch {
+                            // ignore — next probe will retry
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
         // Track Network.enable responses to detect CDP network support
         if (pendingNetworkEnableIds.has(message.id as number)) {
             pendingNetworkEnableIds.delete(message.id as number);
@@ -613,7 +697,10 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
         if (interceptorJson !== null) {
             const iAppKey = findAppKeyForDevice(device);
             const iApp = iAppKey ? connectedApps.get(iAppKey) : null;
-            if (!iApp?.cdpNetworkSupported) {
+            // Skip when CDP Network domain is the source, OR when the in-app
+            // SDK is the source — both would otherwise produce duplicate
+            // entries for every request.
+            if (!iApp?.cdpNetworkSupported && !iApp?.sdkPresent) {
                 applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName));
             }
             return;
@@ -676,6 +763,16 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
 
     // Handle Network.requestWillBeSent
     if (method === "Network.requestWillBeSent") {
+        // Skip CDP capture when the in-app SDK is the source of truth —
+        // otherwise every request lands in both buffers under different ids.
+        // The follow-up Network.responseReceived/loadingFinished/loadingFailed
+        // handlers below only mutate existing entries, so they self-skip.
+        const nAppKey = findAppKeyForDevice(device);
+        const nApp = nAppKey ? connectedApps.get(nAppKey) : null;
+        if (nApp?.sdkPresent) {
+            return;
+        }
+
         const params = message.params as {
             requestId: string;
             request: {
@@ -967,6 +1064,11 @@ export async function connectToDevice(
             if (appForDetection) {
                 scheduleAppDetection(appForDetection);
             }
+
+            // Start periodic SDK probe. When __RN_AI_DEVTOOLS__ is detected,
+            // app.sdkPresent flips to true and CDP/JS-interceptor buffer
+            // writes are suppressed (SDK becomes the single source).
+            startSdkProbeLoop(ws, appKey);
 
             // Start WebSocket ping/pong keepalive to detect dead connections
             // (especially important for physical devices over Wi-Fi)
