@@ -19,25 +19,25 @@ Use this skill when the task involves:
 ### 1. Discover Available Devices
 
 First, check what devices are running:
-- Use `mcp__rn-ai-devtools__list_ios_simulators` to find iOS simulators
-- Use `mcp__rn-ai-devtools__list_android_devices` to find Android devices/emulators
+- Use `mcp__execbro__list_ios_simulators` to find iOS simulators
+- Use `mcp__execbro__list_android_devices` to find Android devices/emulators
 
 ### 2. See What's on Screen
 
 Before interacting, understand the current screen:
 
 **Screenshot approach (recommended first step):**
-- Use `mcp__rn-ai-devtools__ios_screenshot` or `mcp__rn-ai-devtools__android_screenshot` for visual reference
+- Use `mcp__execbro__ios_screenshot` or `mcp__execbro__android_screenshot` for visual reference
 
 **Component tree approach (for finding React Native elements without screenshots):**
-- Use `mcp__rn-ai-devtools__get_screen_layout` for an indented tree of visible components with positions, text, and identifiers
-- Use `mcp__rn-ai-devtools__find_components` to regex-search the fiber tree for a specific component by name
+- Use `mcp__execbro__get_screen_layout` for an indented tree of visible components with positions, text, and identifiers
+- Use `mcp__execbro__find_components` to regex-search the fiber tree for a specific component by name
 
 ### 3. Tap Elements
 
 **Use the unified `tap` tool for all tapping — it auto-detects the platform and tries multiple strategies automatically:**
 
-- `mcp__rn-ai-devtools__tap` — single cross-platform tool with automatic fallback chain:
+- `mcp__execbro__tap` — single cross-platform tool with automatic fallback chain:
   1. Fiber tree (direct `onPress` invocation)
   2. Accessibility tree (native element matching)
   3. OCR (visual text recognition)
@@ -113,34 +113,34 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 ### 4. Other Interactions
 
 **Long press:**
-- Android: `mcp__rn-ai-devtools__android_long_press` with x/y and optional duration
+- Android: `mcp__execbro__android_long_press` with x/y and optional duration
 
 **Swipe/scroll:**
-- Android: `mcp__rn-ai-devtools__android_swipe` with start/end coordinates
+- Android: `mcp__execbro__android_swipe` with start/end coordinates
 - iOS: no dedicated swipe tool — use `tap(x=, y=)` for interactions and scroll by tapping scroll targets, or rely on the app's own navigation
 
 **Type text:**
-- iOS: use `mcp__rn-ai-devtools__tap` with `text=` or `testID=` on the `TextInput` — the fiber tree strategy focuses the input natively. For the value itself, set it via state (e.g., `execute_in_app`) or rely on existing focus + native keyboard
-- Android: `mcp__rn-ai-devtools__android_input_text` (tap input field first)
+- iOS: use `mcp__execbro__tap` with `text=` or `testID=` on the `TextInput` — the fiber tree strategy focuses the input natively. For the value itself, set it via state (e.g., `execute_in_app`) or rely on existing focus + native keyboard
+- Android: `mcp__execbro__android_input_text` (tap input field first)
 
 **Hardware buttons:**
-- iOS: `mcp__rn-ai-devtools__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
-- Android: `mcp__rn-ai-devtools__android_key_event` (HOME, BACK, ENTER, DEL, MENU, etc.)
+- iOS: `mcp__execbro__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
+- Android: `mcp__execbro__android_key_event` (HOME, BACK, ENTER, DEL, MENU, etc.)
 
 **Deep links:**
-- iOS: `mcp__rn-ai-devtools__ios_open_url` with the full URL (e.g., `myapp://settings/profile` or `https://example.com`)
+- iOS: `mcp__execbro__ios_open_url` with the full URL (e.g., `myapp://settings/profile` or `https://example.com`)
 
 ### 5. Get Screen Dimensions (when needed for coordinates)
 
 When calculating swipe distances or tap positions on an unfamiliar device:
-- Android: `mcp__rn-ai-devtools__android_get_screen_size` returns the device's pixel resolution
+- Android: `mcp__execbro__android_get_screen_size` returns the device's pixel resolution
 - Use this before computing percentage-based coordinates (e.g., center = width/2, height/2)
 - For iOS simulators, the resolution is part of the simulator spec — use `list_ios_simulators` to identify the device model
 
 ### 6. Wait for UI Updates
 
 After navigation or interactions that change the screen, poll the UI by re-calling
-`mcp__rn-ai-devtools__get_screen_layout` (or `find_components`) in a short retry
+`mcp__execbro__get_screen_layout` (or `find_components`) in a short retry
 loop until the expected component shows up.
 
 ### 7. Verify Results
@@ -164,23 +164,23 @@ After interactions, verify the result:
 
 ## MCP Tools Used
 
-- `mcp__rn-ai-devtools__tap`
-- `mcp__rn-ai-devtools__find_components`
-- `mcp__rn-ai-devtools__list_ios_simulators`
-- `mcp__rn-ai-devtools__list_android_devices`
-- `mcp__rn-ai-devtools__ios_screenshot` / `android_screenshot`
-- `mcp__rn-ai-devtools__get_screen_layout`
-- `mcp__rn-ai-devtools__inspect_at_point`
-- `mcp__rn-ai-devtools__android_long_press`
-- `mcp__rn-ai-devtools__android_swipe`
-- `mcp__rn-ai-devtools__android_input_text`
-- `mcp__rn-ai-devtools__ios_button` / `android_key_event`
-- `mcp__rn-ai-devtools__ios_open_url`
-- `mcp__rn-ai-devtools__android_get_screen_size`
+- `mcp__execbro__tap`
+- `mcp__execbro__find_components`
+- `mcp__execbro__list_ios_simulators`
+- `mcp__execbro__list_android_devices`
+- `mcp__execbro__ios_screenshot` / `android_screenshot`
+- `mcp__execbro__get_screen_layout`
+- `mcp__execbro__inspect_at_point`
+- `mcp__execbro__android_long_press`
+- `mcp__execbro__android_swipe`
+- `mcp__execbro__android_input_text`
+- `mcp__execbro__ios_button` / `android_key_event`
+- `mcp__execbro__ios_open_url`
+- `mcp__execbro__android_get_screen_size`
 
 ## Notes
 
-- Requires the rn-ai-devtools MCP server to be running
+- Requires the ExecBro MCP server to be running
 - iOS simulator interactions require IDB (`brew install idb-companion`) or AXe CLI (`brew install cameroncooke/axe/axe`). Set `IOS_DRIVER=axe` env var to use AXe.
 - **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically. Use `native=true` for system UI or non-RN apps
 - On failure, follow the `suggestion` field in the tap response — it tells you exactly what to try next
@@ -188,3 +188,4 @@ After interactions, verify the result:
 - For Android, the Back button is available via `android_key_event` with key "BACK"
 - `ios_open_url` works for both custom scheme deep links (`myapp://`) and universal links (`https://`)
 - Use `android_get_screen_size` before computing swipe coordinates on physical devices where screen resolution varies
+- **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.

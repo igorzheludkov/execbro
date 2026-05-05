@@ -58,7 +58,7 @@ npm run dev:mcp    # Builds + runs with HTTP transport on port 8600, auto-restar
 Configure Claude Code to connect via HTTP (in `~/.claude.json` mcpServers):
 ```json
 {
-  "rn-ai-devtools-local": {
+  "execbro-local": {
     "type": "http",
     "url": "http://localhost:8600/mcp"
   }

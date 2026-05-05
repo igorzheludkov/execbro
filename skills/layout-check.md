@@ -21,22 +21,22 @@ When this skill is invoked, follow these steps:
 
 First, check what devices are available:
 
-- Use `mcp__rn-ai-devtools__list_ios_simulators` to find running iOS simulators
-- Use `mcp__rn-ai-devtools__list_android_devices` to find connected Android devices/emulators
+- Use `mcp__execbro__list_ios_simulators` to find running iOS simulators
+- Use `mcp__execbro__list_android_devices` to find connected Android devices/emulators
 
 ### 2. Take Screenshots
 
 Based on what's running, capture screenshots:
 
 **For iOS Simulators:**
-- Use `mcp__rn-ai-devtools__ios_screenshot` with the simulator UDID
+- Use `mcp__execbro__ios_screenshot` with the simulator UDID
 - Capture from both iPhone and iPad if both are running (important for responsive layouts)
 
 **For Android Devices:**
-- Use `mcp__rn-ai-devtools__android_screenshot` with the device serial
+- Use `mcp__execbro__android_screenshot` with the device serial
 
 **Screenshot with OCR (when you need tap coordinates):**
-- Use `mcp__rn-ai-devtools__ocr_screenshot` to capture a screenshot and extract all visible text with tap-ready coordinates
+- Use `mcp__execbro__ocr_screenshot` to capture a screenshot and extract all visible text with tap-ready coordinates
 - Recommended when you need to identify tappable elements — returns ready-to-use tapX/tapY coordinates
 
 ### 3. Present Results
@@ -49,8 +49,8 @@ Based on what's running, capture screenshots:
 
 If a screenshot reveals a layout issue and you need precise measurements:
 - Pick by question:
-  - **Layout/measurement question** ("why is this clipped?", "what's the actual size?", "what handler fires here?") → `mcp__rn-ai-devtools__inspect_at_point(x, y)`. Returns FRAME PER ANCESTOR plus PROPS (handlers, refs, testID). Pure JS hit test — no overlay flicker, fast.
-  - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__rn-ai-devtools__get_inspector_selection(x, y)`. Returns RN's curated hierarchy with merged style per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.). Briefly toggles RN's Element Inspector on→off around the capture.
+  - **Layout/measurement question** ("why is this clipped?", "what's the actual size?", "what handler fires here?") → `mcp__execbro__inspect_at_point(x, y)`. Returns FRAME PER ANCESTOR plus PROPS (handlers, refs, testID). Pure JS hit test — no overlay flicker, fast.
+  - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__execbro__get_inspector_selection(x, y)`. Returns RN's curated hierarchy with merged style per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.). Briefly toggles RN's Element Inspector on→off around the capture.
 - Both tools work on Bridgeless / new arch and on Paper/Fabric.
 
 ### 5. Optional: Compare with Design
@@ -73,16 +73,17 @@ If the user provides a Figma URL or design reference:
 
 ## MCP Tools Used
 
-- `mcp__rn-ai-devtools__list_ios_simulators`
-- `mcp__rn-ai-devtools__list_android_devices`
-- `mcp__rn-ai-devtools__ios_screenshot`
-- `mcp__rn-ai-devtools__android_screenshot`
-- `mcp__rn-ai-devtools__inspect_at_point` (optional: per-ancestor frames + props at coordinates)
-- `mcp__rn-ai-devtools__ocr_screenshot` (screenshot + OCR text with tap coordinates)
-- `mcp__rn-ai-devtools__get_inspector_selection` (optional: identity + rich style per ancestor at coordinates)
+- `mcp__execbro__list_ios_simulators`
+- `mcp__execbro__list_android_devices`
+- `mcp__execbro__ios_screenshot`
+- `mcp__execbro__android_screenshot`
+- `mcp__execbro__inspect_at_point` (optional: per-ancestor frames + props at coordinates)
+- `mcp__execbro__ocr_screenshot` (screenshot + OCR text with tap coordinates)
+- `mcp__execbro__get_inspector_selection` (optional: identity + rich style per ancestor at coordinates)
 
 ## Notes
 
-- This skill requires the rn-ai-devtools MCP server to be running
+- This skill requires the ExecBro MCP server to be running
 - Devices must be booted and the app must be running
 - For iPad testing, ensure both portrait and landscape are considered if relevant
+- **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.
