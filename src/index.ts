@@ -4931,21 +4931,29 @@ async function main() {
             "dev",
             {
                 description:
-                    'Development meta-tool for hot-reload testing. Use action="list" to get all available tools with descriptions. ' +
+                    'Development meta-tool for hot-reload testing. Use action="list" for a compact tool listing (name + first description line); pass filter to narrow by substring or verbose=true for full descriptions. ' +
                     'Use action="call" with tool and args to invoke any tool using the latest code after hot-reload. ' +
                     "This tool always reflects the latest server code without needing a session restart.",
                 inputSchema: {
                     action: z.enum(["list", "call"]).describe('"list" to see all tools, "call" to invoke a tool'),
                     tool: z.string().optional().describe("Tool name to call (required when action is call)"),
                     args: z.record(z.any()).optional().describe("Arguments to pass to the tool (optional, default {})"),
+                    filter: z.string().optional().describe("list only: case-insensitive substring filter on tool name"),
+                    verbose: z.boolean().optional().describe("list only: include full multi-line descriptions (default: first line only)"),
                 },
             },
-            async ({ action, tool, args }: { action: "list" | "call"; tool?: string; args?: Record<string, any> }) => {
+            async ({ action, tool, args, filter, verbose }: { action: "list" | "call"; tool?: string; args?: Record<string, any>; filter?: string; verbose?: boolean }) => {
                 if (action === "list") {
-                    const tools = Array.from(toolRegistry.entries()).map(([name, { config }]) => ({
-                        name,
-                        description: config.description || "",
-                    }));
+                    const needle = filter?.toLowerCase();
+                    const tools = Array.from(toolRegistry.entries())
+                        .filter(([name]) => !needle || name.toLowerCase().includes(needle))
+                        .map(([name, { config }]) => {
+                            const full = config.description || "";
+                            return {
+                                name,
+                                description: verbose ? full : full.split("\n")[0],
+                            };
+                        });
                     return {
                         content: [{ type: "text" as const, text: JSON.stringify(tools, null, 2) }],
                     };

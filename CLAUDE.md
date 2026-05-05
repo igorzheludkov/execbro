@@ -86,10 +86,15 @@ Production users are unaffected — the default transport remains stdio.
 
 In HTTP mode, a `dev` meta-tool is registered for full hot-reload testing. It proxies calls to any tool using the latest server code, so new/modified/removed tools are immediately testable without restarting the Claude Code session.
 
-- `dev(action="list")` — returns the current list of all tools with descriptions
+- `dev(action="list")` — compact listing (name + first description line). Pass `filter="substring"` to narrow by name, or `verbose=true` for full descriptions.
 - `dev(action="call", tool="tool_name", args={...})` — invokes any tool by name using the latest handler
 
 This tool is only available in `--http` mode (dev). It does not appear in production (stdio).
+
+**IMPORTANT — validating changes during development:** When modifying any tool's handler in this repo, verify the change through the `mcp__execbro-local__*` (HTTP) tools, not the production `mcp__execbro__*` (stdio) tools. The stdio server runs the prebuilt `build/index.js` and won't pick up edits without a session restart; the HTTP server is rebuilt by nodemon on every save. Two valid verification paths:
+
+1. **Handler logic change** — call the tool directly via `mcp__execbro-local__<tool>` (immediate, uses latest code) OR via `dev(action="call", tool="<tool>", args={...})`.
+2. **Schema/description change** — the top-level `mcp__execbro-local__*` schemas are cached by Claude Code at session start and do NOT refresh on rebuild. Use `dev(action="list", filter="<tool>")` or `dev(action="list", verbose=true, filter="<tool>")` to see the live schema. A session restart is only needed if you want the new schema visible as a top-level tool.
 
 ## Architecture
 
