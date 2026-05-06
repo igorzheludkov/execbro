@@ -45,12 +45,12 @@ function getIdbPath(): string {
 
 /**
  * Get the active iOS UI driver.
- * Set IOS_DRIVER=axe in MCP server env to use AXe CLI instead of IDB.
+ * Defaults to AXe; set IOS_DRIVER=idb in MCP server env to use IDB instead.
  */
 function getIosDriver(): IOSDriverType {
   const driver = process.env.IOS_DRIVER?.toLowerCase();
-  if (driver === "axe") return "axe";
-  return "idb";
+  if (driver === "idb") return "idb";
+  return "axe";
 }
 
 /**
@@ -863,7 +863,7 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
 // These tools require an iOS UI driver to be installed:
 //   Recommended: AXe — brew install cameroncooke/axe/axe
 //   Alternative: IDB — brew install idb-companion
-// Set IOS_DRIVER=axe env var to use AXe (default is idb)
+// AXe is the default driver. Set IOS_DRIVER=idb to fall back to IDB.
 // ============================================================================
 
 /**

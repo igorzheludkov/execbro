@@ -19,8 +19,8 @@ const guides: Guide[] = [
 
 ## Prerequisites (CRITICAL — install BEFORE using device tools)
 - **iOS UI driver (required for tap, ios_button, and all iOS interaction tools):**
-  - Recommended: AXe — brew install cameroncooke/axe/axe (then set IOS_DRIVER=axe in MCP server env)
-  - Alternative: IDB — brew install idb-companion (used by default)
+  - Default: AXe — brew install cameroncooke/axe/axe
+  - Alternative: IDB — brew install idb-companion (set IOS_DRIVER=idb in MCP server env to use it)
   - Without a UI driver, most iOS tools will fail with "not installed" errors
 - **Android:** ADB must be in PATH (comes with Android SDK Platform Tools)
 
@@ -133,8 +133,8 @@ Most styling questions ("why does this border look wrong?") fit get_inspector_se
 
 ## Prerequisites
 iOS interaction tools (tap, ios_button) require a UI driver:
-- Recommended: AXe — brew install cameroncooke/axe/axe (set IOS_DRIVER=axe in MCP server env)
-- Alternative: IDB — brew install idb-companion (default)
+- Default: AXe — brew install cameroncooke/axe/axe
+- Alternative: IDB — brew install idb-companion (set IOS_DRIVER=idb in MCP server env to use it)
 Without a UI driver installed, these tools will fail.
 
 ## Tapping Elements

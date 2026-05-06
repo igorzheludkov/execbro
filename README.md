@@ -208,9 +208,9 @@ adb devices
 
 iOS UI automation tools (tap, swipe, text input, accessibility queries) require a UI driver. Install one of the following:
 
-**Option A: AXe CLI (experimental)**
+**Option A: AXe CLI (default)**
 
-[AXe](https://github.com/cameroncooke/AXe) is a standalone CLI for iOS simulator automation. No daemon required — single binary, simple setup.
+[AXe](https://github.com/cameroncooke/AXe) is a standalone CLI for iOS simulator automation. No daemon required — single binary, simple setup. Used by default; no `IOS_DRIVER` env var needed.
 
 ```bash
 brew install cameroncooke/axe/axe
@@ -218,7 +218,19 @@ brew install cameroncooke/axe/axe
 
 Verify: `axe --version`
 
-Add `env` to your MCP server configuration:
+> **Note:** AXe text input only supports US keyboard layout characters.
+
+**Option B: IDB (alternative)**
+
+[IDB (iOS Development Bridge)](https://github.com/facebook/idb) is a tool built by Meta for automating iOS Simulators. Requires a background daemon. Use this if you prefer IDB or hit AXe limitations.
+
+```bash
+brew install idb-companion
+```
+
+Verify: `idb_companion --list 1`
+
+Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
 
 ```json
 {
@@ -227,29 +239,15 @@ Add `env` to your MCP server configuration:
       "type": "stdio",
       "command": "npx",
       "args": ["react-native-ai-devtools"],
-      "env": { "IOS_DRIVER": "axe" }
+      "env": { "IOS_DRIVER": "idb" }
     }
   }
 }
 ```
 
-> **Note:** AXe text input only supports US keyboard layout characters.
-
-**Option B: IDB**
-
-[IDB (iOS Development Bridge)](https://github.com/facebook/idb) is a tool built by Meta for automating iOS Simulators. Requires a background daemon.
-
-```bash
-brew install idb-companion
-```
-
-Verify: `idb_companion --list 1`
-
-IDB is the default driver — no `IOS_DRIVER` env var needed.
-
 **What works without a UI driver:**
 
-| Capability                        | Without IDB/AXe | With IDB/AXe |
+| Capability                        | Without AXe/IDB | With AXe/IDB |
 | --------------------------------- | --------------- | ------------ |
 | Screenshots                       | Yes (simctl)    | Yes          |
 | App install/launch/terminate      | Yes (simctl)    | Yes          |
@@ -267,7 +265,7 @@ IDB is the default driver — no `IOS_DRIVER` env var needed.
 
 - Node.js 18+
 - React Native app running with Metro bundler
-- **iOS UI automation**: [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`) or [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`) — required for tap, swipe, text input, accessibility on iOS Simulator
+- **iOS UI automation**: [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`, default) or [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`, opt in via `IOS_DRIVER=idb`) — required for tap, swipe, text input, accessibility on iOS Simulator
 - **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
 
 ## Claude Code Skills

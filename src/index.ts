@@ -679,9 +679,8 @@ registerToolWithTelemetry(
             if (!uiDriverOk) {
                 results.push("");
                 results.push("⚠️  WARNING: iOS UI driver is NOT installed. The `tap` tool and other UI-interaction tools will fail.");
-                results.push("   Install the recommended driver: brew install cameroncooke/axe/axe");
-                results.push("   Then set IOS_DRIVER=axe in your MCP server environment.");
-                results.push("   Alternative: brew install idb-companion (used by default)");
+                results.push("   Install the default driver: brew install cameroncooke/axe/axe");
+                results.push("   Alternative: brew install idb-companion (set IOS_DRIVER=idb to use it)");
             }
         }
 
@@ -1005,7 +1004,7 @@ registerToolWithTelemetry(
             _meaningful: result.verification?.meaningful,
             _changeRate: result.verification?.changeRate,
             _tapStrategy: result.method,
-            _iosDriver: result.platform === "ios" ? (process.env.IOS_DRIVER?.toLowerCase() || "idb") : undefined,
+            _iosDriver: result.platform === "ios" ? (process.env.IOS_DRIVER?.toLowerCase() || "axe") : undefined,
             _artifactKey: result.artifactKey,
             _ocrClosestMatch: result.ocrClosestMatch,
             _fiberPressableCount: result.fiberPressableCount,
@@ -4838,8 +4837,8 @@ registerToolWithTelemetry(
 
 // ============================================================================
 // iOS UI Interaction Tools (require an iOS UI driver)
-// Recommended: AXe — brew install cameroncooke/axe/axe (set IOS_DRIVER=axe)
-// Alternative: IDB — brew install idb-companion (default)
+// Default: AXe — brew install cameroncooke/axe/axe
+// Alternative: IDB — brew install idb-companion (set IOS_DRIVER=idb)
 // ============================================================================
 // Tool: iOS button
 server.registerTool(
