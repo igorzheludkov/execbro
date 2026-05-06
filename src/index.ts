@@ -5109,9 +5109,10 @@ async function main() {
 }
 
 // Skip boot when loaded by unit tests — tests import this module purely to
-// enumerate `toolRegistry`. Jest sets JEST_WORKER_ID; RN_AI_DEVTOOLS_TEST_MODE
-// is a manual escape hatch. Production + dev:mcp leave both unset and boot.
-if (!process.env.RN_AI_DEVTOOLS_TEST_MODE && !process.env.JEST_WORKER_ID) {
+// enumerate `toolRegistry`. Jest sets JEST_WORKER_ID; EXECBRO_TEST_MODE
+// (or legacy RN_AI_DEVTOOLS_TEST_MODE) is a manual escape hatch.
+// Production + dev:mcp leave all unset and boot.
+if (!process.env.EXECBRO_TEST_MODE && !process.env.RN_AI_DEVTOOLS_TEST_MODE && !process.env.JEST_WORKER_ID) {
     main().catch((error) => {
         console.error("[execbro] Fatal error:", error);
         process.exit(1);

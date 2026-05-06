@@ -1,11 +1,11 @@
 import { randomUUID } from "crypto";
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
-import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { ensureLicense, incrementLocalUsage } from "./license.js";
 import { connectedApps } from "./state.js";
 import { getPostHogClient } from "./posthog.js";
+import { CONFIG_DIR } from "./paths.js";
 
 // ============================================================================
 // Configuration
@@ -18,7 +18,6 @@ export function getTelemetryEndpoint(): string { return TELEMETRY_ENDPOINT; }
 export function getTelemetryApiKey(): string { return TELEMETRY_API_KEY; }
 
 const REQUEST_TIMEOUT_MS = 5_000;
-const CONFIG_DIR = join(homedir(), ".rn-ai-debugger");
 const CONFIG_FILE = join(CONFIG_DIR, "telemetry.json");
 export const TELEMETRY_JSONL_PATH = "/tmp/rn-devtools-telemetry.jsonl";
 
@@ -235,10 +234,10 @@ function isFirstRun(): boolean {
 
 export function initTelemetry(): void {
     // Check environment variable for opt-out
-    const envValue = process.env.RN_DEBUGGER_TELEMETRY;
+    const envValue = process.env.EXECBRO_TELEMETRY ?? process.env.RN_DEBUGGER_TELEMETRY;
     if (envValue === "false" || envValue === "0" || envValue === "off") {
         telemetryEnabled = false;
-        console.error("[execbro] Telemetry disabled via RN_DEBUGGER_TELEMETRY");
+        console.error("[execbro] Telemetry disabled via EXECBRO_TELEMETRY");
         return;
     }
 

@@ -316,7 +316,7 @@ If no errors captured via CDP, use get_bundle_errors with platform="ios" or "and
         content: `# Feedback
 
 ## When to Use
-If the user wants to share feedback, request a feature, or report a problem with react-native-ai-devtools, use the send_feedback tool.
+If the user wants to share feedback, request a feature, or report a problem with ExecBro, use the send_feedback tool.
 
 ## How It Works
 1. Call send_feedback with a type (feedback, feature_request, or bug), title, and description

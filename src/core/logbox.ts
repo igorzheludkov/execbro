@@ -126,7 +126,7 @@ ${FIND_LOGBOX_DATA}
             if (log.stack && log.category === pushCategory) {
               log.stack.length = 0;
               log.stack.push({
-                methodName: 'RN AI DevTools',
+                methodName: 'ExecBro',
                 file: '${escapedSubtitle}',
                 lineNumber: 0,
                 column: 0
