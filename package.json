@@ -1,6 +1,6 @@
 {
   "name": "react-native-ai-devtools",
-  "version": "1.6.10",
+  "version": "1.6.11",
   "description": "ExecBro — MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
   "type": "module",
   "main": "build/index.js",
