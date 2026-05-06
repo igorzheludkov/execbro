@@ -2,18 +2,18 @@
 
 **Last updated:** April 30, 2026
 
-React Native AI DevTools ("the Tool") is an MCP server for AI-powered React Native debugging. This document explains what data the Tool collects, how it is used, and how you can control it.
+ExecBro ("the Tool"), shipped as the npm package `react-native-ai-devtools`, is an MCP server for AI-powered React Native debugging. This document explains what data the Tool collects, how it is used, and how you can control it.
 
 ## Summary
 
 | Data type | What is sent | When | Opt-out |
 |-----------|-------------|------|---------|
-| **Telemetry** | Anonymous usage metrics (tool names, success/failure, duration) | Automatically on every session | `RN_DEBUGGER_TELEMETRY=false` |
-| **Auto-registration** | Installation ID, device fingerprint, platform, hostname, OS version, server version | Once on first tool use per session | `RN_DEBUGGER_TELEMETRY=false` |
+| **Telemetry** | Anonymous usage metrics (tool names, success/failure, duration) | Automatically on every session | `EXECBRO_TELEMETRY=false` |
+| **Auto-registration** | Installation ID, device fingerprint, platform, hostname, OS version, server version | Once on first tool use per session | `EXECBRO_TELEMETRY=false` |
 | **License validation** | Installation ID, device fingerprint | Once per session (cached 24 hours) | Cannot be disabled (required for license check) |
 | **OCR screenshots** | Screenshot image for text recognition | Only when `ocr_screenshot` tool is called | Don't use the tool, or use local fallback |
 | **Tap failure artifacts** | JSON bundle + up to 3 downscaled PNG screenshots | On `tap` failure or unmeaningful tap (`changeRate < 0.1%`) | `RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS=1` |
-| **Installation ID** | Random UUID (not linked to your identity) | With telemetry, registration, and OCR requests | Delete `~/.rn-ai-debugger/` |
+| **Installation ID** | Random UUID (not linked to your identity) | With telemetry, registration, and OCR requests | Delete `~/.execbro/` |
 
 ## 1. Anonymous Telemetry
 
@@ -26,7 +26,7 @@ When you use the Tool, anonymous usage data is sent to our telemetry service:
 - **App characteristics**: React Native version, architecture (new/old), JS engine (Hermes/JSC), platform (iOS/Android), and OS version — detected from the connected app
 - **Session data**: session start/end and session duration
 - **Environment**: server version, Node.js version, and operating system (macOS/Linux/Windows)
-- **Installation ID**: a randomly generated UUID stored locally at `~/.rn-ai-debugger/telemetry.json`
+- **Installation ID**: a randomly generated UUID stored locally at `~/.execbro/telemetry.json` (legacy `~/.rn-ai-debugger/` is auto-migrated on first run)
 
 ### What we do NOT collect
 
@@ -46,13 +46,13 @@ When you use the Tool, anonymous usage data is sent to our telemetry service:
 
 ### How to opt out
 
-Add `RN_DEBUGGER_TELEMETRY` to the `env` field in your MCP server configuration:
+Add `EXECBRO_TELEMETRY` to the `env` field in your MCP server configuration:
 
 ```json
-"env": { "RN_DEBUGGER_TELEMETRY": "false" }
+"env": { "EXECBRO_TELEMETRY": "false" }
 ```
 
-Also accepts `"0"` or `"off"`. Telemetry is fully disabled before any data is sent.
+Also accepts `"0"` or `"off"`. Telemetry is fully disabled before any data is sent. The legacy variable name `RN_DEBUGGER_TELEMETRY` is still honored for backward compatibility.
 
 ## 2. Auto-Registration & Device Fingerprinting
 
@@ -91,7 +91,7 @@ Registration data is stored in **Google Firebase Firestore**. Each installation 
 Auto-registration is tied to telemetry. To disable both, add to your MCP server config:
 
 ```json
-"env": { "RN_DEBUGGER_TELEMETRY": "false" }
+"env": { "EXECBRO_TELEMETRY": "false" }
 ```
 
 With telemetry disabled, registration does not occur. License validation will still check the local cache but will not create remote records. The Tool defaults to the free tier if no cached license exists.
@@ -173,7 +173,7 @@ Add to your MCP server configuration:
 "env": { "RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS": "1" }
 ```
 
-Disabling telemetry (`RN_DEBUGGER_TELEMETRY=false`) also disables artifact upload. When opted out, anonymous structured signals (sense counts, closest-match scores) still flow under the existing telemetry policy; PNGs and JSON bundles are not uploaded.
+Disabling telemetry (`EXECBRO_TELEMETRY=false`) also disables artifact upload. When opted out, anonymous structured signals (sense counts, closest-match scores) still flow under the existing telemetry policy; PNGs and JSON bundles are not uploaded.
 
 ## 5. Local Storage
 
@@ -181,13 +181,13 @@ The Tool creates the following files on your machine:
 
 | File | Purpose | Contents |
 |------|---------|----------|
-| `~/.rn-ai-debugger/telemetry.json` | Persistent installation ID | Random UUID, first-run timestamp |
-| `~/.rn-ai-debugger/license.json` | License tier cache | License status, cache expiry (24h TTL) |
+| `~/.execbro/telemetry.json` | Persistent installation ID | Random UUID, first-run timestamp |
+| `~/.execbro/license.json` | License tier cache | License status, cache expiry (24h TTL) |
 
 To delete all locally stored data:
 
 ```bash
-rm -rf ~/.rn-ai-debugger/
+rm -rf ~/.execbro/
 ```
 
 A new installation ID will be generated on the next server startup.
@@ -229,7 +229,7 @@ You can delete your account and all associated data using the `delete_account` M
 You can also delete local data manually:
 
 ```bash
-rm -rf ~/.rn-ai-debugger/
+rm -rf ~/.execbro/
 ```
 
 ## 7. Data Retention
@@ -265,7 +265,7 @@ To run the Tool with zero external data transmission, add to your MCP server con
 
 ```json
 "env": {
-  "RN_DEBUGGER_TELEMETRY": "false",
+  "EXECBRO_TELEMETRY": "false",
   "RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS": "1"
 }
 ```

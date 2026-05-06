@@ -1,8 +1,8 @@
 import { readFileSync, existsSync } from "fs";
-import { homedir } from "os";
 import { join } from "path";
+import { CONFIG_DIR } from "./paths.js";
 
-const CONFIG_FILE = join(homedir(), ".rn-ai-debugger", "config.json");
+const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 const IS_DEV = process.argv.includes("--http");
 
 const PRODUCTION_URL = "https://mobile-ai-devtools.link";

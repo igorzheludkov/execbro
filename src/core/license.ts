@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
-import { homedir, platform, hostname, release } from "os";
+import { platform, hostname, release } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getInstallationId } from "./telemetry.js";
 import { getDeviceFingerprint, getFingerprintVersion } from "./fingerprint.js";
 import { getPostHogClient } from "./posthog.js";
+import { CONFIG_DIR } from "./paths.js";
 
 // ============================================================================
 // Configuration
@@ -17,7 +18,7 @@ const CACHE_TTL_MS = IS_DEV ? 0 : 24 * 60 * 60 * 1000; // No cache in dev, 24h i
 const VALIDATION_ENDPOINT = API_BASE_URL;
 const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 5_000;
-const LICENSE_FILE = join(homedir(), ".rn-ai-debugger", "license.json");
+const LICENSE_FILE = join(CONFIG_DIR, "license.json");
 const DASHBOARD_URL = API_BASE_URL;
 
 // ============================================================================
@@ -65,7 +66,7 @@ interface ApiResponse {
 
 let currentStatus: LicenseStatus | null = null;
 
-const USAGE_FILE = join(homedir(), ".rn-ai-debugger", "usage.json");
+const USAGE_FILE = join(CONFIG_DIR, "usage.json");
 
 let currentUsage: UsageInfo | null = null;
 

@@ -1,7 +1,7 @@
 import { PostHog } from "posthog-node";
 import { existsSync, readFileSync } from "fs";
-import { homedir } from "os";
 import { join } from "path";
+import { CONFIG_DIR } from "./paths.js";
 
 const apiKey = "phc_snUX9TpjAwNhosPMxAY7D89ijESyrQzucAi9qbPJptPY";
 const host = "https://us.i.posthog.com";
@@ -23,7 +23,7 @@ export function identifyIfDevMode(distinctId: string): void {
     if (_identified) return;
     _identified = true;
     try {
-        const configPath = join(homedir(), ".rn-ai-debugger", "telemetry.json");
+        const configPath = join(CONFIG_DIR, "telemetry.json");
         if (existsSync(configPath)) {
             const data = JSON.parse(readFileSync(configPath, "utf-8"));
             if (data.internal) {
