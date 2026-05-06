@@ -12,13 +12,12 @@ ExecBro is the runtime bridge that gives your AI coding assistant live access to
 
 ## Get started
 
-1. [Setup ExecBro as an MCP server for your agent of choice](#claude-code-setup)
+1. [Setup ExecBro as an MCP server for your agent of choice](#setup)
 2. [Setup UI automation helpers](#ios-simulator--ui-automation-setup)
 
 ## Feedback & Feature Requests
 
 Have an idea or found something that could be better? Head over to [GitHub Discussions](https://github.com/igorzheludkov/react-native-ai-devtools/discussions) to share feedback, request features, and vote on what gets built next.
-
 
 ## Features
 
@@ -56,25 +55,23 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 ## Setup
 
-### Claude Code Setup
+No installation required — every client below uses `npx` to fetch the latest version on demand. Pick your agent:
 
-No installation required - Claude Code uses `npx` to run the latest version automatically.
+- [Claude Code](#claude-code) · [Claude Desktop](#claude-desktop) · [Codex CLI](#codex-cli-openai) · [Cursor](#cursor) · [VS Code Copilot](#vs-code-copilot) · [Windsurf](#windsurf) · [Zed](#zed) · [Gemini CLI](#gemini-cli)
 
-#### Global (all projects)
+After adding the server, fully restart the client (quit and relaunch, not just reload) so it picks up the new configuration.
+
+### Claude Code
 
 ```bash
+# Global (all projects)
 claude mcp add execbro --scope user -- npx react-native-ai-devtools
-```
 
-#### Project-specific
-
-```bash
+# Project-specific
 claude mcp add execbro --scope project -- npx react-native-ai-devtools
 ```
 
-#### Manual Configuration
-
-Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
+Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
 
 ```json
 {
@@ -88,15 +85,58 @@ Add to `~/.claude.json` (user scope) or `.mcp.json` (project scope):
 }
 ```
 
-Restart Claude Code after adding the configuration.
+### Claude Desktop
 
-### VS Code Copilot Setup
+Edit the config at:
 
-Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)).
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
-**Via Command Palette**: `Cmd+Shift+P` → "MCP: Add Server"
+```json
+{
+  "mcpServers": {
+    "execbro": {
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"]
+    }
+  }
+}
+```
 
-**Manual config** - add to `.vscode/mcp.json`:
+You can also open this file from **Settings → Developer → Edit Config**. Fully quit and relaunch Claude Desktop after saving.
+
+### Codex CLI (OpenAI)
+
+```bash
+codex mcp add execbro -- npx -y react-native-ai-devtools
+```
+
+Or edit `~/.codex/config.toml` directly:
+
+```toml
+[mcp_servers.execbro]
+command = "npx"
+args = ["-y", "react-native-ai-devtools"]
+```
+
+### Cursor
+
+[Docs](https://docs.cursor.com/context/model-context-protocol). Add via `Cmd+Shift+P` → "View: Open MCP Settings", or edit `.cursor/mcp.json` (project) / `~/.cursor/mcp.json` (global):
+
+```json
+{
+  "mcpServers": {
+    "execbro": {
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"]
+    }
+  }
+}
+```
+
+### VS Code Copilot
+
+Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)). Add via `Cmd+Shift+P` → "MCP: Add Server", or edit `.vscode/mcp.json`:
 
 ```json
 {
@@ -110,13 +150,40 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 }
 ```
 
-### Cursor Setup
+### Windsurf
 
-[Docs](https://docs.cursor.com/context/model-context-protocol)
+[Docs](https://docs.windsurf.com/windsurf/cascade/mcp). Edit `~/.codeium/windsurf/mcp_config.json`:
 
-**Via Command Palette**: `Cmd+Shift+P` → "View: Open MCP Settings"
+```json
+{
+  "mcpServers": {
+    "execbro": {
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"]
+    }
+  }
+}
+```
 
-**Manual config** - add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
+### Zed
+
+[Docs](https://zed.dev/docs/ai/mcp). Open the Agent Panel settings → "Add Custom Server", or add to `settings.json`:
+
+```json
+{
+  "context_servers": {
+    "execbro": {
+      "command": "npx",
+      "args": ["-y", "react-native-ai-devtools"],
+      "env": {}
+    }
+  }
+}
+```
+
+### Gemini CLI
+
+Edit `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project):
 
 ```json
 {
