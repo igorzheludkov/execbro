@@ -351,11 +351,7 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         const inPromo = !!usageInfo?.promotionalPeriodEndsAt
             && new Date(usageInfo.promotionalPeriodEndsAt).getTime() > Date.now();
         if (!inPromo && usageInfo && !usageInfo.canUse) {
-            const isCredits = usageInfo.creditsRemaining !== null;
-            const dashboardUrl = `${API_BASE_URL}/dashboard/usage`;
-            const message = isCredits
-                ? `Credits depleted. Purchase more at ${dashboardUrl}`
-                : `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Purchase a credits pack for unlimited usage at ${dashboardUrl}`;
+            const message = `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Upgrade to Pro for $9/mo unlimited usage at ${API_BASE_URL}/pricing`;
             return { content: [{ type: "text" as const, text: message }] };
         }
 
