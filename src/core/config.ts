@@ -5,7 +5,7 @@ import { CONFIG_DIR } from "./paths.js";
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 const IS_DEV = process.argv.includes("--http");
 
-const PRODUCTION_URL = "https://mobile-ai-devtools.link";
+const PRODUCTION_URL = "https://execbro.com";
 const LOCAL_URL = "http://localhost:3000";
 
 interface Config {
@@ -30,5 +30,4 @@ const config = loadConfig();
  * 2. --http flag → localhost:3000
  * 3. Default → production URL
  */
-export const API_BASE_URL: string =
-    config.apiUrl ?? (IS_DEV ? LOCAL_URL : PRODUCTION_URL);
+export const API_BASE_URL: string = config.apiUrl ?? (IS_DEV ? LOCAL_URL : PRODUCTION_URL);
