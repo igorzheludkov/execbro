@@ -344,8 +344,10 @@ export function trackToolInvocation(
         if (!success && errorMessage) {
             localEvent.errorCategory = categorizeError(errorMessage, errorContext);
             localEvent.errorMessage = errorMessage.substring(0, 200);
-            if (errorContext) localEvent.errorContext = errorContext.substring(0, 150);
         }
+        // Always propagate errorContext when provided — unmeaningful taps are success=true
+        // but still carry triage context (predicate, strategy chain) that must reach blob8.
+        if (errorContext) localEvent.errorContext = errorContext.substring(0, 150);
         if (targetPlatform) localEvent.targetPlatform = targetPlatform;
         if (emptyResult !== undefined) localEvent.emptyResult = emptyResult;
         if (meaningful !== undefined) localEvent.meaningful = meaningful;
@@ -412,10 +414,11 @@ export function trackToolInvocation(
     if (!success && errorMessage) {
         event.errorCategory = categorizeError(errorMessage, errorContext);
         event.errorMessage = errorMessage.substring(0, 200);
-        // Store truncated context (e.g., the expression that caused a syntax error)
-        if (errorContext) {
-            event.errorContext = errorContext.substring(0, 150);
-        }
+    }
+    // Always propagate errorContext when provided — unmeaningful taps are success=true
+    // but still carry triage context (predicate, strategy chain) that must reach blob8.
+    if (errorContext) {
+        event.errorContext = errorContext.substring(0, 150);
     }
 
     if (inputTokens !== undefined && inputTokens > 0) event.inputTokens = inputTokens;
