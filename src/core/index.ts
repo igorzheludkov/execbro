@@ -259,9 +259,11 @@ export {
   ensureLicense,
   getLicenseStatus,
   getUsageInfo,
+  getPricingInfo,
+  formatPlanPrice,
   incrementLocalUsage,
 } from "./license.js";
-export type { LicenseTier, LicenseStatus, UsageInfo } from "./license.js";
+export type { LicenseTier, LicenseStatus, UsageInfo, PricingInfo, PlanPricing } from "./license.js";
 
 // Telemetry
 export {

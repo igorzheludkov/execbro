@@ -8,7 +8,7 @@ import { existsSync, unlinkSync } from "fs";
 import { z } from "zod";
 
 import { getGuideOverview, getGuideByTopic, getAvailableTopics, DECISION_TREE } from "./core/guides.js";
-import { getLicenseStatus, getDashboardUrl, getUsageInfo } from "./core/license.js";
+import { getLicenseStatus, getDashboardUrl, getUsageInfo, getPricingInfo, formatPlanPrice } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
 import { getInstallationId, getServerVersion, getPackageName, isDevMode, TELEMETRY_JSONL_PATH, categorizeError } from "./core/telemetry.js";
@@ -351,7 +351,11 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         const inPromo = !!usageInfo?.promotionalPeriodEndsAt
             && new Date(usageInfo.promotionalPeriodEndsAt).getTime() > Date.now();
         if (!inPromo && usageInfo && !usageInfo.canUse) {
-            const message = `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). Upgrade to Pro for $9/mo unlimited usage at ${API_BASE_URL}/pricing`;
+            const proPricing = getPricingInfo()?.pro;
+            const upgradeClause = proPricing
+                ? `Upgrade to Pro for ${formatPlanPrice(proPricing)} unlimited usage`
+                : `Upgrade to Pro for unlimited usage`;
+            const message = `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). ${upgradeClause} at ${API_BASE_URL}/pricing`;
             return { content: [{ type: "text" as const, text: message }] };
         }
 
