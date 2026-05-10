@@ -49,6 +49,16 @@ export interface UsageInfo {
     promotionalPeriodEndsAt?: string | null;
 }
 
+export interface PlanPricing {
+    amount: number;
+    currency: string;
+    interval: "month" | "year";
+}
+
+export interface PricingInfo {
+    pro?: PlanPricing;
+}
+
 interface ApiResponse {
     tier: LicenseTier;
     error?: string;
@@ -69,9 +79,20 @@ let currentStatus: LicenseStatus | null = null;
 const USAGE_FILE = join(CONFIG_DIR, "usage.json");
 
 let currentUsage: UsageInfo | null = null;
+let currentPricing: PricingInfo | null = null;
 
 export function getUsageInfo(): UsageInfo | null {
     return currentUsage;
+}
+
+export function getPricingInfo(): PricingInfo | null {
+    return currentPricing;
+}
+
+export function formatPlanPrice(p: PlanPricing): string {
+    const symbol = p.currency === "USD" ? "$" : `${p.currency} `;
+    const period = p.interval === "month" ? "mo" : "yr";
+    return `${symbol}${p.amount}/${period}`;
 }
 
 function readUsageCache(): UsageInfo | null {
@@ -270,6 +291,10 @@ async function resolveLicense(): Promise<LicenseResult> {
             const usageData = (apiResponse as any).usage as UsageInfo;
             currentUsage = usageData;
             writeUsageCache(usageData);
+        }
+
+        if ((apiResponse as any).pricing) {
+            currentPricing = (apiResponse as any).pricing as PricingInfo;
         }
 
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
