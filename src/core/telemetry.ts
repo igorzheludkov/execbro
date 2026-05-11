@@ -438,6 +438,44 @@ export function trackToolInvocation(
 
     dispatch(event);
 
+    // Mirror tool_invocation to PostHog so insights/cohort filters can count
+    // per-tool usage natively. Cloudflare remains the source of truth; PostHog
+    // gets a parallel stream keyed on the same installation id.
+    try {
+        const client = getPostHogClient();
+        if (client) {
+            const phProps: Record<string, unknown> = {
+                tool_name: toolName,
+                success,
+                duration_ms: durationMs,
+                is_first_run: isFirstRun(),
+                server_version: getServerVersion(),
+                package_name: getPackageName(),
+                session_id: sessionId?.substring(0, 12) ?? "",
+            };
+            if (event.errorCategory) phProps.error_category = event.errorCategory;
+            if (event.errorMessage) phProps.error_message = event.errorMessage;
+            if (event.errorContext) phProps.error_context = event.errorContext;
+            if (targetPlatform) phProps.target_platform = targetPlatform;
+            if (emptyResult !== undefined) phProps.empty_result = emptyResult;
+            if (meaningful !== undefined) phProps.meaningful = meaningful;
+            if (changeRate !== undefined) phProps.change_rate = changeRate;
+            if (tapStrategy) phProps.tap_strategy = tapStrategy;
+            if (iosDriver) phProps.ios_driver = iosDriver;
+            if (emptyReason) phProps.empty_reason = emptyReason;
+            if (inputTokens !== undefined && inputTokens > 0) phProps.input_tokens = inputTokens;
+            if (outputTokens !== undefined && outputTokens > 0) phProps.output_tokens = outputTokens;
+
+            client.capture({
+                distinctId: getInstallationId(),
+                event: "tool_invocation",
+                properties: phProps,
+            });
+        }
+    } catch {
+        // PostHog errors must never affect tool flow.
+    }
+
     // Increment local usage counter
     incrementLocalUsage();
 
