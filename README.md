@@ -1,5 +1,8 @@
 # ExecBro
 
+> [!IMPORTANT]
+> **Already using ExecBro?** `npx` caches packages indefinitely, so you may be stuck on an old version without realizing it. Update your MCP config to use `npx -y react-native-ai-devtools@latest` (see [Setup](#setup)) so every session pulls the latest release with new tools and bug fixes. New installs after this change auto-update automatically.
+
 > Ships as the npm package `react-native-ai-devtools`.
 
 **Give your AI assistant eyes and hands into your running React Native app.** Like Chrome DevTools — but for AI agents.
@@ -65,10 +68,10 @@ After adding the server, fully restart the client (quit and relaunch, not just r
 
 ```bash
 # Global (all projects)
-claude mcp add execbro --scope user -- npx react-native-ai-devtools
+claude mcp add execbro --scope user -- npx -y react-native-ai-devtools@latest
 
 # Project-specific
-claude mcp add execbro --scope project -- npx react-native-ai-devtools
+claude mcp add execbro --scope project -- npx -y react-native-ai-devtools@latest
 ```
 
 Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
@@ -79,7 +82,7 @@ Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
     "execbro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["react-native-ai-devtools"]
+      "args": ["-y", "react-native-ai-devtools@latest"]
     }
   }
 }
@@ -97,7 +100,7 @@ Edit the config at:
   "mcpServers": {
     "execbro": {
       "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"]
+      "args": ["-y", "react-native-ai-devtools@latest"]
     }
   }
 }
@@ -108,7 +111,7 @@ You can also open this file from **Settings → Developer → Edit Config**. Ful
 ### Codex CLI (OpenAI)
 
 ```bash
-codex mcp add execbro -- npx -y react-native-ai-devtools
+codex mcp add execbro -- npx -y react-native-ai-devtools@latest
 ```
 
 Or edit `~/.codex/config.toml` directly:
@@ -116,7 +119,7 @@ Or edit `~/.codex/config.toml` directly:
 ```toml
 [mcp_servers.execbro]
 command = "npx"
-args = ["-y", "react-native-ai-devtools"]
+args = ["-y", "react-native-ai-devtools@latest"]
 ```
 
 ### Cursor
@@ -128,7 +131,7 @@ args = ["-y", "react-native-ai-devtools"]
   "mcpServers": {
     "execbro": {
       "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"]
+      "args": ["-y", "react-native-ai-devtools@latest"]
     }
   }
 }
@@ -144,7 +147,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
     "execbro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"]
+      "args": ["-y", "react-native-ai-devtools@latest"]
     }
   }
 }
@@ -159,7 +162,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
   "mcpServers": {
     "execbro": {
       "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"]
+      "args": ["-y", "react-native-ai-devtools@latest"]
     }
   }
 }
@@ -174,7 +177,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
   "context_servers": {
     "execbro": {
       "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"],
+      "args": ["-y", "react-native-ai-devtools@latest"],
       "env": {}
     }
   }
@@ -190,7 +193,7 @@ Edit `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project):
   "mcpServers": {
     "execbro": {
       "command": "npx",
-      "args": ["-y", "react-native-ai-devtools"]
+      "args": ["-y", "react-native-ai-devtools@latest"]
     }
   }
 }
@@ -238,7 +241,7 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
     "execbro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["react-native-ai-devtools"],
+      "args": ["-y", "react-native-ai-devtools@latest"],
       "env": { "IOS_DRIVER": "idb" }
     }
   }
@@ -447,7 +450,7 @@ To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `
     "execbro": {
       "type": "stdio",
       "command": "npx",
-      "args": ["react-native-ai-devtools"],
+      "args": ["-y", "react-native-ai-devtools@latest"],
       "env": { "RN_DEBUGGER_TELEMETRY": "false" }
     }
   }
