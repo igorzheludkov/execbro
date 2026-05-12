@@ -56,6 +56,10 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 - **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
 - **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
 
+### Related
+
+- **[execbro-runner](https://github.com/igorzheludkov/execbro-runner)** *(early alpha, in active development)* — queue-based autonomous task runner built on top of ExecBro. Drop in a markdown prompt and a background daemon spins up an isolated sandbox (git worktree + simulator/emulator + Metro), runs Claude Code headlessly, has the agent verify the change live on the device via ExecBro, and optionally pushes a branch with a PR URL. Fire-and-forget Claude Code runs for your React Native app.
+
 ## Setup
 
 No installation required — every client below uses `npx` to fetch the latest version on demand. Pick your agent:
