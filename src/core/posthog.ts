@@ -13,7 +13,13 @@ export function getPostHogClient(): PostHog | null {
     if (!_client) {
         _client = new PostHog(apiKey, {
             host,
-            enableExceptionAutocapture: true,
+            // H1 (Step 9): autocapture installs a global uncaughtException
+            // handler that ships every throw to PostHog — including the SDK's
+            // own EPIPE on a dying socket, producing 100s of self-referential
+            // events per crash (~83% of error-tracking volume). We capture
+            // tool errors explicitly at index.ts already, so autocapture is a
+            // redundant safety net that misfires on its own plumbing.
+            enableExceptionAutocapture: false,
         });
     }
     return _client;

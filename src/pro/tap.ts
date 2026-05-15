@@ -512,6 +512,19 @@ export interface EvidenceSink {
             conf: number;
         }>;
         closestMatch: { text: string; score: number } | null;
+        /**
+         * The best OCR candidate found, with tap-ready coordinates and the
+         * scale factor used to capture the screenshot. Set as soon as
+         * findOcrMatch resolves, BEFORE any tap-execution code runs, so the
+         * orchestrator can recover from a 30ms-late OCR strategy timeout when
+         * the candidate score is high enough (Step 2 in 2026-05-15 plan).
+         */
+        bestCandidate: {
+            text: string;
+            score: number;
+            tapCenter: { x: number; y: number };
+            scaleFactor: number;
+        } | null;
     };
 }
 
@@ -519,7 +532,7 @@ export function makeEmptyEvidenceSink(): EvidenceSink {
     return {
         fiber: { ran: false, durationMs: 0, metroConnected: false, pressables: [] },
         accessibility: { ran: false, durationMs: 0, elements: [] },
-        ocr: { ran: false, durationMs: 0, detections: [], closestMatch: null }
+        ocr: { ran: false, durationMs: 0, detections: [], closestMatch: null, bestCandidate: null }
     };
 }
 
@@ -709,7 +722,8 @@ async function tryAccessibilityStrategy(
     index: number | undefined,
     platform: "ios" | "android",
     udid?: string,
-    sink?: EvidenceSink
+    sink?: EvidenceSink,
+    signal?: AbortSignal
 ): Promise<StrategyResult> {
     if (sink) sink.accessibility.ran = true;
     const startedAt = Date.now();
@@ -850,7 +864,7 @@ async function tryAccessibilityStrategy(
                 searchOptions.textContains = query.text;
             }
 
-            let result = await androidFindElement(searchOptions);
+            let result = await androidFindElement(searchOptions, undefined, signal);
 
             // If testID search via resourceId failed, try contentDescContains
             // (older RN versions map testID to content-description)
@@ -858,7 +872,7 @@ async function tryAccessibilityStrategy(
                 result = await androidFindElement({
                     contentDescContains: query.testID,
                     index
-                });
+                }, undefined, signal);
             }
 
             if (sink && result.allMatches?.length) {
@@ -924,7 +938,14 @@ async function tryAccessibilityStrategy(
     }
 }
 
-async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink): Promise<StrategyResult> {
+/**
+ * Run OCR sense (capture + recognize + match). When `probeOnly` is true,
+ * populates `sink.ocr.bestCandidate` but does NOT tap — caller is responsible
+ * for tapping via tryOcrRecovery() once it decides to use the result.
+ * This is the foundation for Step 4's OCR pre-warm: run the slow OCR probe
+ * concurrently with fiber/a11y so that when neither wins, OCR is already done.
+ */
+async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal, probeOnly = false): Promise<StrategyResult> {
     if (sink) sink.ocr.ran = true;
     const ocrStartedAt = Date.now();
     try {
@@ -948,7 +969,7 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             scaleFactor = screenshot.scaleFactor ?? 1;
         } else {
             const { androidScreenshot } = await import("../core/android.js");
-            const screenshot = await androidScreenshot();
+            const screenshot = await androidScreenshot(undefined, undefined, signal);
             if (!screenshot.success || !screenshot.data) {
                 return {
                     success: false,
@@ -962,7 +983,8 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
         const { recognizeText } = await import("../core/ocr.js");
         const ocrResult = await recognizeText(imageBuffer, {
             scaleFactor,
-            platform
+            platform,
+            signal
         });
 
         if (sink && ocrResult) {
@@ -980,10 +1002,35 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
 
         const match = findOcrMatch(ocrResult, searchText);
 
+        // Step 2 (2026-05-15 plan): record the best candidate with coordinates
+        // BEFORE any tap-execution code runs. If the strategy's withTimeout
+        // races us by 30ms (real production case: COMPRAR/Portuguese-Android
+        // cluster — `findOcrMatch` returned `COMPRAR@1.00` 30ms past the cap),
+        // the orchestrator can recover by tapping at these coords with the
+        // `ocr-recovered` strategy label.
+        if (sink && match) {
+            const closest = sink.ocr.closestMatch;
+            sink.ocr.bestCandidate = {
+                text: match.text,
+                score: closest && closest.text === match.text ? closest.score : 1,
+                tapCenter: { x: match.tapCenter.x, y: match.tapCenter.y },
+                scaleFactor
+            };
+        }
+
         if (!match) {
             return {
                 success: false,
                 reason: `OCR did not find text "${searchText}" on screen`
+            };
+        }
+
+        // Step 4 pre-warm: bestCandidate is set; let the orchestrator decide
+        // whether to actually tap (it may have already won the race via fiber).
+        if (probeOnly) {
+            return {
+                success: false,
+                reason: `OCR probe completed (probeOnly) — match "${match.text}" recorded in evidence`
             };
         }
 
@@ -1027,6 +1074,48 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
         };
     } finally {
         if (sink) sink.ocr.durationMs = Date.now() - ocrStartedAt;
+    }
+}
+
+/**
+ * Step 2 (2026-05-15 plan): OCR-strategy timeout recovery. If the OCR sense
+ * already wrote a high-confidence candidate to the evidence sink (perfect
+ * match found ~30ms past the strategy cap, COMPRAR cluster), tap directly at
+ * the candidate's coordinates. Returns null when there's no candidate worth
+ * acting on so the caller falls back to normal failure handling.
+ */
+async function tryOcrRecovery(
+    evidence: EvidenceSink,
+    platform: "ios" | "android",
+    udid?: string
+): Promise<StrategyResult | null> {
+    const bc = evidence.ocr.bestCandidate;
+    if (!bc || bc.score < 0.9) return null;
+
+    try {
+        if (platform === "ios") {
+            const { getDevicePixelRatio } = await import("../core/ios.js");
+            const dpr = await getDevicePixelRatio(udid);
+            const tapResult = await iosTap(
+                Math.round((bc.tapCenter.x * bc.scaleFactor) / dpr),
+                Math.round((bc.tapCenter.y * bc.scaleFactor) / dpr),
+                { udid }
+            );
+            if (!tapResult.success) return null;
+        } else {
+            await androidTap(
+                Math.round(bc.tapCenter.x * bc.scaleFactor),
+                Math.round(bc.tapCenter.y * bc.scaleFactor)
+            );
+        }
+        return {
+            success: true,
+            reason: `OCR recovered after timeout — tapped "${bc.text}"@${bc.score.toFixed(2)}`,
+            text: bc.text,
+            convertedTo: { x: bc.tapCenter.x, y: bc.tapCenter.y, unit: "pixels" }
+        };
+    } catch {
+        return null;
     }
 }
 
@@ -1099,12 +1188,20 @@ async function tryCoordinateStrategy(
 const SETTLE_DELAY_MS = 800;
 const TAP_TIMEOUT_MS = 20000;
 const MIN_STRATEGY_BUDGET_MS = 500;
+// Per-strategy budget. OCR cap on Android is bumped via maxStrategyMs() because
+// the ADB screencap+pull leg has ~2s variance on real devices; iOS stays at 5s
+// where xcrun simctl screenshot is consistent.
 const MAX_STRATEGY_MS: Record<string, number> = {
     fiber: 5000,
     accessibility: 3000,
     ocr: 5000,
     coordinate: 3000
 };
+
+function maxStrategyMs(strategy: string, platform: "ios" | "android"): number {
+    if (strategy === "ocr" && platform === "android") return 7000;
+    return MAX_STRATEGY_MS[strategy] ?? 5000;
+}
 
 // Matches only the outer withTimeout wrapper message for a tap strategy.
 // Nested sub-operation errors inside a strategy (e.g. "CDP getProperties timed out after 150ms")
@@ -1131,6 +1228,29 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
             }
         );
     });
+}
+
+/**
+ * Like withTimeout, but creates an AbortController whose signal is handed to
+ * the inner factory. On timeout the signal aborts so subprocess work
+ * (uiautomator dump, OCR fetch, screencap) can be killed instead of running
+ * past the strategy cap and bleeding into total tap duration.
+ */
+function withCancelableTimeout<T>(
+    make: (signal: AbortSignal) => Promise<T>,
+    ms: number,
+    label: string
+): Promise<T> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return make(ctrl.signal).then(
+        (val) => { clearTimeout(timer); return val; },
+        (err) => {
+            clearTimeout(timer);
+            if (ctrl.signal.aborted) throw new Error(`${label} timed out after ${ms}ms`);
+            throw err;
+        }
+    );
 }
 
 async function captureScreenshot(
@@ -1450,6 +1570,39 @@ interface ArtifactCaptureContext {
     evidence?: EvidenceSink;
 }
 
+// D2 (Step 6): in-memory ring buffer of recent coord-strategy artifact keys
+// `${round(x/20)}:${round(y/20)}`. Entries expire after 60s. The first
+// failed coord tap at a grid cell uploads its artifact; retries within the
+// window get suppressed.
+const recentCoordArtifacts = new Map<string, number>();
+const COORD_DEDUP_WINDOW_MS = 60_000;
+const COORD_DEDUP_BUCKET = 20;
+
+function shouldDedupArtifact(ctx: ArtifactCaptureContext): boolean {
+    // Only applies to coordinate-strategy artifacts where we have x,y coords.
+    const winningStrat = ctx.attempted.find(a => a.reason === "success")?.strategy
+        ?? ctx.attempted[ctx.attempted.length - 1]?.strategy;
+    if (winningStrat !== "coordinate") return false;
+    const x = ctx.chosenTapPoint?.x ?? (ctx.query as { x?: number }).x;
+    const y = ctx.chosenTapPoint?.y ?? (ctx.query as { y?: number }).y;
+    if (typeof x !== "number" || typeof y !== "number") return false;
+    const key = `${Math.round(x / COORD_DEDUP_BUCKET)}:${Math.round(y / COORD_DEDUP_BUCKET)}`;
+    const now = Date.now();
+    // Sweep stale entries opportunistically — keeps the map from growing.
+    for (const [k, ts] of recentCoordArtifacts) {
+        if (now - ts > COORD_DEDUP_WINDOW_MS) recentCoordArtifacts.delete(k);
+    }
+    const last = recentCoordArtifacts.get(key);
+    if (last !== undefined && (now - last) < COORD_DEDUP_WINDOW_MS) return true;
+    recentCoordArtifacts.set(key, now);
+    return false;
+}
+
+/** Test-only: drop the dedup state so a fresh tap always uploads. */
+export function resetCoordArtifactDedup(): void {
+    recentCoordArtifacts.clear();
+}
+
 async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureSignals | undefined> {
     try {
         const { getServerVersion, categorizeError } = await import("../core/telemetry.js");
@@ -1465,6 +1618,22 @@ async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureS
             return undefined;
         }
 
+        // D1 (Step 6): no-metro unmeaningful taps have no diagnostic signal
+        // beyond a screenshot diff that's already below threshold by definition.
+        // ~50% of recent failure-artifact rows were these — they crowd out real
+        // failures in the dashboard. Telemetry row still flows; just no R2 bundle.
+        const noMetro = ctx.evidence ? !ctx.evidence.fiber.metroConnected : connectedApps.size === 0;
+        if (ctx.outcome === "unmeaningful" && noMetro) {
+            return undefined;
+        }
+
+        // D2 (Step 6): retry deduplication — coord-strategy taps at the same
+        // grid cell within 60s upload the same near-identical artifact. The
+        // first capture is enough; subsequent ones are noise.
+        if (shouldDedupArtifact(ctx)) {
+            return undefined;
+        }
+
         const result = await captureFailureArtifact({
             outcome: ctx.outcome,
             predicate: ctx.query as Record<string, unknown>,
@@ -1477,7 +1646,12 @@ async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureS
             meaningful: ctx.verification?.meaningful,
             senses: ctx.evidence
                 ? {
-                    ocr: ctx.evidence.ocr,
+                    ocr: {
+                        ran: ctx.evidence.ocr.ran,
+                        durationMs: ctx.evidence.ocr.durationMs,
+                        detections: ctx.evidence.ocr.detections,
+                        closestMatch: ctx.evidence.ocr.closestMatch
+                    },
                     fiber: {
                         ran: ctx.evidence.fiber.ran,
                         durationMs: ctx.evidence.fiber.durationMs,
@@ -1926,6 +2100,27 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         beforeScaleFactor = before?.scaleFactor;
     }
 
+    // Step 4: pre-warm the OCR sense if it's in the chain after a faster strategy.
+    // Runs concurrently with fiber/a11y so that when the loop reaches OCR, the
+    // probe is likely already complete (saving ~5s in OCR-win rows). Probe
+    // populates evidence.ocr.bestCandidate; the orchestrator decides whether
+    // to actually tap based on bestCandidate score.
+    const ocrIdx = filteredStrategies.indexOf("ocr");
+    const ocrCanPrewarm = ocrIdx > 0 && !!query.text;
+    let ocrPrewarmCtrl: AbortController | null = null;
+    let ocrPrewarmPromise: Promise<{ result: StrategyResult; aborted: boolean }> | null = null;
+    if (ocrCanPrewarm) {
+        ocrPrewarmCtrl = new AbortController();
+        const ctrl = ocrPrewarmCtrl;
+        const ocrCap = maxStrategyMs("ocr", platform);
+        const timer = setTimeout(() => ctrl.abort(), ocrCap);
+        ocrPrewarmPromise = tryOcrStrategy(query, platform, targetUdid, evidence, ctrl.signal, /* probeOnly */ true)
+            .then(
+                (result) => { clearTimeout(timer); return { result, aborted: ctrl.signal.aborted }; },
+                (err) => { clearTimeout(timer); return { result: { success: false, reason: err instanceof Error ? err.message : String(err) }, aborted: ctrl.signal.aborted }; }
+            );
+    }
+
     // Execute strategies in order with per-strategy caps and overall budget
     for (const strat of filteredStrategies) {
         const remaining = remainingMs();
@@ -1937,25 +2132,61 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             continue;
         }
 
-        const cap = MAX_STRATEGY_MS[strat] ?? 5000;
+        const cap = maxStrategyMs(strat, platform);
         const budget = Math.min(cap, remaining);
 
         let result: StrategyResult;
+        let strategyLabel: string = strat;
 
         try {
             switch (strat) {
                 case "fiber":
+                    // Fiber is JS-only against a CDP target — no subprocess to cancel,
+                    // so the cheaper non-cancellable wrapper is fine.
                     result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence), budget, `fiber`);
                     break;
                 case "accessibility":
-                    result = await withTimeout(
-                        tryAccessibilityStrategy(query, index, platform, targetUdid, evidence),
+                    result = await withCancelableTimeout(
+                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal),
                         budget,
                         `accessibility`
                     );
                     break;
                 case "ocr":
-                    result = await withTimeout(tryOcrStrategy(query, platform, targetUdid, evidence), budget, `ocr`);
+                    if (ocrPrewarmPromise) {
+                        // Pre-warmed probe: await its completion (capped at the
+                        // remaining budget so we don't blow past the overall
+                        // tap timeout if the prewarm is taking forever) and then
+                        // tap based on the recorded bestCandidate.
+                        const prewarmRace = withCancelableTimeout(
+                            (signal) => Promise.race([
+                                ocrPrewarmPromise!,
+                                new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("ocr timed out after " + budget + "ms")), { once: true }))
+                            ]),
+                            budget,
+                            `ocr`
+                        );
+                        try {
+                            await prewarmRace;
+                        } catch (e) {
+                            // Pre-warm timed out beyond what budget allows. Abort it.
+                            ocrPrewarmCtrl?.abort();
+                            throw e;
+                        }
+                        const recovered = await tryOcrRecovery(evidence, platform, targetUdid);
+                        if (recovered) {
+                            result = recovered;
+                            strategyLabel = "ocr";  // not "ocr-recovered" — this is the normal path now
+                        } else {
+                            result = { success: false, reason: `OCR did not find a viable match for "${query.text}"` };
+                        }
+                    } else {
+                        result = await withCancelableTimeout(
+                            (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal),
+                            budget,
+                            `ocr`
+                        );
+                    }
                     break;
                 case "coordinate":
                     result = await withTimeout(
@@ -1968,14 +2199,32 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     result = { success: false, reason: `Unknown strategy: ${strat}` };
             }
         } catch (err) {
-            attempted.push({
-                strategy: strat,
-                reason: err instanceof Error ? err.message : String(err)
-            });
-            continue;
+            const reason = err instanceof Error ? err.message : String(err);
+
+            // Step 2 recovery: when the OCR strategy times out but already
+            // produced a high-confidence candidate (race condition: the tap
+            // was queued ~30ms past the cap in the COMPRAR cluster), tap the
+            // candidate directly and label the strategy `ocr-recovered`.
+            // Score is from sink.ocr.closestMatch's similarity to the search;
+            // a perfect match is 1.0 — gate at 0.9 to skip "not on screen".
+            const recoveredResult = (strat === "ocr" && /ocr timed out after \d+ms$/.test(reason))
+                ? await tryOcrRecovery(evidence, platform, targetUdid)
+                : null;
+
+            if (recoveredResult) {
+                result = recoveredResult;
+                strategyLabel = "ocr-recovered";
+                // Fall through past the catch block to the success handler.
+            } else {
+                attempted.push({ strategy: strat, reason });
+                continue;
+            }
         }
 
         if (result.success) {
+            // Higher-priority strategy won — kill the OCR pre-warm so its
+            // device-side screencap doesn't keep running.
+            if (strat !== "ocr") ocrPrewarmCtrl?.abort();
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             let afterBuffer: Buffer | undefined;
@@ -1988,7 +2237,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 } catch { dprForMarker = 3; }
             }
             const strategyMarker = computeMarkerPx({
-                strategy: strat,
+                strategy: strategyLabel,
                 input: strat === "coordinate" ? { x: query.x!, y: query.y! } : undefined,
                 convertedTo: result.convertedTo,
                 platform,
@@ -2022,7 +2271,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 };
             }
             const successResult = formatTapSuccess({
-                method: strat,
+                method: strategyLabel,
                 query,
                 pressed: result.pressed,
                 text: result.text,

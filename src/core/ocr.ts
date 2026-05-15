@@ -42,6 +42,14 @@ export interface OCROptions {
     platform?: "ios" | "android";
     /** Device pixel ratio for iOS coordinate conversion (default: 3 for @3x devices, use 2 for older/iPad) */
     devicePixelRatio?: number;
+    /**
+     * Optional cancellation signal. When aborted, recognizeText rejects
+     * immediately so callers (e.g. the OCR strategy in tap.ts) don't wait past
+     * their cap. The cloud fetch passes the signal directly; the local easyocr
+     * path can't kill the Python process inside node-easyocr, so the work
+     * continues in the background until the host process exits.
+     */
+    signal?: AbortSignal;
 }
 
 export interface OCRLine {
@@ -260,17 +268,24 @@ async function recognizeTextCloud(
         body,
     };
 
-    let response: Response;
-    try {
+    const externalSignal = options?.signal;
+    const racedSignal = (): AbortSignal => {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), OCR_TIMEOUT_MS);
+        const onExternalAbort = () => { clearTimeout(timeout); controller.abort(); };
+        if (externalSignal) {
+            if (externalSignal.aborted) controller.abort();
+            else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+        }
+        return controller.signal;
+    };
 
+    let response: Response;
+    try {
         response = await fetch(`${OCR_ENDPOINT}/ocr`, {
             ...fetchOptions,
-            signal: controller.signal,
+            signal: racedSignal(),
         });
-
-        clearTimeout(timeout);
     } catch {
         return null; // Network error or timeout — fall back to local
     }
@@ -279,15 +294,10 @@ async function recognizeTextCloud(
     if (response.status === 502) {
         await new Promise((resolve) => setTimeout(resolve, 500));
         try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), OCR_TIMEOUT_MS);
-
             response = await fetch(`${OCR_ENDPOINT}/ocr`, {
                 ...fetchOptions,
-                signal: controller.signal,
+                signal: racedSignal(),
             });
-
-            clearTimeout(timeout);
         } catch {
             return null;
         }
@@ -339,16 +349,31 @@ async function recognizeTextCloud(
 
 /**
  * Run OCR — tries cloud (Google Vision) first, falls back to local EasyOCR.
+ *
+ * If `options.signal` aborts, this rejects immediately so callers don't wait
+ * past their cap. Inflight cloud fetch aborts; local easyocr work continues
+ * in the background (node-easyocr offers no cancel hook) and is dropped on
+ * resolve.
  */
 export async function recognizeText(imageBuffer: Buffer, options?: OCROptions): Promise<OCRResult> {
-    // Try cloud OCR first
-    const cloudResult = await recognizeTextCloud(imageBuffer, options);
-    if (cloudResult) {
-        return cloudResult;
-    }
+    const signal = options?.signal;
+    const abortPromise = signal
+        ? new Promise<never>((_, reject) => {
+            if (signal.aborted) {
+                reject(new Error("recognizeText aborted"));
+                return;
+            }
+            signal.addEventListener("abort", () => reject(new Error("recognizeText aborted")), { once: true });
+        })
+        : null;
 
-    // Fall back to local EasyOCR
-    return recognizeTextLocal(imageBuffer, options);
+    const work = (async () => {
+        const cloudResult = await recognizeTextCloud(imageBuffer, options);
+        if (cloudResult) return cloudResult;
+        return recognizeTextLocal(imageBuffer, options);
+    })();
+
+    return abortPromise ? Promise.race([work, abortPromise]) : work;
 }
 
 /**

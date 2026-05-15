@@ -6,6 +6,7 @@ import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyI
 import { findSimulatorByName } from "./ios.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
+import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
@@ -1355,10 +1356,10 @@ export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
     }
     if (matches.length > 1) {
         const names = matches.map(a => a.deviceInfo.deviceName || a.deviceInfo.title).join(", ");
-        throw new Error(`Multiple devices match "${device}": ${names}. Be more specific (use the full device name for an exact match).`);
+        throw new UserInputError(`Multiple devices match "${device}": ${names}. Be more specific (use the full device name for an exact match).`);
     }
     const available = allOpenNames.length > 0 ? ` Available: ${allOpenNames.join(", ")}.` : "";
-    throw new Error(`No connected device matches "${device}".${available} Run get_apps to see available devices.`);
+    throw new UserInputError(`No connected device matches "${device}".${available} Run get_apps to see available devices.`);
 }
 
 // Check if any app is connected with an OPEN WebSocket
