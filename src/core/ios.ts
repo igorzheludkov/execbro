@@ -1,4 +1,4 @@
-import { exec, execFile } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import { existsSync } from "fs";
 import path from "path";
@@ -6,8 +6,8 @@ import os from "os";
 import sharp from "sharp";
 import { getActiveSimulatorUdid } from "./state.js";
 import { notifyDriverMissing } from "./logbox.js";
+import { execAsync } from "./exec.js";
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 // simctl command timeout in milliseconds

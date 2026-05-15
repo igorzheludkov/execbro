@@ -1,12 +1,9 @@
-import { exec } from "child_process";
-import { promisify } from "util";
 import { existsSync } from "fs";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
 import { notifyDriverMissing } from "./logbox.js";
-
-const execAsync = promisify(exec);
+import { execAsync } from "./exec.js";
 
 // XML parsing for uiautomator dump
 import { XMLParser } from "fast-xml-parser";
@@ -230,7 +227,8 @@ function buildDeviceArg(deviceId?: string): string {
  */
 export async function androidScreenshot(
     outputPath?: string,
-    deviceId?: string
+    deviceId?: string,
+    signal?: AbortSignal
 ): Promise<AdbResult> {
     try {
         const adbMissing = await requireAdb();
@@ -255,17 +253,20 @@ export async function androidScreenshot(
         // Capture screenshot on device
         const remotePath = "/sdcard/screenshot-temp.png";
         await execAsync(`adb ${deviceArg} shell screencap -p ${remotePath}`, {
-            timeout: ADB_TIMEOUT
+            timeout: ADB_TIMEOUT,
+            signal
         });
 
         // Pull screenshot to local machine
         await execAsync(`adb ${deviceArg} pull ${remotePath} "${finalOutputPath}"`, {
-            timeout: ADB_TIMEOUT
+            timeout: ADB_TIMEOUT,
+            signal
         });
 
         // Clean up remote file
         await execAsync(`adb ${deviceArg} shell rm ${remotePath}`, {
-            timeout: ADB_TIMEOUT
+            timeout: ADB_TIMEOUT,
+            signal
         }).catch(() => {
             // Ignore cleanup errors
         });
@@ -1010,7 +1011,7 @@ function matchesElement(element: AndroidUIElement, options: FindElementOptions):
 /**
  * Get UI accessibility tree from Android device using uiautomator
  */
-export async function androidGetUITree(deviceId?: string): Promise<{
+export async function androidGetUITree(deviceId?: string, signal?: AbortSignal): Promise<{
     success: boolean;
     elements?: AndroidUIElement[];
     rawXml?: string;
@@ -1031,20 +1032,26 @@ export async function androidGetUITree(deviceId?: string): Promise<{
 
         const deviceArg = buildDeviceArg(device);
 
-        // Dump UI hierarchy to device
+        // Dump UI hierarchy to device. The `signal` is passed so a strategy-level
+        // timeout in tap.ts can SIGKILL the host adb process — the device-side
+        // uiautomator dump is independent and finishes silently, but we stop
+        // waiting on the ADB channel so the next strategy can use it.
         const remotePath = "/sdcard/ui_dump.xml";
         await execAsync(`adb ${deviceArg} shell uiautomator dump ${remotePath}`, {
-            timeout: ADB_TIMEOUT
+            timeout: ADB_TIMEOUT,
+            signal
         });
 
         // Read the XML content
         const { stdout } = await execAsync(`adb ${deviceArg} shell cat ${remotePath}`, {
-            timeout: ADB_TIMEOUT
+            timeout: ADB_TIMEOUT,
+            signal
         });
 
         // Clean up remote file
         await execAsync(`adb ${deviceArg} shell rm ${remotePath}`, {
-            timeout: ADB_TIMEOUT
+            timeout: ADB_TIMEOUT,
+            signal
         }).catch(() => {});
 
         const elements = parseUIAutomatorXML(stdout);
@@ -1067,7 +1074,8 @@ export async function androidGetUITree(deviceId?: string): Promise<{
  */
 export async function androidFindElement(
     options: FindElementOptions,
-    deviceId?: string
+    deviceId?: string,
+    signal?: AbortSignal
 ): Promise<FindElementResult> {
     try {
         // Validate that at least one search criteria is provided
@@ -1080,7 +1088,7 @@ export async function androidFindElement(
             };
         }
 
-        const treeResult = await androidGetUITree(deviceId);
+        const treeResult = await androidGetUITree(deviceId, signal);
         if (!treeResult.success || !treeResult.elements) {
             return {
                 success: false,
