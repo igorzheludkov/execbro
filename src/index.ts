@@ -11,6 +11,7 @@ import { getGuideOverview, getGuideByTopic, getAvailableTopics, DECISION_TREE } 
 import { getLicenseStatus, getDashboardUrl, getUsageInfo, getPricingInfo, formatPlanPrice } from "./core/license.js";
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
+import { UserInputError } from "./core/errors.js";
 import { getInstallationId, getServerVersion, getPackageName, isDevMode, TELEMETRY_JSONL_PATH, categorizeError } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { reduxDispatch, reduxGetState } from "./core/redux.js";
@@ -160,7 +161,7 @@ import {
 function resolveLogBuffer(device?: string): LogBuffer {
     if (device) {
         const app = getConnectedAppByDevice(device);
-        if (!app) throw new Error(`No connected device matches "${device}"`);
+        if (!app) throw new UserInputError(`No connected device matches "${device}"`);
         const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
         return getLogBuffer(deviceName);
     }
@@ -178,7 +179,7 @@ function resolveLogBuffer(device?: string): LogBuffer {
 function resolveNetworkBuffer(device?: string): NetworkBuffer {
     if (device) {
         const app = getConnectedAppByDevice(device);
-        if (!app) throw new Error(`No connected device matches "${device}"`);
+        if (!app) throw new UserInputError(`No connected device matches "${device}"`);
         const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
         return getNetworkBuffer(deviceName);
     }
@@ -453,7 +454,14 @@ function registerToolWithTelemetry(toolName: string, config: any, handler: (args
         } catch (error) {
             success = false;
             errorMessage = error instanceof Error ? error.message : String(error);
-            getPostHogClient()?.captureException(error, getInstallationId(), { tool: toolName, server_version: getServerVersion(), package_name: getPackageName() });
+            // H2 (Step 9): UserInputError marks agent-input mistakes (unknown
+            // device, missing predicate, ambiguous match). They flow through
+            // telemetry's trackToolInvocation in the finally block; we just
+            // skip the dedicated error-tracking pipe so the dashboard surfaces
+            // real product bugs rather than validation noise.
+            if (!(error instanceof UserInputError)) {
+                getPostHogClient()?.captureException(error, getInstallationId(), { tool: toolName, server_version: getServerVersion(), package_name: getPackageName() });
+            }
             throw error;
         } finally {
             const duration = Date.now() - startTime;
@@ -1550,12 +1558,16 @@ registerToolWithTelemetry(
             // explicitly when they need the tree. The Pressable elements block below is
             // the signal most consumers actually want.
             let pressablesText: string | null = null;
-            const canEnrich = !!targetApp;
 
-            // Enrich with pressable elements (filtered list of tappable components, converted to screenshot pixel coords)
+            // Enrich with pressable elements. With targetApp present we use the
+            // fiber path (most accurate). Without targetApp, getPressableElements
+            // falls back to iOS accessibility tree (E1) when we pass platform.
             try {
-                if (!canEnrich) throw new Error("skip");
-                const pressables = await getPressableElements({ device: targetDeviceName });
+                const pressables = await getPressableElements({
+                    device: targetDeviceName,
+                    platform: "ios",
+                    udid: resolvedUdid ?? undefined
+                });
                 if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
                     const screenshotScale = result.scaleFactor || 1;
                     pressablesText = pressables.parsedElements.map((el) => {
@@ -1595,7 +1607,7 @@ registerToolWithTelemetry(
                 infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
                 infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
             } else {
-                if (!canEnrich && connectedApps.size > 0) {
+                if (!targetApp && connectedApps.size > 0) {
                     infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to simulator ${resolvedUdid}.`;
                     infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
                 }
@@ -1607,7 +1619,7 @@ registerToolWithTelemetry(
 
             // Check for LogBox overlay — only on the matching RN app; skip otherwise
             // to avoid surfacing warnings from a different simulator's app.
-            if (canEnrich) {
+            if (targetApp) {
                 try {
                     const logBoxState = await detectLogBox(targetDeviceName);
                     if (logBoxState && logBoxState.total > 0) {
@@ -1742,15 +1754,15 @@ registerToolWithTelemetry(
             const androidPixelRatio = densityDpi / 160;
             // Skip enrichment when no RN app is connected to this Android device —
             // otherwise we would pull fiber data from a different device's app.
-            const canEnrich = !!targetApp;
             let pressablesText: string | null = null;
             // Screen Layout tree previously appended here was dropped — it was noisy
             // (nested Svg/G/Path duplicates). Use get_screen_layout when the tree is needed.
 
-            // Enrich with pressable elements (filtered list of tappable components, converted to screenshot pixel coords)
+            // Enrich with pressable elements. With targetApp present we use the
+            // fiber path (most accurate). Without targetApp, getPressableElements
+            // falls back to the Android accessibility (uiautomator) tree (E1).
             try {
-                if (!canEnrich) throw new Error("skip");
-                const pressables = await getPressableElements({ device: targetDeviceName });
+                const pressables = await getPressableElements({ device: targetDeviceName, platform: "android" });
                 if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
                     const screenshotScale = result.scaleFactor || 1;
                     pressablesText = pressables.parsedElements.map((el) => {
@@ -1788,7 +1800,7 @@ registerToolWithTelemetry(
                 infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
                 infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
             } else {
-                if (!canEnrich && connectedApps.size > 0) {
+                if (!targetApp && connectedApps.size > 0) {
                     infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to device ${deviceId ?? "(default)"}.`;
                     infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
                 }
@@ -1800,7 +1812,7 @@ registerToolWithTelemetry(
 
             // Check for LogBox overlay — only on the matching RN app; skip otherwise
             // to avoid surfacing warnings from a different device's app.
-            if (canEnrich) {
+            if (targetApp) {
                 try {
                     const logBoxState = await detectLogBox(targetDeviceName);
                     if (logBoxState && logBoxState.total > 0) {
@@ -2088,7 +2100,7 @@ registerToolWithTelemetry(
     async ({ device }) => {
         if (device) {
             const app = getConnectedAppByDevice(device);
-            if (!app) throw new Error(`No connected device matches "${device}"`);
+            if (!app) throw new UserInputError(`No connected device matches "${device}"`);
             const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
             const count = getLogBuffer(deviceName).clear();
             return { content: [{ type: "text", text: `Cleared ${count} log entries from ${deviceName}.` }] };
@@ -3697,7 +3709,7 @@ registerToolWithTelemetry(
         let totalCleared = 0;
         if (device) {
             const app = getConnectedAppByDevice(device);
-            if (!app) throw new Error(`No connected device matches "${device}"`);
+            if (!app) throw new UserInputError(`No connected device matches "${device}"`);
             const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
             totalCleared = getNetworkBuffer(deviceName).clear();
         } else {

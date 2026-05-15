@@ -2022,10 +2022,95 @@ interface PressableElement {
     nearbyText?: string;
 }
 
+/**
+ * E1 / Step 5 (2026-05-15 plan): build a pressables list from the platform
+ * accessibility tree when fiber isn't reachable. Used when metro is offline
+ * (connectedApps.size === 0) so the screenshot tools can still hand the agent
+ * labelled coordinates instead of forcing it to guess pixels — the dominant
+ * cause of unmeaningful coordinate-strategy taps in the 7-day failure data.
+ */
+async function getAccessibilityPressables(
+    platform: "ios" | "android",
+    udid?: string
+): Promise<PressableElement[]> {
+    try {
+        if (platform === "ios") {
+            const { iosGetUITree } = await import("./ios.js");
+            const tree = await iosGetUITree(udid);
+            if (!tree.success || !tree.elements) return [];
+            const interactiveTraits = new Set(["button", "link", "searchfield", "tab", "image"]);
+            return tree.elements
+                .filter(el => {
+                    // iOS: rely on a11y traits + element type. Buttons, links,
+                    // tabs, and any element with a non-empty label/identifier
+                    // that isn't a static text container.
+                    const traitsLower = (el.traits || []).map(t => t.toLowerCase());
+                    if (traitsLower.some(t => interactiveTraits.has(t))) return true;
+                    const type = (el.type || "").toLowerCase();
+                    if (type.includes("button") || type.includes("textfield") || type.includes("searchfield")) return true;
+                    return false;
+                })
+                .map(el => {
+                    const type = (el.type || "").toLowerCase();
+                    return {
+                        component: el.type || "Element",
+                        path: "",
+                        center: el.center,
+                        frame: el.frame,
+                        text: el.label || "",
+                        testID: el.identifier || null,
+                        accessibilityLabel: el.label || null,
+                        hasLabel: !!el.label,
+                        isInput: type.includes("textfield") || type.includes("searchfield")
+                    };
+                });
+        } else {
+            const { androidGetUITree } = await import("./android.js");
+            const tree = await androidGetUITree();
+            if (!tree.success || !tree.elements) return [];
+            return tree.elements
+                .filter(el => el.clickable || el.focused || (el.className && el.className.includes("EditText")))
+                .map(el => ({
+                    component: (el.className || "View").split(".").pop() || "View",
+                    path: "",
+                    center: el.center,
+                    frame: { x: el.bounds.left, y: el.bounds.top, width: el.bounds.width, height: el.bounds.height },
+                    text: el.text || "",
+                    testID: el.resourceId || null,
+                    accessibilityLabel: el.contentDesc || null,
+                    hasLabel: !!(el.text || el.contentDesc),
+                    isInput: !!(el.className && el.className.includes("EditText"))
+                }));
+        }
+    } catch {
+        return [];
+    }
+}
+
 export async function getPressableElements(
-    options: { device?: string } = {}
+    options: { device?: string; platform?: "ios" | "android"; udid?: string } = {}
 ): Promise<ExecutionResult & { parsedElements?: PressableElement[] }> {
-    const { device } = options;
+    const { device, platform, udid } = options;
+
+    // E1 fallback: when metro is offline, use the platform accessibility tree.
+    // Only kicks in when caller passed `platform` so we don't break older
+    // metro-required call paths that didn't opt into the fallback.
+    if (connectedApps.size === 0 && platform) {
+        const elements = await getAccessibilityPressables(platform, udid);
+        return {
+            success: true,
+            result: elements.length > 0
+                ? `Pressable elements (from accessibility tree, ${elements.length} found):\n` +
+                  elements.map((el, i) => {
+                      const label = el.accessibilityLabel || el.text || el.testID || el.component;
+                      const idStr = el.testID ? ` testID="${el.testID}"` : "";
+                      const inputStr = el.isInput ? " [input]" : "";
+                      return `${i + 1}. ${el.component} "${label}"${idStr}${inputStr} — center:(${el.center.x},${el.center.y}) frame:(${el.frame.x},${el.frame.y} ${el.frame.width}x${el.frame.height})`;
+                  }).join("\n")
+                : "No interactive elements found via accessibility.",
+            parsedElements: elements
+        };
+    }
 
     // --- Step 1: walk fiber tree, find pressable/input elements, dispatch measureInWindow ---
     const dispatchExpression = `
