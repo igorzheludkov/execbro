@@ -1769,11 +1769,17 @@ registerToolWithTelemetry(
                 // Use defaults
             }
 
-            // Enrich with screen layout data (component names + tap coordinates)
-            // Android: density ratio = densityDpi / 160 (160dpi = 1dp = 1px baseline)
-            const androidPixelRatio = densityDpi / 160;
-            // Skip enrichment when no RN app is connected to this Android device —
-            // otherwise we would pull fiber data from a different device's app.
+            // Enrich with screen layout data (component names + tap coordinates).
+            // On Bridgeless/Fabric Android (the only target architecture we support;
+            // legacy arch is <5% of users and not a priority), both code paths that
+            // feed this enrichment return DEVICE PIXELS:
+            //   - fiber path: React's measureInWindow on Fabric returns native pixels.
+            //   - a11y fallback: uiautomator's bounds are already device pixels.
+            // The earlier formula multiplied by densityDpi/160 on the (incorrect)
+            // assumption that fiber returned DP — inflating every coordinate by
+            // ~2.6× on a 420dpi emulator and producing numbers like (1170, 4054)
+            // for a button visually sitting near (445, 1370) in the JPEG. Drop the
+            // density factor; only the scaleFactor downscale is needed.
             let pressablesText: string | null = null;
             // Screen Layout tree previously appended here was dropped — it was noisy
             // (nested Svg/G/Path duplicates). Use get_screen_layout when the tree is needed.
@@ -1786,8 +1792,8 @@ registerToolWithTelemetry(
                 if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
                     const screenshotScale = result.scaleFactor || 1;
                     pressablesText = pressables.parsedElements.map((el) => {
-                        const px = Math.round((el.center.x * androidPixelRatio) / screenshotScale);
-                        const py = Math.round((el.center.y * androidPixelRatio) / screenshotScale);
+                        const px = Math.round(el.center.x / screenshotScale);
+                        const py = Math.round(el.center.y / screenshotScale);
                         const label = el.accessibilityLabel || el.text || el.testID || (el.intent ? `${el.intent} icon` : el.component);
                         const idPart = el.testID ? ` testID="${el.testID}"` : "";
                         const kindPart = el.isInput ? " [input]" : "";
