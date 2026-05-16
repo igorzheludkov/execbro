@@ -78,7 +78,7 @@ export async function inputTextWithReplace(
     text: string,
     replace: boolean,
     typeFn: (text: string) => Promise<TypeResult>,
-    clearFn: () => Promise<ClearFocusedInputToolResult> = () => clearFocusedInput()
+    clearFn: () => Promise<ClearFocusedInputToolResult>
 ): Promise<TypeResult> {
     if (replace) {
         const clearResult = await clearFn();
