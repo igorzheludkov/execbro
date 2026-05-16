@@ -12,6 +12,7 @@ import { getLicenseStatus, getDashboardUrl, getUsageInfo, getPricingInfo, format
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
 import { UserInputError } from "./core/errors.js";
+import { clearFocusedInput, dismissKeyboard } from "./core/focusedInputTools.js";
 import { getInstallationId, getServerVersion, getPackageName, isDevMode, TELEMETRY_JSONL_PATH, categorizeError } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { reduxDispatch, reduxGetState } from "./core/redux.js";
@@ -4998,6 +4999,70 @@ server.registerTool(
         };
     }
 );
+
+// Tool: Clear focused text input
+registerToolWithTelemetry(
+    "clear_focused_input",
+    {
+        description:
+            "Clear the contents of the currently focused TextInput, updating React state correctly so controlled components (Formik, react-hook-form, useState) stay consistent." +
+            "\nPURPOSE: Reset whatever TextInput has focus to empty, with the React state owner notified via onChangeText. Use BEFORE typing a replacement value into a pre-filled field." +
+            "\nWHEN TO USE: After tap(testID=...) focuses an input that already has text. Pair with ios_input_text/android_input_text (or use their replace:true flag for one-shot)." +
+            "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). Returns 'no focused TextInput' if nothing is focused — does not silently no-op." +
+            "\nSEE ALSO: dismiss_keyboard, ios_input_text({replace:true}), android_input_text({replace:true}). call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+        inputSchema: {
+            device: z
+                .string()
+                .optional()
+                .describe("Optional device name (substring match). Uses default device if not specified.")
+        }
+    },
+    async ({ device }) => {
+        const result = await clearFocusedInput(device);
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? `Cleared focused input (via ${result.via}).` : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
+// Tool: Dismiss keyboard
+registerToolWithTelemetry(
+    "dismiss_keyboard",
+    {
+        description:
+            "Blur the currently focused TextInput, dismissing the on-screen keyboard." +
+            "\nPURPOSE: Close the keyboard when it's blocking content beneath the input, or move focus off an input before a tap that would otherwise be intercepted." +
+            "\nWHEN TO USE: After typing into a field and before tapping a button that is hidden by the keyboard. Or to verify a 'tap outside dismisses' UX is wired up." +
+            "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). Returns 'no focused TextInput' if nothing is focused.",
+        inputSchema: {
+            device: z
+                .string()
+                .optional()
+                .describe("Optional device name (substring match). Uses default device if not specified.")
+        }
+    },
+    async ({ device }) => {
+        const result = await dismissKeyboard(device);
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success
+                        ? `Dismissed keyboard (nativeTag ${result.nativeTag}).`
+                        : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
 // Tool: iOS input text
 registerToolWithTelemetry(
     "ios_input_text",
