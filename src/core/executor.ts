@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { ExecutionResult, ExecuteOptions } from "./types.js";
 import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
-import { getFirstConnectedApp, getConnectedAppByDevice, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
+import { getFirstConnectedApp, getConnectedAppByDevice, getConnectedAppBySimulatorUdid, getConnectedAppByAndroidDeviceId, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
 import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
 import type { DeviceInfo } from "./types.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
@@ -2092,10 +2092,30 @@ export async function getPressableElements(
 ): Promise<ExecutionResult & { parsedElements?: PressableElement[] }> {
     const { device, platform, udid } = options;
 
-    // E1 fallback: when metro is offline, use the platform accessibility tree.
+    // Resolve which connected RN app corresponds to the requested device/udid.
+    // The E1 fallback below must fire when no app matches THIS device, even if
+    // unrelated apps remain connected to Metro. Without this filter the fiber
+    // path would silently fall back to the first-connected app and return data
+    // for the wrong device (Bug 1, 2026-05-16).
+    let targetApp: ReturnType<typeof getFirstConnectedApp> = null;
+    if (udid && platform === "ios") {
+        targetApp = getConnectedAppBySimulatorUdid(udid);
+    } else if (device) {
+        const matched = getConnectedAppByDevice(device);
+        if (matched && (!platform || matched.platform === platform)) targetApp = matched;
+    } else if (platform === "android") {
+        targetApp = getConnectedAppByAndroidDeviceId(undefined);
+    } else if (platform === "ios") {
+        const first = getFirstConnectedApp();
+        targetApp = first && first.platform === "ios" ? first : null;
+    } else {
+        targetApp = getFirstConnectedApp();
+    }
+
+    // E1 fallback: no app resolved for THIS device → use platform accessibility tree.
     // Only kicks in when caller passed `platform` so we don't break older
     // metro-required call paths that didn't opt into the fallback.
-    if (connectedApps.size === 0 && platform) {
+    if (!targetApp && platform) {
         const elements = await getAccessibilityPressables(platform, udid);
         return {
             success: true,

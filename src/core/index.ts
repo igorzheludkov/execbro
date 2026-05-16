@@ -220,6 +220,8 @@ export {
   iosKeySequence,
   iosDescribeAll,
   iosDescribePoint,
+  detectIOSSystemOverlay,
+  formatIOSSystemOverlayWarning,
   IOS_BUTTON_TYPES,
   // UI Accessibility (Element Finding) - Requires IDB
   iosGetUITree,

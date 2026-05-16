@@ -128,7 +128,10 @@ import {
     isUiDriverAvailable,
     getUiDriverInstallHint,
     iosButton,
+    iosInputText,
     iosDescribeAll,
+    detectIOSSystemOverlay,
+    formatIOSSystemOverlayWarning,
     IOS_BUTTON_TYPES,
     getDevicePixelRatio,
     getIOSSafeAreaTop,
@@ -929,14 +932,16 @@ registerToolWithTelemetry(
                 .optional()
                 .default(true)
                 .describe(
-                    "Capture and return a post-tap screenshot. Enabled by default. Set to false for fastest execution (no screenshots)."
+                    "Return post-tap image bytes in the response. Default true. Set to false to drop the PNG bytes — verification still runs (set verify=false to skip that too). Combine with verify=true to get the meaningful/changeRate signal without paying the ~1MB-per-tap bandwidth cost."
                 ),
             verify: z
                 .boolean()
                 .optional()
                 .describe(
                     "Run before/after screenshot diff to detect if the tap had a meaningful visual effect. " +
-                    "Default: true for coordinate/accessibility/ocr strategies, false for fiber. Requires screenshot=true."
+                    "Default: true for coordinate/accessibility/ocr strategies, false for fiber. " +
+                    "Independent of `screenshot` — verify can run with screenshot=false (the diff is computed internally; image bytes are dropped). " +
+                    "When skipped, the response contains `verification: { skipped: true, skippedReason }` so callers can tell apart \"ran clean\" from \"never ran\"."
                 ),
             burst: z
                 .boolean()
@@ -1628,6 +1633,20 @@ registerToolWithTelemetry(
                 } catch {
                     // Non-fatal: LogBox detection failure should not break screenshot
                 }
+            }
+
+            // I1 (2026-05-16): detect native iOS system overlays (auth sheets, alerts,
+            // permission dialogs) that sit on top of the RN app. The pressables list
+            // reflects the RN screen underneath; without this warning the agent will
+            // happily tap inert RN buttons and loop. Runs whether or not there's a
+            // matching RN app — the overlay belongs to the simulator, not the app.
+            try {
+                const overlay = await detectIOSSystemOverlay(resolvedUdid ?? undefined);
+                if (overlay) {
+                    infoText += formatIOSSystemOverlayWarning(overlay);
+                }
+            } catch {
+                // Non-fatal: overlay detection failure should not break screenshot
             }
 
             imageBuffer.add({
@@ -4979,6 +4998,38 @@ server.registerTool(
         };
     }
 );
+// Tool: iOS input text
+registerToolWithTelemetry(
+    "ios_input_text",
+    {
+        description:
+            "Type text on an iOS simulator." +
+            platformFallbackBanner("`tap(text=...)` — it auto-focuses TextInput via the fiber tree") +
+            " The text is typed into whichever field currently has focus (tap an input first). Mirrors `android_input_text` so cross-platform agents can use `<platform>_input_text` without branching on the iOS driver shell-out." +
+            "\nPURPOSE: Send keystrokes to the focused field on an iOS simulator via the active UI driver (AXe — preferred — or IDB)." +
+            "\nWHEN TO USE: Only after an input is already focused, or when `tap(testID=...)` on the input didn't take focus for some reason. Use the testID-first flow whenever possible — it's faster and survives UI repositioning." +
+            "\nLIMITATIONS: AXe types via the US-keyboard HID — non-ASCII characters (Cyrillic, CJK, Arabic) may not transmit correctly. If the active driver is AXe and the text contains non-ASCII chars, prefer pasting via the simulator pasteboard or setting IOS_DRIVER=idb." +
+            "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+        inputSchema: {
+            text: z.string().describe("Text to type into the currently focused field."),
+            udid: z.string().optional().describe("Optional simulator UDID (from list_ios_simulators). Uses booted simulator if not specified.")
+        }
+    },
+    async ({ text, udid }) => {
+        const result = await iosInputText(text, udid);
+
+        return {
+            content: [
+                {
+                    type: "text",
+                    text: result.success ? result.result! : `Error: ${result.error}`
+                }
+            ],
+            isError: !result.success
+        };
+    }
+);
+
 // Tool: Activate Pro license
 registerToolWithTelemetry(
     "activate_license",
