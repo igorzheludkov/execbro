@@ -2724,6 +2724,34 @@ export async function getPressableElements(
 
             const pressableElements: PressableElement[] = parsed.pressableElements || [];
 
+            // Android: React's measureInWindow on Fabric returns DP, but the a11y
+            // fallback (uiautomator) returns device pixels. Normalize the fiber output
+            // here so all callers see one unit (device pixels) regardless of source.
+            // Without this, the screenshot enrichment in index.ts would have to know
+            // which source produced each element, which leaks the abstraction.
+            // iOS does not need this — fiber returns points and AXe returns points,
+            // so the iOS callers' `* DPR / scale` formula works uniformly.
+            if (platform === "android" && pressableElements.length > 0) {
+                try {
+                    const { androidGetDensity } = await import("./android.js");
+                    const densityResult = await androidGetDensity();
+                    const densityScale = (densityResult.density || 420) / 160;
+                    for (const el of pressableElements) {
+                        el.center = { x: el.center.x * densityScale, y: el.center.y * densityScale };
+                        el.frame = {
+                            x: el.frame.x * densityScale,
+                            y: el.frame.y * densityScale,
+                            width: el.frame.width * densityScale,
+                            height: el.frame.height * densityScale,
+                        };
+                    }
+                } catch {
+                    // If density lookup fails, fall back to the raw DP values —
+                    // callers may surface inflated/deflated coords, which is still
+                    // better than aborting the whole screenshot enrichment.
+                }
+            }
+
             // Format as readable text
             const lines: string[] = [parsed.summary, ""];
             for (let i = 0; i < pressableElements.length; i++) {
