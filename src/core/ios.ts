@@ -1298,6 +1298,86 @@ export async function iosDescribeAll(
 }
 
 /**
+ * I1 (2026-05-16): when a native iOS system sheet (auth prompt, permission request,
+ * Safari sign-in sheet) is on screen, the RN app's fiber tree still describes the
+ * underlying screen — but those pressables aren't interactable until the sheet is
+ * dismissed. Detect the overlay so the screenshot output can warn the agent and
+ * point it at tap(x, y, native=true) for the overlay's actual buttons.
+ *
+ * Heuristic: scan the top three levels of the AXe accessibility tree for an
+ * element whose type matches an iOS sheet/alert role, OR whose AXLabel matches a
+ * well-known system-overlay phrase. False positives are rare because the patterns
+ * are specific to system-presented sheets — RN content rarely uses these labels.
+ */
+const IOS_SYSTEM_OVERLAY_TYPES = /^(Alert|ActionSheet|Sheet|Dialog|SystemDialog)$/i;
+const IOS_SYSTEM_OVERLAY_LABEL_PATTERNS =
+  /Wants to Use|Sign in to|Sign In to|Allow .* to (use|access)|Open in Safari|Continue with|Use Face ID|Use Touch ID|Use Passcode/i;
+
+/**
+ * Telltale of an RN accessibilityLabel rollup vs a system-presented sheet:
+ * a rollup concatenates multiple child labels with commas / newlines (3+ separators),
+ * while a system sheet's label is a single sentence. Without this guard the label
+ * patterns above false-positive on screens like gifted.co's login wrapper whose
+ * rollup happens to contain "Continue with" amongst many other phrases.
+ */
+function looksLikeRNLabelRollup(label: string): boolean {
+  const commas = (label.match(/,/g) ?? []).length;
+  const newlines = (label.match(/\n/g) ?? []).length;
+  return commas + newlines >= 3;
+}
+
+export async function detectIOSSystemOverlay(
+  udid?: string,
+): Promise<{ detected: boolean; description?: string } | null> {
+  try {
+    const desc = await iosDescribeAll(udid);
+    if (!desc.success || !desc.elements) return null;
+
+    const found = (function walk(
+      elements: iOSAccessibilityElement[],
+      depth: number,
+    ): { type: string; label: string } | null {
+      if (depth > 2) return null;
+      for (const el of elements) {
+        if (el.type && IOS_SYSTEM_OVERLAY_TYPES.test(el.type)) {
+          return { type: el.type, label: el.AXLabel ?? "" };
+        }
+        if (
+          el.AXLabel &&
+          IOS_SYSTEM_OVERLAY_LABEL_PATTERNS.test(el.AXLabel) &&
+          !looksLikeRNLabelRollup(el.AXLabel)
+        ) {
+          return { type: el.type ?? "Unknown", label: el.AXLabel };
+        }
+        if (el.children && el.children.length > 0) {
+          const nested = walk(el.children, depth + 1);
+          if (nested) return nested;
+        }
+      }
+      return null;
+    })(desc.elements, 0);
+
+    if (!found) return { detected: false };
+    return { detected: true, description: found.label || found.type };
+  } catch {
+    return null;
+  }
+}
+
+export function formatIOSSystemOverlayWarning(detection: {
+  detected: boolean;
+  description?: string;
+}): string {
+  if (!detection.detected) return "";
+  const desc = detection.description?.slice(0, 120) ?? "system sheet";
+  return (
+    `\n\n⚠️ Native iOS overlay detected: "${desc}". The pressables list above reflects the ` +
+    `React Native screen UNDERNEATH and may be stale. For overlay buttons, take the coordinates ` +
+    `from the screenshot and call tap(x, y, native=true, platform="ios").`
+  );
+}
+
+/**
  * Get accessibility info at a specific point
  */
 export async function iosDescribePoint(
@@ -1737,6 +1817,45 @@ export async function iosGetUITree(udid?: string): Promise<{
 }
 
 /**
+ * Bug 3 (2026-05-16): RN rolls up child Text labels into a parent View's
+ * accessibilityLabel when the parent is marked `accessible`. Result: a screen-root
+ * View whose label is a 200+ char concatenation of every visible text. `labelContains`
+ * matches it, frame is the whole screen, centroid happens to land on whatever button
+ * sits near the middle — and the tap silently lands on the wrong target.
+ *
+ * Heuristic filter: an element is an aggregator wrapper when EITHER
+ *   (a) its label is much longer than the query AND contains concatenation hints
+ *       (newlines, commas, semicolons — RN rollup typically joins with `, ` or `\n`)
+ *   (b) its frame covers >50% of the viewport (a real button never does this)
+ *
+ * Both heuristics together catch the gifted.co LoginScreen wrapper case the doc cites.
+ */
+function isAggregatorWrapper(
+  element: IOSUIElement,
+  query: string,
+  screenSize: { width: number; height: number } | null,
+): boolean {
+  const labelLen = element.label?.length ?? 0;
+  const queryLen = query.length;
+  const isLongConcatenatedLabel =
+    queryLen > 0 &&
+    labelLen > queryLen * 5 &&
+    labelLen > 60 &&
+    /[,;\n]/.test(element.label ?? "");
+
+  let isFullScreenFrame = false;
+  if (screenSize && element.frame) {
+    const elArea = (element.frame.width ?? 0) * (element.frame.height ?? 0);
+    const screenArea = screenSize.width * screenSize.height;
+    if (screenArea > 0) {
+      isFullScreenFrame = elArea > screenArea * 0.5;
+    }
+  }
+
+  return isLongConcatenatedLabel || isFullScreenFrame;
+}
+
+/**
  * Find element(s) in the iOS UI tree matching the given criteria
  */
 export async function iosFindElement(
@@ -1791,6 +1910,53 @@ export async function iosFindElement(
       matches = treeResult.elements.filter((el) =>
         matchesIOSFindElement(el, options),
       );
+    }
+
+    // Bug 3 (2026-05-16): when matching by partial string (labelContains / identifierContains),
+    // drop aggregator-wrapper elements that match only because their label rolls up every
+    // visible child's text. Without this filter, tapping such a wrapper's centroid
+    // silently lands on the wrong on-screen element.
+    //
+    // When ALL matches are aggregator wrappers (the common case — RN often rolls labels
+    // up to a single accessible wrapper, leaving no individual element with a matching
+    // label), refuse with a clear error pointing the agent at component= or coordinates.
+    // This is safer than silently tapping the wrapper centroid (which lands wherever the
+    // wrapper's geometric center happens to be — usually NOT on the requested button).
+    if (options.labelContains !== undefined && matches.length > 0) {
+      const filtered = matches.filter(
+        (el) => !isAggregatorWrapper(el, options.labelContains!, screenSize),
+      );
+      if (filtered.length > 0) {
+        matches = filtered;
+      } else {
+        return {
+          success: true,
+          found: false,
+          matchCount: 0,
+          error:
+            `Only matches for labelContains="${options.labelContains}" were aggregator wrappers ` +
+            `(RN accessibilityLabel rollup of a parent View covering the whole screen). ` +
+            `Tapping the wrapper would land on the wrong element. ` +
+            `Try component="ComponentName" instead, or pass coordinates (x, y) from a screenshot.`,
+        };
+      }
+    }
+    if (options.identifierContains !== undefined && matches.length > 0) {
+      const filtered = matches.filter(
+        (el) => !isAggregatorWrapper(el, options.identifierContains!, screenSize),
+      );
+      if (filtered.length > 0) {
+        matches = filtered;
+      } else {
+        return {
+          success: true,
+          found: false,
+          matchCount: 0,
+          error:
+            `Only matches for identifierContains="${options.identifierContains}" were aggregator wrappers. ` +
+            `Try component="ComponentName" or pass coordinates (x, y) from a screenshot.`,
+        };
+      }
     }
 
     if (matches.length === 0) {

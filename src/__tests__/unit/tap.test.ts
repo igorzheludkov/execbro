@@ -809,4 +809,52 @@ describe("findOcrMatch", () => {
         });
         expect(findOcrMatch(result, "Sign In with Google")).toBeNull();
     });
+
+    it("reconstructs phrases from same-line words when the OCR engine fragmented them (gifted.co regression)", () => {
+        // Models the gifted.co login screen where iOS Vision returned "Continue", "with",
+        // "Google" as three separate word detections (the leading G icon disrupts the
+        // engine's line-baseline grouping). No OCRLine entry is provided.
+        function rowWord(text: string, x: number, y: number, x1: number, y1: number) {
+            const tap = { x: (x + x1) / 2, y: (y + y1) / 2 };
+            return { text, confidence: 0.95, bbox: { x0: x, y0: y, x1, y1 }, center: tap, tapCenter: tap };
+        }
+        const result = makeResult({
+            words: [
+                rowWord("Continue", 100, 480, 200, 510),
+                rowWord("with", 210, 480, 260, 510),
+                rowWord("Google", 270, 480, 360, 510),
+                // Adjacent button on a different y-band — must not get joined.
+                rowWord("Continue", 100, 540, 200, 570),
+                rowWord("with", 210, 540, 260, 570),
+                rowWord("Apple", 270, 540, 350, 570),
+            ],
+        });
+        const match = findOcrMatch(result, "Continue with Google");
+        expect(match).not.toBeNull();
+        // tapCenter narrowed to the three matching words — average of their tap centers
+        // (not the whole reconstructed line, and definitely not the Apple row).
+        expect(match!.tapCenter.x).toBeCloseTo((150 + 235 + 315) / 3, 0);
+        expect(match!.tapCenter.y).toBeCloseTo(495, 0);
+    });
+
+    it("refines tap center to matched words inside a wider reconstructed line (horizontal-button-row case)", () => {
+        // Models Boardwise's "Yes Remotely No" row of three side-by-side buttons. Query
+        // for one of them should tap that button, not the centroid of all three.
+        function rowWord(text: string, x: number, y: number, x1: number, y1: number) {
+            const tap = { x: (x + x1) / 2, y: (y + y1) / 2 };
+            return { text, confidence: 0.95, bbox: { x0: x, y0: y, x1, y1 }, center: tap, tapCenter: tap };
+        }
+        const result = makeResult({
+            words: [
+                rowWord("Yes", 100, 100, 180, 130),
+                rowWord("Remotely", 220, 100, 380, 130),
+                rowWord("No", 420, 100, 480, 130),
+            ],
+        });
+        const match = findOcrMatch(result, "Remotely");
+        expect(match).not.toBeNull();
+        // Should tap inside the "Remotely" bbox, not at the centroid of all three.
+        expect(match!.tapCenter.x).toBe(300);
+        expect(match!.tapCenter.y).toBe(115);
+    });
 });

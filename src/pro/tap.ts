@@ -1,6 +1,6 @@
 import { connectedApps, imageBuffer } from "../core/state.js";
 import type { ConnectedApp } from "../core/types.js";
-import type { OCRResult } from "../core/ocr.js";
+import type { OCRResult, OCRWord } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
 import { pressElement } from "../core/executor.js";
 import {
@@ -73,10 +73,14 @@ export interface TapScreenshot {
 }
 
 export interface TapVerification {
-    meaningful: boolean;
-    changeRate: number;
-    changedPixels: number;
-    totalPixels: number;
+    // When `skipped` is true, the diff was not computed (verify=false). The other
+    // numeric/boolean fields are absent in that case. `explanation` is always present.
+    skipped?: boolean;
+    skippedReason?: string;
+    meaningful?: boolean;
+    changeRate?: number;
+    changedPixels?: number;
+    totalPixels?: number;
     transientChangeDetected?: boolean;
     peakChangeRate?: number;
     peakFrame?: number;
@@ -238,6 +242,96 @@ function normalizeForMatch(text: string): string {
     return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+/**
+ * 2026-05-16: Reconstruct lines from individual OCR words when the engine fragmented a
+ * visible phrase across separate word detections. This happens when a leading icon
+ * (Google "G", Apple logo, Microsoft squares) disrupts iOS Vision's line-baseline
+ * grouping, so "Continue with Google" comes back as three separate words instead of
+ * one OCRLine. Without this, findOcrMatch's word/line substring scan misses the phrase.
+ *
+ * Grouping rule: words whose vertical centers are within half the running median word
+ * height land on the same reconstructed line. Words are sorted left-to-right within
+ * the line and joined with a single space. Exported for unit tests.
+ */
+export interface ReconstructedOcrLine {
+    text: string;
+    bbox: { x0: number; y0: number; x1: number; y1: number };
+    tapCenter: { x: number; y: number };
+    words: OCRWord[];
+}
+
+export function reconstructLinesFromWords(words: OCRWord[]): ReconstructedOcrLine[] {
+    if (!words.length) return [];
+    const sorted = [...words].sort((a, b) => a.bbox.y0 - b.bbox.y0);
+    const groups: OCRWord[][] = [];
+    let current: OCRWord[] = [];
+    let runningMidY = -Infinity;
+    let runningHeight = 0;
+    for (const w of sorted) {
+        const wMid = (w.bbox.y0 + w.bbox.y1) / 2;
+        const wHeight = Math.max(1, w.bbox.y1 - w.bbox.y0);
+        const tolerance = Math.min(wHeight, runningHeight || wHeight) * 0.5;
+        if (current.length === 0 || Math.abs(wMid - runningMidY) <= tolerance) {
+            current.push(w);
+            const n = current.length;
+            runningMidY = runningMidY === -Infinity ? wMid : (runningMidY * (n - 1) + wMid) / n;
+            runningHeight = (runningHeight * (n - 1) + wHeight) / n;
+        } else {
+            groups.push(current);
+            current = [w];
+            runningMidY = wMid;
+            runningHeight = wHeight;
+        }
+    }
+    if (current.length > 0) groups.push(current);
+
+    return groups.map(group => {
+        const sortedWords = [...group].sort((a, b) => a.bbox.x0 - b.bbox.x0);
+        const text = sortedWords.map(w => w.text).join(" ");
+        const x0 = Math.min(...sortedWords.map(w => w.bbox.x0));
+        const y0 = Math.min(...sortedWords.map(w => w.bbox.y0));
+        const x1 = Math.max(...sortedWords.map(w => w.bbox.x1));
+        const y1 = Math.max(...sortedWords.map(w => w.bbox.y1));
+        const tapX = sortedWords.reduce((s, w) => s + w.tapCenter.x, 0) / sortedWords.length;
+        const tapY = sortedWords.reduce((s, w) => s + w.tapCenter.y, 0) / sortedWords.length;
+        return { text, bbox: { x0, y0, x1, y1 }, tapCenter: { x: tapX, y: tapY }, words: sortedWords };
+    });
+}
+
+/**
+ * Narrow the tap point to just the words that produced the substring match.
+ * Without this, a query for "Remotely" against a reconstructed line "Yes Remotely No"
+ * would tap at the line's centroid (middle of "Remotely" in this case, but easily wrong
+ * for asymmetric layouts). Tracks character offsets through the joined text so we know
+ * which constituent words contributed to the matched range.
+ */
+function refineTapCenterToMatchingWords(
+    line: ReconstructedOcrLine,
+    normalizedNeedle: string
+): { x: number; y: number } {
+    const normalizedFull = normalizeForMatch(line.text);
+    const startChar = normalizedFull.indexOf(normalizedNeedle);
+    if (startChar < 0) return line.tapCenter;
+    const endChar = startChar + normalizedNeedle.length;
+
+    let offset = 0;
+    const covered: OCRWord[] = [];
+    for (const w of line.words) {
+        const wNorm = normalizeForMatch(w.text);
+        const wordStart = offset;
+        const wordEnd = offset + wNorm.length;
+        // Word overlaps the matched range
+        if (wordEnd > startChar && wordStart < endChar) {
+            covered.push(w);
+        }
+        offset = wordEnd + 1; // +1 for the joining space
+    }
+    if (covered.length === 0) return line.tapCenter;
+    const tapX = covered.reduce((s, w) => s + w.tapCenter.x, 0) / covered.length;
+    const tapY = covered.reduce((s, w) => s + w.tapCenter.y, 0) / covered.length;
+    return { x: tapX, y: tapY };
+}
+
 export function findOcrMatch(ocrResult: OCRResult, query: string): OcrMatch | null {
     const needle = normalizeForMatch(query);
     if (!needle) return null;
@@ -256,6 +350,20 @@ export function findOcrMatch(ocrResult: OCRResult, query: string): OcrMatch | nu
 
     const substringWord = words.find((w) => normalizeForMatch(w.text).includes(needle));
     if (substringWord) return { text: substringWord.text, tapCenter: substringWord.tapCenter };
+
+    // Fall through to phrases reconstructed from word detections. Tap point is
+    // refined to only the words covering the matched substring, so a query for
+    // "Continue with Google" inside "[icon] Continue with Google" lands on the
+    // text run instead of the line centroid (and won't drift onto the icon).
+    const reconstructed = reconstructLinesFromWords(words);
+    const exactRecon = reconstructed.find((l) => normalizeForMatch(l.text) === needle);
+    if (exactRecon) {
+        return { text: exactRecon.text, tapCenter: refineTapCenterToMatchingWords(exactRecon, needle) };
+    }
+    const substringRecon = reconstructed.find((l) => normalizeForMatch(l.text).includes(needle));
+    if (substringRecon) {
+        return { text: substringRecon.text, tapCenter: refineTapCenterToMatchingWords(substringRecon, needle) };
+    }
 
     return null;
 }
@@ -416,11 +524,24 @@ export function formatTapSuccess(data: {
     verification?: TapVerification;
 }): TapResult {
     const { screenshot, verification, ...rest } = data;
+    // I3 (2026-05-16): when the tap landed on a TextInput-like element and the diff
+    // reports no visual change, that does NOT mean the focus failed. iOS simulators with
+    // the hardware keyboard connected (Cmd+K) suppress the on-screen keyboard, so the
+    // input is focused but the screen looks identical. Surface this so the agent doesn't
+    // assume the tap missed and retry the wrong thing.
+    const isTextInputComponent = (() => {
+        const name = data.component ?? data.pressed ?? "";
+        return /textfield|textinput|edittext|searchfield/i.test(name);
+    })();
+    const note = verification && !verification.skipped && verification.meaningful === false && isTextInputComponent
+        ? "TextInput focused but no visual change detected. If the simulator has a hardware keyboard connected (Cmd+K), the software keyboard is suppressed even though the input is focused — proceed with text entry via ios_input_text / android_input_text."
+        : undefined;
     return {
         success: true,
         ...rest,
         ...(verification && { verification }),
-        ...(screenshot && { screenshot })
+        ...(screenshot && { screenshot }),
+        ...(note && { warning: note })
     };
 }
 
@@ -438,7 +559,7 @@ export function formatTapFailure(data: {
 }): TapResult {
     const errorMsg = data.error || buildErrorMessage(data.query);
     const warning =
-        data.verification && !data.verification.meaningful
+        data.verification && !data.verification.skipped && data.verification.meaningful === false
             ? "Tap executed but no visual change detected. The element may not exist at these coordinates. Examine the screenshot to verify and retry with adjusted coordinates."
             : undefined;
     const lastStrategy = data.attempted.length > 0 ? data.attempted[data.attempted.length - 1].strategy : undefined;
@@ -465,6 +586,38 @@ function buildErrorMessage(query: TapQuery): string {
   if (query.testID) parts.push(`testID="${query.testID}"`);
   if (query.component) parts.push(`component="${query.component}"`);
   return `No element found matching ${parts.join(", ")}`;
+}
+
+// I2 (2026-05-16): RN component composition routinely produces N matches at the same
+// coordinates for the same testID/text (e.g. ThemedButton → TouchableOpacity → TouchableOpacity).
+// The C1 ambiguity guard refuses all such taps and demands `index=`. That's correct in the
+// spatial-ambiguity case (two distinct buttons share a label) but wrong in the
+// wrapper-ambiguity case — there's only one logical button, just stacked components.
+//
+// Collapse matches that share the same (testID, text) and overlap geometrically
+// (centers within TOLERANCE_PX). Keeps the first occurrence — fiber/a11y walks parent-first,
+// so the outermost wrapper survives (its onPress almost always proxies to inner handlers).
+// Spatial ambiguity (different x/y) is preserved and continues to surface the C1 refusal.
+function collapseGeometricallyEquivalentMatches<T>(
+    matches: T[],
+    getCenter: (m: T) => { x: number | undefined; y: number | undefined },
+    getKey: (m: T) => string
+): T[] {
+    if (matches.length <= 1) return matches;
+    const TOLERANCE_PX = 2;
+    const out: T[] = [];
+    for (const m of matches) {
+        const mc = getCenter(m);
+        const mk = getKey(m);
+        const isDuplicate = out.some(o => {
+            if (getKey(o) !== mk) return false;
+            const oc = getCenter(o);
+            return Math.abs((mc.x ?? 0) - (oc.x ?? 0)) <= TOLERANCE_PX &&
+                   Math.abs((mc.y ?? 0) - (oc.y ?? 0)) <= TOLERANCE_PX;
+        });
+        if (!isDuplicate) out.push(m);
+    }
+    return out;
 }
 
 // --- Strategy Result ---
@@ -575,6 +728,12 @@ export function findClosestOcrText(
     const candidates: Array<{ text: string }> = [];
     if (ocrResult?.words?.length) candidates.push(...ocrResult.words.map(w => ({ text: w.text })));
     if (ocrResult?.lines?.length) candidates.push(...ocrResult.lines.map(l => ({ text: l.text })));
+    // Include reconstructed phrases so the diagnostic surfaces "Continue with Google@1.00"
+    // instead of "Continue@0.54" when the engine fragmented a multi-word phrase into
+    // separate word detections.
+    if (ocrResult?.words?.length) {
+        candidates.push(...reconstructLinesFromWords(ocrResult.words).map(l => ({ text: l.text })));
+    }
     if (!candidates.length) return null;
     let best: { text: string; score: number } | null = null;
     for (const c of candidates) {
@@ -675,12 +834,25 @@ async function tryFiberAtDepth(
             // specify an explicit index, refuse to tap and surface the full list
             // so the agent can pick the right one.
             if ((parsed.totalMatches ?? 1) > 1 && index === undefined) {
-                return {
-                    success: false,
-                    reason: `Ambiguous: ${parsed.totalMatches} elements match this query — use index= to pick one`,
-                    matches: parsed.allMatches || [],
-                    ambiguous: true
-                };
+                // I2: collapse geometrically-identical wrapper matches before refusing.
+                const collapsed = collapseGeometricallyEquivalentMatches<{
+                    index: number; component: string; text: string; testID?: string | null; x?: number; y?: number;
+                }>(
+                    parsed.allMatches ?? [],
+                    (m) => ({ x: m.x, y: m.y }),
+                    (m) => `${m.testID ?? ""}::${m.text ?? ""}`
+                );
+                if (collapsed.length > 1) {
+                    return {
+                        success: false,
+                        reason: `Ambiguous: ${collapsed.length} elements match this query — use index= to pick one`,
+                        matches: collapsed,
+                        ambiguous: true
+                    };
+                }
+                // Collapsed to one logical element — fall through and tap. The JS-side
+                // search already picked allMatches[0] (the outermost wrapper) for
+                // parsed.pressed/parsed.nativeTapTarget.
             }
             const elementType = parsed.isInput ? "input element" : "pressable element";
             if (parsed.nativeTapTarget && parsed.nativeTapTarget.x && parsed.nativeTapTarget.y) {
@@ -815,11 +987,20 @@ async function tryAccessibilityStrategy(
             // refuse to tap without an explicit index — picking allMatches[0] silently
             // landed on non-interactive header elements in production telemetry.
             // Mirrors the fiber-strategy guard further up the file.
-            if (result.allMatches.length > 1 && index === undefined) {
+            // I2: collapse geometrically-identical wrapper matches before refusing.
+            const iosEffectiveMatches = result.allMatches.length > 1
+                ? collapseGeometricallyEquivalentMatches(
+                    result.allMatches,
+                    (m) => ({ x: m.center?.x, y: m.center?.y }),
+                    (m) => `${m.identifier ?? ""}::${m.label ?? ""}`
+                )
+                : result.allMatches;
+
+            if (iosEffectiveMatches.length > 1 && index === undefined) {
                 return {
                     success: false,
-                    reason: `Ambiguous: ${result.allMatches.length} elements match this query — use index= to pick one`,
-                    matches: result.allMatches.map((m, i) => ({
+                    reason: `Ambiguous: ${iosEffectiveMatches.length} elements match this query — use index= to pick one`,
+                    matches: iosEffectiveMatches.map((m, i) => ({
                         index: i,
                         component: m.type ?? "",
                         text: m.label ?? "",
@@ -831,11 +1012,11 @@ async function tryAccessibilityStrategy(
                 };
             }
 
-            const match = result.allMatches[index ?? 0];
+            const match = iosEffectiveMatches[index ?? 0];
             if (!match) {
                 return {
                     success: false,
-                    reason: `Index ${index} out of bounds (${result.allMatches.length} matches)`
+                    reason: `Index ${index} out of bounds (${iosEffectiveMatches.length} matches)`
                 };
             }
 
@@ -893,11 +1074,20 @@ async function tryAccessibilityStrategy(
             }
 
             // Ambiguity guard — see iOS branch above for rationale.
-            if (result.allMatches.length > 1 && index === undefined) {
+            // I2: collapse geometrically-identical wrapper matches before refusing.
+            const androidEffectiveMatches = result.allMatches.length > 1
+                ? collapseGeometricallyEquivalentMatches(
+                    result.allMatches,
+                    (m) => ({ x: m.center?.x, y: m.center?.y }),
+                    (m) => `${m.resourceId ?? ""}::${m.text ?? m.contentDesc ?? ""}`
+                )
+                : result.allMatches;
+
+            if (androidEffectiveMatches.length > 1 && index === undefined) {
                 return {
                     success: false,
-                    reason: `Ambiguous: ${result.allMatches.length} elements match this query — use index= to pick one`,
-                    matches: result.allMatches.map((m, i) => ({
+                    reason: `Ambiguous: ${androidEffectiveMatches.length} elements match this query — use index= to pick one`,
+                    matches: androidEffectiveMatches.map((m, i) => ({
                         index: i,
                         component: m.className ?? "",
                         text: m.text ?? m.contentDesc ?? "",
@@ -909,11 +1099,11 @@ async function tryAccessibilityStrategy(
                 };
             }
 
-            const match = result.allMatches[index ?? 0];
+            const match = androidEffectiveMatches[index ?? 0];
             if (!match) {
                 return {
                     success: false,
-                    reason: `Index ${index} out of bounds (${result.allMatches.length} matches)`
+                    reason: `Index ${index} out of bounds (${androidEffectiveMatches.length} matches)`
                 };
             }
 
@@ -1369,26 +1559,63 @@ async function verifyAndCapture(
     beforeScaleFactor?: number,
     markerPx?: { x: number; y: number }
 ): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification; afterBuffer?: Buffer; afterWithMarkerBuffer?: Buffer }> {
-    if (!shouldScreenshot) return {};
+    // Decoupled 2026-05-16 (I5): screenshot and verify are independent knobs.
+    // - shouldVerify=true:    capture after-screenshot internally, diff against beforeBuffer, return verification.
+    // - shouldScreenshot=true: also return the (marker-overlaid) image bytes in the response.
+    // - both false:           fastest path, return only a `skipped` verification stub so the agent can tell apart "ran clean" from "skipped intentionally".
+    if (!shouldVerify && !shouldScreenshot) {
+        return {
+            verification: {
+                skipped: true,
+                skippedReason: "screenshot=false, verify=false",
+                explanation: "Verification skipped (screenshot=false and verify=false)."
+            }
+        };
+    }
 
     await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
 
     const after = await captureScreenshot(platform, udid);
-    if (!after) return {};
+    if (!after) {
+        if (shouldVerify) {
+            return {
+                verification: {
+                    skipped: true,
+                    skippedReason: "after-screenshot capture failed",
+                    explanation: "Verification skipped — could not capture post-tap screenshot."
+                }
+            };
+        }
+        return {};
+    }
 
     const afterWithMarker = markerPx
         ? await drawTapMarker(after.buffer, markerPx.x, markerPx.y)
         : after.buffer;
 
-    const screenshot: TapScreenshot = {
-        image: screenshotToBase64(afterWithMarker),
-        width: after.width,
-        height: after.height,
-        scaleFactor: after.scaleFactor
-    };
+    const screenshot: TapScreenshot | undefined = shouldScreenshot
+        ? {
+              image: screenshotToBase64(afterWithMarker),
+              width: after.width,
+              height: after.height,
+              scaleFactor: after.scaleFactor
+          }
+        : undefined;
 
     let verification: TapVerification | undefined;
-    if (shouldVerify && beforeBuffer) {
+    if (!shouldVerify) {
+        verification = {
+            skipped: true,
+            skippedReason: "verify=false",
+            explanation: "Verification skipped (verify=false)."
+        };
+    } else if (!beforeBuffer) {
+        verification = {
+            skipped: true,
+            skippedReason: "before-screenshot unavailable",
+            explanation: "Verification skipped — could not capture pre-tap screenshot."
+        };
+    } else {
         try {
             const rawStatusBar = platform === "ios" ? 177 : 142; // pixels in original screenshot space
             const scale = beforeScaleFactor || after.scaleFactor || 1;
@@ -1408,8 +1635,12 @@ async function verifyAndCapture(
                     totalPixels: diff.totalPixels
                 })
             };
-        } catch {
-            // Diff failed — still return the screenshot
+        } catch (err) {
+            verification = {
+                skipped: true,
+                skippedReason: `diff failed: ${err instanceof Error ? err.message : String(err)}`,
+                explanation: "Verification skipped — pixel diff threw."
+            };
         }
     }
 
@@ -1830,7 +2061,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         const nativeShouldScreenshot = options.screenshot !== false;
-        const nativeShouldVerify = nativeShouldScreenshot && options.verify !== false;
+        // Decoupled (I5, 2026-05-16): verify runs even when image bytes aren't returned.
+        const nativeShouldVerify = options.verify !== false;
         let nativeBeforeBuffer: Buffer | null = null;
         let nativeScreenshotMeta: { originalWidth: number; originalHeight: number; scaleFactor: number } | undefined;
         if (nativeShouldVerify) {
@@ -1897,6 +2129,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     nativeScreenshotMeta?.scaleFactor,
                     nativeMarker
                 ));
+                if (!nativeShouldScreenshot) screenshot = undefined;
             } else {
                 ({ screenshot, verification } = await verifyAndCapture(
                     platform,
@@ -2085,11 +2318,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         };
     }
 
-    // Determine screenshot and verification behavior
+    // Determine screenshot and verification behavior.
+    // Decoupled (I5, 2026-05-16): verify can run without returning image bytes —
+    // capture cost is paid either way; bandwidth cost is what `screenshot` toggles.
     const shouldScreenshot = options.screenshot !== false;
-    // Always capture before screenshot when screenshots are enabled and verify isn't explicitly off
-    // Verification decision is deferred until we know which strategy actually succeeded
-    const canVerify = shouldScreenshot && options.verify !== false;
+    const canVerify = options.verify !== false;
 
     // Capture "before" screenshot for verification
     let beforeBuffer: Buffer | null = null;
@@ -2252,6 +2485,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     beforeScaleFactor,
                     strategyMarker
                 ));
+                // Burst always produces a screenshot for diff visualization. Drop the
+                // bytes when the caller didn't ask for them — frames are still in
+                // imageBuffer (accessible via get_images(groupId=verification.burstGroupId)).
+                if (!shouldScreenshot) screenshot = undefined;
             } else {
                 ({ screenshot, verification, afterBuffer, afterWithMarkerBuffer } = await verifyAndCapture(
                     platform,
@@ -2286,7 +2523,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             });
             // Capture an artifact for "successful but unmeaningful" taps so we can
             // diagnose taps that landed wrong or hit non-responsive elements.
-            if (verification && verification.changeRate < 0.001) {
+            if (verification && !verification.skipped && (verification.changeRate ?? 1) < 0.001) {
                 const unmeaningfulSignals = await captureTapArtifact({
                     query,
                     outcome: "unmeaningful",
