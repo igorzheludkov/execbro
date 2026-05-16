@@ -5080,15 +5080,22 @@ registerToolWithTelemetry(
             " The text is typed into whichever field currently has focus (tap an input first). Mirrors `android_input_text` so cross-platform agents can use `<platform>_input_text` without branching on the iOS driver shell-out." +
             "\nPURPOSE: Send keystrokes to the focused field on an iOS simulator via the active UI driver (AXe — preferred — or IDB)." +
             "\nWHEN TO USE: Only after an input is already focused, or when `tap(testID=...)` on the input didn't take focus for some reason. Use the testID-first flow whenever possible — it's faster and survives UI repositioning." +
+            "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value." +
             "\nLIMITATIONS: AXe types via the US-keyboard HID — non-ASCII characters (Cyrillic, CJK, Arabic) may not transmit correctly. If the active driver is AXe and the text contains non-ASCII chars, prefer pasting via the simulator pasteboard or setting IOS_DRIVER=idb." +
             "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             text: z.string().describe("Text to type into the currently focused field."),
+            replace: z
+                .boolean()
+                .optional()
+                .describe(
+                    "If true, clear the focused TextInput via React onChangeText before typing. Use to set a pre-filled field to an exact value without concatenation. Requires Bridgeless/Fabric."
+                ),
             udid: z.string().optional().describe("Optional simulator UDID (from list_ios_simulators). Uses booted simulator if not specified.")
         }
     },
-    async ({ text, udid }) => {
-        const result = await iosInputText(text, udid);
+    async ({ text, replace, udid }) => {
+        const result = await inputTextWithReplace(text, replace === true, (t) => iosInputText(t, udid));
 
         return {
             content: [
