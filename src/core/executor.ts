@@ -2724,19 +2724,84 @@ export async function getPressableElements(
 
             const pressableElements: PressableElement[] = parsed.pressableElements || [];
 
-            // Android: React's measureInWindow on Fabric returns DP, but the a11y
-            // fallback (uiautomator) returns device pixels. Normalize the fiber output
-            // here so all callers see one unit (device pixels) regardless of source.
-            // Without this, the screenshot enrichment in index.ts would have to know
-            // which source produced each element, which leaks the abstraction.
-            // iOS does not need this — fiber returns points and AXe returns points,
-            // so the iOS callers' `* DPR / scale` formula works uniformly.
+            // Android coordinate reconciliation (2026-05-17).
+            //
+            // The fiber walker produces rich metadata (component names, testID, intent,
+            // wrapper flags, nearbyText) but its measureInWindow output on Bridgeless/Fabric
+            // is in app-window DP space — off from the actual screen-pixel hit area by the
+            // status bar height (varies per device) AND an additional unaccounted offset
+            // we couldn't characterize across devices.
+            //
+            // uiautomator's bounds, on the other hand, are in absolute display pixels and
+            // match what tap(x, y) → adb input dispatches — they are touch-accurate.
+            //
+            // Strategy: keep fiber's metadata, but replace coords with uiautomator's bounds
+            // when we can match a fiber element to a uiautomator node by text / contentDesc /
+            // resourceId. For icon-only pressables that have no text-match candidate,
+            // fall back to fiber's DP coords scaled by density — they're imperfect but
+            // they keep the same gross layout that an agent could use as a "near this
+            // region" hint, and they're better than nothing.
+            //
+            // iOS is unaffected — fiber returns points and AXe returns points; uniform.
             if (platform === "android" && pressableElements.length > 0) {
+                let densityScale = 2.625;
                 try {
                     const { androidGetDensity } = await import("./android.js");
                     const densityResult = await androidGetDensity();
-                    const densityScale = (densityResult.density || 420) / 160;
-                    for (const el of pressableElements) {
+                    densityScale = (densityResult.density || 420) / 160;
+                } catch { /* default */ }
+
+                let uiNodes: import("./android.js").AndroidUIElement[] | undefined;
+                try {
+                    const { androidGetUITree } = await import("./android.js");
+                    const tree = await androidGetUITree();
+                    if (tree.success && tree.elements) uiNodes = tree.elements;
+                } catch { /* uiautomator unavailable */ }
+
+                const norm = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+                const findUiMatch = (el: PressableElement): import("./android.js").AndroidUIElement | null => {
+                    if (!uiNodes || uiNodes.length === 0) return null;
+                    const targetTestID = norm(el.testID);
+                    const targetText = norm(el.text);
+                    const targetA11y = norm(el.accessibilityLabel);
+                    if (!targetTestID && !targetText && !targetA11y) return null;
+                    // Prefer testID → resourceId exact match (most stable).
+                    if (targetTestID) {
+                        const m = uiNodes.find(u => norm(u.resourceId).endsWith("/" + targetTestID) || norm(u.resourceId) === targetTestID);
+                        if (m) return m;
+                    }
+                    // Then exact text/contentDesc match.
+                    for (const query of [targetText, targetA11y]) {
+                        if (!query) continue;
+                        const m = uiNodes.find(u => norm(u.text) === query || norm(u.contentDesc) === query);
+                        if (m) return m;
+                    }
+                    // Then substring — handles fiber's collected text being a superset of one node's label.
+                    for (const query of [targetText, targetA11y]) {
+                        if (!query) continue;
+                        const m = uiNodes.find(u => {
+                            const ut = norm(u.text);
+                            const ud = norm(u.contentDesc);
+                            return (ut && (ut.includes(query) || query.includes(ut))) ||
+                                   (ud && (ud.includes(query) || query.includes(ud)));
+                        });
+                        if (m) return m;
+                    }
+                    return null;
+                };
+
+                for (const el of pressableElements) {
+                    const match = findUiMatch(el);
+                    if (match) {
+                        el.center = { x: match.center.x, y: match.center.y };
+                        el.frame = {
+                            x: match.bounds.left,
+                            y: match.bounds.top,
+                            width: match.bounds.width,
+                            height: match.bounds.height,
+                        };
+                    } else {
+                        // Fall back to fiber's DP → device-pixel scaling.
                         el.center = { x: el.center.x * densityScale, y: el.center.y * densityScale };
                         el.frame = {
                             x: el.frame.x * densityScale,
@@ -2745,10 +2810,6 @@ export async function getPressableElements(
                             height: el.frame.height * densityScale,
                         };
                     }
-                } catch {
-                    // If density lookup fails, fall back to the raw DP values —
-                    // callers may surface inflated/deflated coords, which is still
-                    // better than aborting the whole screenshot enrichment.
                 }
             }
 
