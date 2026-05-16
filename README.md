@@ -37,8 +37,7 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 - **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
 - **Android Devices** - Screenshots, app install/launch, package management (via ADB)
 - **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots. Returns post-tap screenshot and verifies visual change by default
-- **UI Automation** - Swipe, long press, text input, and key events on both platforms
-- **TextInput Editing** (Bridgeless/Fabric) - `clear_focused_input` and `dismiss_keyboard` operate on whatever has focus; `ios_input_text` / `android_input_text` accept `replace:true` to overwrite pre-filled values. All three update React state through `onChangeText` so controlled components (Formik, react-hook-form, useState) stay consistent
+- **UI Automation** - Swipe, long press, key events, and text input on both platforms. On Bridgeless/Fabric apps, `clear_focused_input` and `dismiss_keyboard` operate on whatever has focus, and `ios_input_text` / `android_input_text` accept `replace:true` to overwrite pre-filled values — all three update React state through `onChangeText` so controlled components (Formik, react-hook-form, useState) stay consistent
 - **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
 - **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
 
