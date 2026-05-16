@@ -31,7 +31,7 @@ export function buildFindFocusedInputExpression(): string {
   (function walk(f, depth) {
     if (!f || host || depth > 400) return;
     const name = getName(f.type);
-    if (name === "RCTSinglelineTextInputView" || name === "RCTMultilineTextInputView") {
+    if (name === "RCTSinglelineTextInputView" || name === "RCTMultilineTextInputView" || name === "AndroidTextInput") {
       const pub = f.stateNode && f.stateNode.canonical && f.stateNode.canonical.publicInstance;
       if (pub && pub.isFocused && pub.isFocused()) { host = f; return; }
     }
@@ -69,7 +69,7 @@ export function buildClearFocusedInputExpression(): string {
   (function walk(f, depth) {
     if (!f || host || depth > 400) return;
     const name = getName(f.type);
-    if (name === "RCTSinglelineTextInputView" || name === "RCTMultilineTextInputView") {
+    if (name === "RCTSinglelineTextInputView" || name === "RCTMultilineTextInputView" || name === "AndroidTextInput") {
       const pub = f.stateNode && f.stateNode.canonical && f.stateNode.canonical.publicInstance;
       if (pub && pub.isFocused && pub.isFocused()) { host = f; return; }
     }
@@ -110,7 +110,7 @@ export function buildDismissKeyboardExpression(): string {
   (function walk(f, depth) {
     if (!f || host || depth > 400) return;
     const name = getName(f.type);
-    if (name === "RCTSinglelineTextInputView" || name === "RCTMultilineTextInputView") {
+    if (name === "RCTSinglelineTextInputView" || name === "RCTMultilineTextInputView" || name === "AndroidTextInput") {
       const pub = f.stateNode && f.stateNode.canonical && f.stateNode.canonical.publicInstance;
       if (pub && pub.isFocused && pub.isFocused()) { host = f; return; }
     }
