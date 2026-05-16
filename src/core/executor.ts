@@ -2745,10 +2745,17 @@ export async function getPressableElements(
             // iOS is unaffected — fiber returns points and AXe returns points; uniform.
             if (platform === "android" && pressableElements.length > 0) {
                 let densityScale = 2.625;
+                let statusBarPixels = 0;
                 try {
-                    const { androidGetDensity } = await import("./android.js");
-                    const densityResult = await androidGetDensity();
+                    const { androidGetDensity, androidGetStatusBarHeight } = await import("./android.js");
+                    const [densityResult, statusBarResult] = await Promise.all([
+                        androidGetDensity(),
+                        androidGetStatusBarHeight().catch(() => ({ success: false, heightPixels: 0 }) as const),
+                    ]);
                     densityScale = (densityResult.density || 420) / 160;
+                    if (statusBarResult.success && statusBarResult.heightPixels) {
+                        statusBarPixels = statusBarResult.heightPixels;
+                    }
                 } catch { /* default */ }
 
                 let uiNodes: import("./android.js").AndroidUIElement[] | undefined;
@@ -2801,11 +2808,28 @@ export async function getPressableElements(
                             height: match.bounds.height,
                         };
                     } else {
-                        // Fall back to fiber's DP → device-pixel scaling.
-                        el.center = { x: el.center.x * densityScale, y: el.center.y * densityScale };
+                        // Fall back to fiber's DP → device-pixel scaling, plus the dynamic
+                        // status-bar pixel offset so the y origin lines up with display
+                        // coordinates (uiautomator's space). measureInWindow on Bridgeless
+                        // returns coordinates relative to the React window which sits
+                        // below the system status bar on non-edge-to-edge apps; without
+                        // this shift, fallback elements report y-values that are
+                        // ~status-bar-height too small.
+                        //
+                        // Note: this is a best-effort correction. Edge-to-edge apps where
+                        // the React window starts at the display origin will see a
+                        // small over-correction here. The proper fix would query
+                        // WindowInsets, but the data isn't exposed via adb in a way
+                        // we can reach today, and the icon-only-no-text fallback is
+                        // already a "region hint" path — agents should prefer
+                        // tap(component=...) / tap(testID=...) for precision.
+                        el.center = {
+                            x: el.center.x * densityScale,
+                            y: el.center.y * densityScale + statusBarPixels,
+                        };
                         el.frame = {
                             x: el.frame.x * densityScale,
-                            y: el.frame.y * densityScale,
+                            y: el.frame.y * densityScale + statusBarPixels,
                             width: el.frame.width * densityScale,
                             height: el.frame.height * densityScale,
                         };
