@@ -158,6 +158,17 @@ Set testID on all interactive elements (buttons, inputs, links) for reliable tap
 ## TextInput Fields
 tap detects TextInput elements (onChangeText/onFocus) in the fiber tree and falls through to native tap (accessibility or coordinates) for actual focus. This means tap(testID="email-input") works even though inputs don't have onPress.
 
+### Replacing pre-filled values (Bridgeless/Fabric only)
+Inputs that already contain text are the most common verification-blocker. The typing tools APPEND by default — typing "https://app.example.com" into a field that already holds "https://demo.example.com" produces "https://demo.example.comhttps://app.example.com", not the intended replacement. Three dedicated tools handle this on Bridgeless/Fabric apps:
+
+- **clear_focused_input** — empty the currently focused TextInput, with the React state owner notified via onChangeText. Use BEFORE typing into a pre-filled field. Returns "no focused TextInput" (not a silent no-op) if nothing has focus.
+- **ios_input_text / android_input_text with replace:true** — one-shot: clear the focused field, then type. Equivalent to clear_focused_input + input_text but in a single call.
+- **dismiss_keyboard** — blur the currently focused TextInput, closing the on-screen keyboard. Useful before tapping buttons hidden behind the keyboard, or to verify "tap outside dismisses" behavior.
+
+All three target whatever has focus (no testID needed). They update React state via onChangeText("") — controlled components (Formik, react-hook-form, useState) stay consistent. Calling publicInstance.clear() directly does NOT do this; it only updates the native side and leaves form state stale.
+
+Multi-device sessions: pass device="<rn-device-name>" (substring match) to disambiguate when replace:true is used. Single-device sessions can omit.
+
 ## Icon-Only Buttons
 For buttons that contain only an icon (no text):
 - tap(component="CartIcon") — finds the icon and walks up the fiber tree to press the nearest pressable parent
@@ -168,7 +179,9 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 
 ## Other Interactions
 - android_swipe: swipe/scroll with start/end coordinates
-- android_input_text: type text (tap input field first; on iOS use tap(testID=...) to focus, then native keyboard)
+- android_input_text / ios_input_text: type text (tap input field first to focus). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
+- clear_focused_input: clear the focused TextInput via onChangeText (controlled-state safe). Pair with input_text for replace flows, or use input_text({replace:true}) for one-shot.
+- dismiss_keyboard: blur the focused input, closing the keyboard.
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)
 - ios_open_url: deep links and universal links
 
@@ -350,7 +363,7 @@ export const DECISION_TREE: string = [
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup     — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs      — console debugging (get_logs, search_logs)",
-    "  interact  — device interaction (tap, android_swipe, screenshots, android_input_text)",
+    "  interact  — device interaction (tap, android_swipe, screenshots, android_input_text, clear_focused_input, dismiss_keyboard)",
     "  layout    — on-screen layout check (get_screen_layout, get_pressable_elements)",
     "  inspect   — component inspection (find_components, inspect_component, get_inspector_selection)",
     "  network   — network request inspection (get_network_requests, search_network)",
