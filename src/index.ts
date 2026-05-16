@@ -4544,14 +4544,25 @@ registerToolWithTelemetry(
                 .describe(
                     "If true, clear the focused TextInput via React onChangeText before typing. Use to set a pre-filled field to an exact value without concatenation. Requires Bridgeless/Fabric."
                 ),
+            device: z
+                .string()
+                .optional()
+                .describe(
+                    "Optional RN device name (substring match) — needed by replace:true when multiple RN apps are connected, to disambiguate which device's focused input to clear. Single-device sessions can omit."
+                ),
             deviceId: z
                 .string()
                 .optional()
                 .describe("Optional device ID. Uses first available device if not specified.")
         }
     },
-    async ({ text, replace, deviceId }) => {
-        const result = await inputTextWithReplace(text, replace === true, (t) => androidInputText(t, deviceId));
+    async ({ text, replace, device, deviceId }) => {
+        const result = await inputTextWithReplace(
+            text,
+            replace === true,
+            (t) => androidInputText(t, deviceId),
+            () => clearFocusedInput(device)
+        );
 
         return {
             content: [
@@ -5091,11 +5102,22 @@ registerToolWithTelemetry(
                 .describe(
                     "If true, clear the focused TextInput via React onChangeText before typing. Use to set a pre-filled field to an exact value without concatenation. Requires Bridgeless/Fabric."
                 ),
+            device: z
+                .string()
+                .optional()
+                .describe(
+                    "Optional RN device name (substring match) — needed by replace:true when multiple RN apps are connected, to disambiguate which device's focused input to clear. Single-device sessions can omit."
+                ),
             udid: z.string().optional().describe("Optional simulator UDID (from list_ios_simulators). Uses booted simulator if not specified.")
         }
     },
-    async ({ text, replace, udid }) => {
-        const result = await inputTextWithReplace(text, replace === true, (t) => iosInputText(t, udid));
+    async ({ text, replace, device, udid }) => {
+        const result = await inputTextWithReplace(
+            text,
+            replace === true,
+            (t) => iosInputText(t, udid),
+            () => clearFocusedInput(device)
+        );
 
         return {
             content: [
