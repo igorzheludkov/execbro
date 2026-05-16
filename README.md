@@ -38,6 +38,7 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 - **Android Devices** - Screenshots, app install/launch, package management (via ADB)
 - **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots. Returns post-tap screenshot and verifies visual change by default
 - **UI Automation** - Swipe, long press, text input, and key events on both platforms
+- **TextInput Editing** (Bridgeless/Fabric) - `clear_focused_input` and `dismiss_keyboard` operate on whatever has focus; `ios_input_text` / `android_input_text` accept `replace:true` to overwrite pre-filled values. All three update React state through `onChangeText` so controlled components (Formik, react-hook-form, useState) stay consistent
 - **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
 - **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
 
@@ -290,6 +291,9 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `get_network_requests`                  | Monitor HTTP requests with method/status filtering                                       |
 | `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
 | `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
+| `ios_input_text` / `android_input_text` | Type text into the focused field. `replace:true` clears pre-filled values first (Fabric) |
+| `clear_focused_input`                   | Clear the focused TextInput via React `onChangeText`, keeping controlled state in sync   |
+| `dismiss_keyboard`                      | Blur the focused input and close the on-screen keyboard                                  |
 | `execute_in_app`                        | Run JS expressions in the app runtime (REPL-style)                                       |
 | `ios_screenshot` / `android_screenshot` | Take device screenshots                                                                  |
 
