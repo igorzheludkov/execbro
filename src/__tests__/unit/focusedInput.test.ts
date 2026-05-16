@@ -12,6 +12,7 @@ describe("buildFindFocusedInputExpression", () => {
         expect(expr).toContain("getFiberRoots");
         expect(expr).toContain("RCTSinglelineTextInputView");
         expect(expr).toContain("RCTMultilineTextInputView");
+        expect(expr).toContain("AndroidTextInput");
     });
 
     it("handles string-type host fibers (Fabric)", () => {
