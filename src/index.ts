@@ -12,7 +12,7 @@ import { getLicenseStatus, getDashboardUrl, getUsageInfo, getPricingInfo, format
 import { API_BASE_URL } from "./core/config.js";
 import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
 import { UserInputError } from "./core/errors.js";
-import { clearFocusedInput, dismissKeyboard } from "./core/focusedInputTools.js";
+import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "./core/focusedInputTools.js";
 import { getInstallationId, getServerVersion, getPackageName, isDevMode, TELEMETRY_JSONL_PATH, categorizeError } from "./core/telemetry.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { reduxDispatch, reduxGetState } from "./core/redux.js";
@@ -4534,17 +4534,24 @@ registerToolWithTelemetry(
             " The text will be input at the current focus point (tap an input field first)." +
             "\nPURPOSE: Send keystrokes to whichever input currently has focus on Android — the tool does NOT focus a field itself." +
             "\nWHEN TO USE: Only after an input is already focused, or when `tap(text=...)` on the input didn't take focus for some reason." +
+            "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value." +
             "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
         inputSchema: {
             text: z.string().describe("Text to type"),
+            replace: z
+                .boolean()
+                .optional()
+                .describe(
+                    "If true, clear the focused TextInput via React onChangeText before typing. Use to set a pre-filled field to an exact value without concatenation. Requires Bridgeless/Fabric."
+                ),
             deviceId: z
                 .string()
                 .optional()
                 .describe("Optional device ID. Uses first available device if not specified.")
         }
     },
-    async ({ text, deviceId }) => {
-        const result = await androidInputText(text, deviceId);
+    async ({ text, replace, deviceId }) => {
+        const result = await inputTextWithReplace(text, replace === true, (t) => androidInputText(t, deviceId));
 
         return {
             content: [

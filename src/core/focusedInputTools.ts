@@ -67,3 +67,24 @@ export async function dismissKeyboard(
     }
     return { success: false, error: r.reason };
 }
+
+export interface TypeResult {
+    success: boolean;
+    result?: string;
+    error?: string;
+}
+
+export async function inputTextWithReplace(
+    text: string,
+    replace: boolean,
+    typeFn: (text: string) => Promise<TypeResult>,
+    clearFn: () => Promise<ClearFocusedInputToolResult> = () => clearFocusedInput()
+): Promise<TypeResult> {
+    if (replace) {
+        const clearResult = await clearFn();
+        if (!clearResult.success) {
+            return { success: false, error: clearResult.error };
+        }
+    }
+    return typeFn(text);
+}
