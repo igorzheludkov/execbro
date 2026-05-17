@@ -193,16 +193,26 @@ export interface ConnectionCheckResult {
     message: string | null;
 }
 
-// Result of ensure_connection
+// Per-device entry surfaced by ensure_connection. `healthCheckPassed` is
+// per-device so callers can tell which of N connected apps went stale; the
+// top-level `healthCheckPassed` aggregates with AND (conservative).
+// `deviceName` matches the identifier tools like `tap` accept via `device=...`.
+export interface EnsureConnectionDeviceInfo {
+    deviceName: string;
+    deviceTitle: string;
+    platform: "ios" | "android";
+    port: number;
+    uptime: string;
+    contextId: number | null;
+    healthCheckPassed: boolean;
+}
+
+// Result of ensure_connection. `connected` is true when at least one app has
+// an OPEN WebSocket; `healthCheckPassed` requires ALL connected apps to pass.
 export interface EnsureConnectionResult {
     connected: boolean;
     wasReconnected: boolean;
     healthCheckPassed: boolean;
-    connectionInfo: {
-        deviceTitle: string;
-        port: number;
-        uptime: string;
-        contextId: number | null;
-    } | null;
+    connectionInfos: EnsureConnectionDeviceInfo[];
     error?: string;
 }
