@@ -22,6 +22,12 @@ ExecBro is the runtime bridge that gives your AI coding assistant live access to
 
 Have an idea or found something that could be better? Head over to [GitHub Discussions](https://github.com/igorzheludkov/react-native-ai-devtools/discussions) to share feedback, request features, and vote on what gets built next.
 
+## Pricing
+
+ExecBro is and will remain free for typical workflows. A paid tier launches in summer 2026 with a single $9/month plan covering unlimited tool calls; the free tier will be capped at 300 tool calls / 30 days at that point. Everyone already using ExecBro before the announcement gets 3 months free of the paid tier — auto-applied via your installation ID, no action required.
+
+Full details and exact dates will be published at [execbro.com/pricing](https://execbro.com/pricing) closer to launch. Until then, nothing changes for current users.
+
 ## Features
 
 ### Runtime Interaction
@@ -58,7 +64,7 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 ### Related
 
-- **[execbro-runner](https://github.com/igorzheludkov/execbro-runner)** *(early alpha, in active development)* — queue-based autonomous task runner built on top of ExecBro. Drop in a markdown prompt and a background daemon spins up an isolated sandbox (git worktree + simulator/emulator + Metro), runs Claude Code headlessly, has the agent verify the change live on the device via ExecBro, and optionally pushes a branch with a PR URL. Fire-and-forget Claude Code runs for your React Native app.
+- **[execbro-runner](https://github.com/igorzheludkov/execbro-runner)** _(early alpha, in active development)_ — queue-based autonomous task runner built on top of ExecBro. Drop in a markdown prompt and a background daemon spins up an isolated sandbox (git worktree + simulator/emulator + Metro), runs Claude Code headlessly, has the agent verify the change live on the device via ExecBro, and optionally pushes a branch with a PR URL. Fire-and-forget Claude Code runs for your React Native app.
 
 ## Setup
 
@@ -82,13 +88,13 @@ Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
 
 ```json
 {
-  "mcpServers": {
-    "execbro": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"]
+    "mcpServers": {
+        "execbro": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"]
+        }
     }
-  }
 }
 ```
 
@@ -101,12 +107,12 @@ Edit the config at:
 
 ```json
 {
-  "mcpServers": {
-    "execbro": {
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"]
+    "mcpServers": {
+        "execbro": {
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"]
+        }
     }
-  }
 }
 ```
 
@@ -132,12 +138,12 @@ args = ["-y", "react-native-ai-devtools@latest"]
 
 ```json
 {
-  "mcpServers": {
-    "execbro": {
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"]
+    "mcpServers": {
+        "execbro": {
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"]
+        }
     }
-  }
 }
 ```
 
@@ -147,13 +153,13 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ```json
 {
-  "servers": {
-    "execbro": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"]
+    "servers": {
+        "execbro": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"]
+        }
     }
-  }
 }
 ```
 
@@ -163,12 +169,12 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ```json
 {
-  "mcpServers": {
-    "execbro": {
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"]
+    "mcpServers": {
+        "execbro": {
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"]
+        }
     }
-  }
 }
 ```
 
@@ -178,13 +184,13 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
 
 ```json
 {
-  "context_servers": {
-    "execbro": {
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"],
-      "env": {}
+    "context_servers": {
+        "execbro": {
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"],
+            "env": {}
+        }
     }
-  }
 }
 ```
 
@@ -194,12 +200,12 @@ Edit `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project):
 
 ```json
 {
-  "mcpServers": {
-    "execbro": {
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"]
+    "mcpServers": {
+        "execbro": {
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"]
+        }
     }
-  }
 }
 ```
 
@@ -241,14 +247,14 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
 
 ```json
 {
-  "mcpServers": {
-    "execbro": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"],
-      "env": { "IOS_DRIVER": "idb" }
+    "mcpServers": {
+        "execbro": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"],
+            "env": { "IOS_DRIVER": "idb" }
+        }
     }
-  }
 }
 ```
 
@@ -300,22 +306,22 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 
 1. Start your React Native app:
 
-   ```bash
-   npm start
-   # or
-   expo start
-   ```
+    ```bash
+    npm start
+    # or
+    expo start
+    ```
 
 2. In Claude Code, scan for Metro:
 
-   ```
-   Use scan_metro to find and connect to Metro
-   ```
+    ```
+    Use scan_metro to find and connect to Metro
+    ```
 
 3. Get logs:
-   ```
-   Use get_logs to see recent console output
-   ```
+    ```
+    Use get_logs to see recent console output
+    ```
 
 ## Detailed Guides
 
@@ -346,8 +352,8 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 2. Connects to the main JS runtime via CDP (Chrome DevTools Protocol) WebSocket
 3. Enables `Runtime.enable` to receive `Runtime.consoleAPICalled` events
 4. Network capture via two paths:
-   - **With SDK**: Reads from the SDK's in-app buffer via `Runtime.evaluate` — captures all requests from startup with full headers and bodies, including cold-start events that CDP would miss
-   - **Without SDK**: Enables CDP `Network.enable` (on supported targets) or injects a JS fetch interceptor as fallback. On cold start, events emitted before the CDP connection is established are lost; subsequent reloads capture everything
+    - **With SDK**: Reads from the SDK's in-app buffer via `Runtime.evaluate` — captures all requests from startup with full headers and bodies, including cold-start events that CDP would miss
+    - **Without SDK**: Enables CDP `Network.enable` (on supported targets) or injects a JS fetch interceptor as fallback. On cold start, events emitted before the CDP connection is established are lost; subsequent reloads capture everything
 5. Stores logs and network requests in circular buffers for retrieval
 
 ## Connection Management
@@ -453,14 +459,14 @@ To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `
 
 ```json
 {
-  "mcpServers": {
-    "execbro": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "react-native-ai-devtools@latest"],
-      "env": { "RN_DEBUGGER_TELEMETRY": "false" }
+    "mcpServers": {
+        "execbro": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "react-native-ai-devtools@latest"],
+            "env": { "RN_DEBUGGER_TELEMETRY": "false" }
+        }
     }
-  }
 }
 ```
 
