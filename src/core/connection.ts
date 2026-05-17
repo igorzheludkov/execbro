@@ -204,7 +204,7 @@ function findAppKeyForDevice(device: DeviceInfo): string | null {
 }
 
 // Helper to convert WebSocket readyState to readable name
-function getWebSocketStateName(state: number): string {
+export function getWebSocketStateName(state: number): string {
     switch (state) {
         case WebSocket.CONNECTING: return "CONNECTING";
         case WebSocket.OPEN: return "OPEN";

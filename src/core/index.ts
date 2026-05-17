@@ -115,6 +115,7 @@ export {
   purgeStaleConnectionsForPorts,
   verifyLogPipeline,
   isHealthCheckMarker,
+  getWebSocketStateName,
 } from "./connection.js";
 
 export type {
