@@ -4,19 +4,20 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer as createHttpServer } from "node:http";
-import { existsSync, unlinkSync } from "fs";
-import { z } from "zod";
 
-import { getGuideOverview, getGuideByTopic, getAvailableTopics, DECISION_TREE } from "./core/guides.js";
-import { getLicenseStatus, getDashboardUrl, getUsageInfo, getPricingInfo, formatPlanPrice } from "./core/license.js";
-import { API_BASE_URL } from "./core/config.js";
-import { getPostHogClient, identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
-import { UserInputError } from "./core/errors.js";
-import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "./core/focusedInputTools.js";
-import { getInstallationId, getServerVersion, getPackageName, isDevMode, TELEMETRY_JSONL_PATH, categorizeError } from "./core/telemetry.js";
-import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
-import { reduxDispatch, reduxGetState } from "./core/redux.js";
-import { tap, convertScreenshotToTapCoords, type TapResult } from "./pro/tap.js";
+import { DECISION_TREE } from "./core/guides.js";
+import { identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
+import { getInstallationId, isDevMode, initTelemetry } from "./core/telemetry.js";
+import {
+    connectedApps,
+    cancelAllReconnectionTimers,
+    clearAllConnectionState,
+    clearAllCDPMessageTimes,
+    suppressReconnection,
+    disconnectMetroBuildEvents,
+} from "./core/index.js";
+import { installToolRegistryInterceptor, toolRegistry } from "./core/register.js";
+
 import { registerAccountTools } from "./tools/accountTools.js";
 import { registerMetaTools } from "./tools/metaTools.js";
 import { registerReduxTools } from "./tools/reduxTools.js";
@@ -30,147 +31,10 @@ import { registerScreenshotTools } from "./tools/screenshotTools.js";
 import { registerInteractionTools } from "./tools/interactionTools.js";
 import { registerComponentTools } from "./tools/componentTools.js";
 
-import type { DeviceInfo } from "./core/index.js";
-import {
-    logBuffers,
-    networkBuffers,
-    getLogBuffer,
-    getNetworkBuffer,
-    getAllLogs,
-    getTotalLogCount,
-    getConnectedAppByDevice,
-    getConnectedAppBySimulatorUdid,
-    getConnectedAppByAndroidDeviceId,
-    LogBuffer,
-    NetworkBuffer,
-    bundleErrorBuffer,
-    imageBuffer,
-    connectedApps,
-    getActiveSimulatorUdid,
-    getActiveOrBootedSimulatorUdid,
-    scanMetroPorts,
-    fetchDevices,
-    selectMainDevice,
-    filterDebuggableDevices,
-    connectToDevice,
-    getConnectedApps,
-    executeInApp,
-    listDebugGlobals,
-    inspectGlobal,
-    reloadApp,
-    // React Component Inspection
-    getComponentTree,
-    getScreenLayout,
-    getPressableElements,
-    inspectComponent,
-    findComponents,
-    inspectAtPoint,
-    toggleElementInspector,
-    getInspectorSelection,
-    getInspectorSelectionAtPoint,
-    getFirstConnectedApp,
-    getLogs,
-    searchLogs,
-    getLogSummary,
-    getNetworkRequests,
-    searchNetworkRequests,
-    getNetworkStats,
-    formatRequestDetails,
-    // Connection state
-    getAllConnectionStates,
-    getAllConnectionMetadata,
-    getRecentGaps,
-    formatDuration,
-    ConnectionGap,
-    cancelAllReconnectionTimers,
-    cancelReconnectionTimer,
-    clearAllConnectionState,
-    clearAllCDPMessageTimes,
-    suppressReconnection,
-    suppressReconnectionForKey,
-    clearReconnectionSuppression,
-    purgeStaleConnectionsForPorts,
-    // Context health tracking
-    getContextHealth,
-    // Connection resilience
-    ensureConnection,
-    checkAndEnsureConnection,
-    getPassiveConnectionStatus,
-    // Bundle (Metro build errors)
-    connectMetroBuildEvents,
-    disconnectMetroBuildEvents,
-    getBundleErrors,
-    getBundleStatusWithErrors,
-    checkMetroState,
-    // Error screen parsing (OCR fallback)
-    parseErrorScreenText,
-    formatParsedError,
-    // OCR
-    recognizeText,
-    inferIOSDevicePixelRatio,
-    // Android
-    listAndroidDevices,
-    androidScreenshot,
-    androidInstallApp,
-    androidLaunchApp,
-    androidListPackages,
-    // Android UI Input (Phase 2)
-    ANDROID_KEY_EVENTS,
-    androidLongPress,
-    androidSwipe,
-    androidInputText,
-    androidKeyEvent,
-    androidGetScreenSize,
-    androidGetDensity,
-    androidGetStatusBarHeight,
-    // iOS
-    listIOSSimulators,
-    iosScreenshot,
-    iosInstallApp,
-    iosLaunchApp,
-    iosOpenUrl,
-    iosTerminateApp,
-    iosBootSimulator,
-    // iOS UI driver tools
-    isUiDriverAvailable,
-    getUiDriverInstallHint,
-    iosButton,
-    iosInputText,
-    iosDescribeAll,
-    detectIOSSystemOverlay,
-    formatIOSSystemOverlayWarning,
-    IOS_BUTTON_TYPES,
-    getDevicePixelRatio,
-    getIOSSafeAreaTop,
-    // Telemetry
-    initTelemetry,
-    trackToolInvocation,
-    getTargetPlatform,
-    // Format utilities (TONL)
-    formatLogsAsTonl,
-    formatNetworkAsTonl,
-    // LogBox detection & control
-    detectLogBox,
-    formatLogBoxWarning,
-    dismissLogBox,
-    formatDismissedEntries,
-    pushLogBox,
-    addLogBoxIgnorePatterns,
-    getLastLogBoxError,
-    verifyLogPipeline,
-    formatIssueBody,
-    buildGitHubUrl,
-    shouldShowFeedbackHint,
-    markFeedbackHintShown,
-    // Native-only hints — shown when Metro-required tools are called without a connection
-    hasMetro,
-    metroMissingHintIfAbsent,
-} from "./core/index.js";
-import { resolveLogBuffer, resolveNetworkBuffer } from "./core/toolHelpers.js";
-import { installToolRegistryInterceptor, registerToolWithTelemetry, toolRegistry } from "./core/register.js";
+// Re-export so tests (src/__tests__/unit/toolDescriptions.test.ts) can enumerate
+// registered tools without booting the server.
 export { toolRegistry };
 
-// Create MCP server
 const server = new McpServer(
     {
         name: "ExecBro (Mobile DevTools)",
@@ -188,43 +52,6 @@ const server = new McpServer(
 );
 installToolRegistryInterceptor(server);
 
-// ============================================================================
-// Telemetry Wrapper
-// ============================================================================
-
-// Banner helpers for platform-specific tool descriptions. Appended after the
-// verbatim first sentence of every ios_*/android_* tool to steer agents toward
-// cross-platform primaries (tap, get_screen_layout, etc) unless native-only
-// behavior is required. See src/core/nativeOnlyHints.ts for the complementary
-// runtime hint shown when Metro is absent.
-const platformFallbackBanner = (prefer: string) =>
-    `\n[PLATFORM FALLBACK — prefer ${prefer} unless you specifically need native-only behavior]`;
-
-const platformUniqueBanner = (useCase: string) =>
-    `\n[PLATFORM-SPECIFIC — no cross-platform equivalent; use when ${useCase}]`;
-
-const primaryInteractionBanner = () =>
-    `\n[PRIMARY INTERACTION TOOL — works on iOS and Android; prefer over ios_*/android_* siblings]`;
-
-
-
-
-
-
-
-
-
-
-// ============================================================================
-// Bundle/Build Error Tools
-// ============================================================================
-
-
-// ============================================================================
-// Android Tools
-
-// ============================================================================
-
 registerAccountTools(server);
 registerMetaTools(server, {
     devMode: isDevMode(),
@@ -241,15 +68,11 @@ registerScreenshotTools(server);
 registerInteractionTools(server);
 registerComponentTools(server);
 
-
-// Main function
 async function main() {
-    // Initialize telemetry (checks opt-out env var, loads/creates installation ID)
-    // License validation is lazy — runs on first tool use via ensureLicense()
     initTelemetry();
     identifyIfDevMode(getInstallationId());
 
-    // --- Eager usage check (pre-loads usage cache for tool-level gate) ---
+    // Pre-load usage cache so the tool-level gate has fresh data on first tool call.
     const { ensureLicense } = await import("./core/license.js");
     await ensureLicense();
 
@@ -286,7 +109,6 @@ async function main() {
         await server.connect(transport);
         console.error("[execbro] Server started on stdio");
     }
-
 }
 
 // Skip boot when loaded by unit tests — tests import this module purely to
