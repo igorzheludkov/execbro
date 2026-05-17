@@ -235,3 +235,21 @@ function cleanupLocalFiles(): void {
         if (existsSync(TELEMETRY_FILE)) unlinkSync(TELEMETRY_FILE);
     } catch { /* best-effort */ }
 }
+
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerToolWithTelemetry } from "../core/register.js";
+
+export function registerAccountTools(server: McpServer): void {
+    registerToolWithTelemetry(
+        server,
+        "activate_license",
+        getActivateLicenseConfig(),
+        handleActivateLicense,
+    );
+    registerToolWithTelemetry(
+        server,
+        "delete_account",
+        getDeleteAccountConfig(),
+        handleDeleteAccount,
+    );
+}
