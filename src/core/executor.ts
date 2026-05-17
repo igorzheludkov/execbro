@@ -2112,6 +2112,13 @@ export async function getPressableElements(
         targetApp = getFirstConnectedApp();
     }
 
+    // When the caller didn't pin a platform, adopt the resolved app's platform so
+    // downstream branches (Android coordinate reconciliation below) run uniformly
+    // regardless of entry point. The standalone get_pressable_elements MCP tool
+    // omits `platform`; without this derivation it would skip reconciliation and
+    // return raw fiber DP that downstream consumers misinterpret as device pixels.
+    const effectivePlatform: "ios" | "android" | undefined = platform ?? targetApp?.platform;
+
     // E1 fallback: no app resolved for THIS device → use platform accessibility tree.
     // Only kicks in when caller passed `platform` so we don't break older
     // metro-required call paths that didn't opt into the fallback.
@@ -2743,7 +2750,7 @@ export async function getPressableElements(
             // region" hint, and they're better than nothing.
             //
             // iOS is unaffected — fiber returns points and AXe returns points; uniform.
-            if (platform === "android" && pressableElements.length > 0) {
+            if (effectivePlatform === "android" && pressableElements.length > 0) {
                 let densityScale = 2.625;
                 let statusBarPixels = 0;
                 try {
