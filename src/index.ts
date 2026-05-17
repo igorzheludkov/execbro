@@ -2788,10 +2788,18 @@ registerToolWithTelemetry(
                     safeAreaTop
                 });
             } else {
-                const deviceId = targetApp.deviceInfo?.deviceName;
-                const shot = await androidScreenshot(undefined, deviceId);
+                // Metro's `deviceName` is the device model (e.g. "sdk_gphone16k_arm64"),
+                // not the adb serial (e.g. "emulator-5554"), so passing it as -s makes
+                // adb miss the device and androidScreenshot/androidGetDensity silently
+                // return defaults (scale=1, density=160). That leaves coords in raw
+                // device pixels — off by ~1.2× from the screenshot/JPEG space the tool
+                // description promises. Pass undefined to let adb auto-pick (matches
+                // how android_screenshot works when called without deviceId). Multi-
+                // Android-device support tracks separately under the multi-device
+                // refactor; this path is a single-Android-device fix.
+                const shot = await androidScreenshot(undefined, undefined);
                 const screenshotScale = shot.scaleFactor || 1;
-                const density = await androidGetDensity(deviceId).catch(() => ({ density: 160 }));
+                const density = await androidGetDensity(undefined).catch(() => ({ density: 160 }));
                 const devicePixelRatio = (density.density || 160) / 160;
                 if (shot.originalWidth && shot.originalHeight) {
                     targetApp.lastScreenshot = {
@@ -2846,7 +2854,16 @@ function formatPressablesInPixels(
             if (cy < safeAreaTop) cy += safeAreaTop;
             if (fy < safeAreaTop) fy += safeAreaTop;
         }
-        const toPx = (v: number) => Math.round((v * devicePixelRatio) / screenshotScale);
+        // iOS: fiber returns points → convert points × DPR / screenshotScale = JPEG px.
+        // Android: getPressableElements reconciles fiber DP against uiautomator device-pixel
+        // bounds (executor.ts, 2026-05-17). After reconciliation, coords are already in
+        // device pixels — only the JPEG downscale needs to be applied. Multiplying by DPR
+        // here would re-inflate them by ~density/160 (~2.6× on a 420dpi device), reproducing
+        // the original out-of-bounds bug.
+        const toPx = (v: number) =>
+            platform === "android"
+                ? Math.round(v / screenshotScale)
+                : Math.round((v * devicePixelRatio) / screenshotScale);
         const cx = toPx(el.center.x);
         const cyPx = toPx(cy);
         const fx = toPx(el.frame.x);
