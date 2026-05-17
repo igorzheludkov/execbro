@@ -27,6 +27,7 @@ import {
     isUiDriverAvailable,
     getTotalLogCount,
     suppressReconnectionForKey,
+    getWebSocketStateName,
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 
@@ -298,8 +299,16 @@ export function registerConnectionTools(server: McpServer): void {
             inputSchema: {}
         },
         async () => {
-            const apps = getConnectedApps();
-    
+            // Brief settle: if any entry is non-OPEN, wait once for sibling
+            // sockets to finish handshaking (e.g. an Android target that
+            // connected microseconds after scan_metro returned but isn't
+            // yet OPEN). Avoids flapping the listing right after scan_metro.
+            let apps = getConnectedApps();
+            if (apps.length > 0 && apps.some(({ isConnected }) => !isConnected)) {
+                await new Promise((r) => setTimeout(r, 250));
+                apps = getConnectedApps();
+            }
+
             if (apps.length === 0) {
                 return {
                     content: [
@@ -310,22 +319,26 @@ export function registerConnectionTools(server: McpServer): void {
                     ]
                 };
             }
-    
-            const deviceLines = apps
-                .filter(({ isConnected }) => isConnected)
-                .map(({ app }, i) => {
-                    const name = app.deviceInfo.deviceName || app.deviceInfo.title;
-                    const appId = app.deviceInfo.appId || app.deviceInfo.title.split(" (")[0] || "unknown";
-                    const lines = [`  ${i + 1}. ${name} — ${appId} (${app.platform}, port ${app.port})`];
-                    if (app.appDetection) {
-                        const d = app.appDetection;
-                        const version = d.reactNativeVersion !== "unknown" ? `RN ${d.reactNativeVersion}` : "RN unknown";
-                        const expo = d.expoSdkVersion ? `, Expo SDK ${d.expoSdkVersion}` : "";
-                        lines.push(`     Environment: ${version}, ${d.architecture} arch, ${d.jsEngine}, ${app.platform} ${d.osVersion}${expo}`);
-                    }
-                    return lines.join("\n");
-                });
-    
+
+            // Show every tracked entry, marking non-OPEN sockets with their
+            // WebSocket state (CONNECTING / CLOSING / CLOSED) so flapping is
+            // visible instead of silently filtered out.
+            const deviceLines = apps.map(({ app, isConnected }, i) => {
+                const name = app.deviceInfo.deviceName || app.deviceInfo.title;
+                const appId = app.deviceInfo.appId || app.deviceInfo.title.split(" (")[0] || "unknown";
+                const statusSuffix = isConnected
+                    ? ""
+                    : ` [${getWebSocketStateName(app.ws.readyState).toLowerCase()} — reconnecting]`;
+                const lines = [`  ${i + 1}. ${name} — ${appId} (${app.platform}, port ${app.port})${statusSuffix}`];
+                if (app.appDetection) {
+                    const d = app.appDetection;
+                    const version = d.reactNativeVersion !== "unknown" ? `RN ${d.reactNativeVersion}` : "RN unknown";
+                    const expo = d.expoSdkVersion ? `, Expo SDK ${d.expoSdkVersion}` : "";
+                    lines.push(`     Environment: ${version}, ${d.architecture} arch, ${d.jsEngine}, ${app.platform} ${d.osVersion}${expo}`);
+                }
+                return lines.join("\n");
+            });
+
             const text = [
                 `Connected devices:`,
                 ...deviceLines,
@@ -334,7 +347,7 @@ export function registerConnectionTools(server: McpServer): void {
                 ``,
                 `Total logs in buffer: ${getTotalLogCount()}`
             ].join("\n");
-    
+
             return {
                 content: [{ type: "text", text }]
             };
