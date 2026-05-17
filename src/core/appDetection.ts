@@ -98,26 +98,45 @@ export function scheduleAppDetection(app: ConnectedApp): void {
         trackAppDetection(presumptive);
     }
 
-    setTimeout(async () => {
-        try {
-            const result = await detectApp(app.ws);
-            if (result) {
-                const parsed = parseDetectionResult(result, app.platform);
-                if (parsed) {
-                    parsed.detectionSource = "probe";
-                    app.appDetection = parsed;
-                    trackAppDetection(parsed);
-                    const versionStr = parsed.reactNativeVersion !== "unknown"
-                        ? `RN ${parsed.reactNativeVersion}, ` : "";
-                    console.error(
-                        `[execbro] App detected: ${versionStr}${parsed.architecture} arch, ${parsed.jsEngine}, ${parsed.appPlatform} ${parsed.osVersion}`
-                    );
+    app.appDetectionPromise = new Promise<void>((resolve) => {
+        setTimeout(async () => {
+            try {
+                const result = await detectApp(app.ws);
+                if (result) {
+                    const parsed = parseDetectionResult(result, app.platform);
+                    if (parsed) {
+                        parsed.detectionSource = "probe";
+                        app.appDetection = parsed;
+                        trackAppDetection(parsed);
+                        const versionStr = parsed.reactNativeVersion !== "unknown"
+                            ? `RN ${parsed.reactNativeVersion}, ` : "";
+                        console.error(
+                            `[execbro] App detected: ${versionStr}${parsed.architecture} arch, ${parsed.jsEngine}, ${parsed.appPlatform} ${parsed.osVersion}`
+                        );
+                    }
                 }
+            } catch (e) {
+                console.error(`[execbro] App detection failed: ${e}`);
+            } finally {
+                resolve();
             }
-        } catch (e) {
-            console.error(`[execbro] App detection failed: ${e}`);
-        }
-    }, DETECTION_DELAY_MS);
+        }, DETECTION_DELAY_MS);
+    });
+}
+
+/**
+ * Await an in-flight scheduleAppDetection probe, racing it against `timeoutMs`.
+ * Resolves when the probe finishes OR the timeout elapses — never throws and
+ * never blocks longer than `timeoutMs`. No-op when no probe is pending or the
+ * stored result is already a probe success.
+ */
+export function awaitAppDetection(app: ConnectedApp, timeoutMs: number): Promise<void> {
+    if (!app.appDetectionPromise) return Promise.resolve();
+    if (app.appDetection?.detectionSource === "probe") return Promise.resolve();
+    return Promise.race([
+        app.appDetectionPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
 }
 
 function detectApp(ws: WebSocket): Promise<Record<string, unknown> | null> {

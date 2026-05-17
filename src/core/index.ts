@@ -123,6 +123,8 @@ export type {
   LogPipelineResult,
 } from "./connection.js";
 
+export { awaitAppDetection } from "./appDetection.js";
+
 // Native-only hint builder — used when Metro-required tools are called without a Metro connection
 export {
   hasMetro,
