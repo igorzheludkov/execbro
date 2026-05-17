@@ -17,12 +17,7 @@ import { getInstallationId, getServerVersion, getPackageName, isDevMode, TELEMET
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork, querySDKConsole, getSDKConsoleStats, clearSDKConsole } from "./core/sdkBridge.js";
 import { reduxDispatch, reduxGetState } from "./core/redux.js";
 import { tap, convertScreenshotToTapCoords, type TapResult } from "./pro/tap.js";
-import {
-    getActivateLicenseConfig,
-    handleActivateLicense,
-    getDeleteAccountConfig,
-    handleDeleteAccount,
-} from "./tools/accountTools.js";
+import { registerAccountTools } from "./tools/accountTools.js";
 
 import type { DeviceInfo } from "./core/index.js";
 import {
@@ -4926,21 +4921,7 @@ registerToolWithTelemetry(
     }
 );
 
-// Tool: Activate Pro license
-registerToolWithTelemetry(
-    server,
-    "activate_license",
-    getActivateLicenseConfig(),
-    handleActivateLicense,
-);
-
-// Tool: Delete account
-registerToolWithTelemetry(
-    server,
-    "delete_account",
-    getDeleteAccountConfig(),
-    handleDeleteAccount,
-);
+registerAccountTools(server);
 
 // Dev-only tool: reset local telemetry data
 if (isDevMode()) {
