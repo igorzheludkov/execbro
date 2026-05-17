@@ -40,6 +40,10 @@ export interface ConnectedApp {
     sdkPresent?: boolean;
     sdkProbeTimer?: NodeJS.Timeout;
     appDetection?: AppDetectionResult;
+    // Resolves when scheduleAppDetection's probe finishes (success, error, or
+    // timeout). Callers that want to display detection info — e.g. get_apps —
+    // can race this against a cap to avoid showing presumptive "RN unknown".
+    appDetectionPromise?: Promise<void>;
 }
 
 export interface AppDetectionResult {

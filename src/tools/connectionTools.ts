@@ -28,6 +28,7 @@ import {
     getTotalLogCount,
     suppressReconnectionForKey,
     getWebSocketStateName,
+    awaitAppDetection,
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 
@@ -308,6 +309,13 @@ export function registerConnectionTools(server: McpServer): void {
                 await new Promise((r) => setTimeout(r, 250));
                 apps = getConnectedApps();
             }
+
+            // Wait for any in-flight app-detection probes so we don't print
+            // presumptive "RN unknown" placeholders right after a fresh
+            // connect. Capped at 1500ms per device (covers the 500ms
+            // schedule delay + ~1s probe latency) — never blocks longer.
+            await Promise.all(apps.map(({ app }) => awaitAppDetection(app, 1500)));
+            apps = getConnectedApps();
 
             if (apps.length === 0) {
                 return {
