@@ -1358,8 +1358,11 @@ export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
         const names = matches.map(a => a.deviceInfo.deviceName || a.deviceInfo.title).join(", ");
         throw new UserInputError(`Multiple devices match "${device}": ${names}. Be more specific (use the full device name for an exact match).`);
     }
-    const available = allOpenNames.length > 0 ? ` Available: ${allOpenNames.join(", ")}.` : "";
-    throw new UserInputError(`No connected device matches "${device}".${available} Run get_apps to see available devices.`);
+    if (allOpenNames.length === 0) {
+        throw new UserInputError(`No connected device matches "${device}". No devices are currently connected — run scan_metro to discover and connect to Metro servers.`);
+    }
+    const quoted = allOpenNames.map(n => `"${n}"`).join(", ");
+    throw new UserInputError(`No connected device matches "${device}". Connected devices: ${quoted}. Retry with one of these names (substring match, case-insensitive).`);
 }
 
 // Check if any app is connected with an OPEN WebSocket
