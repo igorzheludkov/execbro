@@ -160,7 +160,9 @@ import {
     hasMetro,
     metroMissingHintIfAbsent,
 } from "./core/index.js";
-import { resolveLogBuffer, resolveNetworkBuffer, estimateImageTokens } from "./core/toolHelpers.js";
+import { resolveLogBuffer, resolveNetworkBuffer } from "./core/toolHelpers.js";
+import { installToolRegistryInterceptor, registerToolWithTelemetry, toolRegistry } from "./core/register.js";
+export { toolRegistry };
 
 // Create MCP server
 const server = new McpServer(
@@ -178,32 +180,11 @@ const server = new McpServer(
         ].join("\n")
     }
 );
+installToolRegistryInterceptor(server);
 
 // ============================================================================
 // Telemetry Wrapper
 // ============================================================================
-
-// Tools that do NOT require an active Metro connection — excluded from feedback hint trigger
-const NON_METRO_TOOLS = new Set([
-    "scan_metro",
-    "connect_metro",
-    "disconnect_metro",
-    "ensure_connection",
-    "get_connection_status",
-    "get_license_status",
-    "activate_license",
-    "delete_account",
-    "get_usage_guide",
-    "get_apps",
-    "list_ios_simulators",
-    "list_android_devices",
-    "ios_boot_simulator",
-    "ios_launch_app",
-    "android_launch_app",
-    "ios_install_app",
-    "android_install_app",
-    "send_feedback"
-]);
 
 // Banner helpers for platform-specific tool descriptions. Appended after the
 // verbatim first sentence of every ios_*/android_* tool to steer agents toward
@@ -219,184 +200,10 @@ const platformUniqueBanner = (useCase: string) =>
 const primaryInteractionBanner = () =>
     `\n[PRIMARY INTERACTION TOOL — works on iOS and Android; prefer over ios_*/android_* siblings]`;
 
-// Registry for dev meta-tool — stores handlers and configs for dynamic dispatch.
-// Also exported so unit tests can enumerate every registered tool without booting
-// the server. Populated by registerToolWithTelemetry AND by the server.registerTool
-// interceptor installed below, so it captures every registration site.
-/* eslint-disable @typescript-eslint/no-explicit-any */
-export const toolRegistry = new Map<string, { config: any; handler: (args: any) => Promise<any> }>();
-
-// Interceptor: capture every direct server.registerTool call into toolRegistry so
-// tests and the dev meta-tool see the full surface (including platform-native tools
-// and the dev meta-tool itself that bypass registerToolWithTelemetry).
-const _originalRegisterTool = server.registerTool.bind(server);
-(server as any).registerTool = (name: string, config: any, handler: any) => {
-    toolRegistry.set(name, { config, handler });
-    return _originalRegisterTool(name, config, handler);
-};
-
-function registerToolWithTelemetry(toolName: string, config: any, handler: (args: any) => Promise<any>, emptyResultDetector?: (result: any) => boolean): void {
-    toolRegistry.set(toolName, { config, handler });
-    server.registerTool(toolName, config, async (args: any) => {
-        // --- Usage limit check (runs on every tool call) ---
-        // Promo is client-enforced: while promotionalPeriodEndsAt is in the future,
-        // never block — even if the backend cached canUse=false before the promo
-        // started, or if a backend bug flips canUse incorrectly.
-        const usageInfo = getUsageInfo();
-        const inPromo = !!usageInfo?.promotionalPeriodEndsAt
-            && new Date(usageInfo.promotionalPeriodEndsAt).getTime() > Date.now();
-        if (!inPromo && usageInfo && !usageInfo.canUse) {
-            const proPricing = getPricingInfo()?.pro;
-            const upgradeClause = proPricing
-                ? `Upgrade to Pro for ${formatPlanPrice(proPricing)} unlimited usage`
-                : `Upgrade to Pro for unlimited usage`;
-            const message = `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). ${upgradeClause} at ${API_BASE_URL}/pricing`;
-            return { content: [{ type: "text" as const, text: message }] };
-        }
-
-        const startTime = Date.now();
-        let success = true;
-        let errorMessage: string | undefined;
-        let errorContext: string | undefined;
-        let inputTokens: number | undefined;
-        let outputTokens: number | undefined;
-        let emptyResult: boolean | undefined;
-        let meaningful: boolean | undefined;
-        let changeRate: number | undefined;
-        let tapStrategy: string | undefined;
-        let iosDriver: string | undefined;
-        let responsePreview: string | undefined;
-        let emptyReason: string | undefined;
-        let artifactKey: string | undefined;
-        let ocrClosestMatch: string | undefined;
-        let fiberPressableCount: string | undefined;
-        let accessibilityMatchCount: string | undefined;
-        let appRoute: string | undefined;
-
-        try {
-            inputTokens = Math.ceil(JSON.stringify(args).length / 4);
-        } catch {
-            /* circular refs — leave undefined */
-        }
-
-        try {
-            const result = await handler(args);
-            // Check if result indicates an error
-            if (result?.isError) {
-                success = false;
-                // Prefer concise _errorMessage over full response text (which may be large JSON)
-                errorMessage = result._errorMessage || result.content?.[0]?.text || "Unknown error";
-            }
-            // Always propagate _errorContext when the tool provides it (e.g. tap predicate
-            // for unmeaningful outcomes where isError is false but we still want triage context).
-            if (result?._errorContext) {
-                errorContext = result._errorContext;
-            }
-            // Check for empty result (only on success, only if detector provided)
-            if (success && emptyResultDetector) {
-                try {
-                    emptyResult = emptyResultDetector(result);
-                } catch {
-                    // Detector failure should never affect tool execution
-                }
-            }
-            // Extract meaningfulness data if provided (tap tool verification)
-            if (result?._meaningful !== undefined) meaningful = result._meaningful;
-            if (result?._changeRate !== undefined) changeRate = result._changeRate;
-            if (result?._tapStrategy) tapStrategy = result._tapStrategy;
-            if (result?._iosDriver) iosDriver = result._iosDriver;
-            if (result?._emptyReason) emptyReason = result._emptyReason;
-            if (result?._artifactKey) artifactKey = result._artifactKey;
-            if (result?._ocrClosestMatch) ocrClosestMatch = result._ocrClosestMatch;
-            if (result?._fiberPressableCount) fiberPressableCount = result._fiberPressableCount;
-            if (result?._accessibilityMatchCount) accessibilityMatchCount = result._accessibilityMatchCount;
-            if (result?._appRoute) appRoute = result._appRoute;
-            if (Array.isArray(result?.content)) {
-                let totalTokens = 0;
-                for (const item of result.content) {
-                    if (item.type === "text" && typeof item.text === "string") {
-                        totalTokens += Math.ceil(item.text.length / 4);
-                    } else if (item.type === "image" && typeof item.data === "string") {
-                        totalTokens += estimateImageTokens(item.data);
-                    }
-                }
-                if (totalTokens > 0) outputTokens = totalTokens;
-            }
-            // Capture response text preview for local dev dashboard
-            if (Array.isArray(result?.content)) {
-                const textParts = result.content
-                    .filter((item: { type: string }) => item.type === "text")
-                    .map((item: { text: string }) => item.text);
-                if (textParts.length > 0) {
-                    responsePreview = textParts.join("\n").substring(0, 2000);
-                }
-            }
-            // First-install feedback hint — fires once on first successful Metro-connected tool
-            if (!NON_METRO_TOOLS.has(toolName) && shouldShowFeedbackHint()) {
-                markFeedbackHintShown();
-                // Fire-and-forget — don't block the tool response
-                pushLogBox(
-                    "Congratulations on your first tool call! If you encounter any issues or have ideas for improvement, ask your AI assistant to call send_feedback. Your feedback helps me make this product better for everyone. Best regards, ExecBro developer.",
-                    "warning",
-                    true,
-                    "logbox"
-                ).catch(() => {
-                    // Non-fatal — hint delivery failure should not affect tool execution
-                });
-            }
-            return result;
-        } catch (error) {
-            success = false;
-            errorMessage = error instanceof Error ? error.message : String(error);
-            // H2 (Step 9): UserInputError marks agent-input mistakes (unknown
-            // device, missing predicate, ambiguous match). They flow through
-            // telemetry's trackToolInvocation in the finally block; we just
-            // skip the dedicated error-tracking pipe so the dashboard surfaces
-            // real product bugs rather than validation noise.
-            if (!(error instanceof UserInputError)) {
-                getPostHogClient()?.captureException(error, getInstallationId(), { tool: toolName, server_version: getServerVersion(), package_name: getPackageName() });
-            }
-            throw error;
-        } finally {
-            const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute);
-            // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
-            // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
-            let platformKind: "rn" | "native" | null = null;
-            for (const app of connectedApps.values()) {
-                if (app.appDetection) { platformKind = "rn"; break; }
-            }
-            if (!platformKind) {
-                if (toolName.startsWith("ios_") || toolName.startsWith("android_")) platformKind = "native";
-            }
-
-            getPostHogClient()?.capture({
-                distinctId: getInstallationId(),
-                event: toolName,
-                properties: {
-                    success,
-                    duration,
-                    server_version: getServerVersion(),
-                    package_name: getPackageName(),
-                    ...(errorMessage && { error: errorMessage.substring(0, 200) }),
-                    ...(errorMessage && { error_category: categorizeError(errorMessage) }),
-                    ...(getTargetPlatform() && { platform: getTargetPlatform() }),
-                    ...(platformKind && { platform_kind: platformKind }),
-                    ...(tapStrategy && { tap_strategy: tapStrategy }),
-                    ...(meaningful !== undefined && { meaningful }),
-                    ...(changeRate !== undefined && { change_rate: changeRate }),
-                    ...(iosDriver && { ios_driver: iosDriver }),
-                    ...(emptyResult !== undefined && { empty_result: emptyResult }),
-                    ...(emptyReason && { empty_reason: emptyReason }),
-                },
-            });
-        }
-    });
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Tool: Usage guide for agents
 registerToolWithTelemetry(
+    server,
     "get_usage_guide",
     {
         description:
@@ -439,6 +246,7 @@ registerToolWithTelemetry(
 
 // Tool: Scan for Metro servers
 registerToolWithTelemetry(
+    server,
     "scan_metro",
     {
         description:
@@ -600,6 +408,7 @@ registerToolWithTelemetry(
 
 // Tool: Ensure connection health
 registerToolWithTelemetry(
+    server,
     "ensure_connection",
     {
         description:
@@ -687,6 +496,7 @@ registerToolWithTelemetry(
 
 // Tool: Get connected apps
 registerToolWithTelemetry(
+    server,
     "get_apps",
     {
         description:
@@ -746,6 +556,7 @@ registerToolWithTelemetry(
 
 // Tool: Unified tap — tries fiber, accessibility, OCR, coordinate strategies
 registerToolWithTelemetry(
+    server,
     "tap",
     {
         description:
@@ -939,6 +750,7 @@ registerToolWithTelemetry(
 
 // Tool: Get full screen layout (all components with layout styles)
 registerToolWithTelemetry(
+    server,
     "get_screen_layout",
     {
         description:
@@ -1001,6 +813,7 @@ registerToolWithTelemetry(
 
 // Tool: Get console logs
 registerToolWithTelemetry(
+    server,
     "get_logs",
     {
         description:
@@ -1254,6 +1067,7 @@ registerToolWithTelemetry(
 
 // Tool: Search logs
 registerToolWithTelemetry(
+    server,
     "search_logs",
     {
         description: "Search console logs for text (case-insensitive).\n" +
@@ -1360,6 +1174,7 @@ registerToolWithTelemetry(
 
 // Tool: iOS screenshot
 registerToolWithTelemetry(
+    server,
     "ios_screenshot",
     {
         description: "Take a screenshot from an iOS simulator. Returns the image plus two lists: (1) pressable elements — the tappable components on screen with ready-to-use pixel tap coordinates, testIDs, and labels; (2) screen layout — all visible React components for context. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the pressables list — this is the most reliable way to tap icons or visually-identified elements. Use component names from the layout for inspect_component/find_components.\n" +
@@ -1599,6 +1414,7 @@ registerToolWithTelemetry(
 
 // Tool: Android screenshot
 registerToolWithTelemetry(
+    server,
     "android_screenshot",
     {
         description: "Take a screenshot from an Android device/emulator. Returns the image plus two lists: (1) pressable elements — the tappable components on screen with ready-to-use pixel tap coordinates, testIDs, and labels; (2) screen layout — all visible React components for context. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the pressables list — this is the most reliable way to tap icons or visually-identified elements. Use component names from the layout for inspect_component/find_components.\n" +
@@ -1798,6 +1614,7 @@ registerToolWithTelemetry(
 
 // Tool: Get connection status (detailed health and gap tracking)
 registerToolWithTelemetry(
+    server,
     "get_connection_status",
     {
         description:
@@ -1905,6 +1722,7 @@ registerToolWithTelemetry(
 
 // Tool: License status
 registerToolWithTelemetry(
+    server,
     "get_license_status",
     {
         description:
@@ -1962,6 +1780,7 @@ registerToolWithTelemetry(
 
 // Tool: Send feedback / bug report / feature request
 registerToolWithTelemetry(
+    server,
     "send_feedback",
     {
         description:
@@ -2018,6 +1837,7 @@ registerToolWithTelemetry(
 
 // Tool: Clear logs
 registerToolWithTelemetry(
+    server,
     "clear_logs",
     {
         description: "Clear the log buffer.\n" +
@@ -2060,6 +1880,7 @@ registerToolWithTelemetry(
 
 // Tool: Connect to specific Metro port
 registerToolWithTelemetry(
+    server,
     "connect_metro",
     {
         description:
@@ -2128,6 +1949,7 @@ registerToolWithTelemetry(
 
 // Tool: Disconnect from Metro
 registerToolWithTelemetry(
+    server,
     "disconnect_metro",
     {
         description:
@@ -2231,6 +2053,7 @@ registerToolWithTelemetry(
 
 // Tool: Execute JavaScript in app
 registerToolWithTelemetry(
+    server,
     "execute_in_app",
     {
         description:
@@ -2324,6 +2147,7 @@ registerToolWithTelemetry(
 
 // Tool: List debug globals available in the app
 registerToolWithTelemetry(
+    server,
     "list_debug_globals",
     {
         description:
@@ -2369,6 +2193,7 @@ registerToolWithTelemetry(
 
 // Tool: Inspect a global object to see its properties and types
 registerToolWithTelemetry(
+    server,
     "inspect_global",
     {
         description:
@@ -2434,6 +2259,7 @@ registerToolWithTelemetry(
 // ============================================================================
 
 registerToolWithTelemetry(
+    server,
     "redux_dispatch",
     {
         description:
@@ -2482,6 +2308,7 @@ registerToolWithTelemetry(
 );
 
 registerToolWithTelemetry(
+    server,
     "redux_get_state",
     {
         description:
@@ -2528,6 +2355,7 @@ registerToolWithTelemetry(
 
 // Tool: Get the React component tree
 registerToolWithTelemetry(
+    server,
     "get_component_tree",
     {
         description:
@@ -2616,6 +2444,7 @@ registerToolWithTelemetry(
 
 // Tool: Get all pressable elements on screen
 registerToolWithTelemetry(
+    server,
     "get_pressable_elements",
     {
         description:
@@ -2802,6 +2631,7 @@ function formatPressablesInPixels(
 
 // Tool: Inspect a specific component by name
 registerToolWithTelemetry(
+    server,
     "inspect_component",
     {
         description:
@@ -2881,6 +2711,7 @@ registerToolWithTelemetry(
 
 // Tool: Find components matching a pattern
 registerToolWithTelemetry(
+    server,
     "find_components",
     {
         description:
@@ -2948,6 +2779,7 @@ registerToolWithTelemetry(
 
 // Tool: Toggle Element Inspector programmatically
 registerToolWithTelemetry(
+    server,
     "toggle_element_inspector",
     {
         description:
@@ -3010,6 +2842,7 @@ registerToolWithTelemetry(
 
 // Tool: Get currently selected element from Element Inspector
 registerToolWithTelemetry(
+    server,
     "get_inspector_selection",
     {
         description:
@@ -3103,6 +2936,7 @@ registerToolWithTelemetry(
 
 // Tool: Inspect component at coordinates (like Element Inspector)
 registerToolWithTelemetry(
+    server,
     "inspect_at_point",
     {
         description:
@@ -3189,6 +3023,7 @@ registerToolWithTelemetry(
 
 // Tool: Get network requests
 registerToolWithTelemetry(
+    server,
     "get_network_requests",
     {
         description:
@@ -3359,6 +3194,7 @@ registerToolWithTelemetry(
 
 // Tool: Search network requests
 registerToolWithTelemetry(
+    server,
     "search_network",
     {
         description: "Search network requests by URL pattern (case-insensitive).\n" +
@@ -3445,6 +3281,7 @@ registerToolWithTelemetry(
 
 // Tool: Get request details
 registerToolWithTelemetry(
+    server,
     "get_request_details",
     {
         description:
@@ -3569,6 +3406,7 @@ registerToolWithTelemetry(
 
 // Tool: Get network stats
 registerToolWithTelemetry(
+    server,
     "get_network_stats",
     {
         description: "Get statistics about captured network requests: counts by method, status code, and domain.\n" +
@@ -3642,6 +3480,7 @@ registerToolWithTelemetry(
 
 // Tool: Clear network requests
 registerToolWithTelemetry(
+    server,
     "clear_network",
     {
         description: "Clear the network request buffer.\n" +
@@ -3691,6 +3530,7 @@ registerToolWithTelemetry(
 
 // Tool: Get images from shared image buffer
 registerToolWithTelemetry(
+    server,
     "get_images",
     {
         description:
@@ -3769,6 +3609,7 @@ registerToolWithTelemetry(
 
 // Tool: Reload the app
 registerToolWithTelemetry(
+    server,
     "reload_app",
     {
         description:
@@ -3808,6 +3649,7 @@ registerToolWithTelemetry(
 
 // Tool: LogBox control (replaces dismiss_logbox)
 registerToolWithTelemetry(
+    server,
     "logbox",
     {
         description:
@@ -4021,6 +3863,7 @@ registerToolWithTelemetry(
 
 // Tool: Get bundle status
 registerToolWithTelemetry(
+    server,
     "get_bundle_status",
     {
         description:
@@ -4054,6 +3897,7 @@ registerToolWithTelemetry(
 
 // Tool: Get bundle errors
 registerToolWithTelemetry(
+    server,
     "get_bundle_errors",
     {
         description:
@@ -4218,6 +4062,7 @@ registerToolWithTelemetry(
 
 // Tool: Clear bundle errors
 registerToolWithTelemetry(
+    server,
     "clear_bundle_errors",
     {
         description: "Clear the bundle error buffer.\n" +
@@ -4246,6 +4091,7 @@ registerToolWithTelemetry(
 
 // Tool: List Android devices
 registerToolWithTelemetry(
+    server,
     "list_android_devices",
     {
         description: "List connected Android devices and emulators via ADB.\n" +
@@ -4271,6 +4117,7 @@ registerToolWithTelemetry(
 
 // Tool: Android install app
 registerToolWithTelemetry(
+    server,
     "android_install_app",
     {
         description: "Install an APK on an Android device/emulator" +
@@ -4313,6 +4160,7 @@ registerToolWithTelemetry(
 
 // Tool: Android launch app
 registerToolWithTelemetry(
+    server,
     "android_launch_app",
     {
         description: "Launch an app on an Android device/emulator by package name" +
@@ -4351,6 +4199,7 @@ registerToolWithTelemetry(
 
 // Tool: Android list packages
 registerToolWithTelemetry(
+    server,
     "android_list_packages",
     {
         description: "List installed packages on an Android device/emulator" +
@@ -4387,6 +4236,7 @@ registerToolWithTelemetry(
 
 // Tool: Android long press
 registerToolWithTelemetry(
+    server,
     "android_long_press",
     {
         description: "Long press at specific coordinates on an Android device/emulator screen" +
@@ -4421,6 +4271,7 @@ registerToolWithTelemetry(
 
 // Tool: Android swipe
 registerToolWithTelemetry(
+    server,
     "android_swipe",
     {
         description: "Swipe from one point to another on an Android device/emulator screen" +
@@ -4457,6 +4308,7 @@ registerToolWithTelemetry(
 
 // Tool: Android input text
 registerToolWithTelemetry(
+    server,
     "android_input_text",
     {
         description:
@@ -4509,6 +4361,7 @@ registerToolWithTelemetry(
 
 // Tool: Android key event
 registerToolWithTelemetry(
+    server,
     "android_key_event",
     {
         description: "Send a key event to an Android device/emulator." +
@@ -4545,6 +4398,7 @@ registerToolWithTelemetry(
 
 // Tool: Android get screen size
 registerToolWithTelemetry(
+    server,
     "android_get_screen_size",
     {
         description: "Get the screen size (resolution) of an Android device/emulator" +
@@ -4594,6 +4448,7 @@ registerToolWithTelemetry(
 
 // Tool: List iOS simulators
 registerToolWithTelemetry(
+    server,
     "list_ios_simulators",
     {
         description: "List available iOS simulators.\n" +
@@ -4625,6 +4480,7 @@ registerToolWithTelemetry(
 
 // Tool: OCR Screenshot - Extract text with coordinates from screenshot
 registerToolWithTelemetry(
+    server,
     "ocr_screenshot",
     {
         description:
@@ -4764,6 +4620,7 @@ registerToolWithTelemetry(
 
 // Tool: iOS install app
 registerToolWithTelemetry(
+    server,
     "ios_install_app",
     {
         description: "Install an app bundle (.app) on an iOS simulator" +
@@ -4793,6 +4650,7 @@ registerToolWithTelemetry(
 
 // Tool: iOS launch app
 registerToolWithTelemetry(
+    server,
     "ios_launch_app",
     {
         description: "Launch an app on an iOS simulator by bundle ID" +
@@ -4822,6 +4680,7 @@ registerToolWithTelemetry(
 
 // Tool: iOS open URL
 registerToolWithTelemetry(
+    server,
     "ios_open_url",
     {
         description: "Open a URL in the iOS simulator (opens in default handler or Safari).\n" +
@@ -4854,6 +4713,7 @@ registerToolWithTelemetry(
 
 // Tool: iOS terminate app
 registerToolWithTelemetry(
+    server,
     "ios_terminate_app",
     {
         description: "Terminate a running app on an iOS simulator" +
@@ -4883,6 +4743,7 @@ registerToolWithTelemetry(
 
 // Tool: iOS boot simulator
 registerToolWithTelemetry(
+    server,
     "ios_boot_simulator",
     {
         description: "Boot an iOS simulator by UDID.\n" +
@@ -4951,6 +4812,7 @@ server.registerTool(
 
 // Tool: Clear focused text input
 registerToolWithTelemetry(
+    server,
     "clear_focused_input",
     {
         description:
@@ -4982,6 +4844,7 @@ registerToolWithTelemetry(
 
 // Tool: Dismiss keyboard
 registerToolWithTelemetry(
+    server,
     "dismiss_keyboard",
     {
         description:
@@ -5014,6 +4877,7 @@ registerToolWithTelemetry(
 
 // Tool: iOS input text
 registerToolWithTelemetry(
+    server,
     "ios_input_text",
     {
         description:
@@ -5064,6 +4928,7 @@ registerToolWithTelemetry(
 
 // Tool: Activate Pro license
 registerToolWithTelemetry(
+    server,
     "activate_license",
     getActivateLicenseConfig(),
     handleActivateLicense,
@@ -5071,6 +4936,7 @@ registerToolWithTelemetry(
 
 // Tool: Delete account
 registerToolWithTelemetry(
+    server,
     "delete_account",
     getDeleteAccountConfig(),
     handleDeleteAccount,
@@ -5079,6 +4945,7 @@ registerToolWithTelemetry(
 // Dev-only tool: reset local telemetry data
 if (isDevMode()) {
     registerToolWithTelemetry(
+        server,
         "reset_telemetry",
         {
             description:
