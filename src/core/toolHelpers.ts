@@ -80,6 +80,20 @@ export function getJpegDimensions(buffer: Buffer): { width: number; height: numb
     return null;
 }
 
+// Banner helpers for platform-specific tool descriptions. Appended after the
+// verbatim first sentence of every ios_*/android_* tool to steer agents toward
+// cross-platform primaries (tap, get_screen_layout, etc) unless native-only
+// behavior is required. See src/core/nativeOnlyHints.ts for the complementary
+// runtime hint shown when Metro is absent.
+export const platformFallbackBanner = (prefer: string): string =>
+    `\n[PLATFORM FALLBACK — prefer ${prefer} unless you specifically need native-only behavior]`;
+
+export const platformUniqueBanner = (useCase: string): string =>
+    `\n[PLATFORM-SPECIFIC — no cross-platform equivalent; use when ${useCase}]`;
+
+export const primaryInteractionBanner = (): string =>
+    `\n[PRIMARY INTERACTION TOOL — works on iOS and Android; prefer over ios_*/android_* siblings]`;
+
 /**
  * Estimate how many tokens an image will consume in Claude's vision encoder.
  * Per Anthropic docs, Claude auto-resizes images to fit within:
