@@ -752,22 +752,40 @@ registerToolWithTelemetry(
         const lines: string[] = [];
         lines.push("=== Connection Ensured ===\n");
 
-        if (result.connectionInfo) {
-            lines.push(`Device: ${result.connectionInfo.deviceTitle}`);
-            lines.push(`Port: ${result.connectionInfo.port}`);
-            lines.push(`Uptime: ${result.connectionInfo.uptime}`);
-            if (result.connectionInfo.contextId !== null) {
-                lines.push(`Context ID: ${result.connectionInfo.contextId}`);
-            }
+        const infos = result.connectionInfos;
+        if (infos.length === 0) {
+            lines.push("(no connected devices)");
+        } else {
+            infos.forEach((info, idx) => {
+                if (idx > 0) lines.push("");
+                lines.push(`Device: ${info.deviceName} [${info.platform}]`);
+                lines.push(`  Bundle: ${info.deviceTitle}`);
+                lines.push(`  Port: ${info.port}`);
+                lines.push(`  Uptime: ${info.uptime}`);
+                if (info.contextId !== null) {
+                    lines.push(`  Context ID: ${info.contextId}`);
+                }
+                lines.push(`  Health Check: ${info.healthCheckPassed ? "PASSED" : "FAILED"}`);
+            });
         }
 
         lines.push("");
         lines.push(`Reconnected: ${result.wasReconnected ? "Yes" : "No"}`);
-        lines.push(`Health Check: ${result.healthCheckPassed ? "PASSED" : "FAILED"}`);
+
+        if (infos.length > 1) {
+            const healthyCount = infos.filter(i => i.healthCheckPassed).length;
+            lines.push(`Overall: ${healthyCount}/${infos.length} devices healthy`);
+            lines.push(`Use device="<deviceName>" to target a specific device (substring match against the Device line above).`);
+        }
 
         if (!result.healthCheckPassed) {
+            const failed = infos.filter(i => !i.healthCheckPassed).map(i => i.deviceName);
             lines.push("");
-            lines.push("Warning: Health check failed. The page context may be stale.");
+            if (failed.length > 0) {
+                lines.push(`Warning: Health check failed for: ${failed.join(", ")}. The page context may be stale.`);
+            } else {
+                lines.push("Warning: Health check failed. The page context may be stale.");
+            }
             lines.push("Consider using forceRefresh=true or reload_app to get a fresh context.");
         }
 

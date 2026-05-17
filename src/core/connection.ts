@@ -1575,31 +1575,32 @@ export async function ensureConnection(options: {
 } = {}): Promise<EnsureConnectionResult> {
     const { port, healthCheck = true, forceRefresh = false } = options;
 
-    let app = getFirstConnectedApp();
     let wasReconnected = false;
 
-    // Force refresh if requested - close existing connection
-    if (forceRefresh && app) {
-        const appKey = `${app.port}-${app.deviceInfo.id}`;
-        cancelReconnectionTimer(appKey);
-        try {
-            app.ws.close();
-        } catch {
-            // Ignore close errors
+    // forceRefresh: close every currently-connected app, then fall through to
+    // single-device fresh connect. Full multi-device re-discovery is scan_metro's
+    // job — ensureConnection only fresh-connects one when nothing is open.
+    if (forceRefresh) {
+        for (const { key, app } of getConnectedApps()) {
+            cancelReconnectionTimer(key);
+            try { app.ws.close(); } catch { /* ignore */ }
+            connectedApps.delete(key);
         }
-        connectedApps.delete(appKey);
-        app = null;
     }
 
-    // Attempt connection if not connected
-    if (!app) {
+    let openApps: ConnectedApp[] = getConnectedApps()
+        .filter(a => a.isConnected)
+        .map(a => a.app);
+
+    // Nothing connected — establish a single-device connection from scratch.
+    if (openApps.length === 0) {
         const targetPort = port ?? await findFirstMetroPort();
         if (!targetPort) {
             return {
                 connected: false,
                 wasReconnected: false,
                 healthCheckPassed: false,
-                connectionInfo: null,
+                connectionInfos: [],
                 error: "No Metro server found. Make sure Metro bundler is running.",
             };
         }
@@ -1611,7 +1612,7 @@ export async function ensureConnection(options: {
                 connected: false,
                 wasReconnected: false,
                 healthCheckPassed: false,
-                connectionInfo: null,
+                connectionInfos: [],
                 error: `No debuggable devices found on port ${targetPort}. Make sure the app is running.`,
             };
         }
@@ -1626,32 +1627,22 @@ export async function ensureConnection(options: {
             const connectResult = await connectToDevice(mainDevice, targetPort);
             wasReconnected = true;
 
-            // connectToDevice resolves with a status string for non-throw
-            // outcomes including "Skipped X (stale CDP target …)". Surface
-            // that explicitly instead of falling through to the generic
-            // "Connection succeeded but app is not available" below.
             if (connectResult.includes("stale CDP target")) {
                 return {
                     connected: false,
                     wasReconnected: false,
                     healthCheckPassed: false,
-                    connectionInfo: null,
+                    connectionInfos: [],
                     error: `${connectResult}. The CDP page advertised by Metro is no longer responsive — restart the React Native app, then retry.`,
                 };
             }
 
-            // Race window: connectToDevice may resolve with the WS open and
-            // connectedApps populated, but Metro can immediately close the
-            // socket (single-connection limit, transient hiccup). The close
-            // handler then deletes the entry and getFirstConnectedApp returns
-            // null. Settle briefly and retry a few times before giving up.
-            app = getFirstConnectedApp();
-            for (let i = 0; !app && i < 5; i++) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                app = getFirstConnectedApp();
+            // Race window: settle briefly and retry getting the open app list.
+            for (let i = 0; i < 5 && openApps.length === 0; i++) {
+                if (i > 0) await new Promise(resolve => setTimeout(resolve, 100));
+                openApps = getConnectedApps().filter(a => a.isConnected).map(a => a.app);
             }
         } catch (error) {
-            // Ensure we always have a meaningful error message
             let errorMessage: string;
             if (error instanceof Error) {
                 errorMessage = error.message;
@@ -1664,89 +1655,100 @@ export async function ensureConnection(options: {
                 connected: false,
                 wasReconnected: false,
                 healthCheckPassed: false,
-                connectionInfo: null,
+                connectionInfos: [],
                 error: `Connection failed: ${errorMessage}`,
             };
         }
     }
 
-    if (!app) {
+    if (openApps.length === 0) {
         return {
             connected: false,
             wasReconnected: false,
             healthCheckPassed: false,
-            connectionInfo: null,
+            connectionInfos: [],
             error: "Connection succeeded but app is not available",
         };
     }
 
-    // Run health check if requested
-    let healthCheckPassed = true;
-    if (healthCheck) {
-        healthCheckPassed = await runQuickHealthCheck(app);
+    // Per-device health-check; reconnect failed devices individually so a dead
+    // Android doesn't take down a healthy iOS report and vice versa.
+    const perApp: Array<{ app: ConnectedApp; healthy: boolean }> = [];
 
-        // If health check failed and we haven't just reconnected, try reconnecting
-        if (!healthCheckPassed && !wasReconnected) {
-            console.error(`[execbro] Health check failed, attempting reconnection...`);
+    for (const candidate of openApps) {
+        let app = candidate;
+        let healthy = true;
 
-            // Close and reconnect
-            const appKey = `${app.port}-${app.deviceInfo.id}`;
-            const targetPort = app.port;
-            cancelReconnectionTimer(appKey);
-            try {
-                app.ws.close();
-            } catch {
-                // Ignore
-            }
-            connectedApps.delete(appKey);
+        if (healthCheck) {
+            healthy = await runQuickHealthCheck(app);
 
-            // Re-fetch devices and reconnect
-            const devices = await fetchDevices(targetPort);
-            const mainDevice = selectMainDevice(devices);
-            if (mainDevice) {
-                try {
-                    await connectToDevice(mainDevice, targetPort);
-                    app = getFirstConnectedApp();
-                    wasReconnected = true;
+            if (!healthy && !wasReconnected) {
+                const failedTitle = app.deviceInfo.title;
+                console.error(`[execbro] Health check failed for ${failedTitle}, attempting reconnection...`);
 
-                    // Re-run health check after reconnection
-                    if (app) {
-                        healthCheckPassed = await runQuickHealthCheck(app);
+                const appKey = `${app.port}-${app.deviceInfo.id}`;
+                const appPort = app.port;
+                cancelReconnectionTimer(appKey);
+                try { app.ws.close(); } catch { /* ignore */ }
+                connectedApps.delete(appKey);
+
+                const devices = await fetchDevices(appPort);
+                const mainDevice = selectMainDevice(devices);
+                if (mainDevice) {
+                    try {
+                        await connectToDevice(mainDevice, appPort);
+                        wasReconnected = true;
+                        const fresh = getConnectedApps()
+                            .filter(a => a.isConnected)
+                            .map(a => a.app);
+                        const replacement = fresh.find(a => a.deviceInfo.id === mainDevice.id);
+                        if (replacement) {
+                            app = replacement;
+                            healthy = await runQuickHealthCheck(app);
+                        } else {
+                            healthy = false;
+                        }
+                    } catch {
+                        healthy = false;
                     }
-                } catch {
-                    // Failed to reconnect
-                    healthCheckPassed = false;
+                } else {
+                    healthy = false;
                 }
             }
         }
+
+        perApp.push({ app, healthy });
     }
 
-    // Build connection info
-    const appKey = app ? `${app.port}-${app.deviceInfo.id}` : null;
-    const connectionState = appKey ? getConnectionState(appKey) : null;
-    const contextHealth = appKey ? getContextHealth(appKey) : null;
-
-    let uptime = "unknown";
-    if (connectionState?.lastConnectedTime) {
-        const uptimeMs = Date.now() - connectionState.lastConnectedTime.getTime();
-        uptime = formatDuration(uptimeMs);
-    }
-
-    const isConnected = app !== null && app.ws.readyState === WebSocket.OPEN;
-    return {
-        connected: isConnected,
-        wasReconnected,
-        healthCheckPassed,
-        connectionInfo: app ? {
+    const connectionInfos = perApp.map(({ app, healthy }) => {
+        const appKey = `${app.port}-${app.deviceInfo.id}`;
+        const connectionState = getConnectionState(appKey);
+        const contextHealth = getContextHealth(appKey);
+        let uptime = "unknown";
+        if (connectionState?.lastConnectedTime) {
+            uptime = formatDuration(Date.now() - connectionState.lastConnectedTime.getTime());
+        }
+        return {
+            deviceName: app.deviceInfo.deviceName || app.deviceInfo.title,
             deviceTitle: app.deviceInfo.title,
+            platform: app.platform,
             port: app.port,
             uptime,
             contextId: contextHealth?.contextId ?? null,
-        } : null,
-        ...(!isConnected && {
-            error: app
-                ? `Connection lost: WebSocket is in ${["CONNECTING", "OPEN", "CLOSING", "CLOSED"][app.ws.readyState] || "unknown"} state (expected OPEN). Health check ${healthCheckPassed ? "passed" : "failed"}. Try ensure_connection with forceRefresh=true.`
-                : "App became unavailable after reconnection attempt. Try running scan_metro then ensure_connection."
+            healthCheckPassed: healthy,
+        };
+    });
+
+    const anyOpen = perApp.some(r => r.app.ws.readyState === WebSocket.OPEN);
+    const allHealthy = perApp.every(r => r.healthy);
+
+    return {
+        connected: anyOpen,
+        wasReconnected,
+        healthCheckPassed: allHealthy,
+        connectionInfos,
+        ...(!anyOpen && {
+            error: "App became unavailable after reconnection attempt. Try running scan_metro then ensure_connection."
         }),
     };
 }
