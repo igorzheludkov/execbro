@@ -312,9 +312,12 @@ export function registerConnectionTools(server: McpServer): void {
 
             // Wait for any in-flight app-detection probes so we don't print
             // presumptive "RN unknown" placeholders right after a fresh
-            // connect. Capped at 1500ms per device (covers the 500ms
-            // schedule delay + ~1s probe latency) — never blocks longer.
-            await Promise.all(apps.map(({ app }) => awaitAppDetection(app, 1500)));
+            // connect. Capped at 3500ms per device (covers the 500ms
+            // schedule delay + full 3000ms detectApp timeout). Probes run
+            // in parallel so the total wall time is bounded by the slowest
+            // device, not the sum. Subsequent calls are no-ops because
+            // the stored appDetectionPromise resolved.
+            await Promise.all(apps.map(({ app }) => awaitAppDetection(app, 3500)));
             apps = getConnectedApps();
 
             if (apps.length === 0) {
