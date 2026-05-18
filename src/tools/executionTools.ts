@@ -15,18 +15,18 @@ export function registerExecutionTools(server: McpServer): void {
                 "RECOMMENDED WORKFLOW: 1) list_debug_globals to discover available objects, 2) inspect_global to see properties/methods, 3) execute_in_app to call specific methods or read values.\n\n" +
                 "LIMITATIONS (Hermes engine):\n" +
                 "- NO require() or import — only pre-existing globals are available\n" +
-                "- NO async/await syntax — use simple expressions or promise chains (.then())\n" +
-                "- NO emoji or non-ASCII characters in string literals — causes parse errors\n" +
+                "- NO async/await syntax. Use `.then()` chains: `Promise.resolve().then(v => ...)`. The expression's final value is awaited automatically when awaitPromise:true.\n" +
+                "- Non-ASCII characters in string literals (emoji, Arabic, CJK) are auto-escaped server-side. Write them as-is; the wire stays ASCII.\n" +
                 "- Keep expressions simple and synchronous when possible\n\n" +
                 "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
-                "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`, `console.log('\\u{1F600}')`\n" +
+                "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`\n" +
                 "NEW: pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
             inputSchema: {
                 expression: z
                     .string()
                     .describe(
-                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await, no emoji/non-ASCII in strings. Use globals discovered via list_debug_globals."
+                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await (use .then() instead), no unbalanced quotes. Use globals discovered via list_debug_globals — in particular `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry."
                     ),
                 awaitPromise: z.coerce
                     .boolean()
@@ -130,7 +130,8 @@ export function registerExecutionTools(server: McpServer): void {
                 "WHEN TO USE: Start of a state-debugging session, or when you don't know whether the app exposes a Redux/Apollo/Zustand handle.\n" +
                 "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"...\") -> execute_in_app for reads/mutations.\n" +
                 "SDK INTEGRATION: If the app uses `react-native-ai-devtools-sdk` and called `init({ stores, navigation, custom })`, the response includes an `sdk.paths` array of ready-to-use dotted paths (e.g. `__RN_AI_DEVTOOLS__.stores.redux`, `__RN_AI_DEVTOOLS__.custom.mmkv`). Pass these straight to inspect_global or execute_in_app.\n" +
-                "OUTPUT SHAPE: { sdk: { version, capabilities, paths, hint } | null, categories: { 'Apollo Client': [...], 'Redux': [...], 'Other Debug': [...], ... } }\n" +
+                "RN NAMESPACE: The `rn` field reports `globalThis.__rn__`, a curated namespace of seven RN modules — I18nManager, PixelRatio, Platform, StyleSheet, AppRegistry, NativeModules, Dimensions — populated by the SDK's exposeRnGlobals() or the executor's fallback bootstrap. `keys` lists the resolved modules; use dotted paths like `__rn__.Platform.OS` in execute_in_app/inspect_global. When `rn` is null the bootstrap has not yet run; when `keys` is empty the bootstrap ran but no fiber yielded a match.\n" +
+                "OUTPUT SHAPE: { sdk: { version, capabilities, paths, hint } | null, rn: { keys: string[], hint: string } | null, categories: { 'Apollo Client': [...], 'Redux': [...], 'Other Debug': [...], ... } }\n" +
                 "LIMITATIONS: Only sees variables explicitly assigned to a global (e.g., `globalThis.store = store`). Module-scoped state is invisible — expose it first or use the SDK's init().\n" +
                 "GOOD: list_debug_globals()\n" +
                 "BAD: Calling before scan_metro — needs a live connection.\n" +

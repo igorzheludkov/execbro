@@ -7,13 +7,11 @@ import { fetchDevices, filterDebuggableDevices, scanMetroPorts } from "./metro.j
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 import { executeInApp, delay } from "./jsExecute.js";
 
-// List globally available debugging objects in the app.
-// Uses Object.getOwnPropertyNames + Object.keys to catch non-enumerable globals
-// (Hermes does not always make `globalThis.x = ...` assignments enumerable),
-// and probes __RN_AI_DEVTOOLS__ directly so the SDK's registered stores/
-// navigation/custom objects surface as ready-to-use dotted paths.
-export async function listDebugGlobals(device?: string): Promise<ExecutionResult> {
-    const expression = `
+// Build the IIFE expression used by listDebugGlobals. Exported so tests can
+// assert structural invariants (e.g. that we probe __rn__, that we emit the
+// expected hint) without needing to spin up a live CDP connection.
+export function buildListDebugGlobalsExpression(): string {
+    return `
         (function() {
             var names;
             try {
@@ -95,11 +93,49 @@ export async function listDebugGlobals(device?: string): Promise<ExecutionResult
                 }
             } catch (e) { /* ignore */ }
 
-            return { sdk: sdk, categories: categories };
+            // RN namespace probe: populated by the SDK's exposeRnGlobals() or
+            // the executor's fallback fiber-walk bootstrap. Reports keys when
+            // available so agents discover the namespace without reading docs.
+            //   undefined -> bootstrap not run yet
+            //   null      -> bootstrap attempted, no modules found
+            //   object    -> populated namespace
+            var rn = null;
+            try {
+                var rnRaw = globalThis.__rn__;
+                if (typeof rnRaw === 'undefined') {
+                    rn = null;
+                } else if (rnRaw === null) {
+                    rn = {
+                        keys: [],
+                        hint: 'Bootstrap attempted but no fiber had the curated RN modules in scope. Install react-native-ai-devtools-sdk or fall back to a fiber walk.'
+                    };
+                    if (categories['Other Debug'].indexOf('__rn__') < 0) {
+                        categories['Other Debug'].push('__rn__');
+                    }
+                } else if (typeof rnRaw === 'object') {
+                    var rnKeys = Object.keys(rnRaw);
+                    rn = {
+                        keys: rnKeys,
+                        hint: 'Use globalThis.__rn__.<Module> (e.g. globalThis.__rn__.I18nManager.isRTL) in execute_in_app, or pass dotted paths like __rn__.Platform to inspect_global.'
+                    };
+                    if (categories['Other Debug'].indexOf('__rn__') < 0) {
+                        categories['Other Debug'].push('__rn__');
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            return { sdk: sdk, rn: rn, categories: categories };
         })()
     `;
+}
 
-    return executeInApp(expression, false, {}, device);
+// List globally available debugging objects in the app.
+// Uses Object.getOwnPropertyNames + Object.keys to catch non-enumerable globals
+// (Hermes does not always make `globalThis.x = ...` assignments enumerable),
+// and probes __RN_AI_DEVTOOLS__ directly so the SDK's registered stores/
+// navigation/custom objects surface as ready-to-use dotted paths.
+export async function listDebugGlobals(device?: string): Promise<ExecutionResult> {
+    return executeInApp(buildListDebugGlobalsExpression(), false, {}, device);
 }
 
 // Inspect a global object (or a dotted path into one) to see its properties
