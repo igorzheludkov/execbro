@@ -59,6 +59,7 @@ export async function inspectComponent(
         shortPath?: boolean;
         simplifyHooks?: boolean;
         device?: string;
+        timeoutMs?: number;
     } = {}
 ): Promise<ExecutionResult> {
     const {
@@ -68,7 +69,8 @@ export async function inspectComponent(
         childrenDepth = 1,
         shortPath = true,
         simplifyHooks = true,
-        device
+        device,
+        timeoutMs
     } = options;
     const escapedName = componentName.replace(/'/g, "\\'");
 
@@ -300,7 +302,7 @@ export async function inspectComponent(
         })()
     `;
 
-    return executeInApp(expression, false, {}, device);
+    return executeInApp(expression, false, { timeoutMs: timeoutMs ?? 5000, originatingToolName: "inspect_component" }, device);
 }
 
 /**
@@ -315,9 +317,10 @@ export async function findComponents(
         summary?: boolean;
         format?: "json" | "tonl";
         device?: string;
+        timeoutMs?: number;
     } = {}
 ): Promise<ExecutionResult> {
-    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl", device } = options;
+    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl", device, timeoutMs } = options;
     const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
     const expression = `
@@ -450,7 +453,7 @@ export async function findComponents(
         })()
     `;
 
-    const result = await executeInApp(expression, false, {}, device);
+    const result = await executeInApp(expression, false, { timeoutMs: timeoutMs ?? 5000, originatingToolName: "find_components" }, device);
 
     if (format === "tonl" && result.success && result.result) {
         try {
