@@ -110,10 +110,20 @@ describe("executeInApp (integration)", () => {
         expect(expr).toContain("__DEV__");
     });
 
-    it("rejects emoji in expression", async () => {
+    it("auto-escapes emoji inside string literals before sending", async () => {
+        server.respondWithValue("\\u{1F600}", "string");
         const result = await executeInApp("'\ud83d\ude00'", false, { timeoutMs: 5000 });
-        expect(result.success).toBe(false);
-        expect(result.error).toContain("emoji");
+        expect(result.success).toBe(true);
+        // The wire expression must be pure ASCII \u2014 emoji is rewritten to \u{...}
+        // escape sequences inside the string literal so Hermes can compile it.
+        const evalMsg = server.receivedMessages.find((m) =>
+            m.method === "Runtime.evaluate" &&
+            (m.params as { expression: string }).expression.includes("\\u{1F600}")
+        );
+        expect(evalMsg).toBeDefined();
+        const expr = (evalMsg!.params as { expression: string }).expression;
+        // The raw surrogate code units must NOT appear on the wire
+        expect(/[\uD800-\uDFFF]/.test(expr)).toBe(false);
     });
 
     it("handles timeout gracefully", async () => {
