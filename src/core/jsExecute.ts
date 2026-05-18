@@ -189,6 +189,23 @@ function hasTopLevelStatementSeparator(src: string): boolean {
 }
 
 // ============================================================================
+// Per-call timeoutMs: clamp + defaults
+// ============================================================================
+
+export const TIMEOUT_HARD_CAP_MS = 120_000;
+const TIMEOUT_DEFAULT_MS = 5_000;
+
+export function clampTimeoutMs(input: number): { value: number; clampedFrom?: number } {
+    if (!Number.isFinite(input) || input <= 0) {
+        return { value: TIMEOUT_DEFAULT_MS, clampedFrom: input };
+    }
+    if (input > TIMEOUT_HARD_CAP_MS) {
+        return { value: TIMEOUT_HARD_CAP_MS, clampedFrom: input };
+    }
+    return { value: input };
+}
+
+// ============================================================================
 // Transport-vs-logical error classification (used by auto-reconnect path)
 // ============================================================================
 
@@ -380,7 +397,10 @@ function executeCDP(
                         returnByValue: true,
                         awaitPromise,
                         userGesture: true,
-                        generatePreview: true
+                        generatePreview: true,
+                        // Hermes-side timeout layer. Older Hermes builds ignore this — the
+                        // server-side setTimeout above is the primary defense.
+                        timeout: timeoutMs
                     }
                 })
             );
@@ -599,11 +619,22 @@ export async function executeInApp(
 ): Promise<ExecutionResult> {
     const toolName = options.originatingToolName ?? "unknown";
 
-    const first = await executeInAppInner(expression, awaitPromise, options, device);
+    // Clamp timeoutMs at the boundary. Mistyped values clamp with a warning surfaced in
+    // _meta rather than reject. The default (when not supplied) keeps the historical 10000 ms.
+    const requestedTimeout = options.timeoutMs ?? 10_000;
+    const { value: clampedTimeout, clampedFrom } = clampTimeoutMs(requestedTimeout);
+    const effectiveOptions: ExecuteOptions = { ...options, timeoutMs: clampedTimeout };
+
+    const withClampMeta = (r: ExecutionResult): ExecutionResult => {
+        if (clampedFrom === undefined) return r;
+        return { ...r, _meta: { ...(r._meta ?? {}), timeoutClampedFrom: clampedFrom } };
+    };
+
+    const first = await executeInAppInner(expression, awaitPromise, effectiveOptions, device);
 
     if (first.success) {
         trackAutoReconnect("not_needed", toolName);
-        return first;
+        return withClampMeta(first);
     }
 
     const source: "cdp" | "server-timer" | "logical" = first.error?.startsWith(
@@ -616,7 +647,7 @@ export async function executeInApp(
 
     if (classification.kind !== "transport") {
         trackAutoReconnect("not_needed", toolName);
-        return first;
+        return withClampMeta(first);
     }
 
     const currentApp = getConnectedAppByDevice(device);
@@ -625,32 +656,32 @@ export async function executeInApp(
     const reconnected = await attemptQuickReconnect(preferredPort);
     if (!reconnected) {
         trackAutoReconnect("scan_failed", toolName, classification.pattern);
-        return {
+        return withClampMeta({
             success: false,
             error: `reconnect_attempted: ${first.error ?? "unknown"}`,
             _meta: { reconnected: false, transportError: first.error ?? "unknown" },
-        };
+        });
     }
 
     const retry = await executeInAppInner(
         expression,
         awaitPromise,
-        { ...options, autoReconnect: false },
+        { ...effectiveOptions, autoReconnect: false },
         device,
     );
 
     if (retry.success) {
         trackAutoReconnect("success", toolName, classification.pattern);
-        return {
+        return withClampMeta({
             ...retry,
             _meta: { reconnected: true, transportError: first.error ?? "unknown" },
-        };
+        });
     }
 
     trackAutoReconnect("retry_failed", toolName, classification.pattern);
-    return {
+    return withClampMeta({
         success: false,
         error: `reconnected_but_still_failed: ${first.error ?? "unknown"} | ${retry.error ?? "unknown"}`,
         _meta: { reconnected: true, transportError: first.error ?? "unknown" },
-    };
+    });
 }
