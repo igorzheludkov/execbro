@@ -91,18 +91,16 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         };
     }
 
-    // Check for top-level async that Hermes doesn't support in Runtime.evaluate
-    // Pattern: starts with (async or async keyword at expression level
+    // Check for top-level async/await that Hermes doesn't support in Runtime.evaluate
     const trimmed = cleaned.trim();
-    if (trimmed.startsWith("(async") || trimmed.startsWith("async ") || trimmed.startsWith("async(")) {
+    if (looksLikeTopLevelAwait(trimmed)) {
         return {
             valid: false,
             expression: cleaned,
             error:
-                "Hermes does not support top-level async functions in Runtime.evaluate. " +
-                "Instead of `(async () => { ... })()`, use a synchronous approach or " +
-                "execute the async code and access the result via a global variable: " +
-                "`global.__result = null; myAsyncFn().then(r => global.__result = r)`"
+                "top-level await is not supported in Hermes. " +
+                "Wrap in `Promise.resolve().then(v => ...)` instead, or assign the resolved value to a global: " +
+                "`global.__result = null; myAsyncFn().then(r => global.__result = r)`."
         };
     }
 
@@ -137,6 +135,75 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         valid: true,
         expression: cleaned
     };
+}
+
+function isIdentChar(c: string | undefined): boolean {
+    return c !== undefined && /[A-Za-z0-9_$]/.test(c);
+}
+
+// Detect top-level `await`, `async function`, `async (...) => ...`, or
+// `(async ...)` IIFE forms in `src`. Walks char-by-char tracking string,
+// template, comment, and bracket depth so we don't false-positive on
+// substrings inside strings, identifiers like `awaiting`, etc.
+function looksLikeTopLevelAwait(src: string): boolean {
+    // Cheap prefix checks for async-function / async-arrow / async-IIFE forms.
+    // Whitespace-tolerant on `async <keyword>` / `async (`.
+    const asyncPrefix = /^async\s*(?:function\b|\()/;
+    if (asyncPrefix.test(src)) return true;
+    // `(async () => ...)()` or `(async(...)...)` — match `(async` followed by
+    // a non-identifier char (so `(asyncFoo` doesn't trigger).
+    const parenAsync = /^\(\s*async(?:\s|\()/;
+    if (parenAsync.test(src)) return true;
+
+    // Depth-tracked scan for a standalone `await` token at depth 0.
+    let i = 0;
+    let parens = 0;
+    let braces = 0;
+    let brackets = 0;
+    while (i < src.length) {
+        const ch = src[i];
+        const next = src[i + 1];
+        if (ch === "/" && next === "/") {
+            const nl = src.indexOf("\n", i + 2);
+            if (nl === -1) return false;
+            i = nl + 1;
+            continue;
+        }
+        if (ch === "/" && next === "*") {
+            const end = src.indexOf("*/", i + 2);
+            if (end === -1) return false;
+            i = end + 2;
+            continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") {
+            const quote = ch;
+            i++;
+            while (i < src.length) {
+                if (src[i] === "\\") { i += 2; continue; }
+                if (src[i] === quote) { i++; break; }
+                i++;
+            }
+            continue;
+        }
+        if (ch === "(") { parens++; i++; continue; }
+        if (ch === ")") { parens--; i++; continue; }
+        if (ch === "{") { braces++; i++; continue; }
+        if (ch === "}") { braces--; i++; continue; }
+        if (ch === "[") { brackets++; i++; continue; }
+        if (ch === "]") { brackets--; i++; continue; }
+
+        if (
+            parens === 0 && braces === 0 && brackets === 0 &&
+            ch === "a" &&
+            src.slice(i, i + 5) === "await" &&
+            !isIdentChar(src[i - 1]) &&
+            !isIdentChar(src[i + 5])
+        ) {
+            return true;
+        }
+        i++;
+    }
+    return false;
 }
 
 // Walk `src` tracking string/template/comment and bracket depth. Returns true
