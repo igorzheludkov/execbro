@@ -91,10 +91,16 @@ export async function ensureRnGlobalsBootstrap(device?: string): Promise<void> {
     if (bootstrappedApps.has(key)) return;
     bootstrappedApps.add(key);
     try {
+        // Cap at 1500ms — the bootstrap is a fiber walk that completes in <100ms
+        // on a healthy device. Without this cap the default 10s timeoutMs would
+        // dominate the parent call's latency budget when the JS context is hung,
+        // making the user's outer timeoutMs misleading. Bootstrap failure is a
+        // best-effort no-op (the try/catch leaves __rn__ null), so a tight cap
+        // is safe.
         await executeInApp(
             buildRnGlobalsBootstrapExpression(),
             false,
-            { maxRetries: 0, autoReconnect: false, skipBootstrap: true },
+            { maxRetries: 0, autoReconnect: false, skipBootstrap: true, timeoutMs: 1500 },
             device
         );
     } catch (e) {
