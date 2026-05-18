@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { ExecutionResult, ExecuteOptions } from "./types.js";
+import { escapeNonAsciiInStringLiterals } from "./escapeNonAscii.js";
 import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
 import { getFirstConnectedApp, getConnectedAppByDevice, getConnectedAppBySimulatorUdid, getConnectedAppByAndroidDeviceId, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
 import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
@@ -24,6 +25,7 @@ export interface ExpressionValidation {
 /**
  * Check if a string contains emoji or other problematic Unicode characters
  * Hermes has issues with certain UTF-16 surrogate pairs (like emoji)
+ * @deprecated retained for backward compatibility — escapeNonAsciiInStringLiterals handles this now.
  */
 export function containsProblematicUnicode(str: string): boolean {
     // Detect UTF-16 surrogate pairs (emoji and other characters outside BMP)
@@ -70,17 +72,6 @@ export function stripLeadingComments(expression: string): string {
  * Returns cleaned expression or error with helpful message
  */
 export function validateAndPreprocessExpression(expression: string): ExpressionValidation {
-    // Check for emoji/problematic Unicode before any processing
-    if (containsProblematicUnicode(expression)) {
-        return {
-            valid: false,
-            expression,
-            error:
-                "Expression contains emoji or special Unicode characters that Hermes cannot compile. " +
-                "Please remove emoji and use ASCII characters only."
-        };
-    }
-
     // Strip leading comments that would break the expression wrapper
     const cleaned = stripLeadingComments(expression);
 
@@ -92,18 +83,31 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         };
     }
 
-    // Check for top-level async that Hermes doesn't support in Runtime.evaluate
-    // Pattern: starts with (async or async keyword at expression level
-    const trimmed = cleaned.trim();
-    if (trimmed.startsWith("(async") || trimmed.startsWith("async ") || trimmed.startsWith("async(")) {
+    // Auto-escape non-ASCII inside string literals so the wire stays ASCII
+    // and Hermes can compile the expression.
+    const escapeResult = escapeNonAsciiInStringLiterals(cleaned);
+    if (!escapeResult.ok) {
         return {
             valid: false,
             expression: cleaned,
             error:
-                "Hermes does not support top-level async functions in Runtime.evaluate. " +
-                "Instead of `(async () => { ... })()`, use a synchronous approach or " +
-                "execute the async code and access the result via a global variable: " +
-                "`global.__result = null; myAsyncFn().then(r => global.__result = r)`"
+                "Unable to auto-escape non-ASCII characters in expression: " +
+                escapeResult.reason +
+                ". Replace non-ASCII characters with \\uXXXX escape sequences and retry, or check for unbalanced quotes."
+        };
+    }
+    const escaped = escapeResult.expression;
+
+    // Check for top-level async/await that Hermes doesn't support in Runtime.evaluate
+    const trimmed = escaped.trim();
+    if (looksLikeTopLevelAwait(trimmed)) {
+        return {
+            valid: false,
+            expression: escaped,
+            error:
+                "top-level await is not supported in Hermes. " +
+                "Wrap in `Promise.resolve().then(v => ...)` instead, or assign the resolved value to a global: " +
+                "`global.__result = null; myAsyncFn().then(r => global.__result = r)`."
         };
     }
 
@@ -111,7 +115,7 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
     if (/\brequire\s*\(/.test(trimmed)) {
         return {
             valid: false,
-            expression: cleaned,
+            expression: escaped,
             error:
                 "require() is not available in Hermes Runtime.evaluate. " +
                 "Modules cannot be imported at runtime. Only pre-existing global variables are accessible. " +
@@ -126,7 +130,7 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
     if (hasTopLevelStatementSeparator(trimmed)) {
         return {
             valid: false,
-            expression: cleaned,
+            expression: escaped,
             error:
                 "Multi-statement expressions are not supported by Hermes Runtime.evaluate " +
                 "(compiles input as a single expression). " +
@@ -136,8 +140,77 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
 
     return {
         valid: true,
-        expression: cleaned
+        expression: escaped
     };
+}
+
+function isIdentChar(c: string | undefined): boolean {
+    return c !== undefined && /[A-Za-z0-9_$]/.test(c);
+}
+
+// Detect top-level `await`, `async function`, `async (...) => ...`, or
+// `(async ...)` IIFE forms in `src`. Walks char-by-char tracking string,
+// template, comment, and bracket depth so we don't false-positive on
+// substrings inside strings, identifiers like `awaiting`, etc.
+function looksLikeTopLevelAwait(src: string): boolean {
+    // Cheap prefix checks for async-function / async-arrow / async-IIFE forms.
+    // Whitespace-tolerant on `async <keyword>` / `async (`.
+    const asyncPrefix = /^async\s*(?:function\b|\()/;
+    if (asyncPrefix.test(src)) return true;
+    // `(async () => ...)()` or `(async(...)...)` — match `(async` followed by
+    // a non-identifier char (so `(asyncFoo` doesn't trigger).
+    const parenAsync = /^\(\s*async(?:\s|\()/;
+    if (parenAsync.test(src)) return true;
+
+    // Depth-tracked scan for a standalone `await` token at depth 0.
+    let i = 0;
+    let parens = 0;
+    let braces = 0;
+    let brackets = 0;
+    while (i < src.length) {
+        const ch = src[i];
+        const next = src[i + 1];
+        if (ch === "/" && next === "/") {
+            const nl = src.indexOf("\n", i + 2);
+            if (nl === -1) return false;
+            i = nl + 1;
+            continue;
+        }
+        if (ch === "/" && next === "*") {
+            const end = src.indexOf("*/", i + 2);
+            if (end === -1) return false;
+            i = end + 2;
+            continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") {
+            const quote = ch;
+            i++;
+            while (i < src.length) {
+                if (src[i] === "\\") { i += 2; continue; }
+                if (src[i] === quote) { i++; break; }
+                i++;
+            }
+            continue;
+        }
+        if (ch === "(") { parens++; i++; continue; }
+        if (ch === ")") { parens--; i++; continue; }
+        if (ch === "{") { braces++; i++; continue; }
+        if (ch === "}") { braces--; i++; continue; }
+        if (ch === "[") { brackets++; i++; continue; }
+        if (ch === "]") { brackets--; i++; continue; }
+
+        if (
+            parens === 0 && braces === 0 && brackets === 0 &&
+            ch === "a" &&
+            src.slice(i, i + 5) === "await" &&
+            !isIdentChar(src[i - 1]) &&
+            !isIdentChar(src[i + 5])
+        ) {
+            return true;
+        }
+        i++;
+    }
+    return false;
 }
 
 // Walk `src` tracking string/template/comment and bracket depth. Returns true
@@ -490,7 +563,7 @@ async function executeInAppInner(
     options: ExecuteOptions = {},
     device?: string
 ): Promise<ExecutionResult> {
-    const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true, timeoutMs = 10000 } = options;
+    const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true, timeoutMs = 10000, skipBootstrap = false } = options;
 
     let lastError: string | undefined;
     let preferredPort: number | undefined;
@@ -542,6 +615,21 @@ async function executeInAppInner(
                 }
             }
             return { success: false, error: "WebSocket connection is not open." };
+        }
+
+        // Best-effort one-shot bootstrap of globalThis.__rn__ for this app
+        // session. Hermes does not expose closure-captured RN modules, so this
+        // fiber-walk usually sets __rn__ = null — that's fine; list_debug_globals
+        // reports the failure clearly. Wrapped in try/catch so a bootstrap
+        // failure never breaks the user's expression. skipBootstrap is set by
+        // the bootstrap itself (via ensureRnGlobalsBootstrap) to avoid recursion.
+        if (!skipBootstrap) {
+            try {
+                const { ensureRnGlobalsBootstrap } = await import("./rnGlobalsBootstrap.js");
+                await ensureRnGlobalsBootstrap(device);
+            } catch (e) {
+                console.error("[execbro] __rn__ bootstrap dispatch failed:", e);
+            }
         }
 
         // Execute the expression
