@@ -12,6 +12,7 @@ import {
     getInspectorSelection,
     getInspectorSelectionAtPoint,
     inspectAtPoint,
+    measureComponent,
     iosScreenshot,
     androidScreenshot,
     androidGetDensity,
@@ -764,6 +765,69 @@ export function registerComponentTools(server: McpServer): void {
                         text: `Element at (${x}, ${y}):\n\n${result.result}`
                     }
                 ]
+            };
+        }
+    );
+
+    // Tool: Measure on-screen geometry of a named component
+    registerToolWithTelemetry(
+        server,
+        "measure",
+        {
+            description:
+                "Get on-screen geometry {x, y, width, height} for a named React component instance. Calls measureInWindow on the matched fiber (or its nearest host descendant for composite components). Coordinates are in points (iOS) / dp (Android), same space as get_screen_layout and inspect_at_point.\n" +
+                "PURPOSE: One-shot, name-based component measurement — avoids hand-rolling fiber walks and Promise-wrapping measureInWindow callbacks in execute_in_app.\n" +
+                "WHEN TO USE: You already know the component's display name (from get_screen_layout or find_components) and just need its current bounds — e.g. to verify a layout change, compute a tap target, or compare against design specs.\n" +
+                "WORKFLOW: find_components(pattern=\"...\") -> measure(componentName=\"...\", index=N) -> tap(x, y) at the center, or inspect_at_point at the center to verify identity.\n" +
+                "LIMITATIONS: Returns post-layout on-screen geometry only — for static style use find_components({ includeLayout: true }). For point-based lookup use inspect_at_point. Off-screen fibers may return zeros; that's the truth, not an error. Composites with multiple host descendants return the first host descendant's bounds.\n" +
+                "GOOD: measure({ componentName: \"SneakerCard\", index: 0 })\n" +
+                "BAD: measure({ componentName: \"View\" }) — too generic; narrow with find_components first.\n" +
+                "SEE ALSO: inspect_at_point for point-based variant; find_components({ includeLayout: true }) for static style; get_usage_guide(topic=\"inspect\") for the full playbook.",
+            inputSchema: {
+                componentName: z
+                    .string()
+                    .describe("Exact React display name to match (same matcher as inspect_component)."),
+                index: z
+                    .number()
+                    .optional()
+                    .default(0)
+                    .describe("0-based index when multiple instances match (default: 0)."),
+                device: z
+                    .string()
+                    .optional()
+                    .describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+            }
+        },
+        async ({ componentName, index, device }) => {
+            if (!hasMetro()) {
+                const hint = await metroMissingHintIfAbsent("measure");
+                return {
+                    content: [{ type: "text", text: `measure unavailable.${hint}` }],
+                    isError: true
+                };
+            }
+
+            const result = await measureComponent(componentName, index ?? 0, device);
+
+            if (!result.success) {
+                return {
+                    content: [{ type: "text", text: `Error: ${result.error}` }],
+                    isError: true,
+                    _errorContext: result.outcome
+                };
+            }
+
+            const lines = [
+                `Component: ${result.name}`,
+                `Frame: (${result.x.toFixed(1)}, ${result.y.toFixed(1)}) ${result.width.toFixed(1)}x${result.height.toFixed(1)}`,
+                `Center: (${(result.x + result.width / 2).toFixed(1)}, ${(result.y + result.height / 2).toFixed(1)})`,
+            ];
+            if (typeof result.nativeTag === "number") {
+                lines.push(`nativeTag: ${result.nativeTag}`);
+            }
+
+            return {
+                content: [{ type: "text", text: lines.join("\n") }]
             };
         }
     );
