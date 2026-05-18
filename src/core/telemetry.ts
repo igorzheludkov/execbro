@@ -549,6 +549,58 @@ function trackLicenseCheck(source: string, tier: string, durationMs: number): vo
     });
 }
 
+export type AutoReconnectOutcome = "not_needed" | "success" | "scan_failed" | "retry_failed";
+
+/**
+ * Record auto-reconnect outcome for the CDP wrapper.
+ *
+ * Emits as a 'tool_invocation' row (so existing dashboards count it) with a
+ * synthetic toolName '_auto_reconnect' and `errorContext` carrying the
+ * outcome + originating toolName + transportPattern. Does not start a session
+ * or affect license counting.
+ */
+export function trackAutoReconnect(
+    outcome: AutoReconnectOutcome,
+    originatingToolName: string,
+    transportPattern?: string,
+): void {
+    if (!telemetryEnabled) return;
+
+    dispatch({
+        name: "tool_invocation",
+        timestamp: Date.now(),
+        toolName: "_auto_reconnect",
+        success: outcome === "success" || outcome === "not_needed",
+        duration: 0,
+        isFirstRun: isFirstRun(),
+        errorContext: JSON.stringify({
+            outcome,
+            tool: originatingToolName,
+            ...(transportPattern ? { pattern: transportPattern } : {}),
+        }),
+    });
+
+    try {
+        const client = getPostHogClient();
+        if (client) {
+            client.capture({
+                distinctId: getInstallationId(),
+                event: "transport_auto_reconnect",
+                properties: {
+                    outcome,
+                    tool_name: originatingToolName,
+                    transport_pattern: transportPattern,
+                    server_version: getServerVersion(),
+                    package_name: getPackageName(),
+                    session_id: sessionId?.substring(0, 12) ?? "",
+                },
+            });
+        }
+    } catch {
+        // PostHog errors must never affect tool flow.
+    }
+}
+
 /**
  * Records app detection result as an app_detected event.
  * Called from appDetection.ts after successful detection.

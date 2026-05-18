@@ -5,6 +5,7 @@ import { getFirstConnectedApp, getConnectedAppByDevice, getConnectedAppBySimulat
 import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
 import type { DeviceInfo } from "./types.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
+import { trackAutoReconnect } from "./telemetry.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
@@ -187,6 +188,70 @@ function hasTopLevelStatementSeparator(src: string): boolean {
     return false;
 }
 
+// ============================================================================
+// Per-call timeoutMs: clamp + defaults
+// ============================================================================
+
+export const TIMEOUT_HARD_CAP_MS = 120_000;
+const TIMEOUT_DEFAULT_MS = 5_000;
+
+export function clampTimeoutMs(input: number): { value: number; clampedFrom?: number } {
+    if (!Number.isFinite(input) || input <= 0) {
+        return { value: TIMEOUT_DEFAULT_MS, clampedFrom: input };
+    }
+    if (input > TIMEOUT_HARD_CAP_MS) {
+        return { value: TIMEOUT_HARD_CAP_MS, clampedFrom: input };
+    }
+    return { value: input };
+}
+
+// ============================================================================
+// Transport-vs-logical error classification (used by auto-reconnect path)
+// ============================================================================
+
+export type TransportPattern = "no_apps" | "ws_closed" | "target_closed" | "cdp_eval_too_long";
+
+export type TransportClassification =
+    | { kind: "transport"; pattern: TransportPattern }
+    | { kind: "logical" };
+
+/**
+ * Classify an error message into transport-vs-logical for auto-reconnect routing.
+ *
+ * The `source` argument distinguishes the CDP-emitted "Expression took too long"
+ * (a stale-target signal we DO want to reconnect on) from the server-side
+ * `Promise.race` timer text (a logical "this took too long" we do NOT).
+ */
+export function classifyTransportError(
+    message: string,
+    source: "cdp" | "server-timer" | "logical",
+): TransportClassification {
+    if (!message) return { kind: "logical" };
+
+    if (source === "server-timer") return { kind: "logical" };
+
+    if (/No apps connected/i.test(message)) return { kind: "transport", pattern: "no_apps" };
+
+    if (
+        /ECONNRESET/i.test(message) ||
+        /WebSocket connection is not open/i.test(message) ||
+        /socket hang up/i.test(message) ||
+        /WebSocket frame/i.test(message)
+    ) {
+        return { kind: "transport", pattern: "ws_closed" };
+    }
+
+    if (/target closed/i.test(message) || /Inspector detached/i.test(message)) {
+        return { kind: "transport", pattern: "target_closed" };
+    }
+
+    if (source === "cdp" && /Expression took too long to evaluate/i.test(message)) {
+        return { kind: "transport", pattern: "cdp_eval_too_long" };
+    }
+
+    return { kind: "logical" };
+}
+
 // Error patterns that indicate a stale/destroyed context
 const CONTEXT_ERROR_PATTERNS = [
     "cannot find context",
@@ -332,7 +397,10 @@ function executeCDP(
                         returnByValue: true,
                         awaitPromise,
                         userGesture: true,
-                        generatePreview: true
+                        generatePreview: true,
+                        // Hermes-side timeout layer. Older Hermes builds ignore this — the
+                        // server-side setTimeout above is the primary defense.
+                        timeout: timeoutMs
                     }
                 })
             );
@@ -416,7 +484,7 @@ else{return __v}})()`;
 }
 
 // Execute JavaScript in the connected React Native app with retry logic
-export async function executeInApp(
+async function executeInAppInner(
     expression: string,
     awaitPromise: boolean = true,
     options: ExecuteOptions = {},
@@ -528,4 +596,92 @@ export async function executeInApp(
             "3. After restarting, call scan_metro again to reconnect",
         ].join("\n")
     };
+}
+
+/**
+ * One-shot scan-and-retry wrapper on top of executeInAppInner.
+ *
+ * On first-failure, classifies the error as transport-vs-logical:
+ *  - transport → call attemptQuickReconnect once, retry with autoReconnect:false
+ *    to avoid recursion. Successful retries carry _meta.reconnected; surviving
+ *    failures surface 'reconnected_but_still_failed'.
+ *  - logical → propagate the original error unchanged.
+ *
+ * The server-side `timeoutMs` timer always classifies as logical (a too-long
+ * expression is not a transport drop), so timeoutMs hits never trigger
+ * reconnect.
+ */
+export async function executeInApp(
+    expression: string,
+    awaitPromise: boolean = true,
+    options: ExecuteOptions = {},
+    device?: string
+): Promise<ExecutionResult> {
+    const toolName = options.originatingToolName ?? "unknown";
+
+    // Clamp timeoutMs at the boundary. Mistyped values clamp with a warning surfaced in
+    // _meta rather than reject. The default (when not supplied) keeps the historical 10000 ms.
+    const requestedTimeout = options.timeoutMs ?? 10_000;
+    const { value: clampedTimeout, clampedFrom } = clampTimeoutMs(requestedTimeout);
+    const effectiveOptions: ExecuteOptions = { ...options, timeoutMs: clampedTimeout };
+
+    const withClampMeta = (r: ExecutionResult): ExecutionResult => {
+        if (clampedFrom === undefined) return r;
+        return { ...r, _meta: { ...(r._meta ?? {}), timeoutClampedFrom: clampedFrom } };
+    };
+
+    const first = await executeInAppInner(expression, awaitPromise, effectiveOptions, device);
+
+    if (first.success) {
+        trackAutoReconnect("not_needed", toolName);
+        return withClampMeta(first);
+    }
+
+    const source: "cdp" | "server-timer" | "logical" = first.error?.startsWith(
+        "Timeout: Expression took too long",
+    )
+        ? "server-timer"
+        : "cdp";
+
+    const classification = classifyTransportError(first.error ?? "", source);
+
+    if (classification.kind !== "transport") {
+        trackAutoReconnect("not_needed", toolName);
+        return withClampMeta(first);
+    }
+
+    const currentApp = getConnectedAppByDevice(device);
+    const preferredPort = currentApp?.port;
+
+    const reconnected = await attemptQuickReconnect(preferredPort);
+    if (!reconnected) {
+        trackAutoReconnect("scan_failed", toolName, classification.pattern);
+        return withClampMeta({
+            success: false,
+            error: `reconnect_attempted: ${first.error ?? "unknown"}`,
+            _meta: { reconnected: false, transportError: first.error ?? "unknown" },
+        });
+    }
+
+    const retry = await executeInAppInner(
+        expression,
+        awaitPromise,
+        { ...effectiveOptions, autoReconnect: false },
+        device,
+    );
+
+    if (retry.success) {
+        trackAutoReconnect("success", toolName, classification.pattern);
+        return withClampMeta({
+            ...retry,
+            _meta: { reconnected: true, transportError: first.error ?? "unknown" },
+        });
+    }
+
+    trackAutoReconnect("retry_failed", toolName, classification.pattern);
+    return withClampMeta({
+        success: false,
+        error: `reconnected_but_still_failed: ${first.error ?? "unknown"} | ${retry.error ?? "unknown"}`,
+        _meta: { reconnected: true, transportError: first.error ?? "unknown" },
+    });
 }

@@ -107,6 +107,11 @@ export interface ExecutionResult {
     success: boolean;
     result?: string;
     error?: string;
+    _meta?: {
+        reconnected?: boolean;
+        transportError?: string;
+        timeoutClampedFrom?: number;
+    };
 }
 
 // Log level type
@@ -185,10 +190,11 @@ export interface ContextHealth {
 
 // Options for execute_in_app retry behavior
 export interface ExecuteOptions {
-    maxRetries?: number;      // Default: 2
-    retryDelayMs?: number;    // Default: 1000
-    autoReconnect?: boolean;  // Default: true
-    timeoutMs?: number;       // Default: 10000
+    maxRetries?: number;          // Default: 2
+    retryDelayMs?: number;        // Default: 1000
+    autoReconnect?: boolean;      // Default: true
+    timeoutMs?: number;           // Default: 10000
+    originatingToolName?: string; // For telemetry attribution on auto-reconnect outcomes
 }
 
 export interface ConnectionCheckResult {
