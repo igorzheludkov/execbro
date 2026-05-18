@@ -14,7 +14,7 @@ export function registerExecutionTools(server: McpServer): void {
                 "RECOMMENDED WORKFLOW: 1) list_debug_globals to discover available objects, 2) inspect_global to see properties/methods, 3) execute_in_app to call specific methods or read values.\n\n" +
                 "LIMITATIONS (Hermes engine):\n" +
                 "- NO require() or import — only pre-existing globals are available\n" +
-                "- NO async/await syntax — use simple expressions or promise chains (.then())\n" +
+                "- NO async/await syntax. Use `.then()` chains: `Promise.resolve().then(v => ...)`. The expression's final value is awaited automatically when awaitPromise:true.\n" +
                 "- NO emoji or non-ASCII characters in string literals — causes parse errors\n" +
                 "- Keep expressions simple and synchronous when possible\n\n" +
                 "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
@@ -24,7 +24,7 @@ export function registerExecutionTools(server: McpServer): void {
                 expression: z
                     .string()
                     .describe(
-                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await, no emoji/non-ASCII in strings. Use globals discovered via list_debug_globals."
+                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await (use .then() instead), no unbalanced quotes. Use globals discovered via list_debug_globals — in particular `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry."
                     ),
                 awaitPromise: z.coerce
                     .boolean()
