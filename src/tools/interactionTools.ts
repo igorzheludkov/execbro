@@ -9,11 +9,16 @@ import {
     ANDROID_KEY_EVENTS,
     iosButton,
     iosInputText,
+    iosSwipe,
     IOS_BUTTON_TYPES,
     getActiveSimulatorUdid,
     getActiveOrBootedSimulatorUdid,
+    getDevicePixelRatio,
+    getDefaultAndroidDevice,
+    findSimulatorByName,
+    connectedApps,
 } from "../core/index.js";
-import { tap, type TapResult } from "../pro/tap.js";
+import { tap, convertScreenshotToTapCoords, type TapResult } from "../pro/tap.js";
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 
@@ -285,7 +290,164 @@ export function registerInteractionTools(server: McpServer): void {
             };
         }
     );
-    
+
+    // Tool: iOS swipe
+    registerToolWithTelemetry(
+        server,
+        "ios_swipe",
+        {
+            description:
+                "Swipe gesture on an iOS simulator screen." +
+                platformFallbackBanner("`swipe` for cross-platform gestures; `tap` for targeted interactions") +
+                " Pass screenshot pixel coordinates directly — the same values returned by ios_screenshot pressable elements and screen layout. Coordinates are auto-converted to native iOS points internally. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
+                "\nPURPOSE: Perform a raw-coordinate swipe gesture for scrolling, paging, dismissing sheets, or drawer opens on iOS." +
+                "\nWHEN TO USE: When you need a gesture rather than a tap — scroll lists, swipe carousels, or pull-to-refresh." +
+                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+            inputSchema: {
+                startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels (from ios_screenshot output)"),
+                startY: z.coerce.number().describe("Starting Y coordinate in screenshot pixels (from ios_screenshot output)"),
+                endX: z.coerce.number().describe("Ending X coordinate in screenshot pixels (from ios_screenshot output)"),
+                endY: z.coerce.number().describe("Ending Y coordinate in screenshot pixels (from ios_screenshot output)"),
+                duration: z.coerce.number().optional().describe("Optional swipe duration in seconds"),
+                delta: z.coerce.number().optional().describe("Optional delta between touch events (step size)"),
+                udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
+            }
+        },
+        async ({ startX, startY, endX, endY, duration, delta, udid }) => {
+            const dpr = await getDevicePixelRatio(udid);
+            const firstApp = connectedApps.values().next().value;
+            const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
+            const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, scaleFactor);
+            const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, scaleFactor);
+            const result = await iosSwipe(start.x, start.y, end.x, end.y, { duration, delta, udid });
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.success ? result.result! : `Error: ${result.error}`
+                    }
+                ],
+                isError: !result.success
+            };
+        }
+    );
+
+    // Tool: Cross-platform swipe — auto-routes to iOS or Android backend
+    registerToolWithTelemetry(
+        server,
+        "swipe",
+        {
+            description:
+                "Swipe gesture that auto-routes to the correct platform (iOS or Android)." +
+                primaryInteractionBanner() + "\n" +
+                "PURPOSE: Single unified swipe entry point — accepts screenshot pixel coordinates and dispatches to ios_swipe or android_swipe based on the connected device.\n" +
+                "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers — anything that needs a gesture rather than a tap. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
+                "WORKFLOW: ios_screenshot or android_screenshot -> swipe({ startX, startY, endX, endY }) -> screenshot again to verify.\n" +
+                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. When both iOS and Android devices are connected, pass platform explicitly.\n" +
+                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+            inputSchema: {
+                startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels"),
+                startY: z.coerce.number().describe("Starting Y coordinate in screenshot pixels"),
+                endX: z.coerce.number().describe("Ending X coordinate in screenshot pixels"),
+                endY: z.coerce.number().describe("Ending Y coordinate in screenshot pixels"),
+                durationMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe("Swipe duration in milliseconds (default: 300 on Android; iOS uses driver default if omitted)"),
+                platform: z
+                    .enum(["ios", "android"])
+                    .optional()
+                    .describe("Target platform. Required when both iOS and Android devices are connected. Auto-detected if only one is available."),
+                device: z
+                    .string()
+                    .optional()
+                    .describe("Optional iOS simulator name (substring match) to disambiguate when multiple simulators are booted."),
+                udid: z.string().optional().describe("Optional iOS simulator UDID. Forces iOS targeting."),
+                deviceId: z.string().optional().describe("Optional Android device ID. Uses first available Android device if not specified.")
+            }
+        },
+        async ({ startX, startY, endX, endY, durationMs, platform, device, udid, deviceId }) => {
+            // Platform resolution mirrors the tap() native-mode flow (src/pro/tap.ts).
+            if (udid && platform === "android") {
+                return {
+                    content: [{ type: "text", text: 'Error: udid is only valid for iOS. Got platform: "android".' }],
+                    isError: true
+                };
+            }
+
+            let resolvedPlatform: "ios" | "android" | undefined = platform;
+            let resolvedUdid: string | undefined;
+
+            if (udid) {
+                resolvedPlatform = "ios";
+                resolvedUdid = udid;
+            } else if (!resolvedPlatform) {
+                const deviceMatchedUdid = device
+                    ? await findSimulatorByName(device).catch(() => null)
+                    : null;
+                if (deviceMatchedUdid) {
+                    resolvedPlatform = "ios";
+                    resolvedUdid = deviceMatchedUdid;
+                } else {
+                    const [androidDevice, iosSimulator] = await Promise.all([
+                        getDefaultAndroidDevice().catch(() => null),
+                        getActiveOrBootedSimulatorUdid().catch(() => null)
+                    ]);
+                    if (androidDevice && iosSimulator) {
+                        return {
+                            content: [{ type: "text", text: 'Error: Multiple platforms detected (both Android and iOS). Specify platform: "android" or platform: "ios" to target the correct device.' }],
+                            isError: true
+                        };
+                    }
+                    if (androidDevice) {
+                        resolvedPlatform = "android";
+                    } else if (iosSimulator) {
+                        resolvedPlatform = "ios";
+                        resolvedUdid = iosSimulator;
+                    } else {
+                        return {
+                            content: [{ type: "text", text: "Error: No Android device or iOS simulator found. Connect a device or start a simulator." }],
+                            isError: true
+                        };
+                    }
+                }
+            } else if (resolvedPlatform === "ios") {
+                resolvedUdid =
+                    (device ? await findSimulatorByName(device).catch(() => null) : null) ??
+                    (await getActiveOrBootedSimulatorUdid().catch(() => null)) ??
+                    undefined;
+            }
+
+            let result;
+            if (resolvedPlatform === "ios") {
+                const dpr = await getDevicePixelRatio(resolvedUdid);
+                const firstApp = connectedApps.values().next().value;
+                const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
+                const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, scaleFactor);
+                const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, scaleFactor);
+                const duration = durationMs !== undefined ? durationMs / 1000 : undefined;
+                result = await iosSwipe(start.x, start.y, end.x, end.y, { duration, udid: resolvedUdid });
+            } else {
+                const firstApp = connectedApps.values().next().value;
+                const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
+                const start = convertScreenshotToTapCoords(startX, startY, "android", 1, scaleFactor);
+                const end = convertScreenshotToTapCoords(endX, endY, "android", 1, scaleFactor);
+                result = await androidSwipe(start.x, start.y, end.x, end.y, durationMs ?? 300, deviceId);
+            }
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: result.success ? `[${resolvedPlatform}] ${result.result}` : `Error: ${result.error}`
+                    }
+                ],
+                isError: !result.success
+            };
+        }
+    );
+
     // Tool: Android input text
     registerToolWithTelemetry(
         server,

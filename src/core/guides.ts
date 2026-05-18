@@ -178,7 +178,8 @@ For buttons that contain only an icon (no text):
 tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibility/OCR instead. For best results, use testID or coordinates.
 
 ## Other Interactions
-- android_swipe: swipe/scroll with start/end coordinates
+- swipe: cross-platform swipe/scroll with start/end coordinates (auto-routes to ios_swipe or android_swipe). Use for FlatList/SectionList scrolling where off-screen items aren't mounted.
+- ios_swipe / android_swipe: platform-specific raw-coordinate swipe (fallback for the cross-platform swipe tool)
 - android_input_text / ios_input_text: type text (tap input field first to focus). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
 - clear_focused_input: clear the focused TextInput via onChangeText (controlled-state safe). Pair with input_text for replace flows, or use input_text({replace:true}) for one-shot.
 - dismiss_keyboard: blur the focused input, closing the keyboard.
