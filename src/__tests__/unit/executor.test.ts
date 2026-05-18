@@ -80,13 +80,13 @@ describe("validateAndPreprocessExpression", () => {
     it("rejects top-level async function", () => {
         const result = validateAndPreprocessExpression("async () => { await fetch() }");
         expect(result.valid).toBe(false);
-        expect(result.error).toContain("async");
+        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
     });
 
     it("rejects async IIFE", () => {
         const result = validateAndPreprocessExpression("(async () => { await fetch() })()");
         expect(result.valid).toBe(false);
-        expect(result.error).toContain("async");
+        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
     });
 
     it("strips comments and validates remaining expression", () => {
@@ -130,6 +130,40 @@ describe("validateAndPreprocessExpression", () => {
 
     it("accepts semicolons inside template literals", () => {
         const result = validateAndPreprocessExpression("`a;b;c`");
+        expect(result.valid).toBe(true);
+    });
+
+    it("rejects bare top-level await with a targeted error", () => {
+        const result = validateAndPreprocessExpression("await fetch('/x')");
+        expect(result.valid).toBe(false);
+        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
+        expect(result.error).toMatch(/Promise\.resolve\(\)\.then/);
+    });
+
+    it("rejects async function declarations with the same targeted error", () => {
+        const result = validateAndPreprocessExpression("async function x() { return 1 }");
+        expect(result.valid).toBe(false);
+        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
+    });
+
+    it("rejects async arrow IIFE with the same targeted error", () => {
+        const result = validateAndPreprocessExpression("(async () => 1)()");
+        expect(result.valid).toBe(false);
+        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
+    });
+
+    it("allows Promise.resolve().then() chains", () => {
+        const result = validateAndPreprocessExpression("Promise.resolve(1).then(v => v + 1)");
+        expect(result.valid).toBe(true);
+    });
+
+    it("does not flag the substring 'await' inside an identifier or string", () => {
+        const result = validateAndPreprocessExpression('"keep awaiting"');
+        expect(result.valid).toBe(true);
+    });
+
+    it("does not flag `awaiting` as a variable name", () => {
+        const result = validateAndPreprocessExpression("awaiting");
         expect(result.valid).toBe(true);
     });
 });
