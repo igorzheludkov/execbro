@@ -323,5 +323,5 @@ export { formatLogsAsTonl, formatNetworkAsTonl } from "./format.js";
 export type { OutputFormat } from "./format.js";
 
 // Measure (component on-screen geometry)
-export { measureComponent } from "./measure.js";
-export type { MeasureBounds, MeasureOutcome, MeasureToolResult } from "./measure.js";
+export { measureComponent } from "./measureComponentTools.js";
+export type { MeasureBounds, MeasureOutcome, MeasureToolResult } from "./measureComponentTools.js";
