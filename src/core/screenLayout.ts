@@ -261,6 +261,7 @@ export async function getScreenLayout(
         summary?: boolean;
         device?: string;
         raw?: boolean;
+        timeoutMs?: number;
     } = {}
 ): Promise<ExecutionResult & {
     parsedElements?: ScreenElement[];
@@ -268,7 +269,7 @@ export async function getScreenLayout(
     offScreenBelow?: string[];
     offScreenAbove?: string[];
 }> {
-    const { extended = false, summary = false, device, raw = false } = options;
+    const { extended = false, summary = false, device, raw = false, timeoutMs } = options;
     const maxDepth = 5000;
     const componentsOnly = true;
     const shortPath = true;
@@ -501,7 +502,7 @@ export async function getScreenLayout(
         })()
     `;
 
-    let dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
+    let dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: timeoutMs ?? 30000, originatingToolName: "get_screen_layout" }, device);
     if (!dispatchResult.success) return dispatchResult;
 
     let dispatchError: string | undefined;
@@ -517,7 +518,7 @@ export async function getScreenLayout(
     // after the retry — surface an actionable error pointing at OCR/screenshot.
     if (dispatchError && /React DevTools hook not found/.test(dispatchError)) {
         await delay(400);
-        dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
+        dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: timeoutMs ?? 30000, originatingToolName: "get_screen_layout" }, device);
         if (!dispatchResult.success) return dispatchResult;
         dispatchError = undefined;
         try {
@@ -778,7 +779,7 @@ export async function getScreenLayout(
         })()
     `;
 
-    const result = await executeInApp(resolveExpression, false, { timeoutMs: 30000 }, device);
+    const result = await executeInApp(resolveExpression, false, { timeoutMs: timeoutMs ?? 30000, originatingToolName: "get_screen_layout" }, device);
 
     // Format output as tree
     if (result.success && result.result) {

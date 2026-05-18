@@ -68,6 +68,7 @@ export async function getComponentTree(
         structureOnly?: boolean;
         focusedOnly?: boolean;
         device?: string;
+        timeoutMs?: number;
     } = {}
 ): Promise<ExecutionResult> {
     const {
@@ -77,7 +78,8 @@ export async function getComponentTree(
         format = "tonl",
         structureOnly = false,
         focusedOnly = false,
-        device
+        device,
+        timeoutMs
     } = options;
     // Use lower default depth for structureOnly to keep output compact (~2-5KB)
     // Full mode uses higher depth since TONL format handles it better
@@ -290,7 +292,7 @@ export async function getComponentTree(
     `;
 
     // Use a longer timeout for component tree traversal — large apps can exceed 10s
-    const result = await executeInApp(expression, false, { timeoutMs: 30000 }, device);
+    const result = await executeInApp(expression, false, { timeoutMs: timeoutMs ?? 30000, originatingToolName: "get_component_tree" }, device);
 
     // Apply formatting if requested
     if (result.success && result.result) {
