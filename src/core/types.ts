@@ -189,6 +189,10 @@ export interface ExecuteOptions {
     retryDelayMs?: number;    // Default: 1000
     autoReconnect?: boolean;  // Default: true
     timeoutMs?: number;       // Default: 10000
+    // Internal: when true, skip the one-shot globalThis.__rn__ fallback
+    // bootstrap. Set by the bootstrap itself to prevent infinite recursion
+    // (the bootstrap runs through executeInApp).
+    skipBootstrap?: boolean;
 }
 
 export interface ConnectionCheckResult {

@@ -63,6 +63,13 @@ initBundleErrorBuffer(bundleErrorBuffer);
 // Connected apps
 export const connectedApps: Map<string, ConnectedApp> = new Map();
 
+// Apps that have already had their globalThis.__rn__ fallback bootstrap
+// attempted this session. Keyed by the same string we use for device targeting
+// (either the explicit `device` param, or the first connectedApps key). The
+// Set is unbounded but each entry is a small string, so accumulation across a
+// long-running MCP session is negligible.
+export const bootstrappedApps: Set<string> = new Set();
+
 export function getTargetPlatform(): string | undefined {
     const firstApp = connectedApps.values().next().value;
     return firstApp?.platform;
