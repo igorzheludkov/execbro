@@ -15,6 +15,15 @@ export function buildRnGlobalsBootstrapExpression(): string {
     // module signatures. Stops on first match per module.
     return `(() => {
         try {
+            // SDK fast path: if react-native-ai-devtools-sdk's exposeRnGlobals()
+            // already populated __rn__, don't run the fiber walk and don't clobber it.
+            const existing = globalThis.__rn__;
+            if (existing && typeof existing === "object") {
+                const existingKeys = Object.keys(existing);
+                if (existingKeys.length > 0) {
+                    return { ok: true, keys: existingKeys, reason: "sdk-populated" };
+                }
+            }
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             if (!hook || typeof hook.getFiberRoots !== "function") {
                 globalThis.__rn__ = null;
