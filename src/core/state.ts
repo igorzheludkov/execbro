@@ -1,7 +1,6 @@
 import { ConnectedApp, PendingExecution, LogEntry } from "./types.js";
 import { LogBuffer } from "./logs.js";
 import { NetworkBuffer } from "./network.js";
-import { BundleErrorBuffer, initBundleErrorBuffer } from "./bundle.js";
 import { ImageBuffer } from "./imageBuffer.js";
 
 // Per-device log buffers (keyed by deviceName)
@@ -51,14 +50,13 @@ export function getTotalLogCount(): number {
     return total;
 }
 
-// Global bundle error buffer
-export const bundleErrorBuffer = new BundleErrorBuffer(100);
+// Global bundle error buffer — owned by bundle.ts to avoid a
+// bundle ↔ connection ↔ state init cycle; re-exported here for callers
+// that still import it from state.
+export { bundleErrorBuffer } from "./bundle.js";
 
 // Global image buffer (shared across all screenshot-producing tools)
 export const imageBuffer = new ImageBuffer(50);
-
-// Initialize bundle error buffer reference in bundle.ts
-initBundleErrorBuffer(bundleErrorBuffer);
 
 // Connected apps
 export const connectedApps: Map<string, ConnectedApp> = new Map();

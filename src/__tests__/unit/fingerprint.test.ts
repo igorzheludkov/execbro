@@ -1,13 +1,23 @@
 import { jest } from "@jest/globals";
 
+// Pass-through mocks: spread the real module so any export the deferred setup
+// or transitive deps consume (e.g. child_process.exec) keeps working. Using
+// the `node:` protocol bypasses Jest's mock registry for the inner lookup,
+// since unstable_mockModule below is keyed on the bare specifier.
+const realChildProcess = await import("node:child_process");
+const realFs = await import("node:fs");
+const realOs = await import("node:os");
+
 const mockExecSync = jest.fn();
 jest.unstable_mockModule("child_process", () => ({
+    ...realChildProcess,
     execSync: mockExecSync,
 }));
 
 const mockReadFileSync = jest.fn();
 const mockExistsSync = jest.fn();
 jest.unstable_mockModule("fs", () => ({
+    ...realFs,
     readFileSync: mockReadFileSync,
     existsSync: mockExistsSync,
 }));
@@ -16,6 +26,7 @@ const mockUserInfo = jest.fn();
 const mockCpus = jest.fn();
 const mockPlatform = jest.fn();
 jest.unstable_mockModule("os", () => ({
+    ...realOs,
     userInfo: mockUserInfo,
     cpus: mockCpus,
     platform: mockPlatform,
