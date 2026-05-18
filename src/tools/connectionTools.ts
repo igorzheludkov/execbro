@@ -654,9 +654,11 @@ export function registerConnectionTools(server: McpServer): void {
         {
             description:
                 "Reload the React Native app (triggers JavaScript bundle reload like pressing 'r' in Metro).\n" +
-                "DO NOT call this reflexively after JS/TS/TSX/style edits — Fast Refresh applies those automatically in 1-2s. Reloading discards in-memory state: navigation stack, context, hooks state, BLE/WebSocket connections, paired devices, auth sessions. That can force re-pairing or re-login and break your verification loop, so the cost of an unnecessary reload is high.\n" +
-                "ONLY reload when: (1) native code, app.json, Info.plist, Podfile, or a native module changed; (2) Fast Refresh visibly failed (red-screen, stale render confirmed via screenshot after a few seconds); (3) the app is in a broken/error state; (4) you need to reset app state completely; or (5) the user explicitly asks. If unsure, take a screenshot first and verify Fast Refresh didn't already apply the change — don't reload defensively.\n" +
-                "Will auto-connect to Metro if no connection exists. After reload, the app may take a few seconds to fully restart and become responsive — wait before running other tools.",
+                "PURPOSE: Force a full JS bundle reload when Fast Refresh isn't enough — clears in-memory state and re-runs the bundle from scratch.\n" +
+                "WHEN TO USE (only these cases): (1) native code, app.json, Info.plist, Podfile, or a native module changed; (2) Fast Refresh visibly failed (red-screen or stale render confirmed via screenshot after a few seconds); (3) the app is in a broken state; (4) you need to reset app state completely; (5) the user explicitly asks.\n" +
+                "AVOID: reloading reflexively after JS/TS/TSX/style edits — Fast Refresh applies those in 1-2s. A reload discards navigation stack, context, hooks state, BLE/WebSocket connections, paired devices, and auth sessions, which can force re-pairing or re-login and break your verification loop.\n" +
+                "WORKFLOW: screenshot → wait 2s for Fast Refresh → if still stale, reload_app. Will auto-connect to Metro if no connection exists. After reload, wait a few seconds before running other tools.\n" +
+                "SEE ALSO: get_refresh_status (did Fast Refresh accept?), get_bundle_status (did Metro compile?).",
             inputSchema: {
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
             }

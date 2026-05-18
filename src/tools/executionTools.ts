@@ -125,17 +125,15 @@ export function registerExecutionTools(server: McpServer): void {
         "list_debug_globals",
         {
             description:
-                "List globally available debugging objects in the connected React Native app (Apollo Client, Redux store, React DevTools, etc.). Use this to discover what state management and debugging tools are available.\n" +
-                "PURPOSE: Enumerate the app's `globalThis.*` surface so you know which stores, clients, and debug hooks you can drill into.\n" +
+                "List globally available debugging objects in the connected app (Apollo, Redux, React DevTools, etc.).\n" +
+                "PURPOSE: Enumerate the app's globalThis.* surface so you know which stores, clients, and debug hooks you can drill into.\n" +
                 "WHEN TO USE: Start of a state-debugging session, or when you don't know whether the app exposes a Redux/Apollo/Zustand handle.\n" +
                 "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"...\") -> execute_in_app for reads/mutations.\n" +
-                "SDK INTEGRATION: If the app uses `react-native-ai-devtools-sdk` and called `init({ stores, navigation, custom })`, the response includes an `sdk.paths` array of ready-to-use dotted paths (e.g. `__RN_AI_DEVTOOLS__.stores.redux`, `__RN_AI_DEVTOOLS__.custom.mmkv`). Pass these straight to inspect_global or execute_in_app.\n" +
-                "RN NAMESPACE: The `rn` field reports `globalThis.__rn__`, a curated namespace of seven RN modules — I18nManager, PixelRatio, Platform, StyleSheet, AppRegistry, NativeModules, Dimensions — populated by the SDK's exposeRnGlobals() or the executor's fallback bootstrap. `keys` lists the resolved modules; use dotted paths like `__rn__.Platform.OS` in execute_in_app/inspect_global. When `rn` is null the bootstrap has not yet run; when `keys` is empty the bootstrap ran but no fiber yielded a match.\n" +
-                "OUTPUT SHAPE: { sdk: { version, capabilities, paths, hint } | null, rn: { keys: string[], hint: string } | null, categories: { 'Apollo Client': [...], 'Redux': [...], 'Other Debug': [...], ... } }\n" +
-                "LIMITATIONS: Only sees variables explicitly assigned to a global (e.g., `globalThis.store = store`). Module-scoped state is invisible — expose it first or use the SDK's init().\n" +
-                "GOOD: list_debug_globals()\n" +
-                "BAD: Calling before scan_metro — needs a live connection.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
+                "SDK INTEGRATION: When react-native-ai-devtools-sdk's init({ stores, navigation, custom }) was called, the response includes an sdk.paths array of dotted paths (e.g. __RN_AI_DEVTOOLS__.stores.redux). Pass them to inspect_global or execute_in_app.\n" +
+                "RN NAMESPACE: The rn field reports globalThis.__rn__ — a curated set of seven RN modules (I18nManager, PixelRatio, Platform, StyleSheet, AppRegistry, NativeModules, Dimensions) populated by SDK exposeRnGlobals() or the executor's fallback bootstrap. Use paths like __rn__.Platform.OS. rn=null → bootstrap not yet run; keys=[] → ran but no match.\n" +
+                "OUTPUT: { sdk: {...}|null, rn: {keys, hint}|null, categories: {...} }\n" +
+                "LIMITATIONS: Only sees variables explicitly assigned to a global. Module-scoped state is invisible — expose it first or use the SDK.\n" +
+                "SEE ALSO: get_usage_guide(topic=\"state\") for the full playbook.",
             inputSchema: {
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
             }

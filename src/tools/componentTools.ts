@@ -616,15 +616,13 @@ export function registerComponentTools(server: McpServer): void {
         "get_inspector_selection",
         {
             description:
-                "Identify the React component at a screen location AND read its full styling. Returns RN's curated owner-tree hierarchy with PER-COMPONENT STYLE (padding, margin, border, layout, colors, fontSize, etc.) — the same rich data the on-device Element Inspector shows. Works on Bridgeless / new arch by invoking RN's inspector programmatically. If x/y provided: toggles the overlay on, captures the selection, and toggles it back off (no screenshot pollution). If no coordinates: reads the current selection from a manually-driven overlay.\n" +
-                "PURPOSE: Identity + styling. Answers \"what is this and how is it styled?\" — the primary tool for visual/style debugging at a coordinate.\n" +
-                "WHEN TO USE: You see a visual issue at a pixel and want the component name AND its style values (e.g. \"why is borderRadius 14 instead of 16?\"). Best for style/CSS-style debugging.\n" +
-                "WORKFLOW: ios_screenshot / android_screenshot -> note the suspect pixel -> get_inspector_selection(x, y) -> edit the returned style values.\n" +
-                "LIMITATIONS: Requires RN dev mode (__DEV__). x/y are in points/dp. Brief overlay flicker (~600ms total). Source file paths are pre-wired but null on React 19 (where _debugSource was dropped); component name + style is always returned.\n" +
-                "DIFFERENCE vs inspect_at_point: get_inspector_selection returns RICH STYLE per ancestor (the inspector's curated view) but only ONE frame (the inspected element). inspect_at_point returns FRAME PER ANCESTOR plus PROPS (handlers, refs, non-style props) but no rich style merging. Use this tool for style/identity; use inspect_at_point for layout measurements and props.\n" +
-                "GOOD: get_inspector_selection({ x: 180, y: 420 }) // \"what is this gradient card and what's its borderRadius?\"\n" +
-                "BAD: Calling it in a tight loop — prefer inspect_at_point (no overlay toggle, faster, no visual side effect).\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "Identify the React component at a screen location AND read its full styling. Returns RN's curated owner-tree hierarchy with per-component STYLE (padding, margin, border, layout, colors, fontSize, etc.) — the same data the on-device Element Inspector shows. Works on Bridgeless/new arch by invoking RN's inspector programmatically. With x/y: toggles the overlay on, captures, toggles it off. Without coordinates: reads the current selection from a manually-driven overlay.\n" +
+                "PURPOSE: Identity + styling — \"what is this and how is it styled?\" The primary tool for visual/style debugging at a coordinate.\n" +
+                "WHEN TO USE: You see a visual issue at a pixel and want the component name AND its style values (e.g. \"why is borderRadius 14 instead of 16?\").\n" +
+                "WORKFLOW: screenshot → note suspect pixel → get_inspector_selection(x, y) → edit returned style values.\n" +
+                "LIMITATIONS: Requires RN dev mode. Brief overlay flicker (~600ms). Source paths are null on React 19 (where _debugSource was dropped); name + style is always returned.\n" +
+                "VS inspect_at_point: this returns RICH STYLE per ancestor but only ONE frame. inspect_at_point returns FRAME PER ANCESTOR + PROPS but no rich style merging.\n" +
+                "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
             inputSchema: {
                 x: z
                     .number()
@@ -710,15 +708,13 @@ export function registerComponentTools(server: McpServer): void {
         "inspect_at_point",
         {
             description:
-                "Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point), plus the innermost component's PROPS (handlers as `[Function]`, refs, custom props like onPress/data/testID). Pure JS hit-test via fiber tree + measureInWindow — no on-device overlay toggled, zero visual side effect. Works on Paper and Fabric.\n" +
-                "PURPOSE: Layout/props diagnosis. Answers \"where is each ancestor positioned, and what props does the touched component expose?\"\n" +
-                "WHEN TO USE: A button is clipped, an element's hit area is wrong, an animated frame is unexpected — or you need handler/ref/non-style props that the inspector doesn't surface. Also preferred for tight loops or before/after comparisons (no overlay flicker).\n" +
-                "WORKFLOW: ios_screenshot -> find suspect pixel -> convert to dp (pixel / pixelRatio) -> inspect_at_point(x, y).\n" +
-                "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong component. Style is shown as a reference (no rich merging) — for style debugging use get_inspector_selection.\n" +
-                "DIFFERENCE vs get_inspector_selection: inspect_at_point returns FRAME PER ANCESTOR + PROPS, no overlay flicker, no rich style. get_inspector_selection returns RICH STYLE per ancestor (padding/margin/border) but only ONE frame and toggles the overlay briefly. Use get_inspector_selection for style/identity; use this tool for layout measurements and props.\n" +
-                "GOOD: inspect_at_point({ x: 205, y: 360 }) // \"why is this button's hit area too small?\"\n" +
-                "BAD: inspect_at_point({ x: 540, y: 960 }) // raw screenshot pixels — picks the wrong node.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point) + the innermost component's PROPS (handlers as [Function], refs, custom props like onPress/data/testID). Pure JS hit-test via fiber + measureInWindow — no overlay toggled, zero visual side effect. Works on Paper and Fabric.\n" +
+                "PURPOSE: Layout/props diagnosis — \"where is each ancestor positioned, and what props does the touched component expose?\"\n" +
+                "WHEN TO USE: A button is clipped, hit area is wrong, animated frame is unexpected — or you need handler/ref/non-style props. Also preferred for tight loops (no overlay flicker).\n" +
+                "WORKFLOW: screenshot → suspect pixel → divide by pixel ratio → inspect_at_point(x, y).\n" +
+                "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is shown for reference only (no rich merging); for style debugging use get_inspector_selection.\n" +
+                "VS get_inspector_selection: this returns FRAME PER ANCESTOR + PROPS, no flicker. Inspector returns RICH STYLE per ancestor but only one frame and briefly toggles the overlay.\n" +
+                "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
             inputSchema: {
                 x: z
                     .number()
