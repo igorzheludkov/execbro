@@ -26,6 +26,18 @@ import {
     connectedApps,
 } from "../core/index.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
+import type { ExecutionResult } from "../core/types.js";
+
+function collectMetaNotes(r: ExecutionResult): string[] {
+    const out: string[] = [];
+    if (r._meta?.reconnected) {
+        out.push(`[reconnected: transport error "${r._meta.transportError ?? "unknown"}" was auto-recovered]`);
+    }
+    if (r._meta?.timeoutClampedFrom !== undefined) {
+        out.push(`[warning: timeoutMs ${r._meta.timeoutClampedFrom} clamped to 120000]`);
+    }
+    return out;
+}
 
 export function registerComponentTools(server: McpServer): void {
     // Tool: Get full screen layout (all components with layout styles)
@@ -54,10 +66,16 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Return only component counts by name instead of full tree (default: false)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                timeoutMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe(
+                        "Per-call timeout in milliseconds. Default: 5000; bumped to 15000 when extended=true. Hard cap: 120000."
+                    )
             }
         },
-        async ({ extended, summary, device }) => {
+        async ({ extended, summary, device, timeoutMs }) => {
             if (!hasMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_layout");
                 return {
@@ -65,29 +83,24 @@ export function registerComponentTools(server: McpServer): void {
                     isError: true
                 };
             }
-    
-            const result = await getScreenLayout({ extended, summary, device });
-    
+
+            const effectiveTimeoutMs = timeoutMs ?? (extended ? 15000 : 5000);
+            const result = await getScreenLayout({ extended, summary, device, timeoutMs: effectiveTimeoutMs });
+
+            const metaNotes = collectMetaNotes(result);
+
             if (!result.success) {
+                const errText = metaNotes.length > 0 ? `Error: ${result.error}\n\n${metaNotes.join("\n")}` : `Error: ${result.error}`;
                 return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Error: ${result.error}`
-                        }
-                    ],
+                    content: [{ type: "text", text: errText }],
                     isError: true
                 };
             }
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `Screen Layout:\n\n${result.result}`
-                    }
-                ]
-            };
+
+            const body = metaNotes.length > 0
+                ? `Screen Layout:\n\n${result.result}\n\n${metaNotes.join("\n")}`
+                : `Screen Layout:\n\n${result.result}`;
+            return { content: [{ type: "text", text: body }] };
         }
     );
     
@@ -153,10 +166,15 @@ export function registerComponentTools(server: McpServer): void {
                     .describe(
                         "Output format: 'json' or 'tonl' (default, compact indented tree). Ignored if structureOnly=true."
                     ),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                timeoutMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe("Per-call timeout in milliseconds. Default: 5000. Hard cap: 120000.")
             }
         },
-        async ({ structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format, device }) => {
+        async ({ structureOnly, maxDepth, includeProps, includeStyles, hideInternals, format, device, timeoutMs }) => {
+            const effectiveTimeoutMs = timeoutMs ?? 5000;
             const result = await getComponentTree({
                 structureOnly,
                 maxDepth,
@@ -164,29 +182,24 @@ export function registerComponentTools(server: McpServer): void {
                 includeStyles,
                 hideInternals,
                 format,
-                device
+                device,
+                timeoutMs: effectiveTimeoutMs
             });
-    
+
+            const metaNotes = collectMetaNotes(result);
+
             if (!result.success) {
+                const errText = metaNotes.length > 0 ? `Error: ${result.error}\n\n${metaNotes.join("\n")}` : `Error: ${result.error}`;
                 return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Error: ${result.error}`
-                        }
-                    ],
+                    content: [{ type: "text", text: errText }],
                     isError: true
                 };
             }
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `React Component Tree:\n\n${result.result}`
-                    }
-                ]
-            };
+
+            const body = metaNotes.length > 0
+                ? `React Component Tree:\n\n${result.result}\n\n${metaNotes.join("\n")}`
+                : `React Component Tree:\n\n${result.result}`;
+            return { content: [{ type: "text", text: body }] };
         }
     );
     
@@ -427,10 +440,15 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe("Simplify hooks output by hiding effects and reducing depth (default: true)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                timeoutMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe("Per-call timeout in milliseconds. Default: 5000. Hard cap: 120000.")
             }
         },
-        async ({ componentName, index, includeState, includeChildren, childrenDepth, includeStyle, shortPath, simplifyHooks, device }) => {
+        async ({ componentName, index, includeState, includeChildren, childrenDepth, includeStyle, shortPath, simplifyHooks, device, timeoutMs }) => {
+            const effectiveTimeoutMs = timeoutMs ?? 5000;
             const result = await inspectComponent(componentName, {
                 index,
                 includeState,
@@ -439,29 +457,24 @@ export function registerComponentTools(server: McpServer): void {
                 includeStyle,
                 shortPath,
                 simplifyHooks,
-                device
+                device,
+                timeoutMs: effectiveTimeoutMs
             });
-    
+
+            const metaNotes = collectMetaNotes(result);
+
             if (!result.success) {
+                const errText = metaNotes.length > 0 ? `Error: ${result.error}\n\n${metaNotes.join("\n")}` : `Error: ${result.error}`;
                 return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Error: ${result.error}`
-                        }
-                    ],
+                    content: [{ type: "text", text: errText }],
                     isError: true
                 };
             }
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `Component Inspection: ${componentName}\n\n${result.result}`
-                    }
-                ]
-            };
+
+            const body = metaNotes.length > 0
+                ? `Component Inspection: ${componentName}\n\n${result.result}\n\n${metaNotes.join("\n")}`
+                : `Component Inspection: ${componentName}\n\n${result.result}`;
+            return { content: [{ type: "text", text: body }] };
         }
     );
     
@@ -503,33 +516,34 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default("tonl")
                     .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                timeoutMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe("Per-call timeout in milliseconds. Default: 5000. Hard cap: 120000.")
             }
         },
-        async ({ pattern, maxResults, includeLayout, shortPath, summary, format, device }) => {
-            const result = await findComponents(pattern, { maxResults, includeLayout, shortPath, summary, format, device });
-    
+        async ({ pattern, maxResults, includeLayout, shortPath, summary, format, device, timeoutMs }) => {
+            const effectiveTimeoutMs = timeoutMs ?? 5000;
+            const result = await findComponents(pattern, {
+                maxResults, includeLayout, shortPath, summary, format, device,
+                timeoutMs: effectiveTimeoutMs,
+            });
+
+            const metaNotes = collectMetaNotes(result);
+
             if (!result.success) {
+                const errText = metaNotes.length > 0 ? `Error: ${result.error}\n\n${metaNotes.join("\n")}` : `Error: ${result.error}`;
                 return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Error: ${result.error}`
-                        }
-                    ],
+                    content: [{ type: "text", text: errText }],
                     isError: true
                 };
             }
-    
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `Find Components (pattern: "${pattern}"):\n\n${result.result}`
-                    }
-                ]
-            };
+
+            const body = metaNotes.length > 0
+                ? `Find Components (pattern: "${pattern}"):\n\n${result.result}\n\n${metaNotes.join("\n")}`
+                : `Find Components (pattern: "${pattern}"):\n\n${result.result}`;
+            return { content: [{ type: "text", text: body }] };
         }
     );
     

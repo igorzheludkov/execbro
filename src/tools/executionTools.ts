@@ -20,6 +20,7 @@ export function registerExecutionTools(server: McpServer): void {
                 "- Keep expressions simple and synchronous when possible\n\n" +
                 "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
                 "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`, `console.log('\\u{1F600}')`\n" +
+                "NEW: pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
             inputSchema: {
                 expression: z
@@ -44,22 +45,40 @@ export function registerExecutionTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Disable result truncation. Tip: Be cautious - Redux stores or large state can return 10KB+."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                timeoutMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe(
+                        "Per-call timeout in milliseconds. Default: 10000. Hard cap: 120000 (values above are clamped with a warning surfaced in the response). A timeout here is a logical failure and does NOT trigger auto-reconnect."
+                    )
             }
         },
-        async ({ expression, awaitPromise, maxResultLength, verbose, device }) => {
-            const result = await executeInApp(expression, awaitPromise, {}, device);
+        async ({ expression, awaitPromise, maxResultLength, verbose, device, timeoutMs }) => {
+            const result = await executeInApp(expression, awaitPromise, {
+                timeoutMs,
+                originatingToolName: "execute_in_app",
+            }, device);
     
+            const metaNotes: string[] = [];
+            if (result._meta?.reconnected) {
+                metaNotes.push(`[reconnected: transport error "${result._meta.transportError ?? "unknown"}" was auto-recovered]`);
+            }
+            if (result._meta?.timeoutClampedFrom !== undefined) {
+                metaNotes.push(`[warning: timeoutMs ${result._meta.timeoutClampedFrom} clamped to 120000]`);
+            }
+
             if (!result.success) {
                 let errorText = `Error: ${result.error}`;
-    
+
                 // If the error is a ReferenceError (accessing a global that doesn't exist),
                 // guide the agent to expose the variable as a global first
                 if (result.error?.includes("ReferenceError")) {
                     errorText +=
                         "\n\nNOTE: This variable is not exposed as a global. To access it, first assign it to a global variable in your app code (e.g., `globalThis.__MY_VAR__ = myVar;`), then use execute_in_app to read `__MY_VAR__`. You can also use list_debug_globals to see what globals ARE currently available.";
                 }
-    
+                if (metaNotes.length > 0) errorText = `${errorText}\n\n${metaNotes.join("\n")}`;
+
                 return {
                     content: [
                         {
@@ -72,16 +91,17 @@ export function registerExecutionTools(server: McpServer): void {
                     _errorContext: expression
                 };
             }
-    
+
             let resultText = result.result ?? "undefined";
-    
+
             // Apply truncation unless verbose or unlimited
             if (!verbose && maxResultLength > 0 && resultText.length > maxResultLength) {
                 resultText =
                     resultText.slice(0, maxResultLength) + `... [truncated: ${result.result?.length ?? 0} chars total]`;
             }
-    
-    
+
+            if (metaNotes.length > 0) resultText = `${resultText}\n\n${metaNotes.join("\n")}`;
+
             return {
                 content: [
                     {
