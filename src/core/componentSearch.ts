@@ -56,6 +56,7 @@ export async function inspectComponent(
         includeState?: boolean;
         includeChildren?: boolean;
         childrenDepth?: number;
+        includeStyle?: boolean;
         shortPath?: boolean;
         simplifyHooks?: boolean;
         device?: string;
@@ -66,6 +67,7 @@ export async function inspectComponent(
         includeState = true,
         includeChildren = false,
         childrenDepth = 1,
+        includeStyle = false,
         shortPath = true,
         simplifyHooks = true,
         device
@@ -94,6 +96,7 @@ export async function inspectComponent(
             const includeState = ${includeState};
             const includeChildren = ${includeChildren};
             const childrenDepth = ${childrenDepth};
+            const includeStyle = ${includeStyle};
             const shortPath = ${shortPath};
             const simplifyHooks = ${simplifyHooks};
             const pathSegments = 3;
@@ -148,6 +151,58 @@ export async function inspectComponent(
                 return result;
             }
 
+            const resolveRNStyle = (hook && hook.resolveRNStyle) || null;
+
+            function flattenStyleProp(style) {
+                if (style == null || style === false || style === true) return null;
+                if (typeof style === 'number') {
+                    if (resolveRNStyle) {
+                        try {
+                            const resolved = resolveRNStyle(style);
+                            return resolved ? flattenStyleProp(resolved) : null;
+                        } catch { return null; }
+                    }
+                    return null;
+                }
+                if (Array.isArray(style)) {
+                    const out = {};
+                    for (const item of style) {
+                        const flat = flattenStyleProp(item);
+                        if (flat && typeof flat === 'object') Object.assign(out, flat);
+                    }
+                    return Object.keys(out).length ? out : null;
+                }
+                if (typeof style === 'object') return style;
+                return null;
+            }
+
+            function sanitizeStyleObject(s) {
+                if (!s || typeof s !== 'object') return null;
+                const out = {};
+                for (const k of Object.keys(s)) {
+                    const v = s[k];
+                    if (v === undefined) continue;
+                    if (v === null) { out[k] = null; continue; }
+                    const t = typeof v;
+                    if (t === 'function') { out[k] = '[Function]'; continue; }
+                    if (t === 'object') {
+                        try { JSON.stringify(v); out[k] = v; }
+                        catch { out[k] = String(v); }
+                        continue;
+                    }
+                    out[k] = v;
+                }
+                return Object.keys(out).length ? out : null;
+            }
+
+            function getResolvedStyle(fiber) {
+                try {
+                    const raw = fiber && fiber.memoizedProps && fiber.memoizedProps.style;
+                    if (raw == null) return null;
+                    return sanitizeStyleObject(flattenStyleProp(raw));
+                } catch { return null; }
+            }
+
             function getChildTree(fiber, depth) {
                 if (!fiber || depth <= 0) return null;
                 const children = [];
@@ -155,13 +210,25 @@ export async function inspectComponent(
                 while (child && children.length < 30) {
                     const name = getComponentName(child);
                     if (name) {
+                        const style = includeStyle ? getResolvedStyle(child) : null;
                         if (depth === 1) {
-                            // Just names for depth 1
-                            children.push(name);
+                            if (includeStyle) {
+                                const entry = { component: name };
+                                if (style) entry.style = style;
+                                children.push(entry);
+                            } else {
+                                children.push(name);
+                            }
                         } else {
-                            // Tree structure for depth > 1
                             const nestedChildren = getChildTree(child, depth - 1);
-                            children.push(nestedChildren ? { component: name, children: nestedChildren } : name);
+                            if (includeStyle) {
+                                const entry = { component: name };
+                                if (style) entry.style = style;
+                                if (nestedChildren) entry.children = nestedChildren;
+                                children.push(entry);
+                            } else {
+                                children.push(nestedChildren ? { component: name, children: nestedChildren } : name);
+                            }
                         }
                     }
                     child = child.sibling;

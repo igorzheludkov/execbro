@@ -414,6 +414,13 @@ export function registerComponentTools(server: McpServer): void {
                     .describe(
                         "How many levels deep to show children (default: 1 = direct children only, 2+ = nested tree)"
                     ),
+                includeStyle: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe(
+                        "Include flattened style on each child entry (only with includeChildren). Use when debugging 'why isn't X style applying' or cascade-like inheritance on nested elements (e.g., textAlign on an inner Text, flex on a wrapper View). Resolves StyleSheet IDs and array/conditional styles to a single object. Default: false."
+                    ),
                 shortPath: z.boolean().optional().default(true).describe("Show only last 3 path segments (default: true)"),
                 simplifyHooks: z
                     .boolean()
@@ -423,12 +430,13 @@ export function registerComponentTools(server: McpServer): void {
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
             }
         },
-        async ({ componentName, index, includeState, includeChildren, childrenDepth, shortPath, simplifyHooks, device }) => {
+        async ({ componentName, index, includeState, includeChildren, childrenDepth, includeStyle, shortPath, simplifyHooks, device }) => {
             const result = await inspectComponent(componentName, {
                 index,
                 includeState,
                 includeChildren,
                 childrenDepth,
+                includeStyle,
                 shortPath,
                 simplifyHooks,
                 device
