@@ -184,7 +184,12 @@ export function formatBundleErrors(errors: BundleError[]): string {
 
 // Metro WebSocket connection for build events
 let metroEventWs: WebSocket | null = null;
-let bundleErrorBuffer: BundleErrorBuffer | null = null;
+
+// Self-owned shared buffer. Owning it here (rather than constructing it in
+// state.ts and injecting back via initBundleErrorBuffer) breaks the
+// bundle ↔ connection ↔ state cycle: state.ts no longer needs to import
+// the BundleErrorBuffer class at module-init time. Re-exported by state.ts.
+export const bundleErrorBuffer: BundleErrorBuffer = new BundleErrorBuffer(100);
 
 // Metro build events reconnection state
 let metroBuildEventPort: number | null = null;
@@ -192,11 +197,6 @@ let metroBuildEventReconnecting = false;
 let metroBuildEventAttempts = 0;
 const MAX_BUILD_EVENT_RECONNECT_ATTEMPTS = 5;
 const BUILD_EVENT_BACKOFF_BASE_MS = 500;
-
-// Initialize bundle error buffer (called from state.ts)
-export function initBundleErrorBuffer(buffer: BundleErrorBuffer): void {
-    bundleErrorBuffer = buffer;
-}
 
 /**
  * Schedule reconnection for Metro build events with exponential backoff
@@ -259,9 +259,7 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
                     // Non-JSON message, might be an error string
                     const text = data.toString();
                     if (text.includes('error') || text.includes('Error') || text.includes('Unable to resolve')) {
-                        if (bundleErrorBuffer) {
-                            bundleErrorBuffer.add(parseMetroError(text));
-                        }
+                        bundleErrorBuffer.add(parseMetroError(text));
                     }
                 }
             });
@@ -292,8 +290,6 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
 
 // Handle Metro build event messages
 function handleMetroBuildMessage(message: Record<string, unknown>): void {
-    if (!bundleErrorBuffer) return;
-
     const type = message.type as string;
 
     // Handle bundle build start
