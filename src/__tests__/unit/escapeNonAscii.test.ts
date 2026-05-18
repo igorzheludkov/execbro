@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { escapeNonAsciiInStringLiterals } from "../../core/escapeNonAscii";
+import { escapeNonAsciiInStringLiterals } from "../../core/escapeNonAscii.js";
 
 function run(src: string): string {
     const r = escapeNonAsciiInStringLiterals(src);
