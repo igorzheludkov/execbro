@@ -1,4 +1,5 @@
 import { executeInApp } from "./jsExecute.js";
+import { trackFastRefreshInstall } from "./telemetry.js";
 import type { ExecutionResult } from "./types.js";
 import {
     buildReadRefreshLogExpression,
@@ -6,6 +7,10 @@ import {
     type RefreshLogEntry,
     type RecorderVia,
 } from "./fastRefreshRecorder.js";
+
+// One telemetry event per device-session so repeated polling doesn't spam.
+// Keyed by device || "<default>".
+const reportedInstallDevices = new Set<string>();
 
 export type ExecuteFn = (
     expression: string,
@@ -70,6 +75,26 @@ export async function getRefreshStatus(
     }
 
     const meta = parsed._meta;
+
+    if (meta) {
+        const deviceKey = args.device ?? "<default>";
+        const shouldReport =
+            meta.recorderInstalled === false || meta.justInstalled === true || !reportedInstallDevices.has(deviceKey);
+        if (shouldReport) {
+            reportedInstallDevices.add(deviceKey);
+            try {
+                trackFastRefreshInstall({
+                    via: meta.via ?? null,
+                    recorderInstalled: meta.recorderInstalled,
+                    justInstalled: meta.justInstalled === true,
+                    reason: meta.reason,
+                });
+            } catch {
+                // Telemetry errors must never affect tool flow.
+            }
+        }
+    }
+
     if (meta && meta.recorderInstalled === false) {
         return { success: false, error: meta.reason ?? "recorder not installed" };
     }
