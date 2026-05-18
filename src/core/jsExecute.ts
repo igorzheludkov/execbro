@@ -5,6 +5,7 @@ import { getFirstConnectedApp, getConnectedAppByDevice, getConnectedAppBySimulat
 import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
 import type { DeviceInfo } from "./types.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
+import { trackAutoReconnect } from "./telemetry.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
@@ -463,7 +464,7 @@ else{return __v}})()`;
 }
 
 // Execute JavaScript in the connected React Native app with retry logic
-export async function executeInApp(
+async function executeInAppInner(
     expression: string,
     awaitPromise: boolean = true,
     options: ExecuteOptions = {},
@@ -574,5 +575,82 @@ export async function executeInApp(
             "   - Android: android_launch_app (restarts automatically)",
             "3. After restarting, call scan_metro again to reconnect",
         ].join("\n")
+    };
+}
+
+/**
+ * One-shot scan-and-retry wrapper on top of executeInAppInner.
+ *
+ * On first-failure, classifies the error as transport-vs-logical:
+ *  - transport → call attemptQuickReconnect once, retry with autoReconnect:false
+ *    to avoid recursion. Successful retries carry _meta.reconnected; surviving
+ *    failures surface 'reconnected_but_still_failed'.
+ *  - logical → propagate the original error unchanged.
+ *
+ * The server-side `timeoutMs` timer always classifies as logical (a too-long
+ * expression is not a transport drop), so timeoutMs hits never trigger
+ * reconnect.
+ */
+export async function executeInApp(
+    expression: string,
+    awaitPromise: boolean = true,
+    options: ExecuteOptions = {},
+    device?: string
+): Promise<ExecutionResult> {
+    const toolName = options.originatingToolName ?? "unknown";
+
+    const first = await executeInAppInner(expression, awaitPromise, options, device);
+
+    if (first.success) {
+        trackAutoReconnect("not_needed", toolName);
+        return first;
+    }
+
+    const source: "cdp" | "server-timer" | "logical" = first.error?.startsWith(
+        "Timeout: Expression took too long",
+    )
+        ? "server-timer"
+        : "cdp";
+
+    const classification = classifyTransportError(first.error ?? "", source);
+
+    if (classification.kind !== "transport") {
+        trackAutoReconnect("not_needed", toolName);
+        return first;
+    }
+
+    const currentApp = getConnectedAppByDevice(device);
+    const preferredPort = currentApp?.port;
+
+    const reconnected = await attemptQuickReconnect(preferredPort);
+    if (!reconnected) {
+        trackAutoReconnect("scan_failed", toolName, classification.pattern);
+        return {
+            success: false,
+            error: `reconnect_attempted: ${first.error ?? "unknown"}`,
+            _meta: { reconnected: false, transportError: first.error ?? "unknown" },
+        };
+    }
+
+    const retry = await executeInAppInner(
+        expression,
+        awaitPromise,
+        { ...options, autoReconnect: false },
+        device,
+    );
+
+    if (retry.success) {
+        trackAutoReconnect("success", toolName, classification.pattern);
+        return {
+            ...retry,
+            _meta: { reconnected: true, transportError: first.error ?? "unknown" },
+        };
+    }
+
+    trackAutoReconnect("retry_failed", toolName, classification.pattern);
+    return {
+        success: false,
+        error: `reconnected_but_still_failed: ${first.error ?? "unknown"} | ${retry.error ?? "unknown"}`,
+        _meta: { reconnected: true, transportError: first.error ?? "unknown" },
     };
 }
