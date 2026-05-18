@@ -187,6 +187,53 @@ function hasTopLevelStatementSeparator(src: string): boolean {
     return false;
 }
 
+// ============================================================================
+// Transport-vs-logical error classification (used by auto-reconnect path)
+// ============================================================================
+
+export type TransportPattern = "no_apps" | "ws_closed" | "target_closed" | "cdp_eval_too_long";
+
+export type TransportClassification =
+    | { kind: "transport"; pattern: TransportPattern }
+    | { kind: "logical" };
+
+/**
+ * Classify an error message into transport-vs-logical for auto-reconnect routing.
+ *
+ * The `source` argument distinguishes the CDP-emitted "Expression took too long"
+ * (a stale-target signal we DO want to reconnect on) from the server-side
+ * `Promise.race` timer text (a logical "this took too long" we do NOT).
+ */
+export function classifyTransportError(
+    message: string,
+    source: "cdp" | "server-timer" | "logical",
+): TransportClassification {
+    if (!message) return { kind: "logical" };
+
+    if (source === "server-timer") return { kind: "logical" };
+
+    if (/No apps connected/i.test(message)) return { kind: "transport", pattern: "no_apps" };
+
+    if (
+        /ECONNRESET/i.test(message) ||
+        /WebSocket connection is not open/i.test(message) ||
+        /socket hang up/i.test(message) ||
+        /WebSocket frame/i.test(message)
+    ) {
+        return { kind: "transport", pattern: "ws_closed" };
+    }
+
+    if (/target closed/i.test(message) || /Inspector detached/i.test(message)) {
+        return { kind: "transport", pattern: "target_closed" };
+    }
+
+    if (source === "cdp" && /Expression took too long to evaluate/i.test(message)) {
+        return { kind: "transport", pattern: "cdp_eval_too_long" };
+    }
+
+    return { kind: "logical" };
+}
+
 // Error patterns that indicate a stale/destroyed context
 const CONTEXT_ERROR_PATTERNS = [
     "cannot find context",
