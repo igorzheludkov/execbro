@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { executeInApp, listDebugGlobals, inspectGlobal } from "../core/index.js";
+import { getRefreshStatus } from "../core/fastRefreshTools.js";
 
 export function registerExecutionTools(server: McpServer): void {
     // Tool: Execute JavaScript in app
@@ -203,6 +204,66 @@ export function registerExecutionTools(server: McpServer): void {
                         text: `Properties of ${objectName}:\n\n${result.result}`
                     }
                 ]
+            };
+        }
+    );
+
+    // Tool: Did the JS runtime accept a Fast Refresh update since `since`?
+    registerToolWithTelemetry(
+        server,
+        "get_refresh_status",
+        {
+            description:
+                "Pull-style probe: did the JS runtime accept a Fast Refresh (HMR) update since `since`? Returns lastUpdateAt, updateCount, and recentUpdates from a 32-entry ring buffer fed by a recorder around __ReactRefresh.performReactRefresh (preferred) or \\$RefreshReg\\$ (fallback).\n\n" +
+                "PURPOSE: Confirm an edit landed in the running app without polling logs or screenshots. After editing TSX, wait ~2s then call with `since` = a Date.now() captured BEFORE the edit. updateCount > 0 means Fast Refresh accepted.\n\n" +
+                "WHEN TO USE: After editing .tsx/.ts files (prefer over reload_app). To distinguish runtime acceptance (this) from Metro build state (get_bundle_status).\n\n" +
+                "FILTER: `since` (epoch ms) keeps entries with at > since. `sincePath` (substring) matches modulePath — available on the \\$RefreshReg\\$ path but often omitted on performReactRefresh; if so the filter matches nothing — drop it.\n\n" +
+                "LIMITATIONS: A full reload resets the buffer (next call reports `recorder just installed`). Edits to non-React utility files still increment. Requires the React 18+ refresh runtime.\n\n" +
+                "SEE ALSO: get_bundle_status (did Metro compile?), get_bundle_errors (compile failures), reload_app (force full reload).",
+            inputSchema: {
+                sincePath: z
+                    .string()
+                    .optional()
+                    .describe("Substring matched against entry modulePath. Must not contain double quotes. Omit on builds where modulePath is unavailable."),
+                since: z
+                    .number()
+                    .optional()
+                    .describe("Epoch ms; only count refresh entries with at > since. Capture Date.now() before your edit."),
+                device: z
+                    .string()
+                    .optional()
+                    .describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+            }
+        },
+        async ({ sincePath, since, device }) => {
+            const r = await getRefreshStatus({ sincePath, since, device });
+
+            if (!r.success) {
+                return {
+                    content: [{ type: "text", text: `Error: ${r.error}` }],
+                    isError: true
+                };
+            }
+
+            const lines: string[] = [
+                `updateCount: ${r.updateCount ?? 0}`,
+                `lastUpdateAt: ${r.lastUpdateAt ?? "null"}`,
+                `via: ${r.via ?? "unknown"}`
+            ];
+            if (r.recentUpdates && r.recentUpdates.length > 0) {
+                lines.push("recentUpdates (newest first):");
+                for (const e of r.recentUpdates) {
+                    lines.push(`  - at=${e.at}${e.modulePath ? ` modulePath=${e.modulePath}` : ""}`);
+                }
+            } else {
+                lines.push("recentUpdates: (none)");
+            }
+            if (r.justInstalled) {
+                lines.push("(recorder just installed — past updates not captured)");
+            }
+
+            return {
+                content: [{ type: "text", text: lines.join("\n") }]
             };
         }
     );
