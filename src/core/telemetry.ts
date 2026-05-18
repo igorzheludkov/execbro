@@ -616,6 +616,34 @@ export function trackAppDetection(detection: {
     }
 }
 
+/**
+ * Records a Fast Refresh recorder install event. Fired once per
+ * device-session by getRefreshStatus when the executor lazy-installs the
+ * recorder or detects an install failure. SDK-side installs (which happen
+ * before the executor sees the app) surface here as via != null with
+ * justInstalled = false on the first observation.
+ */
+export function trackFastRefreshInstall(detection: {
+    via: "performReactRefresh" | "RefreshReg" | null;
+    recorderInstalled: boolean;
+    justInstalled: boolean;
+    reason?: string;
+}): void {
+    if (!telemetryEnabled) return;
+
+    dispatch({
+        name: "fast_refresh_install",
+        timestamp: Date.now(),
+        isFirstRun: isFirstRun(),
+        errorContext: JSON.stringify({
+            via: detection.via,
+            installed: detection.recorderInstalled,
+            just: detection.justInstalled,
+            ...(detection.reason ? { reason: detection.reason } : {}),
+        }),
+    });
+}
+
 // ============================================================================
 // Event Dispatch
 // ============================================================================
