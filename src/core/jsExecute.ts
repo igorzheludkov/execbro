@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { ExecutionResult, ExecuteOptions } from "./types.js";
+import { escapeNonAsciiInStringLiterals } from "./escapeNonAscii.js";
 import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
 import { getFirstConnectedApp, getConnectedAppByDevice, getConnectedAppBySimulatorUdid, getConnectedAppByAndroidDeviceId, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
 import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
@@ -23,6 +24,7 @@ export interface ExpressionValidation {
 /**
  * Check if a string contains emoji or other problematic Unicode characters
  * Hermes has issues with certain UTF-16 surrogate pairs (like emoji)
+ * @deprecated retained for backward compatibility — escapeNonAsciiInStringLiterals handles this now.
  */
 export function containsProblematicUnicode(str: string): boolean {
     // Detect UTF-16 surrogate pairs (emoji and other characters outside BMP)
@@ -69,17 +71,6 @@ export function stripLeadingComments(expression: string): string {
  * Returns cleaned expression or error with helpful message
  */
 export function validateAndPreprocessExpression(expression: string): ExpressionValidation {
-    // Check for emoji/problematic Unicode before any processing
-    if (containsProblematicUnicode(expression)) {
-        return {
-            valid: false,
-            expression,
-            error:
-                "Expression contains emoji or special Unicode characters that Hermes cannot compile. " +
-                "Please remove emoji and use ASCII characters only."
-        };
-    }
-
     // Strip leading comments that would break the expression wrapper
     const cleaned = stripLeadingComments(expression);
 
@@ -91,12 +82,27 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         };
     }
 
-    // Check for top-level async/await that Hermes doesn't support in Runtime.evaluate
-    const trimmed = cleaned.trim();
-    if (looksLikeTopLevelAwait(trimmed)) {
+    // Auto-escape non-ASCII inside string literals so the wire stays ASCII
+    // and Hermes can compile the expression.
+    const escapeResult = escapeNonAsciiInStringLiterals(cleaned);
+    if (!escapeResult.ok) {
         return {
             valid: false,
             expression: cleaned,
+            error:
+                "Unable to auto-escape non-ASCII characters in expression: " +
+                escapeResult.reason +
+                ". Replace non-ASCII characters with \\uXXXX escape sequences and retry, or check for unbalanced quotes."
+        };
+    }
+    const escaped = escapeResult.expression;
+
+    // Check for top-level async/await that Hermes doesn't support in Runtime.evaluate
+    const trimmed = escaped.trim();
+    if (looksLikeTopLevelAwait(trimmed)) {
+        return {
+            valid: false,
+            expression: escaped,
             error:
                 "top-level await is not supported in Hermes. " +
                 "Wrap in `Promise.resolve().then(v => ...)` instead, or assign the resolved value to a global: " +
@@ -108,7 +114,7 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
     if (/\brequire\s*\(/.test(trimmed)) {
         return {
             valid: false,
-            expression: cleaned,
+            expression: escaped,
             error:
                 "require() is not available in Hermes Runtime.evaluate. " +
                 "Modules cannot be imported at runtime. Only pre-existing global variables are accessible. " +
@@ -123,7 +129,7 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
     if (hasTopLevelStatementSeparator(trimmed)) {
         return {
             valid: false,
-            expression: cleaned,
+            expression: escaped,
             error:
                 "Multi-statement expressions are not supported by Hermes Runtime.evaluate " +
                 "(compiles input as a single expression). " +
@@ -133,7 +139,7 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
 
     return {
         valid: true,
-        expression: cleaned
+        expression: escaped
     };
 }
 

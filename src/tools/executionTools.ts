@@ -15,10 +15,10 @@ export function registerExecutionTools(server: McpServer): void {
                 "LIMITATIONS (Hermes engine):\n" +
                 "- NO require() or import — only pre-existing globals are available\n" +
                 "- NO async/await syntax. Use `.then()` chains: `Promise.resolve().then(v => ...)`. The expression's final value is awaited automatically when awaitPromise:true.\n" +
-                "- NO emoji or non-ASCII characters in string literals — causes parse errors\n" +
+                "- Non-ASCII characters in string literals (emoji, Arabic, CJK) are auto-escaped server-side. Write them as-is; the wire stays ASCII.\n" +
                 "- Keep expressions simple and synchronous when possible\n\n" +
                 "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
-                "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`, `console.log('\\u{1F600}')`\n" +
+                "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
             inputSchema: {
                 expression: z

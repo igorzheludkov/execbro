@@ -65,12 +65,6 @@ describe("validateAndPreprocessExpression", () => {
         expect(result.expression).toBe("1 + 1");
     });
 
-    it("rejects expression with emoji", () => {
-        const result = validateAndPreprocessExpression("console.log('😀')");
-        expect(result.valid).toBe(false);
-        expect(result.error).toContain("emoji");
-    });
-
     it("rejects empty expression after stripping comments", () => {
         const result = validateAndPreprocessExpression("// just a comment");
         expect(result.valid).toBe(false);
@@ -165,6 +159,40 @@ describe("validateAndPreprocessExpression", () => {
     it("does not flag `awaiting` as a variable name", () => {
         const result = validateAndPreprocessExpression("awaiting");
         expect(result.valid).toBe(true);
+    });
+});
+
+describe("validateAndPreprocessExpression — non-ASCII handling", () => {
+    it("auto-escapes Arabic in a string literal and accepts the expression", () => {
+        const result = validateAndPreprocessExpression('"اللغة"');
+        expect(result.valid).toBe(true);
+        expect(result.expression).toContain("\\u0627");
+        expect(result.expression).not.toContain("اللغة");
+    });
+
+    it("auto-escapes emoji in a string literal", () => {
+        const result = validateAndPreprocessExpression('"hi 😀"');
+        expect(result.valid).toBe(true);
+        expect(result.expression).toContain("\\u{1F600}");
+    });
+
+    it("accepts plain non-emoji non-ASCII (still escaped) inside a literal", () => {
+        const result = validateAndPreprocessExpression('"café"');
+        expect(result.valid).toBe(true);
+        expect(result.expression).toContain("\\u00E9");
+    });
+
+    it("falls back to a structured reject on unbalanced quotes", () => {
+        const result = validateAndPreprocessExpression('"unterminated');
+        expect(result.valid).toBe(false);
+        expect(result.error).toMatch(/unable to auto-escape/i);
+        expect(result.error).toMatch(/\\u/);
+    });
+
+    it("leaves regex literal contents alone (no false escape)", () => {
+        const result = validateAndPreprocessExpression("/[abc]/.test('x')");
+        expect(result.valid).toBe(true);
+        expect(result.expression).toContain("/[abc]/");
     });
 });
 
