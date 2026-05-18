@@ -422,7 +422,7 @@ export async function executeInApp(
     options: ExecuteOptions = {},
     device?: string
 ): Promise<ExecutionResult> {
-    const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true, timeoutMs = 10000 } = options;
+    const { maxRetries = 2, retryDelayMs = 1000, autoReconnect = true, timeoutMs = 10000, skipBootstrap = false } = options;
 
     let lastError: string | undefined;
     let preferredPort: number | undefined;
@@ -474,6 +474,21 @@ export async function executeInApp(
                 }
             }
             return { success: false, error: "WebSocket connection is not open." };
+        }
+
+        // Best-effort one-shot bootstrap of globalThis.__rn__ for this app
+        // session. Hermes does not expose closure-captured RN modules, so this
+        // fiber-walk usually sets __rn__ = null — that's fine; list_debug_globals
+        // reports the failure clearly. Wrapped in try/catch so a bootstrap
+        // failure never breaks the user's expression. skipBootstrap is set by
+        // the bootstrap itself (via ensureRnGlobalsBootstrap) to avoid recursion.
+        if (!skipBootstrap) {
+            try {
+                const { ensureRnGlobalsBootstrap } = await import("./rnGlobalsBootstrap.js");
+                await ensureRnGlobalsBootstrap(device);
+            } catch (e) {
+                console.error("[execbro] __rn__ bootstrap dispatch failed:", e);
+            }
         }
 
         // Execute the expression
