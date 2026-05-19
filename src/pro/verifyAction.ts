@@ -93,6 +93,7 @@ export async function verifyAndCapture(args: {
         markerPx,
     } = args;
     const source = args.source ?? "tap-verify";
+    const action: "tap" | "swipe" = source.startsWith("swipe") ? "swipe" : "tap";
 
     if (!shouldVerify && !shouldScreenshot) {
         return {
@@ -161,7 +162,8 @@ export async function verifyAndCapture(args: {
                     meaningful: diff.changed,
                     changeRate: diff.changeRate,
                     changedPixels: diff.changedPixels,
-                    totalPixels: diff.totalPixels
+                    totalPixels: diff.totalPixels,
+                    action
                 })
             };
         } catch (err) {
@@ -211,6 +213,7 @@ export async function burstCaptureAndVerify(args: {
     const { platform, beforeBuffer, udid, beforeScaleFactor, markerPx } = args;
     const source = args.source ?? "tap-burst";
     const groupIntent = source === "tap-burst" ? "tap-verification" : `${source.replace(/-burst$/, "")}-verification`;
+    const action: "tap" | "swipe" = source.startsWith("swipe") ? "swipe" : "tap";
 
     if (!beforeBuffer) return {};
 
@@ -297,7 +300,8 @@ export async function burstCaptureAndVerify(args: {
             totalPixels: 0,
             transientChangeDetected: analysis.transientChangeDetected,
             peakChangeRate: analysis.peakChangeRate,
-            peakFrame: analysis.peakFrame
+            peakFrame: analysis.peakFrame,
+            action
         })
     };
 

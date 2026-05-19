@@ -178,8 +178,8 @@ For buttons that contain only an icon (no text):
 tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibility/OCR instead. For best results, use testID or coordinates.
 
 ## Other Interactions
-- swipe: cross-platform swipe/scroll with start/end coordinates (auto-routes to ios_swipe or android_swipe). Use for FlatList/SectionList scrolling where off-screen items aren't mounted.
-- ios_swipe / android_swipe: platform-specific raw-coordinate swipe (fallback for the cross-platform swipe tool)
+- swipe: cross-platform swipe/scroll with start/end coordinates (auto-routes to ios_swipe or android_swipe). Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false the gesture had no visual effect (end-of-list, non-scrollable surface, or coordinates missed the scroll surface). Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path when you only care about firing the gesture.
+- ios_swipe / android_swipe: platform-specific raw-coordinate swipe (fallback for the cross-platform swipe tool; no verification)
 - android_input_text / ios_input_text: type text (tap input field first to focus). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
 - clear_focused_input: clear the focused TextInput via onChangeText (controlled-state safe). Pair with input_text for replace flows, or use input_text({replace:true}) for one-shot.
 - dismiss_keyboard: blur the focused input, closing the keyboard.
