@@ -111,31 +111,35 @@ export function buildVerificationExplanation(v: {
     transientChangeDetected?: boolean;
     peakChangeRate?: number;
     peakFrame?: number;
+    action?: "tap" | "swipe";
 }): string {
     const pct = (rate: number) => (rate * 100).toFixed(1) + "%";
+    const action = v.action ?? "tap";
+    const Action = action[0].toUpperCase() + action.slice(1);
+    const target = action === "swipe" ? "scroll surface" : "element";
 
     if (v.meaningful && !v.transientChangeDetected) {
-        return `Tap caused a visible UI change (${pct(v.changeRate)} pixel diff). The screen updated as expected.`;
+        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). The screen updated as expected.`;
     }
 
     if (v.meaningful && v.transientChangeDetected) {
         return (
             `No persistent change, but transient visual feedback detected ` +
             `(frame ${v.peakFrame} peak ${pct(v.peakChangeRate || 0)} diff). ` +
-            `Tap triggered a press animation that settled back to original state.`
+            `${Action} triggered a momentary animation that settled back to original state.`
         );
     }
 
     if (v.transientChangeDetected === false) {
         return (
             `No visual change detected — neither persistent nor transient across burst frames. ` +
-            `The element may not respond visually or the tap may have missed.`
+            `The ${target} may not respond visually or the ${action} may have missed.`
         );
     }
 
     return (
         `No visual change detected between before and after screenshots. ` +
-        `The element may not respond visually or the tap may have missed.`
+        `The ${target} may not respond visually or the ${action} may have missed.`
     );
 }
 

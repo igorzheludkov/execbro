@@ -344,11 +344,12 @@ export function registerInteractionTools(server: McpServer): void {
         "swipe",
         {
             description:
-                "Swipe gesture that auto-routes to the correct platform (iOS or Android)." +
+                "Swipe gesture that auto-routes to the correct platform (iOS or Android), with pixel-diff verification." +
                 primaryInteractionBanner() + "\n" +
-                "PURPOSE: Single unified swipe entry point — accepts screenshot pixel coordinates and dispatches to ios_swipe or android_swipe based on the connected device.\n" +
+                "PURPOSE: Single unified swipe entry point — accepts screenshot pixel coordinates, dispatches to ios_swipe or android_swipe, and returns a `verification` block indicating whether the swipe produced a visual change.\n" +
                 "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers — anything that needs a gesture rather than a tap. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
-                "WORKFLOW: ios_screenshot or android_screenshot -> swipe({ startX, startY, endX, endY }) -> screenshot again to verify.\n" +
+                "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means the scroll did nothing (end-of-list, non-scrollable surface, or missed coordinates). burst=true catches transient feedback like overscroll bounce.\n" +
+                "WORKFLOW: ios_screenshot or android_screenshot -> swipe({ startX, startY, endX, endY }) -> read response.verification.meaningful to confirm it worked.\n" +
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. When both iOS and Android devices are connected, pass platform explicitly.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
             inputSchema: {

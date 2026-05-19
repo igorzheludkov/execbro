@@ -73,7 +73,7 @@ See [Layout & Component Inspection guide](layout-inspection.md) for detailed wor
 | Tool                          | Description                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tap`                         | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots. Returns a post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `device` (substring match) or `udid` (iOS, exact) to pin to a specific device when multiple are connected |
-| `android_swipe`               | Swipe gesture with start/end coordinates on Android (scroll lists, navigate between screens, pull-to-refresh)                                                                                                                                                                                                                                                              |
+| `swipe`                       | **Unified swipe** — auto-detects platform (iOS/Android), dispatches to the native driver, and returns a `verification` block. `verification.meaningful` is false when the swipe produced no visual change (end-of-list, non-scrollable surface, or missed coordinates). Set `burst:true` to surface transient overscroll/bounce feedback. Set `verify:false, screenshot:false` for the fastest path. |
 | `ocr_screenshot`              | Extract all visible text with tap-ready coordinates (works on iOS/Android)                                                                                                                                                                                                                                                                                                 |
 
 **Examples:**
@@ -85,6 +85,8 @@ tap with component="HamburgerIcon"        # Finds by React component name
 tap with x=300 y=600                      # Taps at pixel coordinates (auto-converts)
 tap with text="Menu" strategy="ocr"       # Forces OCR strategy only
 tap with x=300 y=600 native=true          # Taps directly via ADB/simctl (no RN connection needed)
+swipe with startX=200 startY=600 endX=200 endY=200            # Scroll up; reads verification.meaningful
+swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscroll/bounce feedback
 ```
 
 ## Android (ADB)
