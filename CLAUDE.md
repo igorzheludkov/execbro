@@ -144,7 +144,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 **UI Interaction:**
 - `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `device` (substring match on the connected app's deviceName) or `udid` (iOS simulator UDID — takes precedence, iOS-only) to pin the tap to a specific device when multiple are connected. Use `screenshot=false` to disable screenshots, `verify=false` to skip verification. Use `burst=true` to capture rapid sequential screenshots for detecting transient visual feedback (press animations, highlights) — results stored in image buffer accessible via `get_images`.
-- `android_swipe`: Swipe/scroll gestures with start/end coordinates
+- `swipe`: Cross-platform swipe/scroll gesture (auto-routes to iOS/Android). Returns `verification.meaningful` to detect no-op swipes (end-of-list, non-scrollable surface, missed coordinates). Use `burst:true` for overscroll/bounce detection, `verify:false, screenshot:false` for fastest path, `delta` for iOS touch step size.
 - `android_input_text`: Type text into the focused input field
 - `ios_button`: Press iOS hardware buttons (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
 - `android_key_event`: Send Android key events (HOME, BACK, ENTER, DEL, MENU, etc.)

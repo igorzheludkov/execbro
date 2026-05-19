@@ -259,85 +259,6 @@ export function registerInteractionTools(server: McpServer): void {
         }
     );
     
-    // Tool: Android swipe
-    registerToolWithTelemetry(
-        server,
-        "android_swipe",
-        {
-            description: "Swipe from one point to another on an Android device/emulator screen" +
-                platformFallbackBanner("`tap` for targeted interactions; keep android_swipe for raw-coordinate gestures") +
-                "\nPURPOSE: Perform a raw-coordinate swipe gesture for scrolling, paging, dismissing sheets, or drawer opens on Android." +
-                "\nWHEN TO USE: When you need a gesture rather than a tap — scroll lists, swipe carousels, or pull-to-refresh." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
-            inputSchema: {
-                startX: z.coerce.number().describe("Starting X coordinate in pixels"),
-                startY: z.coerce.number().describe("Starting Y coordinate in pixels"),
-                endX: z.coerce.number().describe("Ending X coordinate in pixels"),
-                endY: z.coerce.number().describe("Ending Y coordinate in pixels"),
-                durationMs: z.number().optional().default(300).describe("Swipe duration in milliseconds (default: 300)"),
-                deviceId: z
-                    .string()
-                    .optional()
-                    .describe("Optional device ID. Uses first available device if not specified.")
-            }
-        },
-        async ({ startX, startY, endX, endY, durationMs, deviceId }) => {
-            const result = await androidSwipe(startX, startY, endX, endY, durationMs, deviceId);
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-
-    // Tool: iOS swipe
-    registerToolWithTelemetry(
-        server,
-        "ios_swipe",
-        {
-            description:
-                "Swipe gesture on an iOS simulator screen." +
-                platformFallbackBanner("`swipe` for cross-platform gestures; `tap` for targeted interactions") +
-                " Pass screenshot pixel coordinates directly — the same values returned by ios_screenshot pressable elements and screen layout. Coordinates are auto-converted to native iOS points internally. Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
-                "\nPURPOSE: Perform a raw-coordinate swipe gesture for scrolling, paging, dismissing sheets, or drawer opens on iOS." +
-                "\nWHEN TO USE: When you need a gesture rather than a tap — scroll lists, swipe carousels, or pull-to-refresh." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
-            inputSchema: {
-                startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels (from ios_screenshot output)"),
-                startY: z.coerce.number().describe("Starting Y coordinate in screenshot pixels (from ios_screenshot output)"),
-                endX: z.coerce.number().describe("Ending X coordinate in screenshot pixels (from ios_screenshot output)"),
-                endY: z.coerce.number().describe("Ending Y coordinate in screenshot pixels (from ios_screenshot output)"),
-                duration: z.coerce.number().optional().describe("Optional swipe duration in seconds"),
-                delta: z.coerce.number().optional().describe("Optional delta between touch events (step size)"),
-                udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
-            }
-        },
-        async ({ startX, startY, endX, endY, duration, delta, udid }) => {
-            const dpr = await getDevicePixelRatio(udid);
-            const firstApp = connectedApps.values().next().value;
-            const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
-            const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, scaleFactor);
-            const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, scaleFactor);
-            const result = await iosSwipe(start.x, start.y, end.x, end.y, { duration, delta, udid });
-
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-
     // Tool: Cross-platform swipe — auto-routes to iOS or Android backend
     registerToolWithTelemetry(
         server,
@@ -346,7 +267,7 @@ export function registerInteractionTools(server: McpServer): void {
             description:
                 "Swipe gesture that auto-routes to the correct platform (iOS or Android), with pixel-diff verification." +
                 primaryInteractionBanner() + "\n" +
-                "PURPOSE: Single unified swipe entry point — accepts screenshot pixel coordinates, dispatches to ios_swipe or android_swipe, and returns a `verification` block indicating whether the swipe produced a visual change.\n" +
+                "PURPOSE: Single unified swipe entry point — accepts screenshot pixel coordinates, dispatches to the correct native driver, and returns a `verification` block indicating whether the swipe produced a visual change.\n" +
                 "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers — anything that needs a gesture rather than a tap. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
                 "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means the scroll did nothing (end-of-list, non-scrollable surface, or missed coordinates). burst=true catches transient feedback like overscroll bounce.\n" +
                 "WORKFLOW: ios_screenshot or android_screenshot -> swipe({ startX, startY, endX, endY }) -> read response.verification.meaningful to confirm it worked.\n" +
@@ -361,6 +282,10 @@ export function registerInteractionTools(server: McpServer): void {
                     .number()
                     .optional()
                     .describe("Swipe duration in milliseconds (default: 300 on Android; iOS uses driver default if omitted)"),
+                delta: z.coerce
+                    .number()
+                    .optional()
+                    .describe("iOS only — touch step size between events (driver-dependent default). Ignored on Android."),
                 platform: z
                     .enum(["ios", "android"])
                     .optional()
@@ -399,7 +324,7 @@ export function registerInteractionTools(server: McpServer): void {
                     ),
             }
         },
-        async ({ startX, startY, endX, endY, durationMs, platform, device, udid, deviceId, verify, screenshot, burst }) => {
+        async ({ startX, startY, endX, endY, durationMs, delta, platform, device, udid, deviceId, verify, screenshot, burst }) => {
             // Platform resolution mirrors the tap() native-mode flow (src/pro/tap.ts).
             if (udid && platform === "android") {
                 return {
@@ -471,7 +396,7 @@ export function registerInteractionTools(server: McpServer): void {
                 const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, scaleFactor);
                 const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, scaleFactor);
                 const duration = durationMs !== undefined ? durationMs / 1000 : undefined;
-                driverResult = await iosSwipe(start.x, start.y, end.x, end.y, { duration, udid: resolvedUdid });
+                driverResult = await iosSwipe(start.x, start.y, end.x, end.y, { duration, delta, udid: resolvedUdid });
             } else {
                 const firstApp = connectedApps.values().next().value;
                 const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
