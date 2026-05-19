@@ -4,6 +4,7 @@ import { connectedApps, pendingExecutions, getNextMessageId, getLogBuffer, getNe
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
+import { getAdbIdForAvd } from "./android.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
@@ -1044,19 +1045,30 @@ export async function connectToDevice(
             const networkEnableId = sendNetworkEnable(ws);
             pendingNetworkEnableIds.add(networkEnableId);
 
-            // Try to resolve iOS simulator UDID from device name
-            // This enables automatic device scoping for iOS tools
+            // Resolve native identifiers from the device name in parallel:
+            //   - iOS: simulator UDID via findSimulatorByName
+            //   - Android: adb serial via getAdbIdForAvd (maps AVD name → emulator-NNNN)
+            // Both are best-effort; failures are swallowed. Identifiers enable
+            // automatic device scoping and power the registry-first resolver fast path.
             if (device.deviceName) {
-                const simulatorUdid = await findSimulatorByName(device.deviceName);
-                if (simulatorUdid) {
-                    setActiveSimulatorUdid(simulatorUdid, appKey);
-                    // Update platform to ios now that simulator is confirmed
-                    const connectedApp = connectedApps.get(appKey);
-                    if (connectedApp) {
+                const [simulatorUdid, adbSerial] = await Promise.all([
+                    findSimulatorByName(device.deviceName).catch(() => null),
+                    getAdbIdForAvd(device.deviceName).catch(() => null)
+                ]);
+
+                const connectedApp = connectedApps.get(appKey);
+                if (connectedApp) {
+                    if (simulatorUdid) {
+                        setActiveSimulatorUdid(simulatorUdid, appKey);
                         connectedApp.platform = "ios";
                         connectedApp.simulatorUdid = simulatorUdid;
+                        console.error(`[execbro] Linked to iOS simulator: ${simulatorUdid}`);
                     }
-                    console.error(`[execbro] Linked to iOS simulator: ${simulatorUdid}`);
+                    if (adbSerial) {
+                        connectedApp.platform = "android";
+                        connectedApp.adbSerial = adbSerial;
+                        console.error(`[execbro] Linked to Android emulator: ${adbSerial}`);
+                    }
                 }
             }
 
