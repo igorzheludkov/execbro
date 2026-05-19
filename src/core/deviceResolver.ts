@@ -49,6 +49,19 @@ function ok(target: DeviceTarget): ResolveResult {
 }
 
 /**
+ * Render a DeviceResolverError as a single string suitable for tool responses.
+ * Appends the candidates list when present so the agent can disambiguate
+ * without an extra list_devices call.
+ */
+export function formatResolverError(error: DeviceResolverError): string {
+    if (!error.candidates || error.candidates.length === 0) return error.message;
+    const lines = error.candidates.map(
+        (c) => `  - ${c.name} (${c.platform}) → device="${c.identifier}"`
+    );
+    return `${error.message}\nCandidates:\n${lines.join("\n")}`;
+}
+
+/**
  * Resolve a single `device` string (UDID, adb serial, RN-registry deviceName,
  * sim/emu name, or undefined) into a structured DeviceTarget.
  *

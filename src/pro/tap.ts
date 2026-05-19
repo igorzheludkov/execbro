@@ -15,7 +15,7 @@ import { androidTap, androidFindElement } from "../core/android.js";
 import { compareScreenshots } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
 import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice } from "../core/connection.js";
-import { resolveDeviceTarget } from "../core/deviceResolver.js";
+import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { notifyDriverMissing } from "../core/logbox.js";
 import { captureFailureArtifact, type ArtifactOutcome, type CaptureSignals } from "../core/failureArtifact.js";
 import {
@@ -1734,7 +1734,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             return {
                 success: false,
                 query,
-                error: nativeResolved.error.message
+                error: formatResolverError(nativeResolved.error)
             };
         }
         const platform: "ios" | "android" = nativeResolved.target.platform;
@@ -1847,7 +1847,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return {
             success: false,
             query,
-            error: resolved.error.message
+            error: formatResolverError(resolved.error)
         };
     }
     const platform: "ios" | "android" = resolved.target.platform;

@@ -22,7 +22,7 @@ import {
 } from "../pro/verifyAction.js";
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
-import { resolveDeviceTarget } from "../core/deviceResolver.js";
+import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 
 export function registerInteractionTools(server: McpServer): void {
     // Tool: Unified tap — tries fiber, accessibility, OCR, coordinate strategies
@@ -312,7 +312,7 @@ export function registerInteractionTools(server: McpServer): void {
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
                 return {
-                    content: [{ type: "text", text: `Error: ${resolved.error.message}` }],
+                    content: [{ type: "text", text: `Error: ${formatResolverError(resolved.error)}` }],
                     isError: true
                 };
             }
