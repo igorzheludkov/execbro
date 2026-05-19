@@ -35,11 +35,11 @@ On failure, the response includes an actionable `suggestion` telling the agent e
 
 ## Platform-Specific Tools
 
-For gestures beyond tapping, use platform-specific tools:
+For gestures beyond tapping:
 
 ```
-# Swipe (Android)
-android_swipe with startX=540 startY=1500 endX=540 endY=500
+# Swipe (auto-routes to iOS/Android; returns verification.meaningful)
+swipe with startX=540 startY=1500 endX=540 endY=500
 
 # Text input on Android (tap input field first)
 tap with text="Email"
@@ -81,7 +81,7 @@ tap with x=540 y=960
 Swipe gesture:
 
 ```
-android_swipe with startX=540 startY=1500 endX=540 endY=500
+swipe with startX=540 startY=1500 endX=540 endY=500
 ```
 
 Type text (tap input field first):

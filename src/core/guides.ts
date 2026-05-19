@@ -178,8 +178,7 @@ For buttons that contain only an icon (no text):
 tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibility/OCR instead. For best results, use testID or coordinates.
 
 ## Other Interactions
-- swipe: cross-platform swipe/scroll with start/end coordinates (auto-routes to ios_swipe or android_swipe). Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false the gesture had no visual effect (end-of-list, non-scrollable surface, or coordinates missed the scroll surface). Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path when you only care about firing the gesture.
-- ios_swipe / android_swipe: platform-specific raw-coordinate swipe (fallback for the cross-platform swipe tool; no verification)
+- swipe: cross-platform swipe/scroll with start/end coordinates. Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false the gesture had no visual effect (end-of-list, non-scrollable surface, or coordinates missed the scroll surface). Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path when you only care about firing the gesture. Pass delta on iOS to control touch step size.
 - android_input_text / ios_input_text: type text (tap input field first to focus). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
 - clear_focused_input: clear the focused TextInput via onChangeText (controlled-state safe). Pair with input_text for replace flows, or use input_text({replace:true}) for one-shot.
 - dismiss_keyboard: blur the focused input, closing the keyboard.
@@ -359,12 +358,12 @@ If the user wants to share feedback, request a feature, or report a problem with
  */
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_pressable_elements, get_screen_layout.",
-    "Platform-specific ios_* / android_* tools (ios_button, android_swipe, android_input_text, android_key_event, android_long_press, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
+    "Platform-specific ios_* / android_* tools (ios_button, android_input_text, android_key_event, android_long_press, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup     — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs      — console debugging (get_logs, search_logs)",
-    "  interact  — device interaction (tap, android_swipe, screenshots, android_input_text, clear_focused_input, dismiss_keyboard)",
+    "  interact  — device interaction (tap, swipe, screenshots, android_input_text, clear_focused_input, dismiss_keyboard)",
     "  layout    — on-screen layout check (get_screen_layout, get_pressable_elements)",
     "  inspect   — component inspection (find_components, inspect_component, get_inspector_selection)",
     "  network   — network request inspection (get_network_requests, search_network)",

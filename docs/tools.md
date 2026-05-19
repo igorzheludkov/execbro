@@ -99,7 +99,6 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 | `android_launch_app`       | Launch an app by package name                               |
 | `android_list_packages`    | List installed packages (with optional filter)              |
 | `android_long_press`       | Long press at specific coordinates                          |
-| `android_swipe`            | Swipe from one point to another                             |
 | `android_input_text`       | Type text at current focus point                            |
 | `android_key_event`        | Send key events (HOME, BACK, ENTER, etc.)                   |
 | `android_get_screen_size`  | Get device screen resolution                                |

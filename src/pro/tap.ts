@@ -59,8 +59,7 @@ export interface TapOptions {
     device?: string;
     /**
      * iOS simulator UDID to target directly. Takes precedence over `device` and over the
-     * Metro-connected app's simulatorUdid. Mirrors the `udid` parameter on ios_screenshot,
-     * ios_swipe, etc.
+     * Metro-connected app's simulatorUdid. Mirrors the `udid` parameter on ios_screenshot, etc.
      */
     udid?: string;
 }
@@ -2437,7 +2436,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const allTimedOut = attempted.length > 0 && attempted.every(a => a.outcome === "timeout" || a.outcome === "skipped");
     let suggestion = buildSuggestion(query, strategies, platform);
     if (fiberSawInvisible) {
-        suggestion = `Element exists in the React tree but is not on screen. Try scrolling it into view (${platform === "ios" ? "ios_swipe / arrow keys" : "android_swipe"}), dismiss any overlay covering it, or wait for layout to settle. ` + suggestion;
+        suggestion = `Element exists in the React tree but is not on screen. Try scrolling it into view with swipe(), dismiss any overlay covering it, or wait for layout to settle. ` + suggestion;
     } else if (allTimedOut) {
         // No strategy got to a definitive answer — don't let the agent conclude
         // the element is missing. Steer toward retry or a different strategy.
@@ -2532,7 +2531,7 @@ function buildSuggestion(query: TapQuery, triedStrategies: string[], platform: s
     if (query.testID && looksLikeVirtualizedListItem(query.testID)) {
         suggestions.push(
             "testID looks like a virtualized list item — scroll it on-screen first " +
-            `(${platform === "ios" ? "ios_button arrow keys / swipe" : "android_swipe"}) before tapping`
+            `(swipe()${platform === "ios" ? " or ios_button arrow keys" : ""}) before tapping`
         );
     }
 
