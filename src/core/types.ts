@@ -26,6 +26,12 @@ export interface ConnectedApp {
     port: number;
     platform: "ios" | "android";
     simulatorUdid?: string;
+    // Android emulator/device serial (e.g. "emulator-5554"). Populated at
+    // connect time when getAdbIdForAvd matches deviceName to a running
+    // emulator. Stays undefined for physical Android devices unless we add
+    // a dedicated matcher later. Used by deviceResolver to short-circuit
+    // OS-level lookups.
+    adbSerial?: string;
     lastScreenshot?: {
         originalWidth: number;
         originalHeight: number;
