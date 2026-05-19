@@ -15,16 +15,120 @@ import {
     iosOpenUrl,
 } from "../core/index.js";
 import { platformUniqueBanner } from "../core/toolHelpers.js";
+import { listAllDevices } from "../core/deviceDiscovery.js";
+import { getConnectedApps } from "../core/connection.js";
 
 export function registerDeviceTools(server: McpServer): void {
     // ============================================================================
-    
+
+    // Tool: List all devices (cross-platform, works without React Native)
+    registerToolWithTelemetry(
+        server,
+        "list_devices",
+        {
+            description:
+                "List every iOS simulator, Android emulator, and connected physical device on the host machine, in one structured response.\n" +
+                "PURPOSE: Single discovery entry point. Returns booted+shutdown iOS sims (from simctl), running+stopped Android emulators (from `emulator -list-avds` cross-referenced with `adb devices`), and attached physical devices. Each row is enriched with `rnConnected` when an RN app from get_apps matches the same identifier.\n" +
+                "WHEN TO USE: Before tap/swipe to pick a device, when a tool reports an ambiguous-device error, or to check whether a simulator is booted before targeting it.\n" +
+                "WORKS WITHOUT RN: No Metro connection required. Safe to call before scan_metro.\n" +
+                "WORKFLOW: list_devices -> tap({ device: '<udid-or-serial-or-name>', ... })\n" +
+                "SEE ALSO: get_apps for RN-specific connection details (RN version, JS engine, network capture mode).",
+            inputSchema: {
+                refresh: z
+                    .coerce
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe("Force re-query of simctl/adb/emulator instead of returning cached results (5s TTL).")
+            }
+        },
+        async ({ refresh }) => {
+            const inventory = await listAllDevices({ refresh });
+
+            // Best-effort RN enrichment. If the registry is empty, this loop
+            // is a no-op and the OS-level inventory is returned untouched —
+            // preserves the "works without React Native" guarantee.
+            const apps = getConnectedApps();
+            if (apps.length > 0) {
+                const byUdid = new Map<string, { deviceName: string; port: number }>();
+                const bySerial = new Map<string, { deviceName: string; port: number }>();
+                for (const { app } of apps) {
+                    const entry = { deviceName: app.deviceInfo.deviceName, port: app.port };
+                    if (app.simulatorUdid) byUdid.set(app.simulatorUdid.toLowerCase(), entry);
+                    if (app.adbSerial) bySerial.set(app.adbSerial, entry);
+                }
+                for (const sim of inventory.ios.simulators) {
+                    const match = byUdid.get(sim.udid.toLowerCase());
+                    if (match) sim.rnConnected = match;
+                }
+                for (const emu of inventory.android.emulators) {
+                    if (emu.serial) {
+                        const match = bySerial.get(emu.serial);
+                        if (match) emu.rnConnected = match;
+                    }
+                }
+                for (const phys of inventory.android.physical) {
+                    const match = bySerial.get(phys.serial);
+                    if (match) phys.rnConnected = match;
+                }
+            }
+
+            const lines: string[] = [];
+            lines.push(`Devices: ${inventory.summary.booted} running, ${inventory.summary.total} total`);
+
+            if (inventory.ios.available) {
+                lines.push("\niOS simulators:");
+                if (inventory.ios.simulators.length === 0) {
+                    lines.push("  (none)");
+                } else {
+                    for (const s of inventory.ios.simulators) {
+                        const badge = s.state === "booted" ? "🟢 booted" : "⚪ shutdown";
+                        const rn = s.rnConnected ? `  [RN connected on port ${s.rnConnected.port}]` : "";
+                        lines.push(`  ${s.name} (${s.runtime}) — ${badge} — UDID: ${s.udid}${rn}`);
+                    }
+                }
+            } else {
+                lines.push(`\niOS: unavailable (${inventory.ios.error ?? "unknown"})`);
+            }
+
+            if (inventory.android.available) {
+                lines.push("\nAndroid emulators:");
+                if (inventory.android.emulators.length === 0) {
+                    lines.push("  (none)");
+                } else {
+                    for (const e of inventory.android.emulators) {
+                        const badge = e.state === "running" ? `🟢 running (${e.serial})` : "⚪ stopped";
+                        const rn = e.rnConnected ? `  [RN connected on port ${e.rnConnected.port}]` : "";
+                        lines.push(`  ${e.name} — ${badge}${rn}`);
+                    }
+                }
+                if (inventory.android.physical.length > 0) {
+                    lines.push("\nAndroid physical:");
+                    for (const p of inventory.android.physical) {
+                        const rn = p.rnConnected ? `  [RN connected on port ${p.rnConnected.port}]` : "";
+                        lines.push(`  ${p.model} (${p.serial}) — ${p.state}${rn}`);
+                    }
+                }
+            } else {
+                lines.push(`\nAndroid: unavailable (${inventory.android.error ?? "unknown"})`);
+            }
+
+            return {
+                content: [
+                    { type: "text", text: lines.join("\n") },
+                    { type: "text", text: JSON.stringify(inventory, null, 2) }
+                ]
+            };
+        }
+    );
+
     // Tool: List Android devices
     registerToolWithTelemetry(
         server,
         "list_android_devices",
         {
-            description: "List connected Android devices and emulators via ADB.\n" +
+            description: "DEPRECATED: prefer list_devices, which returns Android emulators (running + stopped) + iOS simulators + physical devices in one call.\n" +
+                "List connected Android devices and emulators via ADB.\n" +
                 "PURPOSE: Discover which physical devices and emulators are visible to adb so you can pick a target UDID/serial.\n" +
                 "WHEN TO USE: Before android_install_app / android_launch_app, or when a tool reports \"no device\" and you need to confirm visibility.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
@@ -206,7 +310,8 @@ export function registerDeviceTools(server: McpServer): void {
         server,
         "list_ios_simulators",
         {
-            description: "List available iOS simulators.\n" +
+            description: "DEPRECATED: prefer list_devices, which returns iOS simulators + Android emulators + physical devices in one call.\n" +
+                "List available iOS simulators.\n" +
                 "PURPOSE: Enumerate installed iOS simulators with their UDIDs and boot state so you can boot or install into the right one.\n" +
                 "WHEN TO USE: Before ios_boot_simulator / ios_install_app, or when you need a UDID for a specific device name.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
