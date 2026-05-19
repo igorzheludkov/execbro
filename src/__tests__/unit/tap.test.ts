@@ -542,7 +542,11 @@ describe("tap orchestrator", () => {
         connectedApps.clear();
 
         expect(result.success).toBe(false);
-        expect(result.error).toContain("Multiple devices match");
+        // resolveDeviceTarget emits "matches multiple connected devices" for
+        // registry-substring ambiguity. The previous getConnectedAppByDevice
+        // wrapper said "Multiple devices match"; the new contract is more
+        // explicit about where the conflict came from.
+        expect(result.error).toContain("matches multiple connected devices");
     });
 });
 
@@ -636,9 +640,10 @@ describe("tap without Metro connection", () => {
             text: "Submit",
             strategy: "fiber",
         });
-        // If Metro auto-connect succeeded, fiber may work — that's fine.
-        // But if it failed, the error or attempted strategies should mention Metro.
-        if (!result.success) {
+        // If Metro auto-connect succeeded, fiber may try and fail to find the
+        // query — that's also fine. If auto-connect failed and Metro is still
+        // absent, the error or attempted strategies should mention Metro.
+        if (!result.success && connectedApps.size === 0) {
             const mentionsMetro =
                 result.error?.includes("Metro") ||
                 result.attempted?.some((a) => a.reason.includes("Metro"));
