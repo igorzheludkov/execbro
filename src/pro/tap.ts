@@ -60,9 +60,19 @@ export interface TapOptions {
     udid?: string;
 }
 
+// outcome categorizes WHY the strategy didn't tap, distinct from `reason` (the raw message):
+//   - "not-found": strategy ran to completion and found no match (definitive miss)
+//   - "timeout": strategy didn't finish within its budget — result UNKNOWN, do not infer absence
+//   - "skipped": strategy was skipped before running (no Metro, no UI driver, budget exhausted)
+//   - "invisible": strategy found query-matching elements but none were visible/laid out
+//   - "ambiguous": multiple matches and no index= specified
+//   - "error": strategy threw or returned an unexpected error
+export type TapAttemptOutcome = "not-found" | "timeout" | "skipped" | "invisible" | "ambiguous" | "error";
+
 export interface TapAttempt {
     strategy: string;
     reason: string;
+    outcome?: TapAttemptOutcome;
 }
 
 export interface TapScreenshot {
@@ -1376,20 +1386,24 @@ async function tryCoordinateStrategy(
 }
 
 const SETTLE_DELAY_MS = 800;
-const TAP_TIMEOUT_MS = 20000;
+const TAP_TIMEOUT_MS = 25000;
 const MIN_STRATEGY_BUDGET_MS = 500;
 // Per-strategy budget. OCR cap on Android is bumped via maxStrategyMs() because
 // the ADB screencap+pull leg has ~2s variance on real devices; iOS stays at 5s
 // where xcrun simctl screenshot is consistent.
+// Heavy strategies (fiber on deep trees with multi-depth retries, axe accessibility
+// dumps on dense iOS screens) need more headroom — previous caps produced spurious
+// timeouts that the agent read as "element missing" when the strategy simply didn't
+// get to finish. The overall TAP_TIMEOUT_MS budget still bounds the worst case.
 const MAX_STRATEGY_MS: Record<string, number> = {
-    fiber: 5000,
-    accessibility: 3000,
-    ocr: 5000,
+    fiber: 8000,
+    accessibility: 6000,
+    ocr: 6000,
     coordinate: 3000
 };
 
 function maxStrategyMs(strategy: string, platform: "ios" | "android"): number {
-    if (strategy === "ocr" && platform === "android") return 7000;
+    if (strategy === "ocr" && platform === "android") return 9000;
     return MAX_STRATEGY_MS[strategy] ?? 5000;
 }
 
@@ -1398,9 +1412,9 @@ function maxStrategyMs(strategy: string, platform: "ios" | "android"): number {
 // must NOT be classified as a tap-level timeout.
 const STRATEGY_TIMEOUT_RE = /^(fiber|accessibility|ocr|coordinate) timed out after \d+ms$/;
 
-export function isTapTimeout(attempted: readonly { reason: string; strategy?: string }[]): boolean {
+export function isTapTimeout(attempted: readonly { reason: string; strategy?: string; outcome?: TapAttemptOutcome }[]): boolean {
     return attempted.some(
-        (a) => STRATEGY_TIMEOUT_RE.test(a.reason) || a.reason.startsWith("Skipped —")
+        (a) => a.outcome === "timeout" || a.outcome === "skipped" || STRATEGY_TIMEOUT_RE.test(a.reason) || a.reason.startsWith("Skipped —")
     );
 }
 
@@ -1558,7 +1572,7 @@ async function verifyAndCapture(
     udid?: string,
     beforeScaleFactor?: number,
     markerPx?: { x: number; y: number }
-): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification; afterBuffer?: Buffer; afterWithMarkerBuffer?: Buffer }> {
+): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification; afterWithMarkerBuffer?: Buffer }> {
     // Decoupled 2026-05-16 (I5): screenshot and verify are independent knobs.
     // - shouldVerify=true:    capture after-screenshot internally, diff against beforeBuffer, return verification.
     // - shouldScreenshot=true: also return the (marker-overlaid) image bytes in the response.
@@ -1593,14 +1607,16 @@ async function verifyAndCapture(
         ? await drawTapMarker(after.buffer, markerPx.x, markerPx.y)
         : after.buffer;
 
-    const screenshot: TapScreenshot | undefined = shouldScreenshot
-        ? {
-              image: screenshotToBase64(afterWithMarker),
-              width: after.width,
-              height: after.height,
-              scaleFactor: after.scaleFactor
-          }
-        : undefined;
+    // Construct the screenshot eagerly. Caller decides whether to drop it
+    // based on `shouldScreenshot` AND the verification outcome — when a tap
+    // is unmeaningful we surface the image regardless so the agent can
+    // diagnose without an extra round-trip.
+    const screenshot: TapScreenshot = {
+        image: screenshotToBase64(afterWithMarker),
+        width: after.width,
+        height: after.height,
+        scaleFactor: after.scaleFactor
+    };
 
     let verification: TapVerification | undefined;
     if (!shouldVerify) {
@@ -1664,7 +1680,7 @@ async function verifyAndCapture(
         metadata: { phase: "after", changeRate: verification?.changeRate }
     });
 
-    return { screenshot, verification, afterBuffer: after.buffer, afterWithMarkerBuffer: afterWithMarker };
+    return { screenshot, verification, afterWithMarkerBuffer: afterWithMarker };
 }
 
 // --- Burst Capture ---
@@ -1678,7 +1694,7 @@ async function burstCaptureAndVerify(
     udid?: string,
     beforeScaleFactor?: number,
     markerPx?: { x: number; y: number }
-): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification; afterBuffer?: Buffer; afterWithMarkerBuffer?: Buffer }> {
+): Promise<{ screenshot?: TapScreenshot; verification?: TapVerification; afterWithMarkerBuffer?: Buffer }> {
     if (!beforeBuffer) return {};
 
     const frames: Buffer[] = [beforeBuffer];
@@ -1775,7 +1791,6 @@ async function burstCaptureAndVerify(
     return {
         screenshot,
         verification,
-        afterBuffer: frames[lastFrameIdx],
         afterWithMarkerBuffer: markedFrames[lastFrameIdx]
     };
 }
@@ -1793,7 +1808,6 @@ interface ArtifactCaptureContext {
     deviceName?: string;
     screenshotMeta?: { width: number; height: number };
     screenshotBuffer?: Buffer | null;
-    afterBuffer?: Buffer | null;
     afterWithMarker?: Buffer | null;
     chosenTapPoint?: { x: number; y: number } | null;
     verification?: TapVerification;
@@ -1930,7 +1944,6 @@ async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureS
             chosenElement: null,
             screenshots: {
                 before: ctx.screenshotBuffer ?? null,
-                after: ctx.afterBuffer ?? null,
                 afterWithMarker: ctx.afterWithMarker ?? null
             },
             deviceMeta: {
@@ -2289,14 +2302,16 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         if (strat === "fiber" && !hasMetro) {
             attempted.push({
                 strategy: "fiber",
-                reason: "Skipped — no Metro connection (required for fiber)"
+                reason: "Skipped — no Metro connection (required for fiber)",
+                outcome: "skipped"
             });
             return false;
         }
         if (uiDriverMissing && UI_DRIVER_REQUIRED_STRATEGIES.includes(strat)) {
             attempted.push({
                 strategy: strat,
-                reason: "Skipped — iOS UI driver is not installed (required for iOS tap/accessibility/OCR)"
+                reason: "Skipped — iOS UI driver is not installed (required for iOS tap/accessibility/OCR)",
+                outcome: "skipped"
             });
             return false;
         }
@@ -2324,10 +2339,12 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const shouldScreenshot = options.screenshot !== false;
     const canVerify = options.verify !== false;
 
-    // Capture "before" screenshot for verification
+    // Capture "before" screenshot. Always attempted (independent of canVerify)
+    // so failure artifacts always carry a before.png — the diagnostic value of
+    // the before frame doesn't depend on whether we run the post-tap diff.
     let beforeBuffer: Buffer | null = null;
     let beforeScaleFactor: number | undefined;
-    if (canVerify) {
+    {
         const before = await captureScreenshot(platform, targetUdid);
         beforeBuffer = before?.buffer || null;
         beforeScaleFactor = before?.scaleFactor;
@@ -2360,7 +2377,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         if (remaining < MIN_STRATEGY_BUDGET_MS) {
             attempted.push({
                 strategy: strat,
-                reason: `Skipped — only ${remaining}ms remaining (budget ${TAP_TIMEOUT_MS}ms)`
+                reason: `Skipped — only ${remaining}ms remaining (budget ${TAP_TIMEOUT_MS}ms)`,
+                outcome: "skipped"
             });
             continue;
         }
@@ -2449,7 +2467,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 strategyLabel = "ocr-recovered";
                 // Fall through past the catch block to the success handler.
             } else {
-                attempted.push({ strategy: strat, reason });
+                // Classify the throw: a strategy-level timeout means "result UNKNOWN"
+                // (the strategy didn't finish), distinct from "ran clean and found
+                // nothing". Agents must not infer absence from timeouts. The
+                // `outcome` field carries that distinction; `reason` stays the raw
+                // message so existing log-matchers / classifiers keep working.
+                const outcome: TapAttemptOutcome = STRATEGY_TIMEOUT_RE.test(reason) ? "timeout" : "error";
+                attempted.push({ strategy: strat, reason, outcome });
                 continue;
             }
         }
@@ -2460,7 +2484,6 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             if (strat !== "ocr") ocrPrewarmCtrl?.abort();
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
-            let afterBuffer: Buffer | undefined;
             let afterWithMarkerBuffer: Buffer | undefined;
             let dprForMarker: number | undefined;
             if (platform === "ios") {
@@ -2478,7 +2501,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 devicePixelRatio: dprForMarker
             });
             if (options.burst && canVerify && beforeBuffer) {
-                ({ screenshot, verification, afterBuffer, afterWithMarkerBuffer } = await burstCaptureAndVerify(
+                ({ screenshot, verification, afterWithMarkerBuffer } = await burstCaptureAndVerify(
                     platform,
                     beforeBuffer,
                     targetUdid,
@@ -2486,19 +2509,24 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     strategyMarker
                 ));
                 // Burst always produces a screenshot for diff visualization. Drop the
-                // bytes when the caller didn't ask for them — frames are still in
-                // imageBuffer (accessible via get_images(groupId=verification.burstGroupId)).
-                if (!shouldScreenshot) screenshot = undefined;
+                // bytes when the caller didn't ask for them AND the tap was meaningful
+                // — keeping the screenshot on unmeaningful taps saves the agent a
+                // round-trip when it needs to diagnose. Frames remain in imageBuffer
+                // either way (accessible via get_images(groupId=verification.burstGroupId)).
+                if (!shouldScreenshot && verification?.meaningful !== false) screenshot = undefined;
             } else {
-                ({ screenshot, verification, afterBuffer, afterWithMarkerBuffer } = await verifyAndCapture(
+                ({ screenshot, verification, afterWithMarkerBuffer } = await verifyAndCapture(
                     platform,
                     canVerify,
-                    shouldScreenshot,
+                    /* shouldScreenshot */ true,
                     beforeBuffer,
                     targetUdid,
                     beforeScaleFactor,
                     strategyMarker
                 ));
+                // Mirror the burst-path gate: drop the screenshot only when the
+                // caller didn't ask for it AND the tap was meaningful.
+                if (!shouldScreenshot && verification?.meaningful !== false) screenshot = undefined;
             }
             if (screenshot && app) {
                 app.lastScreenshot = {
@@ -2523,7 +2551,9 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             });
             // Capture an artifact for "successful but unmeaningful" taps so we can
             // diagnose taps that landed wrong or hit non-responsive elements.
-            if (verification && !verification.skipped && (verification.changeRate ?? 1) < 0.001) {
+            // Uses the same `meaningful` flag the agent sees so dashboard outcomes
+            // stay consistent with what the caller observed.
+            if (verification && !verification.skipped && verification.meaningful === false) {
                 const unmeaningfulSignals = await captureTapArtifact({
                     query,
                     outcome: "unmeaningful",
@@ -2533,7 +2563,6 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     deviceName,
                     screenshotMeta: screenshot ? { width: screenshot.width, height: screenshot.height } : undefined,
                     screenshotBuffer: beforeBuffer,
-                    afterBuffer: afterBuffer ?? null,
                     afterWithMarker: afterWithMarkerBuffer ?? null,
                     chosenTapPoint: strategyMarker ? { x: strategyMarker.x, y: strategyMarker.y } : null,
                     verification,
@@ -2544,7 +2573,16 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             return successResult;
         }
 
-        attempted.push({ strategy: strat, reason: result.reason });
+        // Classify the strategy's non-success result. The reason string carries
+        // the diagnostic from the strategy; outcome lets agents branch on category
+        // without parsing prose. "invisible" / "ambiguous" are pinned by substring
+        // matches the fiber strategy emits via pressables.ts.
+        const reasonStr = result.reason || "";
+        let attemptOutcome: TapAttemptOutcome = "not-found";
+        if (result.ambiguous) attemptOutcome = "ambiguous";
+        else if (reasonStr.indexOf("but none are visible") !== -1) attemptOutcome = "invisible";
+        else if (STRATEGY_TIMEOUT_RE.test(reasonStr)) attemptOutcome = "timeout";
+        attempted.push({ strategy: strat, reason: reasonStr, outcome: attemptOutcome });
 
         // If fiber found an element with measured coordinates, do a native tap directly
         if (strat === "fiber" && result.convertedTo && result.pressed) {
@@ -2603,13 +2641,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     ({ screenshot, verification } = await verifyAndCapture(
                         platform,
                         canVerify,
-                        shouldScreenshot,
+                        /* shouldScreenshot */ true,
                         beforeBuffer,
                         targetUdid,
                         beforeScaleFactor,
                         fiberMarker
                     ));
                 }
+                if (!shouldScreenshot && verification?.meaningful !== false) screenshot = undefined;
                 if (screenshot && app) {
                     app.lastScreenshot = {
                         originalWidth: screenshot.width,
@@ -2669,7 +2708,19 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const hitTimeout = isTapTimeout(attempted);
     const elapsed = TAP_TIMEOUT_MS - remainingMs();
 
-    const suggestion = buildSuggestion(query, strategies, platform);
+    // If fiber located the element but visibility filtered it out, prepend a
+    // scroll-or-dismiss hint so the agent doesn't waste a turn assuming the
+    // testID/component is missing.
+    const fiberSawInvisible = attempted.some(a => a.strategy === "fiber" && a.outcome === "invisible");
+    const allTimedOut = attempted.length > 0 && attempted.every(a => a.outcome === "timeout" || a.outcome === "skipped");
+    let suggestion = buildSuggestion(query, strategies, platform);
+    if (fiberSawInvisible) {
+        suggestion = `Element exists in the React tree but is not on screen. Try scrolling it into view (${platform === "ios" ? "ios_swipe / arrow keys" : "android_swipe"}), dismiss any overlay covering it, or wait for layout to settle. ` + suggestion;
+    } else if (allTimedOut) {
+        // No strategy got to a definitive answer — don't let the agent conclude
+        // the element is missing. Steer toward retry or a different strategy.
+        suggestion = `All strategies timed out — the element's presence is UNKNOWN. Retry the tap (transient slowness is common on dense screens), or try a different strategy explicitly (e.g. strategy='fiber' if accessibility timed out). ` + suggestion;
+    }
     const { screenshot: failScreenshot } = shouldScreenshot
         ? await verifyAndCapture(platform, false, true, null, targetUdid)
         : { screenshot: undefined };
@@ -2680,10 +2731,20 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             scaleFactor: failScreenshot.scaleFactor
         };
     }
+    // Pick the right error framing: a definitive "not found" is different from
+    // "all strategies timed out — we don't know whether it exists".
+    let errorOverride: string | undefined;
+    if (hitTimeout) {
+        errorOverride = `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)`;
+    } else if (allTimedOut) {
+        errorOverride = `All tap strategies timed out before completing — element presence is UNKNOWN`;
+    } else if (fiberSawInvisible) {
+        errorOverride = `Element matches the query but is not visible on screen`;
+    }
     const failureResult = formatTapFailure({
         query,
         attempted,
-        error: hitTimeout ? `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)` : undefined,
+        error: errorOverride,
         suggestion,
         device: deviceName,
         screenshot: failScreenshot

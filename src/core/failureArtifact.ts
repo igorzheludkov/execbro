@@ -94,7 +94,7 @@ export interface UploadInput {
     artifactKey: string;
     apiKey: string;
     bundleGz: Buffer;
-    pngs: { before?: Buffer; after?: Buffer; afterWithMarker?: Buffer };
+    pngs: { before?: Buffer; afterWithMarker?: Buffer };
 }
 
 export async function uploadArtifact(input: UploadInput): Promise<boolean> {
@@ -105,7 +105,6 @@ export async function uploadArtifact(input: UploadInput): Promise<boolean> {
     const fd = new FormData();
     fd.append("bundle", new Blob([new Uint8Array(input.bundleGz)], { type: "application/gzip" }), "bundle");
     if (input.pngs.before) fd.append("before.png", new Blob([new Uint8Array(input.pngs.before)], { type: "image/png" }), "before.png");
-    if (input.pngs.after) fd.append("after.png", new Blob([new Uint8Array(input.pngs.after)], { type: "image/png" }), "after.png");
     if (input.pngs.afterWithMarker) fd.append("after-with-marker.png", new Blob([new Uint8Array(input.pngs.afterWithMarker)], { type: "image/png" }), "after-with-marker.png");
 
     const ctrl = new AbortController();
@@ -144,7 +143,6 @@ export interface CaptureInput {
     chosenElement: Record<string, unknown> | null;
     screenshots: {
         before: Buffer | null;
-        after: Buffer | null;
         afterWithMarker: Buffer | null;
     };
     deviceMeta: ArtifactInput["deviceMeta"];
@@ -208,7 +206,6 @@ export async function captureFailureArtifact(input: CaptureInput): Promise<Captu
         bundleGz = gzipBundle(bundle);
 
         if (input.screenshots.before) pngs.before = await downscaleScreenshot(input.screenshots.before);
-        if (input.screenshots.after) pngs.after = await downscaleScreenshot(input.screenshots.after);
         if (input.screenshots.afterWithMarker) pngs.afterWithMarker = await downscaleScreenshot(input.screenshots.afterWithMarker);
     } catch {
         return { artifactKey: "", signals: { ...signals, artifactKey: "" } };
