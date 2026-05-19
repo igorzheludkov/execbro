@@ -11,11 +11,7 @@ import {
     iosInputText,
     iosSwipe,
     IOS_BUTTON_TYPES,
-    getActiveSimulatorUdid,
-    getActiveOrBootedSimulatorUdid,
     getDevicePixelRatio,
-    getDefaultAndroidDevice,
-    findSimulatorByName,
     connectedApps,
 } from "../core/index.js";
 import { tap, convertScreenshotToTapCoords, type TapResult } from "../pro/tap.js";
@@ -26,6 +22,7 @@ import {
 } from "../pro/verifyAction.js";
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
+import { resolveDeviceTarget } from "../core/deviceResolver.js";
 
 export function registerInteractionTools(server: McpServer): void {
     // Tool: Unified tap — tries fiber, accessibility, OCR, coordinate strategies
@@ -271,7 +268,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers — anything that needs a gesture rather than a tap. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
                 "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means the scroll did nothing (end-of-list, non-scrollable surface, or missed coordinates). burst=true catches transient feedback like overscroll bounce.\n" +
                 "WORKFLOW: ios_screenshot or android_screenshot -> swipe({ startX, startY, endX, endY }) -> read response.verification.meaningful to confirm it worked.\n" +
-                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. When both iOS and Android devices are connected, pass platform explicitly.\n" +
+                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
             inputSchema: {
                 startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels"),
@@ -286,16 +283,16 @@ export function registerInteractionTools(server: McpServer): void {
                     .number()
                     .optional()
                     .describe("iOS only — touch step size between events (driver-dependent default). Ignored on Android."),
-                platform: z
-                    .enum(["ios", "android"])
-                    .optional()
-                    .describe("Target platform. Required when both iOS and Android devices are connected. Auto-detected if only one is available."),
                 device: z
                     .string()
                     .optional()
-                    .describe("Optional iOS simulator name (substring match) to disambiguate when multiple simulators are booted."),
-                udid: z.string().optional().describe("Optional iOS simulator UDID. Forces iOS targeting."),
-                deviceId: z.string().optional().describe("Optional Android device ID. Uses first available Android device if not specified."),
+                    .describe(
+                        "Target device. Accepts (a) an iOS simulator UDID, " +
+                        "(b) an Android adb serial like 'emulator-5554', " +
+                        "(c) the iOS simulator or Android emulator/device name (substring match), or " +
+                        "(d) a connected RN app's deviceName (substring match against get_apps output). " +
+                        "Omit when exactly one device is available. Call list_devices to enumerate."
+                    ),
                 verify: z
                     .boolean()
                     .optional()
@@ -324,57 +321,16 @@ export function registerInteractionTools(server: McpServer): void {
                     ),
             }
         },
-        async ({ startX, startY, endX, endY, durationMs, delta, platform, device, udid, deviceId, verify, screenshot, burst }) => {
-            // Platform resolution mirrors the tap() native-mode flow (src/pro/tap.ts).
-            if (udid && platform === "android") {
+        async ({ startX, startY, endX, endY, durationMs, delta, device, verify, screenshot, burst }) => {
+            const resolved = await resolveDeviceTarget(device);
+            if (!resolved.ok) {
                 return {
-                    content: [{ type: "text", text: 'Error: udid is only valid for iOS. Got platform: "android".' }],
+                    content: [{ type: "text", text: `Error: ${resolved.error.message}` }],
                     isError: true
                 };
             }
-
-            let resolvedPlatform: "ios" | "android" | undefined = platform;
-            let resolvedUdid: string | undefined;
-
-            if (udid) {
-                resolvedPlatform = "ios";
-                resolvedUdid = udid;
-            } else if (!resolvedPlatform) {
-                const deviceMatchedUdid = device
-                    ? await findSimulatorByName(device).catch(() => null)
-                    : null;
-                if (deviceMatchedUdid) {
-                    resolvedPlatform = "ios";
-                    resolvedUdid = deviceMatchedUdid;
-                } else {
-                    const [androidDevice, iosSimulator] = await Promise.all([
-                        getDefaultAndroidDevice().catch(() => null),
-                        getActiveOrBootedSimulatorUdid().catch(() => null)
-                    ]);
-                    if (androidDevice && iosSimulator) {
-                        return {
-                            content: [{ type: "text", text: 'Error: Multiple platforms detected (both Android and iOS). Specify platform: "android" or platform: "ios" to target the correct device.' }],
-                            isError: true
-                        };
-                    }
-                    if (androidDevice) {
-                        resolvedPlatform = "android";
-                    } else if (iosSimulator) {
-                        resolvedPlatform = "ios";
-                        resolvedUdid = iosSimulator;
-                    } else {
-                        return {
-                            content: [{ type: "text", text: "Error: No Android device or iOS simulator found. Connect a device or start a simulator." }],
-                            isError: true
-                        };
-                    }
-                }
-            } else if (resolvedPlatform === "ios") {
-                resolvedUdid =
-                    (device ? await findSimulatorByName(device).catch(() => null) : null) ??
-                    (await getActiveOrBootedSimulatorUdid().catch(() => null)) ??
-                    undefined;
-            }
+            const resolvedPlatform: "ios" | "android" = resolved.target.platform;
+            const resolvedUdid: string | undefined = resolved.target.iosUdid;
 
             const shouldVerify = verify !== false;
             const shouldScreenshot = screenshot !== false;
@@ -402,7 +358,7 @@ export function registerInteractionTools(server: McpServer): void {
                 const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
                 const start = convertScreenshotToTapCoords(startX, startY, "android", 1, scaleFactor);
                 const end = convertScreenshotToTapCoords(endX, endY, "android", 1, scaleFactor);
-                driverResult = await androidSwipe(start.x, start.y, end.x, end.y, durationMs ?? 300, deviceId);
+                driverResult = await androidSwipe(start.x, start.y, end.x, end.y, durationMs ?? 300, resolved.target.androidSerial);
             }
 
             if (!driverResult.success) {
