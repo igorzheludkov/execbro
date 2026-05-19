@@ -149,13 +149,13 @@ describe("uploadArtifact", () => {
             artifactKey: "2026-04-29/00000000-0000-0000-0000-000000000001",
             apiKey: "key",
             bundleGz: Buffer.from([1, 2, 3]),
-            pngs: { before: Buffer.from([4]), after: Buffer.from([5]), afterWithMarker: Buffer.from([6]) }
+            pngs: { before: Buffer.from([4]), afterWithMarker: Buffer.from([6]) }
         });
         expect(ok).toBe(true);
         expect(lastReq.url).toBe("https://test.invalid/api/tap-artifact");
         expect((lastReq.headers as any)["X-API-Key"]).toBe("key");
         expect((lastReq.headers as any)["X-Artifact-Id"]).toBe("2026-04-29/00000000-0000-0000-0000-000000000001");
-        expect(lastReq.bodyParts).toEqual(new Set(["bundle", "before.png", "after.png", "after-with-marker.png"]));
+        expect(lastReq.bodyParts).toEqual(new Set(["bundle", "before.png", "after-with-marker.png"]));
     });
 
     it("posts only the bundle when no PNGs available", async () => {
@@ -209,7 +209,7 @@ describe("captureFailureArtifact", () => {
         },
         chosenTapPoint: null,
         chosenElement: null,
-        screenshots: { before: null, after: null, afterWithMarker: null },
+        screenshots: { before: null, afterWithMarker: null },
         deviceMeta: { platform: "ios", driver: "axe", screenSize: { w: 1170, h: 2532 } },
         ...overrides
     });

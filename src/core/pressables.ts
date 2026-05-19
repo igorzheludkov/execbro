@@ -1424,16 +1424,14 @@ export async function pressElement(options: {
                 }
             }
 
-            // Filter visible and match
+            // Filter visible and match. Track query-matching elements that fail
+            // the visibility filter so we can distinguish "exists but off-screen /
+            // not laid out" from "doesn't exist in the fiber tree at all".
             var matches = [];
+            var invisibleMatches = [];
             for (var i = 0; i < measurements.length; i++) {
                 var m = measurements[i];
                 if (!m) continue;
-
-                // Visibility filter: positive dimensions, within viewport
-                if (m.width <= 0 || m.height <= 0) continue;
-                if (m.x + m.width < 0 || m.y + m.height < 0) continue;
-                if (m.x > viewportW || m.y > viewportH) continue;
 
                 var info = meta[i];
 
@@ -1458,7 +1456,14 @@ export async function pressElement(options: {
                     matched = matched && (ownNameMatch || meaningfulMatch);
                 }
 
-                if (matched) {
+                if (!matched) continue;
+
+                // Visibility filter: positive dimensions, within viewport
+                var visible = m.width > 0 && m.height > 0 &&
+                    (m.x + m.width >= 0) && (m.y + m.height >= 0) &&
+                    m.x <= viewportW && m.y <= viewportH;
+
+                if (visible) {
                     matches.push({
                         name: info.name,
                         text: info.text,
@@ -1468,6 +1473,24 @@ export async function pressElement(options: {
                         x: Math.round(m.x + m.width / 2),
                         y: Math.round(m.y + m.height / 2)
                     });
+                } else {
+                    var reason;
+                    if (m.width <= 0 || m.height <= 0) reason = 'zero-size';
+                    else if (m.y >= viewportH) reason = 'below-viewport';
+                    else if (m.y + m.height <= 0) reason = 'above-viewport';
+                    else if (m.x >= viewportW) reason = 'right-of-viewport';
+                    else if (m.x + m.width <= 0) reason = 'left-of-viewport';
+                    else reason = 'off-screen';
+                    invisibleMatches.push({
+                        name: info.name,
+                        text: info.text,
+                        testID: info.testID,
+                        reason: reason,
+                        x: Math.round(m.x),
+                        y: Math.round(m.y),
+                        width: Math.round(m.width),
+                        height: Math.round(m.height)
+                    });
                 }
             }
 
@@ -1476,7 +1499,19 @@ export async function pressElement(options: {
                 if (searchText !== null) criteria.push('text="' + searchText + '"');
                 if (searchTestID !== null) criteria.push('testID="' + searchTestID + '"');
                 if (searchComponent !== null) criteria.push('component="' + searchComponent + '"');
-                return { error: 'No visible pressable or focusable elements found matching: ' + criteria.join(', ') };
+                if (invisibleMatches.length > 0) {
+                    // Element exists in the fiber tree but isn't visible — scroll,
+                    // dismiss an overlay, or wait for layout before retrying.
+                    return {
+                        error: 'Found ' + invisibleMatches.length + ' fiber match(es) for ' + criteria.join(', ') + ' but none are visible (reasons: ' + invisibleMatches.slice(0, 3).map(function(x) { return x.reason; }).join(', ') + '). The element exists in the React tree but is off-screen or has zero dimensions.',
+                        invisibleMatches: invisibleMatches.slice(0, 10),
+                        existsInTree: true
+                    };
+                }
+                return {
+                    error: 'No pressable or focusable elements found matching: ' + criteria.join(', ') + '. The element is not present in the React tree on the current screen.',
+                    existsInTree: false
+                };
             }
 
             if (targetIndex >= matches.length) {

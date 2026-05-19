@@ -8,7 +8,7 @@ export interface ScreenshotDiffResult {
     totalPixels: number;
 }
 
-const POSSIBLE_CHANGE = 0.001;  // 0.1% — likely real (text updates, counter changes)
+const POSSIBLE_CHANGE = 0.0005; // 0.05% — small UI state changes (pill selection, toggle highlight)
 const MIN_CHANGED_PIXELS = 200; // Absolute floor: a single character change is ~200-400px at typical resolutions
 const PIXEL_THRESHOLD = 0.1;    // pixelmatch per-pixel color tolerance (0-1)
 
