@@ -19,6 +19,11 @@ import {
     connectedApps,
 } from "../core/index.js";
 import { tap, convertScreenshotToTapCoords, type TapResult } from "../pro/tap.js";
+import {
+    captureScreenshot,
+    verifyAndCapture,
+    burstCaptureAndVerify,
+} from "../pro/verifyAction.js";
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 
@@ -364,10 +369,36 @@ export function registerInteractionTools(server: McpServer): void {
                     .optional()
                     .describe("Optional iOS simulator name (substring match) to disambiguate when multiple simulators are booted."),
                 udid: z.string().optional().describe("Optional iOS simulator UDID. Forces iOS targeting."),
-                deviceId: z.string().optional().describe("Optional Android device ID. Uses first available Android device if not specified.")
+                deviceId: z.string().optional().describe("Optional Android device ID. Uses first available Android device if not specified."),
+                verify: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe(
+                        "Compare before/after screenshots to detect whether the swipe produced a visual change. " +
+                        "Set false to skip. When skipped, the response contains `verification: { skipped: true, skippedReason }` " +
+                        "so callers can tell apart \"ran clean\" from \"never ran\"."
+                    ),
+                screenshot: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe(
+                        "Return the post-swipe image bytes in the response. Default true. Set to false to drop the PNG bytes — " +
+                        "verification still runs (set verify=false to skip that too)."
+                    ),
+                burst: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe(
+                        "Capture rapid sequential frames after the swipe to detect transient feedback (overscroll bounce, " +
+                        "fling-then-snap-back) even when the final state is unchanged. Frames are stored in the image buffer; " +
+                        "use get_images(groupId=verification.burstGroupId) to retrieve them."
+                    ),
             }
         },
-        async ({ startX, startY, endX, endY, durationMs, platform, device, udid, deviceId }) => {
+        async ({ startX, startY, endX, endY, durationMs, platform, device, udid, deviceId, verify, screenshot, burst }) => {
             // Platform resolution mirrors the tap() native-mode flow (src/pro/tap.ts).
             if (udid && platform === "android") {
                 return {
@@ -419,7 +450,19 @@ export function registerInteractionTools(server: McpServer): void {
                     undefined;
             }
 
-            let result;
+            const shouldVerify = verify !== false;
+            const shouldScreenshot = screenshot !== false;
+            const shouldBurst = burst === true;
+
+            // Capture before-screenshot only if we'll need it (verify or burst).
+            const wantBefore = shouldVerify || shouldBurst;
+            const beforeCapture = wantBefore
+                ? await captureScreenshot(resolvedPlatform!, resolvedUdid)
+                : null;
+            const beforeBuffer = beforeCapture?.buffer ?? null;
+            const beforeScaleFactor = beforeCapture?.scaleFactor;
+
+            let driverResult: { success: boolean; result?: string; error?: string };
             if (resolvedPlatform === "ios") {
                 const dpr = await getDevicePixelRatio(resolvedUdid);
                 const firstApp = connectedApps.values().next().value;
@@ -427,23 +470,75 @@ export function registerInteractionTools(server: McpServer): void {
                 const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, scaleFactor);
                 const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, scaleFactor);
                 const duration = durationMs !== undefined ? durationMs / 1000 : undefined;
-                result = await iosSwipe(start.x, start.y, end.x, end.y, { duration, udid: resolvedUdid });
+                driverResult = await iosSwipe(start.x, start.y, end.x, end.y, { duration, udid: resolvedUdid });
             } else {
                 const firstApp = connectedApps.values().next().value;
                 const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
                 const start = convertScreenshotToTapCoords(startX, startY, "android", 1, scaleFactor);
                 const end = convertScreenshotToTapCoords(endX, endY, "android", 1, scaleFactor);
-                result = await androidSwipe(start.x, start.y, end.x, end.y, durationMs ?? 300, deviceId);
+                driverResult = await androidSwipe(start.x, start.y, end.x, end.y, durationMs ?? 300, deviceId);
+            }
+
+            if (!driverResult.success) {
+                return {
+                    content: [{ type: "text", text: `Error: ${driverResult.error}` }],
+                    isError: true
+                };
+            }
+
+            // Driver succeeded — run verification.
+            const verifyResult = shouldBurst
+                ? await burstCaptureAndVerify({
+                    platform: resolvedPlatform!,
+                    beforeBuffer,
+                    udid: resolvedUdid,
+                    beforeScaleFactor,
+                    source: "swipe-burst",
+                })
+                : await verifyAndCapture({
+                    platform: resolvedPlatform!,
+                    shouldVerify,
+                    shouldScreenshot,
+                    beforeBuffer,
+                    udid: resolvedUdid,
+                    beforeScaleFactor,
+                    source: "swipe-verify",
+                });
+
+            const { screenshot: screenshotData, verification } = verifyResult;
+
+            const warning =
+                verification && !verification.skipped && verification.meaningful === false
+                    ? "Swipe executed but no visual change detected — list may be at end-of-scroll, content is non-scrollable, or the gesture missed the scroll surface. Inspect the screenshot and retry with adjusted coordinates if needed."
+                    : undefined;
+
+            const responseBody: Record<string, unknown> = {
+                success: true,
+                platform: resolvedPlatform,
+                from: { x: startX, y: startY },
+                to: { x: endX, y: endY },
+                driverMessage: driverResult.result,
+                ...(verification && { verification }),
+                ...(warning && { warning }),
+            };
+
+            const content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [
+                { type: "text" as const, text: JSON.stringify(responseBody, null, 2) },
+            ];
+
+            if (shouldScreenshot && screenshotData) {
+                content.push({
+                    type: "image" as const,
+                    data: screenshotData.image,
+                    mimeType: "image/jpeg",
+                });
             }
 
             return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? `[${resolvedPlatform}] ${result.result}` : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
+                content,
+                isError: false,
+                _meaningful: verification && !verification.skipped ? verification.meaningful : undefined,
+                _changeRate: verification && !verification.skipped ? verification.changeRate : undefined,
             };
         }
     );
