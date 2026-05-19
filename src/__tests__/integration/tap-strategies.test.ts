@@ -390,7 +390,7 @@ describe.skip("Category 3: Non-RN Native App (System Apps)", () => {
         }
         await sleep(2000);
 
-        const result = await tap({ x: 200, y: 400, native: true, platform });
+        const result = await tap({ x: 200, y: 400, native: true });
         expect(result.success).toBe(true);
 
         // Reconnect for any subsequent test runs

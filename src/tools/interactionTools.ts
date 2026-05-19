@@ -36,8 +36,8 @@ export function registerInteractionTools(server: McpServer): void {
                 "PURPOSE: Single unified tap entry point — resolves text/testID/component/coordinates into a real touch event on the correct device.\n" +
                 "WHEN TO USE: Any time you need to press a button, focus an input, open a menu, or verify a handler fires. Prefer testID, then text, then component, then (x,y) from a screenshot's pressables list.\n" +
                 "WORKFLOW: ios_screenshot or android_screenshot -> tap(testID=\"...\") | tap(text=\"...\") | tap(x, y) -> screenshot again to verify. Use burst=true when meaningful=false but visual feedback looks transient.\n" +
-                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. When iOS AND Android are connected, pass platform explicitly.\n" +
-                "GOOD: tap({ testID: \"login-btn\" }); tap({ text: \"Submit\" }); tap({ x: 300, y: 600 }); tap({ x: 300, y: 600, native: true, platform: \"android\" })\n" +
+                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
+                "GOOD: tap({ testID: \"login-btn\" }); tap({ text: \"Submit\" }); tap({ x: 300, y: 600 }); tap({ x: 300, y: 600, native: true, device: \"emulator-5554\" })\n" +
                 "BAD: tap({ text: \"\" }) or tap({ x: 0, y: 0 }) — missing a target. tap({ text: \"Submit\" }) without first screenshotting an ambiguous screen.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
             inputSchema: {
@@ -97,26 +97,15 @@ export function registerInteractionTools(server: McpServer): void {
                         "When true, tap coordinates directly via ADB/simctl without requiring a React Native connection. " +
                         "Useful for interacting with native UI, system dialogs, or non-RN apps. Requires x/y coordinates."
                     ),
-                platform: z
-                    .enum(["ios", "android"])
-                    .optional()
-                    .describe(
-                        "Target platform. Required when both iOS and Android devices are connected. Auto-detected if only one platform is available."
-                    ),
                 device: z
                     .string()
                     .optional()
                     .describe(
-                        "Target device name (substring match against the connected RN app's device name). " +
-                        "Use to pin the tap to a specific device when multiple are connected (e.g. \"iPhone SE\"). " +
-                        "Run get_apps to see connected device names. For iOS, the matched device's simulatorUdid is used to scope the tap."
-                    ),
-                udid: z
-                    .string()
-                    .optional()
-                    .describe(
-                        "iOS simulator UDID (from list_ios_simulators). Takes precedence over device/platform when set. " +
-                        "iOS-only — pairing with platform=\"android\" returns an error."
+                        "Target device. Accepts (a) an iOS simulator UDID, " +
+                        "(b) an Android adb serial like 'emulator-5554', " +
+                        "(c) the iOS simulator or Android emulator/device name (substring match), or " +
+                        "(d) a connected RN app's deviceName (substring match against get_apps output). " +
+                        "Omit when exactly one device is available. Call list_devices to enumerate."
                     ),
                 screenshot: z
                     .boolean()
@@ -158,9 +147,7 @@ export function registerInteractionTools(server: McpServer): void {
                 strategy: args.strategy,
                 maxTraversalDepth: args.maxTraversalDepth,
                 native: args.native,
-                platform: args.platform,
                 device: args.device,
-                udid: args.udid,
                 screenshot: args.screenshot,
                 verify: args.verify,
                 burst: args.burst,

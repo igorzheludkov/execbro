@@ -282,7 +282,6 @@ describe("formatTapSuccess with coordinate conversion info", () => {
             pressed: "PrimaryButton",
             tappedAt: { x: 300, y: 600 },
             convertedTo: { x: 100, y: 200, unit: "points" },
-            platform: "ios",
         });
         expect(result.tappedAt).toEqual({ x: 300, y: 600 });
         expect(result.convertedTo).toEqual({ x: 100, y: 200, unit: "points" });
@@ -510,29 +509,10 @@ describe("tap orchestrator", () => {
         expect(result.error).toContain("Both x and y");
     });
 
-    it("rejects udid combined with platform=android (non-native)", async () => {
-        const { tap } = await import("../../pro/tap.js");
-        const result = await tap({
-            text: "Submit",
-            platform: "android",
-            udid: "ABC-123",
-        });
-        expect(result.success).toBe(false);
-        expect(result.error).toContain("udid is only valid for iOS");
-    });
-
-    it("rejects udid combined with platform=android (native)", async () => {
-        const { tap } = await import("../../pro/tap.js");
-        const result = await tap({
-            x: 100,
-            y: 200,
-            native: true,
-            platform: "android",
-            udid: "ABC-123",
-        });
-        expect(result.success).toBe(false);
-        expect(result.error).toContain("udid is only valid for iOS");
-    });
+    // udid + platform=android conflict tests removed — both fields no longer
+    // exist in TapOptions (collapsed into the unified `device` field). The
+    // resolver disambiguates by identifier format (UDID → iOS, adb serial →
+    // Android) so the conflict can't be constructed.
 
     it("surfaces ambiguous-device errors from getConnectedAppByDevice", async () => {
         const { tap } = await import("../../pro/tap.js");
@@ -625,7 +605,6 @@ describe("tap without Metro connection", () => {
         const result = await tap({
             text: "Submit",
             strategy: "accessibility",
-            platform: "ios",
         });
         // It may still fail (no simulator running in test env), but the error
         // should NOT be "No connected app"
@@ -642,7 +621,6 @@ describe("tap without Metro connection", () => {
         const result = await tap({
             text: "Submit",
             strategy: "ocr",
-            platform: "ios",
         });
         if (!result.success) {
             expect(result.error).not.toContain("No connected app");
@@ -657,7 +635,6 @@ describe("tap without Metro connection", () => {
         const result = await tap({
             text: "Submit",
             strategy: "fiber",
-            platform: "ios",
         });
         // If Metro auto-connect succeeded, fiber may work — that's fine.
         // But if it failed, the error or attempted strategies should mention Metro.
