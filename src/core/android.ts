@@ -216,6 +216,102 @@ export async function getDefaultAndroidDevice(): Promise<string | null> {
 }
 
 /**
+ * Locate the `emulator` binary. Returns the command string to invoke it
+ * (either bare "emulator" if it's on PATH, or a quoted absolute path).
+ * Returns null when the binary cannot be located. Mirrors `isAdbAvailable`'s
+ * PATH → ANDROID_HOME → common-install-paths discovery order.
+ */
+async function findEmulatorBinary(): Promise<string | null> {
+    try {
+        await execAsync("emulator -help", { timeout: 3000 });
+        return "emulator";
+    } catch {
+        // not on PATH — try standard install locations
+    }
+
+    const env = process.env;
+    const candidates: string[] = [];
+    if (env.ANDROID_HOME) candidates.push(path.join(env.ANDROID_HOME, "emulator", "emulator"));
+    if (env.ANDROID_SDK_ROOT) candidates.push(path.join(env.ANDROID_SDK_ROOT, "emulator", "emulator"));
+    candidates.push(path.join(os.homedir(), "Library", "Android", "sdk", "emulator", "emulator"));
+
+    for (const candidate of candidates) {
+        try {
+            await execAsync(`"${candidate}" -help`, { timeout: 3000 });
+            return `"${candidate}"`;
+        } catch {
+            // try next
+        }
+    }
+    return null;
+}
+
+/**
+ * List all Android Virtual Devices defined on the host machine, regardless of
+ * whether they are currently running.
+ *
+ * Returns `[]` when adb is missing, the emulator binary cannot be located, or
+ * the listing fails. Callers should treat that as "no inventory available"
+ * rather than an error so the surrounding tool can still surface other
+ * platforms.
+ */
+export async function getAndroidEmulatorAvds(): Promise<string[]> {
+    const adbMissing = await requireAdb();
+    if (adbMissing) return [];
+
+    const emulatorBin = await findEmulatorBinary();
+    if (!emulatorBin) return [];
+
+    try {
+        const { stdout } = await execAsync(`${emulatorBin} -list-avds`, { timeout: ADB_TIMEOUT });
+        return stdout
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0 && !line.includes("Storing crashdata"));
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Map a running emulator's AVD name to its adb serial (e.g. "emulator-5554").
+ *
+ * Strategy: list adb devices, filter to `emulator-NNNN` serials, then call
+ * `adb -s <serial> emu avd name` per serial until one matches the requested
+ * AVD name. Returns `null` if no running emulator matches or if adb is
+ * unavailable. This is the slow path for the resolver — callers should prefer
+ * the cached registry entry first.
+ */
+export async function getAdbIdForAvd(avdName: string): Promise<string | null> {
+    const adbMissing = await requireAdb();
+    if (adbMissing) return null;
+
+    try {
+        const { stdout: devicesOut } = await execAsync("adb devices", { timeout: ADB_TIMEOUT });
+        const lines = devicesOut.trim().split("\n").slice(1); // skip "List of devices attached" header
+        const emulatorSerials = lines
+            .map((line) => line.trim().split(/\s+/)[0])
+            .filter((id) => /^emulator-\d+$/.test(id));
+
+        const target = avdName.trim();
+        for (const serial of emulatorSerials) {
+            try {
+                const { stdout } = await execAsync(`adb -s ${serial} emu avd name`, {
+                    timeout: ADB_TIMEOUT
+                });
+                const reported = stdout.split("\n")[0]?.trim() ?? "";
+                if (reported === target) return serial;
+            } catch {
+                // skip this serial, try next
+            }
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Build device selector for ADB command
  */
 function buildDeviceArg(deviceId?: string): string {
