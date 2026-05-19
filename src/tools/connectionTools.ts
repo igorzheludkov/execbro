@@ -341,6 +341,12 @@ export function registerConnectionTools(server: McpServer): void {
                     ? ""
                     : ` [${getWebSocketStateName(app.ws.readyState).toLowerCase()} — reconnecting]`;
                 const lines = [`  ${i + 1}. ${name} — ${appId} (${app.platform}, port ${app.port})${statusSuffix}`];
+                if (app.simulatorUdid) {
+                    lines.push(`     Simulator UDID: ${app.simulatorUdid}`);
+                }
+                if (app.adbSerial) {
+                    lines.push(`     ADB Serial: ${app.adbSerial}`);
+                }
                 if (app.appDetection) {
                     const d = app.appDetection;
                     const version = d.reactNativeVersion !== "unknown" ? `RN ${d.reactNativeVersion}` : "RN unknown";
@@ -350,17 +356,39 @@ export function registerConnectionTools(server: McpServer): void {
                 return lines.join("\n");
             });
 
+            const firstApp = apps[0].app;
+            const firstIdentifier =
+                firstApp.simulatorUdid ??
+                firstApp.adbSerial ??
+                firstApp.deviceInfo.deviceName;
+
             const text = [
                 `Connected devices:`,
                 ...deviceLines,
                 ``,
-                `Use device="${apps[0].app.deviceInfo.deviceName}" to target a specific device.`,
+                `Use device="${firstApp.deviceInfo.deviceName}", device="${firstIdentifier}", or any UDID/serial above to target a specific device.`,
                 ``,
                 `Total logs in buffer: ${getTotalLogCount()}`
             ].join("\n");
 
+            // Structured payload — downstream tools and tests can read this
+            // without parsing the prose above.
+            const structured = apps.map(({ app, isConnected }) => ({
+                deviceName: app.deviceInfo.deviceName,
+                appId: app.deviceInfo.appId,
+                platform: app.platform,
+                port: app.port,
+                simulatorUdid: app.simulatorUdid ?? null,
+                adbSerial: app.adbSerial ?? null,
+                isConnected,
+                appDetection: app.appDetection ?? null
+            }));
+
             return {
-                content: [{ type: "text", text }]
+                content: [
+                    { type: "text", text },
+                    { type: "text", text: JSON.stringify({ apps: structured }, null, 2) }
+                ]
             };
         }
     );
