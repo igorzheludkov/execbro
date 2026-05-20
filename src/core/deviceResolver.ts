@@ -104,19 +104,30 @@ export async function resolveDeviceTarget(device?: string): Promise<ResolveResul
         const inv = await listAllDevices();
         const emu = inv.android.emulators.find((e) => e.serial === trimmed);
         if (emu) {
+            // Prefer the RN registry's deviceName when an app is connected on
+            // this serial — the registry name (e.g. "sdk_gphone16k_arm64 - 16 -
+            // API 36") matches what every other code path emits; the AVD
+            // identifier ("Pixel_9_-_16kb") is confusing as a response label.
+            // OB2 (2026-05-20).
+            const registryApp = getConnectedApps().find(
+                (e) => e.app.platform === "android" && e.app.adbSerial === trimmed
+            );
             return ok({
                 platform: "android",
                 androidSerial: trimmed,
-                deviceName: emu.name,
+                deviceName: registryApp?.app.deviceInfo.deviceName || emu.name,
                 source: "adb-serial"
             });
         }
         const phys = inv.android.physical.find((p) => p.serial === trimmed);
         if (phys) {
+            const registryApp = getConnectedApps().find(
+                (e) => e.app.platform === "android" && e.app.adbSerial === trimmed
+            );
             return ok({
                 platform: "android",
                 androidSerial: trimmed,
-                deviceName: phys.model,
+                deviceName: registryApp?.app.deviceInfo.deviceName || phys.model,
                 source: "adb-serial"
             });
         }
@@ -136,9 +147,26 @@ export async function resolveDeviceTarget(device?: string): Promise<ResolveResul
         });
         if (matches.length === 1) {
             const m = matches[0].app;
+            // When the iOS app's UDID hasn't been backfilled yet (the
+            // findSimulatorByName race during connection), look it up on
+            // demand. Without this, downstream callers default to whichever
+            // simulator simctl reports as active — which on a multi-sim
+            // setup can be the OTHER device. Bug #5 (2026-05-20).
+            let iosUdid = m.simulatorUdid;
+            if (m.platform === "ios" && !iosUdid && m.deviceInfo.deviceName) {
+                try {
+                    const inv = await listAllDevices();
+                    const sim = inv.ios.simulators.find(
+                        (s) => s.state === "booted" && s.name === m.deviceInfo.deviceName
+                    );
+                    if (sim) iosUdid = sim.udid;
+                } catch {
+                    // best-effort; fall through with undefined udid
+                }
+            }
             return ok({
                 platform: m.platform,
-                iosUdid: m.simulatorUdid,
+                iosUdid,
                 androidSerial: m.adbSerial,
                 deviceName: m.deviceInfo.deviceName,
                 source: "registry"

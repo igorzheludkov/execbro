@@ -759,7 +759,7 @@ export function findClosestOcrText(
 
 // --- Strategy Functions ---
 
-async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number, sink?: EvidenceSink): Promise<StrategyResult> {
+async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number, sink?: EvidenceSink, device?: string): Promise<StrategyResult> {
     if (sink) {
         sink.fiber.ran = true;
         sink.fiber.metroConnected = connectedApps.size > 0;
@@ -779,7 +779,7 @@ async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDep
         let lastResult: StrategyResult | null = null;
 
         for (const depth of depthAttempts) {
-            const result = await tryFiberAtDepth(query, index, depth);
+            const result = await tryFiberAtDepth(query, index, depth, device);
             if (sink && result.matches?.length) {
                 sink.fiber.pressables = result.matches.slice(0, 50).map(m => ({
                     label: m.text || undefined,
@@ -805,7 +805,8 @@ async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDep
 async function tryFiberAtDepth(
     query: TapQuery,
     index: number | undefined,
-    maxTraversalDepth: number
+    maxTraversalDepth: number,
+    device?: string
 ): Promise<StrategyResult> {
     try {
         const result = await pressElement({
@@ -813,7 +814,8 @@ async function tryFiberAtDepth(
             testID: query.testID,
             component: query.component,
             index,
-            maxTraversalDepth
+            maxTraversalDepth,
+            device
         });
 
         if (!result.success) {
@@ -1909,7 +1911,12 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
     }
 
-    const deviceName = app?.deviceInfo?.deviceName;
+    // The response's `device` label must reflect the RESOLVED target, not the
+    // registry-app fallback. When the registry lookup couldn't find a matching
+    // app (e.g. simulatorUdid hadn't been backfilled yet), `app` lands on the
+    // first iOS entry — which on a multi-sim setup is the WRONG device. The
+    // resolver already knows the right deviceName; trust it. Bug #5 (2026-05-20).
+    const deviceName = resolved.target.deviceName || app?.deviceInfo?.deviceName;
 
     // Determine strategies
     const strategies = getAvailableStrategies(query, strategy);
@@ -2020,7 +2027,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 case "fiber":
                     // Fiber is JS-only against a CDP target — no subprocess to cancel,
                     // so the cheaper non-cancellable wrapper is fine.
-                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence), budget, `fiber`);
+                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence, deviceName), budget, `fiber`);
                     break;
                 case "accessibility":
                     result = await withCancelableTimeout(
@@ -2066,8 +2073,19 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     }
                     break;
                 case "coordinate":
+                    // Prefer `beforeScaleFactor` (captured against `targetUdid` this turn)
+                    // over `app.lastScreenshot.scaleFactor` (stale and may belong to a
+                    // different device on a multi-sim setup). Bug #5 (2026-05-20).
                     result = await withTimeout(
-                        tryCoordinateStrategy(query.x!, query.y!, platform, app?.lastScreenshot, targetUdid),
+                        tryCoordinateStrategy(
+                            query.x!,
+                            query.y!,
+                            platform,
+                            beforeScaleFactor != null
+                                ? { originalWidth: 0, originalHeight: 0, scaleFactor: beforeScaleFactor }
+                                : app?.lastScreenshot,
+                            targetUdid
+                        ),
                         budget,
                         `coordinate`
                     );
@@ -2228,7 +2246,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     const { androidGetDensity } = await import("../core/android.js");
                     const densityResult = await androidGetDensity();
                     const densityScale = (densityResult.density || 420) / 160;
-                    await androidTap(Math.round(coords.x * densityScale), Math.round(coords.y * densityScale));
+                    const pxX = Math.round(coords.x * densityScale);
+                    const pxY = Math.round(coords.y * densityScale);
+                    await androidTap(pxX, pxY);
+                    // Report the actual tap coords (pixels) the caller can pass straight
+                    // to coordinate tools / verification — not the raw dp from fiber.
+                    // Matches every other Android coord report in the tool (OB1, 2026-05-20).
+                    coords.x = pxX;
+                    coords.y = pxY;
+                    coords.unit = "pixels";
                 }
                 // fiber+native uses native tap — always verify
                 let screenshot: TapScreenshot | undefined;
