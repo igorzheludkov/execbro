@@ -172,13 +172,21 @@ export function registerScreenshotTools(server: McpServer): void {
                     // Non-fatal: screenshot works without pressables enrichment
                 }
     
-                let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+                const deliveredWidth = result.scaleFactor && result.scaleFactor > 1
+                    ? Math.round(pixelWidth / result.scaleFactor)
+                    : pixelWidth;
+                const deliveredHeight = result.scaleFactor && result.scaleFactor > 1
+                    ? Math.round(pixelHeight / result.scaleFactor)
+                    : pixelHeight;
+                let infoText: string;
+                if (result.scaleFactor && result.scaleFactor > 1) {
+                    infoText = `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${deliveredWidth}x${deliveredHeight} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`;
+                } else {
+                    infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+                }
                 infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
                 infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
                 infoText += `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
-                if (result.scaleFactor && result.scaleFactor > 1) {
-                    infoText += `\n🖼️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
-                }
                 if (pressablesText) {
                     infoText += `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
                     infoText += `\n${pressablesText}`;
@@ -324,7 +332,15 @@ export function registerScreenshotTools(server: McpServer): void {
                     };
                 }
     
-                let infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+                const androidDeliveredW = result.scaleFactor && result.scaleFactor > 1
+                    ? Math.round(pixelWidth / result.scaleFactor)
+                    : pixelWidth;
+                const androidDeliveredH = result.scaleFactor && result.scaleFactor > 1
+                    ? Math.round(pixelHeight / result.scaleFactor)
+                    : pixelHeight;
+                let infoText = result.scaleFactor && result.scaleFactor > 1
+                    ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${androidDeliveredW}x${androidDeliveredH} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`
+                    : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
     
                 // Get status bar height for coordinate guidance
                 let statusBarPixels = 63; // Default fallback
@@ -384,7 +400,6 @@ export function registerScreenshotTools(server: McpServer): void {
                 infoText += `\n📱 Android uses PIXELS for all coordinates`;
     
                 if (result.scaleFactor && result.scaleFactor > 1) {
-                    infoText += `\n🖼️ Image was scaled down to fit API limits (scale: ${result.scaleFactor.toFixed(3)})`;
                     infoText += `\n📐 tap() handles coordinate conversion automatically — pass pixel coords from this image directly`;
                 } else {
                     infoText += `\n📐 Screenshot coords = tap coords (no conversion needed)`;

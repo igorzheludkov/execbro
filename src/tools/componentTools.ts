@@ -345,12 +345,16 @@ export function registerComponentTools(server: McpServer): void {
         for (let i = 0; i < elements.length; i++) {
             const el = elements[i];
             // react-native-screens modal presentations report y relative to content origin;
-            // shift into the window frame when the measurement falls inside the safe-area band.
+            // shift into the window frame when the element's center sits inside the safe-area
+            // band. The shift MUST be applied to center and frame atomically — independent
+            // checks (cy<inset, fy<inset) drift apart on iPad-style insets where a header's
+            // center is just below the inset but its frame top is just above, producing
+            // center/frame.y values that don't satisfy center = frame.y + frame.h/2.
             let cy = el.center.y;
             let fy = el.frame.y;
-            if (platform === "ios" && safeAreaTop > 0) {
-                if (cy < safeAreaTop) cy += safeAreaTop;
-                if (fy < safeAreaTop) fy += safeAreaTop;
+            if (platform === "ios" && safeAreaTop > 0 && cy < safeAreaTop) {
+                cy += safeAreaTop;
+                fy += safeAreaTop;
             }
             // iOS: fiber returns points → convert points × DPR / screenshotScale = JPEG px.
             // Android: getPressableElements reconciles fiber DP against uiautomator device-pixel

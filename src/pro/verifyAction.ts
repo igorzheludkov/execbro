@@ -12,6 +12,13 @@ import {
 export const SETTLE_DELAY_MS = 800;
 export const BURST_FRAME_COUNT = 4;
 export const BURST_FRAME_INTERVAL_MS = 150;
+// Modal slide-up / sheet-present animations on iOS occasionally settle just
+// after the 800 ms window — first diff reports zero change while the second
+// (taken a few hundred ms later) catches the modal. We retry once when the
+// first diff is exactly 0 so a single missed animation frame doesn't flip
+// `meaningful` to false. Common-path taps that genuinely produce a change on
+// the first capture are unaffected.
+export const ZERO_DIFF_RETRY_DELAY_MS = 400;
 
 export async function captureScreenshot(
     platform: "ios" | "android",
@@ -107,7 +114,7 @@ export async function verifyAndCapture(args: {
 
     await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
 
-    const after = await captureScreenshot(platform, udid);
+    let after = await captureScreenshot(platform, udid);
     if (!after) {
         if (shouldVerify) {
             return {
@@ -120,17 +127,6 @@ export async function verifyAndCapture(args: {
         }
         return {};
     }
-
-    const afterWithMarker = markerPx
-        ? await drawTapMarker(after.buffer, markerPx.x, markerPx.y)
-        : after.buffer;
-
-    const screenshot: TapScreenshot = {
-        image: screenshotToBase64(afterWithMarker),
-        width: after.width,
-        height: after.height,
-        scaleFactor: after.scaleFactor
-    };
 
     let verification: TapVerification | undefined;
     if (!shouldVerify) {
@@ -150,9 +146,29 @@ export async function verifyAndCapture(args: {
             const rawStatusBar = platform === "ios" ? 177 : 142;
             const scale = beforeScaleFactor || after.scaleFactor || 1;
             const statusBarHeight = Math.round(rawStatusBar / scale);
-            const diff = await compareScreenshots(beforeBuffer, after.buffer, {
+            let diff = await compareScreenshots(beforeBuffer, after.buffer, {
                 statusBarHeight
             });
+            // Slide-up modal animations on Android have a longer linear-blend
+            // phase than iOS — the first retry at +400ms still catches the
+            // pre-animation frame on a slow emulator. Retry up to two times
+            // before giving up. Each retry only fires when the prior diff was
+            // exactly zero, so common-path taps that produced a change on the
+            // first capture are unaffected. Bug #4-on-Android (EC1, 2026-05-20).
+            const maxZeroDiffRetries = platform === "android" ? 2 : 1;
+            for (let attempt = 0; attempt < maxZeroDiffRetries && diff.changedPixels === 0; attempt++) {
+                await new Promise((resolve) => setTimeout(resolve, ZERO_DIFF_RETRY_DELAY_MS));
+                const retryAfter = await captureScreenshot(platform, udid);
+                if (!retryAfter) break;
+                const retryDiff = await compareScreenshots(beforeBuffer, retryAfter.buffer, {
+                    statusBarHeight
+                });
+                if (retryDiff.changedPixels > 0) {
+                    diff = retryDiff;
+                    after = retryAfter;
+                    break;
+                }
+            }
             verification = {
                 meaningful: diff.changed,
                 changeRate: diff.changeRate,
@@ -174,6 +190,17 @@ export async function verifyAndCapture(args: {
             };
         }
     }
+
+    const afterWithMarker = markerPx
+        ? await drawTapMarker(after.buffer, markerPx.x, markerPx.y)
+        : after.buffer;
+
+    const screenshot: TapScreenshot = {
+        image: screenshotToBase64(afterWithMarker),
+        width: after.width,
+        height: after.height,
+        scaleFactor: after.scaleFactor
+    };
 
     const verifyGroupId = `verify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     if (beforeBuffer) {
