@@ -29,6 +29,7 @@ import {
     getContextHealth,
     updateContextHealth,
     formatDuration,
+    recordConnectionEvent,
 } from "./connectionState.js";
 
 // Connection locks to prevent concurrent connection attempts to the same device
@@ -940,6 +941,7 @@ export async function connectToDevice(
 
                 // Ping failed — connection is dead, clean up
                 console.error(`[execbro] Existing connection to ${device.title} failed liveness check (no pong), reconnecting`);
+                recordConnectionEvent("liveness-failed", appKey, device.title, "no pong within 2000ms");
                 reconnectionSuppressed.add(appKey);
                 try { existingApp.ws.terminate(); } catch { /* ignore */ }
                 connectedApps.delete(appKey);
@@ -985,16 +987,94 @@ export async function connectToDevice(
         try {
             const ws = await createWebSocketWithOriginFallback(device.webSocketDebuggerUrl);
 
+            // Register close/error handlers IMMEDIATELY — before any async work
+            // below (probeCdpAlive, Runtime.enable, simctl/adb lookups). Previously
+            // they were attached only at the end of the setup block, so any close
+            // event during that window was silently swallowed: the entry stayed
+            // in connectedApps, readyState flipped to CLOSED, but no reconnect
+            // was scheduled and no `closed` event was recorded.
+            let pingInterval: NodeJS.Timeout | null = null;
+            let staleRejected = false;
+
+            const handleClose = () => {
+                if (staleRejected) return; // probe-fail path handles its own cleanup
+                if (pingInterval) {
+                    clearInterval(pingInterval);
+                    pingInterval = null;
+                }
+
+                // Release connection lock if still held
+                connectionLocks.delete(appKey);
+
+                connectedApps.delete(appKey);
+                clearLastCDPMessageTime(appKey);
+                // Clear active simulator UDID if this connection set it
+                clearActiveSimulatorIfSource(appKey);
+
+                // Keep log and network buffers across reconnections
+                // They are only cleared on demand via clear_logs / clear_network tools
+
+                // Check if connection was stable before resetting attempts
+                const state = getConnectionState(appKey);
+                let wasStable = false;
+                if (state?.lastConnectedTime) {
+                    const connectionDuration = Date.now() - state.lastConnectedTime.getTime();
+                    wasStable = connectionDuration >= MIN_STABLE_CONNECTION_MS;
+                    if (wasStable) {
+                        // Connection was stable - reset attempts for fresh start
+                        updateConnectionState(appKey, { reconnectionAttempts: 0 });
+                        console.error(`[execbro] Connection was stable for ${Math.round(connectionDuration / 1000)}s, resetting reconnection attempts`);
+                    }
+                }
+
+                // Record the gap and trigger reconnection
+                recordConnectionGap(appKey, "Connection closed");
+                if (state) {
+                    updateConnectionState(appKey, {
+                        status: "disconnected",
+                        lastDisconnectTime: new Date()
+                    });
+                }
+
+                const uptimeMs = state?.lastConnectedTime ? Date.now() - state.lastConnectedTime.getTime() : 0;
+                const earlyPhase = state ? "" : " (before state init)";
+                console.error(`[execbro] Disconnected from ${device.title}${earlyPhase}`);
+                recordConnectionEvent("closed", appKey, device.title, `uptime ${formatDuration(uptimeMs)}${wasStable ? " (stable)" : " (unstable)"}${earlyPhase}`);
+
+                // Schedule auto-reconnection if enabled (skip if intentionally disconnected)
+                if (reconnectionConfig.enabled && !reconnectionSuppressed.has(appKey)) {
+                    // If close fired before initConnectionState, scheduleReconnection
+                    // would early-return (it requires existing state). Init it now
+                    // so the reconnect loop can still run.
+                    if (!state) initConnectionState(appKey);
+                    scheduleReconnection(appKey, reconnectionConfig);
+                } else if (reconnectionSuppressed.has(appKey)) {
+                    reconnectionSuppressed.delete(appKey);
+                    console.error(`[execbro] Reconnection suppressed for ${device.title} (intentional disconnect)`);
+                    recordConnectionEvent("reconnect-suppressed", appKey, device.title, "intentional disconnect");
+                } else if (!reconnectionConfig.enabled) {
+                    recordConnectionEvent("reconnect-suppressed", appKey, device.title, "reconnect disabled by caller");
+                }
+            };
+
+            ws.on("close", handleClose);
+            ws.on("error", (error: Error) => {
+                console.error(`[execbro] WebSocket error for ${device.title}: ${error?.message || error}`);
+            });
+
             // Verify the JS context is actually alive. Metro's /json can advertise
             // zombie CDP pages that complete the WS handshake but no longer execute.
             // A stale target here causes every downstream tool to time out or return
             // degenerate state (e.g. __DEV__ === false on a debug bundle).
             const alive = await probeCdpAlive(ws, PROBE_TIMEOUT_MS);
             if (!alive) {
+                staleRejected = true;
+                ws.off("close", handleClose);
                 connectionLocks.delete(appKey);
                 try { ws.terminate(); } catch { /* ignore */ }
                 clearConnectionMetadata(appKey);
                 console.error(`[execbro] Rejecting stale CDP target for ${device.title} (no probe response)`);
+                recordConnectionEvent("stale-target", appKey, device.title, `no probe response within ${PROBE_TIMEOUT_MS}ms${isReconnection ? " (during reconnect)" : ""}`);
                 resolve(`Skipped ${device.deviceName || device.title} (stale CDP target — no response from JS context)`);
                 return;
             }
@@ -1016,10 +1096,12 @@ export async function connectToDevice(
                 // Reset context health for reconnection
                 initContextHealth(appKey);
                 console.error(`[execbro] Reconnected to ${device.title}`);
+                recordConnectionEvent("reconnect-success", appKey, device.title);
             } else {
                 initConnectionState(appKey);
                 initContextHealth(appKey);
                 console.error(`[execbro] Connected to ${device.title}`);
+                recordConnectionEvent("connect-success", appKey, device.title);
             }
 
             // Enable Runtime domain to receive console messages
@@ -1084,12 +1166,17 @@ export async function connectToDevice(
             startSdkProbeLoop(ws, appKey);
 
             // Start WebSocket ping/pong keepalive to detect dead connections
-            // (especially important for physical devices over Wi-Fi)
+            // (especially important for physical devices over Wi-Fi).
+            // pingInterval was declared up-top so the early-registered close
+            // handler can clear it; close/error handlers are already attached.
             let pongReceived = true;
-            const pingInterval = setInterval(() => {
+            pingInterval = setInterval(() => {
                 if (!pongReceived) {
                     console.error(`[execbro] No pong from ${device.title}, terminating connection`);
-                    clearInterval(pingInterval);
+                    if (pingInterval) {
+                        clearInterval(pingInterval);
+                        pingInterval = null;
+                    }
                     ws.terminate();
                     return;
                 }
@@ -1108,55 +1195,6 @@ export async function connectToDevice(
                 } catch {
                     // Ignore non-JSON messages
                 }
-            });
-
-            ws.on("close", () => {
-                clearInterval(pingInterval);
-
-                // Release connection lock if still held
-                connectionLocks.delete(appKey);
-
-                connectedApps.delete(appKey);
-                clearLastCDPMessageTime(appKey);
-                // Clear active simulator UDID if this connection set it
-                clearActiveSimulatorIfSource(appKey);
-
-                // Keep log and network buffers across reconnections
-                // They are only cleared on demand via clear_logs / clear_network tools
-
-                // Check if connection was stable before resetting attempts
-                const state = getConnectionState(appKey);
-                let wasStable = false;
-                if (state?.lastConnectedTime) {
-                    const connectionDuration = Date.now() - state.lastConnectedTime.getTime();
-                    wasStable = connectionDuration >= MIN_STABLE_CONNECTION_MS;
-                    if (wasStable) {
-                        // Connection was stable - reset attempts for fresh start
-                        updateConnectionState(appKey, { reconnectionAttempts: 0 });
-                        console.error(`[execbro] Connection was stable for ${Math.round(connectionDuration / 1000)}s, resetting reconnection attempts`);
-                    }
-                }
-
-                // Record the gap and trigger reconnection
-                recordConnectionGap(appKey, "Connection closed");
-                updateConnectionState(appKey, {
-                    status: "disconnected",
-                    lastDisconnectTime: new Date()
-                });
-
-                console.error(`[execbro] Disconnected from ${device.title}`);
-
-                // Schedule auto-reconnection if enabled (skip if intentionally disconnected)
-                if (reconnectionConfig.enabled && !reconnectionSuppressed.has(appKey)) {
-                    scheduleReconnection(appKey, reconnectionConfig);
-                } else if (reconnectionSuppressed.has(appKey)) {
-                    reconnectionSuppressed.delete(appKey);
-                    console.error(`[execbro] Reconnection suppressed for ${device.title} (intentional disconnect)`);
-                }
-            });
-
-            ws.on("error", (error: Error) => {
-                console.error(`[execbro] WebSocket error for ${device.title}: ${error?.message || error}`);
             });
 
             resolve(`Connected to ${device.title} (${device.deviceName})`);
@@ -1188,15 +1226,20 @@ function scheduleReconnection(
     const state = getConnectionState(appKey);
     if (!state) return;
 
+    const meta = getConnectionMetadata(appKey);
+    const deviceTitle = meta?.deviceInfo.title;
+
     const attempts = state.reconnectionAttempts;
     if (attempts >= config.maxAttempts) {
         console.error(`[execbro] Max reconnection attempts (${config.maxAttempts}) reached for ${appKey}`);
         updateConnectionState(appKey, { status: "disconnected" });
+        recordConnectionEvent("max-attempts-reached", appKey, deviceTitle, `${config.maxAttempts} attempts exhausted`);
         return;
     }
 
     const delay = calculateBackoffDelay(attempts, config);
     console.error(`[execbro] Scheduling reconnection attempt ${attempts + 1}/${config.maxAttempts} in ${delay}ms`);
+    recordConnectionEvent("reconnect-scheduled", appKey, deviceTitle, `attempt ${attempts + 1}/${config.maxAttempts} in ${delay}ms`);
 
     updateConnectionState(appKey, {
         status: "reconnecting",
@@ -1220,8 +1263,11 @@ async function attemptReconnection(
     const metadata = getConnectionMetadata(appKey);
     if (!metadata) {
         console.error(`[execbro] No metadata for reconnection: ${appKey}`);
+        recordConnectionEvent("reconnect-failed", appKey, undefined, "no metadata");
         return false;
     }
+    const deviceTitle = metadata.deviceInfo.title;
+    recordConnectionEvent("reconnect-attempt", appKey, deviceTitle);
 
     // Quick check: is Metro even running on this port?
     const { scanMetroPorts } = await import("./metro.js");
@@ -1229,6 +1275,7 @@ async function attemptReconnection(
     if (openPorts.length === 0) {
         console.error(`[execbro] Metro not running on port ${metadata.port}, stopping reconnection for ${appKey}`);
         updateConnectionState(appKey, { status: "disconnected" });
+        recordConnectionEvent("metro-down", appKey, deviceTitle, `port ${metadata.port} not open`);
         return false;
     }
 
@@ -1242,6 +1289,7 @@ async function attemptReconnection(
 
         if (!device) {
             console.error(`[execbro] Device no longer available for ${appKey}`);
+            recordConnectionEvent("reconnect-failed", appKey, deviceTitle, "device no longer advertised by Metro");
             // Schedule next attempt
             scheduleReconnection(appKey, config);
             return false;
@@ -1250,7 +1298,9 @@ async function attemptReconnection(
         await connectToDevice(device, metadata.port, { isReconnection: true, reconnectionConfig: config });
         return true;
     } catch (error) {
-        console.error(`[execbro] Reconnection failed: ${error}`);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[execbro] Reconnection failed: ${msg}`);
+        recordConnectionEvent("reconnect-failed", appKey, deviceTitle, msg);
         // Schedule next attempt
         scheduleReconnection(appKey, config);
         return false;

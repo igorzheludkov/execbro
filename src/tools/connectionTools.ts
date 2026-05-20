@@ -12,6 +12,7 @@ import {
     getContextHealth,
     getAllConnectionMetadata,
     getAllConnectionStates,
+    getConnectionEvents,
     formatDuration,
     cancelAllReconnectionTimers,
     cancelReconnectionTimer,
@@ -405,10 +406,25 @@ export function registerConnectionTools(server: McpServer): void {
                 "LIMITATIONS: Reports only MCP-side view; doesn't know why Metro dropped the socket (simulator sleep, app backgrounded, etc).\n" +
                 "GOOD: get_connection_status() after noticing stale data.\n" +
                 "BAD: Polling get_connection_status as a heartbeat — use ensure_connection(healthCheck=true) for a live probe.\n" +
+                "Pass events=true to include the recent connection event log (connect/close/reconnect lifecycle) — useful when a target drops mid-session and you need to see why reconnect didn't recover it.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
-            inputSchema: {}
+            inputSchema: {
+                events: z
+                    .boolean()
+                    .optional()
+                    .describe("Include the recent connection event log (lifecycle: connect, close, reconnect attempts/failures, stale-target, etc). Default: false."),
+                eventLimit: z
+                    .coerce
+                    .number()
+                    .optional()
+                    .describe("When events=true, show only the last N events. Default: 50."),
+                eventAppKey: z
+                    .string()
+                    .optional()
+                    .describe("When events=true, filter the event log to a single appKey (format: '<port>-<deviceId>').")
+            }
         },
-        async () => {
+        async ({ events, eventLimit, eventAppKey }) => {
             const connections = getConnectedApps();
             const states = getAllConnectionStates();
             const metadata = getAllConnectionMetadata();
@@ -416,8 +432,26 @@ export function registerConnectionTools(server: McpServer): void {
             const lines: string[] = [];
             lines.push("=== Connection Status ===\n");
     
+            const appendEventsBlock = () => {
+                if (!events) return;
+                const limit = eventLimit && eventLimit > 0 ? eventLimit : 50;
+                const eventList = getConnectionEvents({ appKey: eventAppKey, last: limit });
+                lines.push("");
+                lines.push(`=== Recent Connection Events (last ${eventList.length}${eventAppKey ? ` for ${eventAppKey}` : ""}) ===`);
+                if (eventList.length === 0) {
+                    lines.push("  (no events recorded yet)");
+                    return;
+                }
+                for (const ev of eventList) {
+                    const detail = ev.detail ? ` — ${ev.detail}` : "";
+                    const title = ev.deviceTitle ? ` ${ev.deviceTitle}` : "";
+                    lines.push(`  ${ev.timestamp.toLocaleTimeString()} [${ev.type}] ${ev.appKey}${title}${detail}`);
+                }
+            };
+
             if (connections.length === 0 && states.size === 0) {
                 lines.push("No connections established. Run scan_metro to connect.");
+                appendEventsBlock();
                 return {
                     content: [{ type: "text", text: lines.join("\n") }]
                 };
@@ -493,7 +527,9 @@ export function registerConnectionTools(server: McpServer): void {
                     lines.push("");
                 }
             }
-    
+
+            appendEventsBlock();
+
             return {
                 content: [{ type: "text", text: lines.join("\n") }]
             };

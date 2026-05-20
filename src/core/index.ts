@@ -31,6 +31,10 @@ export {
   markContextHealthy,
   clearContextHealth,
   getAllContextHealth,
+  // Connection event buffer (internal debugging)
+  recordConnectionEvent,
+  getConnectionEvents,
+  clearConnectionEvents,
 } from "./connectionState.js";
 
 // State

@@ -342,3 +342,69 @@ export function clearContextHealth(appKey: string): void {
 export function getAllContextHealth(): Map<string, ContextHealth> {
     return new Map(contextHealthStates);
 }
+
+// ========== Connection Event Buffer (internal debugging) ==========
+
+export type ConnectionEventType =
+    | "connect-start"
+    | "connect-success"
+    | "connect-rejected"
+    | "stale-target"
+    | "liveness-failed"
+    | "closed"
+    | "reconnect-scheduled"
+    | "reconnect-attempt"
+    | "reconnect-success"
+    | "reconnect-failed"
+    | "max-attempts-reached"
+    | "reconnect-suppressed"
+    | "metro-down";
+
+export interface ConnectionEvent {
+    timestamp: Date;
+    appKey: string;
+    deviceTitle?: string;
+    type: ConnectionEventType;
+    detail?: string;
+}
+
+const CONNECTION_EVENT_BUFFER_SIZE = 200;
+const connectionEvents: ConnectionEvent[] = [];
+
+export function recordConnectionEvent(
+    type: ConnectionEventType,
+    appKey: string,
+    deviceTitle?: string,
+    detail?: string
+): void {
+    connectionEvents.push({
+        timestamp: new Date(),
+        appKey,
+        deviceTitle,
+        type,
+        detail,
+    });
+    if (connectionEvents.length > CONNECTION_EVENT_BUFFER_SIZE) {
+        connectionEvents.splice(0, connectionEvents.length - CONNECTION_EVENT_BUFFER_SIZE);
+    }
+}
+
+export function getConnectionEvents(filter?: {
+    appKey?: string;
+    last?: number;
+}): ConnectionEvent[] {
+    let result = connectionEvents;
+    if (filter?.appKey) {
+        result = result.filter((e) => e.appKey === filter.appKey);
+    }
+    if (filter?.last !== undefined && filter.last > 0) {
+        result = result.slice(-filter.last);
+    }
+    return result.slice();
+}
+
+export function clearConnectionEvents(): number {
+    const count = connectionEvents.length;
+    connectionEvents.length = 0;
+    return count;
+}

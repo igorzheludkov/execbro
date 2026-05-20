@@ -285,7 +285,8 @@ describe("formatTapSuccess with coordinate conversion info", () => {
         });
         expect(result.tappedAt).toEqual({ x: 300, y: 600 });
         expect(result.convertedTo).toEqual({ x: 100, y: 200, unit: "points" });
-        expect(result.platform).toBe("ios");
+        // platform was dropped from TapOptions in the device-targeting refactor;
+        // formatTapSuccess no longer surfaces it as a top-level field.
     });
 
     it("includes device name when provided", () => {
@@ -642,12 +643,16 @@ describe("tap without Metro connection", () => {
         });
         // If Metro auto-connect succeeded, fiber may try and fail to find the
         // query — that's also fine. If auto-connect failed and Metro is still
-        // absent, the error or attempted strategies should mention Metro.
+        // absent, tap must explain *why* it failed. The device-targeting
+        // refactor lets resolveDeviceTarget reject early with a "no device"
+        // error before any strategy runs, so result.attempted can be absent —
+        // accept either a Metro-mention OR a device-resolution error as a
+        // valid no-Metro explanation. What's NOT acceptable is silent failure.
         if (!result.success && connectedApps.size === 0) {
-            const mentionsMetro =
-                result.error?.includes("Metro") ||
-                result.attempted?.some((a) => a.reason.includes("Metro"));
-            expect(mentionsMetro).toBe(true);
+            const errorMentionsMetro = result.error?.includes("Metro") ?? false;
+            const attemptedMentionsMetro = result.attempted?.some((a) => a.reason.includes("Metro")) ?? false;
+            const deviceResolutionError = result.error?.toLowerCase().includes("device") ?? false;
+            expect(errorMentionsMetro || attemptedMentionsMetro || deviceResolutionError).toBe(true);
         }
     }, 15000);
 });
