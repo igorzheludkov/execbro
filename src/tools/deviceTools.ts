@@ -17,6 +17,7 @@ import {
 import { platformUniqueBanner } from "../core/toolHelpers.js";
 import { listAllDevices } from "../core/deviceDiscovery.js";
 import { getConnectedApps } from "../core/connection.js";
+import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
 
 export function registerDeviceTools(server: McpServer): void {
     // ============================================================================
@@ -164,7 +165,7 @@ export function registerDeviceTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID. Uses first available device if not specified."),
+                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified."),
                 replace: z
                     .boolean()
                     .optional()
@@ -178,7 +179,9 @@ export function registerDeviceTools(server: McpServer): void {
             }
         },
         async ({ apkPath, deviceId, replace, grantPermissions }) => {
-            const result = await androidInstallApp(apkPath, deviceId, { replace, grantPermissions });
+            const r = await resolveAndroidDeviceId(deviceId);
+            if (!r.ok) return r.response;
+            const result = await androidInstallApp(apkPath, r.serial, { replace, grantPermissions });
     
             return {
                 content: [
@@ -213,11 +216,13 @@ export function registerDeviceTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID. Uses first available device if not specified.")
+                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
             }
         },
         async ({ packageName, activityName, deviceId }) => {
-            const result = await androidLaunchApp(packageName, activityName, deviceId);
+            const r = await resolveAndroidDeviceId(deviceId);
+            if (!r.ok) return r.response;
+            const result = await androidLaunchApp(packageName, activityName, r.serial);
     
             return {
                 content: [
@@ -245,12 +250,14 @@ export function registerDeviceTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID. Uses first available device if not specified."),
+                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified."),
                 filter: z.string().optional().describe("Optional filter to search packages by name (case-insensitive)")
             }
         },
         async ({ deviceId, filter }) => {
-            const result = await androidListPackages(deviceId, filter);
+            const r = await resolveAndroidDeviceId(deviceId);
+            if (!r.ok) return r.response;
+            const result = await androidListPackages(r.serial, filter);
     
             return {
                 content: [
@@ -277,11 +284,13 @@ export function registerDeviceTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID. Uses first available device if not specified.")
+                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
             }
         },
         async ({ deviceId }) => {
-            const result = await androidGetScreenSize(deviceId);
+            const r = await resolveAndroidDeviceId(deviceId);
+            if (!r.ok) return r.response;
+            const result = await androidGetScreenSize(r.serial);
     
             if (!result.success) {
                 return {
@@ -348,11 +357,13 @@ export function registerDeviceTools(server: McpServer): void {
                 "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
             inputSchema: {
                 appPath: z.string().describe("Path to the .app bundle to install"),
-                udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
             }
         },
         async ({ appPath, udid }) => {
-            const result = await iosInstallApp(appPath, udid);
+            const r = await resolveIosUdid(udid);
+            if (!r.ok) return r.response;
+            const result = await iosInstallApp(appPath, r.udid);
     
             return {
                 content: [
@@ -378,11 +389,13 @@ export function registerDeviceTools(server: McpServer): void {
                 "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
             inputSchema: {
                 bundleId: z.string().describe("Bundle ID of the app (e.g., com.example.myapp)"),
-                udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
             }
         },
         async ({ bundleId, udid }) => {
-            const result = await iosLaunchApp(bundleId, udid);
+            const r = await resolveIosUdid(udid);
+            if (!r.ok) return r.response;
+            const result = await iosLaunchApp(bundleId, r.udid);
     
             return {
                 content: [
@@ -411,11 +424,13 @@ export function registerDeviceTools(server: McpServer): void {
                 platformUniqueBanner("testing iOS deep links or universal links"),
             inputSchema: {
                 url: z.string().describe("URL to open (e.g., https://example.com or myapp://path)"),
-                udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
             }
         },
         async ({ url, udid }) => {
-            const result = await iosOpenUrl(url, udid);
+            const r = await resolveIosUdid(udid);
+            if (!r.ok) return r.response;
+            const result = await iosOpenUrl(url, r.udid);
     
             return {
                 content: [
@@ -441,11 +456,13 @@ export function registerDeviceTools(server: McpServer): void {
                 "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
             inputSchema: {
                 bundleId: z.string().describe("Bundle ID of the app to terminate"),
-                udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
             }
         },
         async ({ bundleId, udid }) => {
-            const result = await iosTerminateApp(bundleId, udid);
+            const r = await resolveIosUdid(udid);
+            if (!r.ok) return r.response;
+            const result = await iosTerminateApp(bundleId, r.udid);
     
             return {
                 content: [

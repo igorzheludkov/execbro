@@ -38,7 +38,7 @@ export function buildFindFocusedInputExpression(): string {
     if (f.child) walk(f.child, depth + 1);
     if (f.sibling) walk(f.sibling, depth);
   })(root.current, 0);
-  if (!host) return { focused: false, reason: "no focused TextInput" };
+  if (!host) return { focused: false, reason: "no focused TextInput. Tap an input first — tap({ testID: '...' }) or tap(x, y) on the field — then retry. (This tool acts on whatever has React focus right now; it does not focus a field itself.)" };
   let inputFiber = null;
   for (let p = host; p; p = p.return) {
     if (p.memoizedProps && typeof p.memoizedProps.onChangeText === "function") { inputFiber = p; break; }
@@ -76,7 +76,7 @@ export function buildClearFocusedInputExpression(): string {
     if (f.child) walk(f.child, depth + 1);
     if (f.sibling) walk(f.sibling, depth);
   })(root.current, 0);
-  if (!host) return { cleared: false, reason: "no focused TextInput" };
+  if (!host) return { cleared: false, reason: "no focused TextInput. Tap an input first — tap({ testID: '...' }) or tap(x, y) on the field — then retry. (This tool acts on whatever has React focus right now; it does not focus a field itself.)" };
   let inputFiber = null;
   for (let p = host; p; p = p.return) {
     if (p.memoizedProps && typeof p.memoizedProps.onChangeText === "function") { inputFiber = p; break; }
@@ -117,7 +117,7 @@ export function buildDismissKeyboardExpression(): string {
     if (f.child) walk(f.child, depth + 1);
     if (f.sibling) walk(f.sibling, depth);
   })(root.current, 0);
-  if (!host) return { dismissed: false, reason: "no focused TextInput" };
+  if (!host) return { dismissed: false, reason: "no focused TextInput. Tap an input first — tap({ testID: '...' }) or tap(x, y) on the field — then retry. (This tool acts on whatever has React focus right now; it does not focus a field itself.)" };
   const pub = host.stateNode.canonical.publicInstance;
   if (pub && typeof pub.blur === "function") {
     pub.blur();

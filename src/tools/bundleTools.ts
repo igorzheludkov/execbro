@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
+import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
 import {
     getBundleStatusWithErrors,
     getBundleErrors,
@@ -291,7 +292,7 @@ export function registerBundleTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID for screenshot fallback. Uses first available device if not specified.")
+                    .describe("Optional device target for screenshot fallback. Accepts an adb serial / iOS UDID, an emulator/simulator name, or a substring of the connected RN device name. Uses first available device if not specified.")
             }
         },
         async ({ maxErrors, platform, deviceId }) => {
@@ -353,9 +354,13 @@ export function registerBundleTools(server: McpServer): void {
                 };
     
                 if (platform === "android") {
-                    screenshotResult = await androidScreenshot(undefined, deviceId);
+                    const r = await resolveAndroidDeviceId(deviceId);
+                    if (!r.ok) return r.response;
+                    screenshotResult = await androidScreenshot(undefined, r.serial);
                 } else {
-                    screenshotResult = await iosScreenshot(undefined, deviceId);
+                    const r = await resolveIosUdid(deviceId);
+                    if (!r.ok) return r.response;
+                    screenshotResult = await iosScreenshot(undefined, r.udid);
                 }
     
                 if (!screenshotResult.success || !screenshotResult.data) {
