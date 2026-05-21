@@ -1398,11 +1398,16 @@ const MIN_STRATEGY_BUDGET_MS = 500;
 // dumps on dense iOS screens) need more headroom — previous caps produced spurious
 // timeouts that the agent read as "element missing" when the strategy simply didn't
 // get to finish. The overall TAP_TIMEOUT_MS budget still bounds the worst case.
+// Coordinate looks "light" (one tap subprocess) but on iOS it pairs an axe/idb
+// invocation with a CDP getDevicePixelRatio + best-effort fiber inspection;
+// the 3000ms cap surfaced as spurious "coordinate timed out" failures while
+// 20+ seconds of the overall budget were still unused. Align with the other
+// strategies — the global TAP_TIMEOUT_MS still bounds the worst case.
 const MAX_STRATEGY_MS: Record<string, number> = {
     fiber: 8000,
     accessibility: 6000,
     ocr: 6000,
-    coordinate: 3000
+    coordinate: 8000
 };
 
 function maxStrategyMs(strategy: string, platform: "ios" | "android"): number {
