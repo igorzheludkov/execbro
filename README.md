@@ -7,7 +7,9 @@
 
 **Give your AI assistant eyes and hands into your running React Native app.** Like Chrome DevTools — but for AI agents.
 
-ExecBro is the runtime bridge that gives your AI coding assistant live access to your React Native app — logs, network, component state, screenshots, taps, and JS execution. One MCP server, zero-config, zero SDK required, zero code changes to your app.
+Build, debug, and verify features end-to-end — without leaving the chat.
+
+ExecBro is the runtime bridge between your AI coding assistant and your running React Native app — exposing MCP tools to read logs and network, inspect component state, capture screenshots, tap the UI, and run JS. Zero config, no SDK or code changes required — an optional SDK unlocks richer log and network capture when you want it.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/igorzheludkov/react-native-ai-devtools/main/docs/demo/get_logs_demo.gif" alt="ExecBro demo" width="800" />
