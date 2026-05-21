@@ -1384,12 +1384,23 @@ export function getConnectedAppByAndroidDeviceId(deviceId?: string): ConnectedAp
     return null;
 }
 
+/**
+ * Lowercase and strip separators (whitespace, `_`, `-`) so substring matches
+ * survive punctuation drift between caller input and the device's reported
+ * identifier (e.g. "SM_A356N" vs "SM-A356N - 15 - API 35").
+ */
+function normalizeDeviceId(value: string | null | undefined): string {
+    if (!value) return "";
+    return value.toLowerCase().replace(/[\s_\-]+/g, "");
+}
+
 export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
     if (!device) {
         return getFirstConnectedApp();
     }
 
     const lowerDevice = device.toLowerCase();
+    const normDevice = normalizeDeviceId(device);
     const matches: ConnectedApp[] = [];
     const allOpenNames: string[] = [];
 
@@ -1400,7 +1411,16 @@ export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
         }
         const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "";
         allOpenNames.push(deviceName);
-        if (deviceName.toLowerCase().includes(lowerDevice)) {
+        // Match against deviceName + the underlying hardware identifiers, with
+        // separator-insensitive normalization so "SM_A356N" finds
+        // "SM-A356N - 15 - API 35" and "emulator-5554" finds the Android app
+        // attached to that serial.
+        const haystacks = [
+            normalizeDeviceId(deviceName),
+            normalizeDeviceId(app.simulatorUdid),
+            normalizeDeviceId(app.adbSerial)
+        ].filter((s) => s.length > 0);
+        if (haystacks.some((h) => h.includes(normDevice))) {
             matches.push(app);
         }
     }

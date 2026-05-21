@@ -36,6 +36,16 @@ export type ResolveResult =
 const UDID_REGEX = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 const ADB_SERIAL_REGEX = /^emulator-\d+$/;
 
+/**
+ * Lowercase and strip separators (whitespace, `_`, `-`) so substring matches
+ * survive punctuation drift between caller input and the device's reported
+ * name (e.g. "SM_A356N" vs "SM-A356N - 15 - API 35").
+ */
+function normalizeName(value: string | null | undefined): string {
+    if (!value) return "";
+    return value.toLowerCase().replace(/[\s_\-]+/g, "");
+}
+
 function err(
     code: DeviceResolverErrorCode,
     message: string,
@@ -140,9 +150,9 @@ export async function resolveDeviceTarget(device?: string): Promise<ResolveResul
     // Step 3: Registry substring match.
     if (trimmed) {
         const apps = getConnectedApps();
-        const needle = trimmed.toLowerCase();
+        const needle = normalizeName(trimmed);
         const matches = apps.filter((entry) => {
-            const name = entry.app.deviceInfo.deviceName?.toLowerCase() ?? "";
+            const name = normalizeName(entry.app.deviceInfo.deviceName);
             return name.includes(needle);
         });
         if (matches.length === 1) {
@@ -188,15 +198,15 @@ export async function resolveDeviceTarget(device?: string): Promise<ResolveResul
     // Step 4: OS-level name match.
     const inv = await listAllDevices();
     if (trimmed) {
-        const needle = trimmed.toLowerCase();
+        const needle = normalizeName(trimmed);
         const iosBootedMatches = inv.ios.simulators.filter(
-            (s) => s.state === "booted" && s.name.toLowerCase().includes(needle)
+            (s) => s.state === "booted" && normalizeName(s.name).includes(needle)
         );
         const androidRunningMatches = inv.android.emulators.filter(
-            (e) => e.state === "running" && e.name.toLowerCase().includes(needle)
+            (e) => e.state === "running" && normalizeName(e.name).includes(needle)
         );
         const androidPhysicalMatches = inv.android.physical.filter(
-            (p) => p.state === "device" && p.model.toLowerCase().includes(needle)
+            (p) => p.state === "device" && normalizeName(p.model).includes(needle)
         );
 
         const totalMatches =

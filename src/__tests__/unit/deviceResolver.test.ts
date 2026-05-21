@@ -127,6 +127,45 @@ describe("resolveDeviceTarget", () => {
         }
     });
 
+    it("matches the RN registry across punctuation drift (SM_A356N vs SM-A356N - 15 - API 35)", async () => {
+        getConnectedAppsMock.mockReturnValue([
+            {
+                app: {
+                    platform: "android",
+                    adbSerial: "RFCX90KEYBM",
+                    deviceInfo: { deviceName: "SM-A356N - 15 - API 35" }
+                }
+            }
+        ]);
+
+        const r = await resolveDeviceTarget("SM_A356N");
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+            expect(r.target.platform).toBe("android");
+            expect(r.target.androidSerial).toBe("RFCX90KEYBM");
+            expect(r.target.source).toBe("registry");
+        }
+    });
+
+    it("OS-level match survives punctuation drift on Android model names", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            android: {
+                available: true,
+                emulators: [],
+                physical: [{ serial: "RFCX90KEYBM", model: "SM-A356N - 15 - API 35", state: "device" }]
+            }
+        });
+
+        const r = await resolveDeviceTarget("SM_A356N");
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+            expect(r.target.platform).toBe("android");
+            expect(r.target.androidSerial).toBe("RFCX90KEYBM");
+            expect(r.target.source).toBe("name-match");
+        }
+    });
+
     it("matches the RN registry by deviceName substring (Android)", async () => {
         getConnectedAppsMock.mockReturnValue([
             {
