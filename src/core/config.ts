@@ -26,8 +26,10 @@ const config = loadConfig();
 
 /**
  * Resolution order:
- * 1. config.json apiUrl (if set)
- * 2. --http flag → localhost:3000
- * 3. Default → production URL
+ * 1. EXECBRO_API_URL env var (if set)
+ * 2. config.json apiUrl (if set)
+ * 3. --http flag → localhost:3000
+ * 4. Default → production URL
  */
-export const API_BASE_URL: string = config.apiUrl ?? (IS_DEV ? LOCAL_URL : PRODUCTION_URL);
+export const API_BASE_URL: string =
+    process.env.EXECBRO_API_URL ?? config.apiUrl ?? (IS_DEV ? LOCAL_URL : PRODUCTION_URL);
