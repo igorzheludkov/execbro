@@ -268,6 +268,16 @@ function hasTopLevelStatementSeparator(src: string): boolean {
 export const TIMEOUT_HARD_CAP_MS = 120_000;
 const TIMEOUT_DEFAULT_MS = 5_000;
 
+// Flips true after the first successful executeInApp OR successful CDP
+// connection in this process. Used by the auto-reconnect wrapper to distinguish
+// "Metro/app never came up" (don't bother scanning) from a mid-session
+// transport drop worth retrying.
+let hasEverConnected = false;
+
+export function markConnectionEstablished(): void {
+    hasEverConnected = true;
+}
+
 export function clampTimeoutMs(input: number): { value: number; clampedFrom?: number } {
     if (!Number.isFinite(input) || input <= 0) {
         return { value: TIMEOUT_DEFAULT_MS, clampedFrom: input };
@@ -721,6 +731,7 @@ export async function executeInApp(
     const first = await executeInAppInner(expression, awaitPromise, effectiveOptions, device);
 
     if (first.success) {
+        hasEverConnected = true;
         trackAutoReconnect("not_needed", toolName);
         return withClampMeta(first);
     }
@@ -734,6 +745,15 @@ export async function executeInApp(
     const classification = classifyTransportError(first.error ?? "", source);
 
     if (classification.kind !== "transport") {
+        trackAutoReconnect("not_needed", toolName);
+        return withClampMeta(first);
+    }
+
+    // 'no_apps' without any prior successful exec means Metro/app simply isn't
+    // running — scanning will only re-confirm that. Return the original error
+    // so the user sees the actionable message ("Run 'scan_metro' first") instead
+    // of a misleading 'reconnect_attempted' prefix.
+    if (classification.pattern === "no_apps" && !hasEverConnected) {
         trackAutoReconnect("not_needed", toolName);
         return withClampMeta(first);
     }

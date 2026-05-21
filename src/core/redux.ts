@@ -54,8 +54,8 @@ export interface ReduxResult {
     previousAction?: unknown;
 }
 
-async function runReduxExpression(expression: string, device?: string): Promise<ReduxResult> {
-    const exec = await executeInApp(expression, false, { timeoutMs: 15000 }, device);
+async function runReduxExpression(expression: string, originatingToolName: string, device?: string): Promise<ReduxResult> {
+    const exec = await executeInApp(expression, false, { timeoutMs: 15000, originatingToolName }, device);
     if (!exec.success) {
         return { success: false, error: exec.error || "Execution failed" };
     }
@@ -106,7 +106,7 @@ export async function reduxDispatch(options: ReduxDispatchOptions): Promise<Redu
         }
         return JSON.stringify({ ok: true, storeCount: found.length, storeIndex: idx, action: action, state: state });
     `;
-    return runReduxExpression(buildExpression(body), device);
+    return runReduxExpression(buildExpression(body), "redux_dispatch", device);
 }
 
 export interface ReduxGetStateOptions {
@@ -137,5 +137,5 @@ export async function reduxGetState(options: ReduxGetStateOptions = {}): Promise
         try { safe = JSON.parse(JSON.stringify(state)); } catch (e) { safe = { __error: 'state not JSON-serializable: ' + e.message }; }
         return JSON.stringify({ ok: true, storeCount: found.length, storeIndex: idx, state: safe });
     `;
-    return runReduxExpression(buildExpression(body), device);
+    return runReduxExpression(buildExpression(body), "redux_get_state", device);
 }

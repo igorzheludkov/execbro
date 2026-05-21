@@ -479,7 +479,7 @@ export async function getPressableElements(
         })()
     `;
 
-    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, device);
+    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000, originatingToolName: "get_pressable_elements" }, device);
     if (!dispatchResult.success) return dispatchResult;
 
     try {
@@ -724,7 +724,7 @@ export async function getPressableElements(
         })()
     `;
 
-    const result = await executeInApp(resolveExpression, false, { timeoutMs: 30000 }, device);
+    const result = await executeInApp(resolveExpression, false, { timeoutMs: 30000, originatingToolName: "get_pressable_elements" }, device);
 
     if (result.success && result.result) {
         try {
@@ -1381,7 +1381,7 @@ export async function pressElement(options: {
         })()
     `;
 
-    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000 }, options.device);
+    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000, originatingToolName: "tap" }, options.device);
     if (!dispatchResult.success) return dispatchResult;
 
     try {
@@ -1544,5 +1544,5 @@ export async function pressElement(options: {
         })()
     `;
 
-    return executeInApp(resolveExpression, false, { timeoutMs: 10000 }, options.device);
+    return executeInApp(resolveExpression, false, { timeoutMs: 10000, originatingToolName: "tap" }, options.device);
 }

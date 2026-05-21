@@ -29,7 +29,7 @@ export async function toggleElementInspector(device?: string): Promise<Execution
         })()
     `;
 
-    return executeInApp(expression, false, {}, device);
+    return executeInApp(expression, false, { originatingToolName: "toggle_element_inspector" }, device);
 }
 
 /**
@@ -67,7 +67,7 @@ export async function isInspectorActive(device?: string): Promise<boolean> {
         })()
     `;
 
-    const result = await executeInApp(expression, false, {}, device);
+    const result = await executeInApp(expression, false, { originatingToolName: "is_inspector_active" }, device);
     if (result.success && result.result) {
         return result.result === "true";
     }
@@ -154,7 +154,7 @@ export async function getInspectorSelection(device?: string): Promise<ExecutionR
         })()
     `;
 
-    return executeInApp(expression, false, {}, device);
+    return executeInApp(expression, false, { originatingToolName: "get_inspector_selection" }, device);
 }
 
 /**
@@ -220,7 +220,7 @@ export async function getInspectorSelectionAtPoint(
         })()
     `;
 
-    const setup = await executeInApp(setupExpression, false, {}, device);
+    const setup = await executeInApp(setupExpression, false, { originatingToolName: "inspect_at_point" }, device);
     if (!setup.success) return setup;
     try {
         const parsed = JSON.parse(setup.result || "{}");
@@ -266,7 +266,7 @@ export async function getInspectorSelectionAtPoint(
         })()
     `;
 
-    const tap = await executeInApp(tapExpression, false, {}, device);
+    const tap = await executeInApp(tapExpression, false, { originatingToolName: "inspect_at_point" }, device);
     if (!tap.success) return tap;
     try {
         const parsed = JSON.parse(tap.result || "{}");
@@ -353,7 +353,7 @@ export async function getInspectorSelectionAtPoint(
         })()
     `;
 
-    const readResult = await executeInApp(readExpression, false, {}, device);
+    const readResult = await executeInApp(readExpression, false, { originatingToolName: "inspect_at_point" }, device);
 
     // Step 4: hide the overlay so it doesn't pollute subsequent screenshots.
     // We always hide after a successful capture — agents don't manually toggle.
@@ -383,7 +383,7 @@ export async function getInspectorSelectionAtPoint(
         })()
     `;
     try {
-        await executeInApp(teardownExpression, false, {}, device);
+        await executeInApp(teardownExpression, false, { originatingToolName: "inspect_at_point" }, device);
     } catch {
         /* best-effort hide; don't fail the call */
     }
@@ -624,5 +624,5 @@ export async function inspectAtPoint(
     // awaitPromise:true so CDP Runtime.evaluate returns the resolved value.
     // 5000ms timeout >> the inner 300ms cap; leaves headroom for slow Fabric
     // measure paths without letting a hung Hermes runtime stall the tool.
-    return executeInApp(expression, true, { timeoutMs: 5000 }, device);
+    return executeInApp(expression, true, { timeoutMs: 5000, originatingToolName: "inspect_at_point" }, device);
 }

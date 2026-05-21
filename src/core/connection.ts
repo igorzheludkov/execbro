@@ -9,6 +9,7 @@ import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
+import { markConnectionEstablished } from "./jsExecute.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -1082,6 +1083,7 @@ export async function connectToDevice(
             // Connection established — run setup
             connectionLocks.delete(appKey);
             connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
+            markConnectionEstablished();
 
             // Initialize or update connection state
             // Note: We do NOT reset reconnectionAttempts here - that happens

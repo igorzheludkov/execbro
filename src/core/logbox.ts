@@ -189,7 +189,7 @@ function recordLogBoxError(reason: string | null): void {
  */
 export async function detectLogBox(device?: string): Promise<LogBoxState | null> {
     try {
-        const result = await executeInApp(DETECT_EXPRESSION, true, { timeoutMs: 5000 }, device);
+        const result = await executeInApp(DETECT_EXPRESSION, true, { timeoutMs: 5000, originatingToolName: "logbox" }, device);
         if (!result.success || !result.result) {
             recordLogBoxError("execute_failed");
             return null;
@@ -213,7 +213,7 @@ export async function detectLogBox(device?: string): Promise<LogBoxState | null>
  */
 export async function dismissLogBox(device?: string): Promise<LogBoxDismissResult | null> {
     try {
-        const result = await executeInApp(DISMISS_EXPRESSION, true, { timeoutMs: 5000 }, device);
+        const result = await executeInApp(DISMISS_EXPRESSION, true, { timeoutMs: 5000, originatingToolName: "logbox" }, device);
         if (!result.success || !result.result) {
             recordLogBoxError("execute_failed");
             return null;
@@ -247,7 +247,7 @@ export async function pushLogBox(
     if (target === "metro") {
         try {
             const escapedMessage = message.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n");
-            const result = await executeInApp(`(function() { console.log('${escapedMessage}'); return JSON.stringify({ success: true }); })()`, true, { timeoutMs: 5000 }, device);
+            const result = await executeInApp(`(function() { console.log('${escapedMessage}'); return JSON.stringify({ success: true }); })()`, true, { timeoutMs: 5000, originatingToolName: "logbox" }, device);
             if (!result.success || !result.result) return false;
             const parsed = JSON.parse(result.result);
             return parsed.success === true;
@@ -256,7 +256,7 @@ export async function pushLogBox(
         }
     }
     try {
-        const result = await executeInApp(buildPushExpression(message, level, expanded, subtitle), true, { timeoutMs: 5000 }, device);
+        const result = await executeInApp(buildPushExpression(message, level, expanded, subtitle), true, { timeoutMs: 5000, originatingToolName: "logbox" }, device);
         if (!result.success || !result.result) {
             recordLogBoxError("execute_failed");
             return false;
@@ -283,7 +283,7 @@ export async function addLogBoxIgnorePatterns(
     device?: string
 ): Promise<string[] | null> {
     try {
-        const result = await executeInApp(buildIgnoreExpression(patterns), true, { timeoutMs: 5000 }, device);
+        const result = await executeInApp(buildIgnoreExpression(patterns), true, { timeoutMs: 5000, originatingToolName: "logbox" }, device);
         if (!result.success || !result.result) {
             recordLogBoxError("execute_failed");
             return null;

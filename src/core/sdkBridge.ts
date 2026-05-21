@@ -36,7 +36,7 @@ export async function isSDKInstalled(): Promise<boolean> {
     const result = await executeInApp(
         'typeof globalThis.__RN_AI_DEVTOOLS__?.getNetworkEntries === "function"',
         false,
-        { timeoutMs: 3000 }
+        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
     );
     return result.success && result.result === "true";
 }
@@ -47,7 +47,7 @@ async function readRawNetwork(): Promise<SDKResult<SDKNetworkEntry[]>> {
     const result = await executeInApp(
         "JSON.stringify(globalThis.__RN_AI_DEVTOOLS__.getNetworkEntries())",
         false,
-        { timeoutMs: 5000 }
+        { timeoutMs: 5000, originatingToolName: "_sdk_bridge" }
     );
     if (!result.success) return { success: false, error: result.error || "executeInApp failed" };
     try {
@@ -61,7 +61,7 @@ async function readRawConsole(): Promise<SDKResult<SDKConsoleEntry[]>> {
     const result = await executeInApp(
         "JSON.stringify(globalThis.__RN_AI_DEVTOOLS__.getConsoleEntries())",
         false,
-        { timeoutMs: 5000 }
+        { timeoutMs: 5000, originatingToolName: "_sdk_bridge" }
     );
     if (!result.success) return { success: false, error: result.error || "executeInApp failed" };
     try {
@@ -218,7 +218,7 @@ export async function clearSDKNetwork(): Promise<{ success: boolean; count?: num
     const result = await executeInApp(
         "globalThis.__RN_AI_DEVTOOLS__.clearNetwork()",
         false,
-        { timeoutMs: 3000 }
+        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
     );
     if (!result.success) return { success: false, error: result.error };
     const count = parseInt(result.result || "0", 10);
@@ -229,7 +229,7 @@ export async function clearSDKConsole(): Promise<{ success: boolean; count?: num
     const result = await executeInApp(
         "globalThis.__RN_AI_DEVTOOLS__.clearConsole()",
         false,
-        { timeoutMs: 3000 }
+        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
     );
     if (!result.success) return { success: false, error: result.error };
     const count = parseInt(result.result || "0", 10);

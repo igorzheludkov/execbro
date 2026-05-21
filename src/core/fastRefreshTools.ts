@@ -20,7 +20,7 @@ export type ExecuteFn = (
 ) => Promise<ExecutionResult>;
 
 const defaultExecute: ExecuteFn = (expression, awaitPromise, options, device) =>
-    executeInApp(expression, awaitPromise, options, device);
+    executeInApp(expression, awaitPromise, { originatingToolName: "fast_refresh", ...options }, device);
 
 export interface GetRefreshStatusArgs {
     sincePath?: string;
