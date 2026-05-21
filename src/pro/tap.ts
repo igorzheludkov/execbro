@@ -510,7 +510,7 @@ export async function getCurrentScreen(): Promise<string | null> {
             return null;
         })()`;
 
-      const result = await executeInApp(expression, false);
+      const result = await executeInApp(expression, false, { originatingToolName: "tap" });
       if (result.success && result.result && result.result !== "null" && result.result !== "undefined") {
           return result.result.replace(/^"|"$/g, "");
       }

@@ -11,7 +11,7 @@ export type { MeasureOutcome, MeasureBounds, MeasureToolResult } from "./measure
 export type ExecuteFn = (expression: string, device?: string) => Promise<ExecutionResult>;
 
 const defaultExecute: ExecuteFn = (expression, device) =>
-    executeInApp(expression, true, { timeoutMs: 5000 }, device);
+    executeInApp(expression, true, { timeoutMs: 5000, originatingToolName: "measure" }, device);
 
 export async function measureComponent(
     componentName: string,

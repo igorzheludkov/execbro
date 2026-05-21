@@ -565,12 +565,18 @@ export function trackAutoReconnect(
     transportPattern?: string,
 ): void {
     if (!telemetryEnabled) return;
+    // No-op outcomes ('not_needed') account for ~98% of events and carry zero
+    // signal — only emit when the wrapper actually attempted a reconnect.
+    if (outcome === "not_needed") return;
+    // Skip events fired before a session_id is assigned (e.g. first
+    // executeInApp before session_start) — they're un-attributable.
+    if (!sessionId) return;
 
     dispatch({
         name: "tool_invocation",
         timestamp: Date.now(),
         toolName: "_auto_reconnect",
-        success: outcome === "success" || outcome === "not_needed",
+        success: outcome === "success",
         duration: 0,
         isFirstRun: isFirstRun(),
         errorContext: JSON.stringify({

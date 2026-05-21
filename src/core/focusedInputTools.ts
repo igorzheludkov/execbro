@@ -21,7 +21,7 @@ export interface DismissKeyboardToolResult {
 
 export type ExecuteFn = (expression: string, device?: string) => Promise<ExecutionResult>;
 
-const defaultExecute: ExecuteFn = (expression, device) => executeInApp(expression, true, {}, device);
+const defaultExecute: ExecuteFn = (expression, device) => executeInApp(expression, true, { originatingToolName: "focused_input" }, device);
 
 function parseExecutorResult<T>(raw: string | undefined): T | null {
     if (!raw) return null;

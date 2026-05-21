@@ -135,7 +135,7 @@ export function buildListDebugGlobalsExpression(): string {
 // and probes __RN_AI_DEVTOOLS__ directly so the SDK's registered stores/
 // navigation/custom objects surface as ready-to-use dotted paths.
 export async function listDebugGlobals(device?: string): Promise<ExecutionResult> {
-    return executeInApp(buildListDebugGlobalsExpression(), false, {}, device);
+    return executeInApp(buildListDebugGlobalsExpression(), false, { originatingToolName: "list_debug_globals" }, device);
 }
 
 // Inspect a global object (or a dotted path into one) to see its properties
@@ -186,7 +186,7 @@ export async function inspectGlobal(objectName: string, device?: string): Promis
         })()
     `;
 
-    return executeInApp(expression, false, {}, device);
+    return executeInApp(expression, false, { originatingToolName: "inspect_global" }, device);
 }
 
 // Reload the React Native app using __ReactRefresh
