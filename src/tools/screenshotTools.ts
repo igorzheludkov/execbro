@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
+import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
 import {
     iosScreenshot,
     androidScreenshot,
@@ -45,11 +46,13 @@ export function registerScreenshotTools(server: McpServer): void {
                 udid: z
                     .string()
                     .optional()
-                    .describe("Optional simulator UDID (from list_ios_simulators). Uses booted simulator if not specified.")
+                    .describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
             }
         },
         async ({ outputPath, udid }) => {
-            const result = await iosScreenshot(outputPath, udid);
+            const resolved = await resolveIosUdid(udid);
+            if (!resolved.ok) return resolved.response;
+            const result = await iosScreenshot(outputPath, resolved.udid);
     
             if (!result.success) {
                 return {
@@ -293,12 +296,14 @@ export function registerScreenshotTools(server: McpServer): void {
                     .string()
                     .optional()
                     .describe(
-                        "Optional device ID (from list_android_devices). Uses first available device if not specified."
+                        "Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified."
                     )
             }
         },
         async ({ outputPath, deviceId }) => {
-            const result = await androidScreenshot(outputPath, deviceId);
+            const resolved = await resolveAndroidDeviceId(deviceId);
+            if (!resolved.ok) return resolved.response;
+            const result = await androidScreenshot(outputPath, resolved.serial);
     
             if (!result.success) {
                 return {
@@ -581,10 +586,16 @@ export function registerScreenshotTools(server: McpServer): void {
         },
         async ({ platform, deviceId }) => {
             try {
-                // Take screenshot
-                const screenshotResult = platform === "android"
-                    ? await androidScreenshot(undefined, deviceId)
-                    : await iosScreenshot(undefined, deviceId);
+                let screenshotResult;
+                if (platform === "android") {
+                    const r = await resolveAndroidDeviceId(deviceId);
+                    if (!r.ok) return r.response;
+                    screenshotResult = await androidScreenshot(undefined, r.serial);
+                } else {
+                    const r = await resolveIosUdid(deviceId);
+                    if (!r.ok) return r.response;
+                    screenshotResult = await iosScreenshot(undefined, r.udid);
+                }
     
                 if (!screenshotResult.success || !screenshotResult.data) {
                     return {

@@ -23,6 +23,7 @@ import {
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
+import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
 
 export function registerInteractionTools(server: McpServer): void {
     // Tool: Unified tap — tries fiber, accessibility, OCR, coordinate strategies
@@ -225,11 +226,13 @@ export function registerInteractionTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID. Uses first available device if not specified.")
+                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
             }
         },
         async ({ x, y, durationMs, deviceId }) => {
-            const result = await androidLongPress(x, y, durationMs, deviceId);
+            const r = await resolveAndroidDeviceId(deviceId);
+            if (!r.ok) return r.response;
+            const result = await androidLongPress(x, y, durationMs, r.serial);
     
             return {
                 content: [
@@ -423,6 +426,7 @@ export function registerInteractionTools(server: McpServer): void {
                 " The text will be input at the current focus point (tap an input field first)." +
                 "\nPURPOSE: Send keystrokes to whichever input currently has focus on Android — the tool does NOT focus a field itself." +
                 "\nWHEN TO USE: Only after an input is already focused, or when `tap(text=...)` on the input didn't take focus for some reason." +
+                "\nPREREQUISITE: A TextInput must already have focus. Tap the field first (e.g. tap({ testID: 'search' })) — `android_input_text` does NOT focus a field itself; replace:true also requires React focus." +
                 "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value." +
                 "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
             inputSchema: {
@@ -442,14 +446,16 @@ export function registerInteractionTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID. Uses first available device if not specified.")
+                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
             }
         },
         async ({ text, replace, device, deviceId }) => {
+            const r = await resolveAndroidDeviceId(deviceId);
+            if (!r.ok) return r.response;
             const result = await inputTextWithReplace(
                 text,
                 replace === true,
-                (t) => androidInputText(t, deviceId),
+                (t) => androidInputText(t, r.serial),
                 () => clearFocusedInput(device)
             );
     
@@ -481,14 +487,16 @@ export function registerInteractionTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional device ID. Uses first available device if not specified.")
+                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
             }
         },
         async ({ key, deviceId }) => {
             // Try to parse as number first, otherwise treat as key name
             const keyCode = /^\d+$/.test(key) ? parseInt(key, 10) : (key.toUpperCase() as keyof typeof ANDROID_KEY_EVENTS);
-    
-            const result = await androidKeyEvent(keyCode, deviceId);
+
+            const r = await resolveAndroidDeviceId(deviceId);
+            if (!r.ok) return r.response;
+            const result = await androidKeyEvent(keyCode, r.serial);
     
             return {
                 content: [
@@ -535,11 +543,13 @@ export function registerInteractionTools(server: McpServer): void {
                     .enum(IOS_BUTTON_TYPES)
                     .describe("Hardware button to press: HOME, LOCK, SIDE_BUTTON, SIRI, or APPLE_PAY"),
                 duration: z.coerce.number().optional().describe("Optional button press duration in seconds"),
-                udid: z.string().optional().describe("Optional simulator UDID. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
             }
         },
         async ({ button, duration, udid }) => {
-            const result = await iosButton(button, { duration, udid });
+            const r = await resolveIosUdid(udid);
+            if (!r.ok) return r.response;
+            const result = await iosButton(button, { duration, udid: r.udid });
     
             return {
                 content: [
@@ -562,6 +572,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "Clear the contents of the currently focused TextInput, updating React state correctly so controlled components (Formik, react-hook-form, useState) stay consistent." +
                 "\nPURPOSE: Reset whatever TextInput has focus to empty, with the React state owner notified via onChangeText. Use BEFORE typing a replacement value into a pre-filled field." +
                 "\nWHEN TO USE: After tap(testID=...) focuses an input that already has text. Pair with ios_input_text/android_input_text (or use their replace:true flag for one-shot)." +
+                "\nPREREQUISITE: A TextInput must already have React focus. Tap the field first (e.g. tap({ testID: 'search' })) — this tool does NOT focus a field itself." +
                 "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). Returns 'no focused TextInput' if nothing is focused — does not silently no-op." +
                 "\nSEE ALSO: dismiss_keyboard, ios_input_text({replace:true}), android_input_text({replace:true}). call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
             inputSchema: {
@@ -594,6 +605,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "Blur the currently focused TextInput, dismissing the on-screen keyboard." +
                 "\nPURPOSE: Close the keyboard when it's blocking content beneath the input, or move focus off an input before a tap that would otherwise be intercepted." +
                 "\nWHEN TO USE: After typing into a field and before tapping a button that is hidden by the keyboard. Or to verify a 'tap outside dismisses' UX is wired up." +
+                "\nPREREQUISITE: A TextInput must already have React focus. Tap the field first (e.g. tap({ testID: 'search' }))." +
                 "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). Returns 'no focused TextInput' if nothing is focused.",
             inputSchema: {
                 device: z
@@ -646,14 +658,16 @@ export function registerInteractionTools(server: McpServer): void {
                     .describe(
                         "Optional RN device name (substring match) — needed by replace:true when multiple RN apps are connected, to disambiguate which device's focused input to clear. Single-device sessions can omit."
                     ),
-                udid: z.string().optional().describe("Optional simulator UDID (from list_ios_simulators). Uses booted simulator if not specified.")
+                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
             }
         },
         async ({ text, replace, device, udid }) => {
+            const r = await resolveIosUdid(udid);
+            if (!r.ok) return r.response;
             const result = await inputTextWithReplace(
                 text,
                 replace === true,
-                (t) => iosInputText(t, udid),
+                (t) => iosInputText(t, r.udid),
                 () => clearFocusedInput(device)
             );
     

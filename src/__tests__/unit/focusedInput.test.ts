@@ -54,7 +54,7 @@ describe("buildClearFocusedInputExpression", () => {
 
     it("returns cleared:false with reason when nothing focused", () => {
         const expr = buildClearFocusedInputExpression();
-        expect(expr).toContain(`cleared: false, reason: "no focused TextInput"`);
+        expect(expr).toContain(`cleared: false, reason: "no focused TextInput`);
     });
 });
 
@@ -66,6 +66,6 @@ describe("buildDismissKeyboardExpression", () => {
 
     it("returns dismissed:false with reason when nothing focused", () => {
         const expr = buildDismissKeyboardExpression();
-        expect(expr).toContain(`dismissed: false, reason: "no focused TextInput"`);
+        expect(expr).toContain(`dismissed: false, reason: "no focused TextInput`);
     });
 });

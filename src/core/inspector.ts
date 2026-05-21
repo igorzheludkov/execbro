@@ -1,5 +1,5 @@
 import type { ExecutionResult } from "./types.js";
-import { executeInApp, delay } from "./jsExecute.js";
+import { executeInApp } from "./jsExecute.js";
 
 // ============================================================================
 // Coordinate-Based Element Inspection (via DevTools Inspector API)
@@ -394,14 +394,19 @@ export async function getInspectorSelectionAtPoint(
 /**
  * Inspect the React component at a specific (x, y) coordinate.
  *
- * Works on both Paper and Fabric (New Architecture). Uses a two-step approach
- * because measureInWindow callbacks fire in a future native event loop tick
- * (not microtasks), so awaitPromise cannot be used to collect them:
+ * Works on both Paper and Fabric (New Architecture). Walks the fiber tree,
+ * fires measureInWindow on each host component, and resolves a Promise once
+ * either all callbacks have reported or a 300 ms timeout elapses — then
+ * hit-tests against the target coordinates and returns the innermost match.
  *
- * Step 1 — dispatch: walk the fiber tree, call measureInWindow on each host
- *   component, store fiber refs and results in app globals.
- * Step 2 — resolve (after 300ms): read the globals, hit-test against target
- *   coordinates, return the innermost matching React component.
+ * The whole flow happens inside a single Runtime.evaluate with awaitPromise.
+ * An earlier two-call design (dispatch → wait 300ms → resolve, bridged via
+ * globalThis.__inspectFibers/Measurements) was racy: any JS-context reset
+ * between the calls — Fast Refresh full-reload, CDP auto-reconnect landing
+ * on a different pageId — wiped the globals and surfaced as the cryptic
+ * "No measurement data available. Run inspect_at_point again." error
+ * (~13 events / 2 days, all on RN 1.10.0). Collapsing into one call closes
+ * that window by construction.
  */
 export async function inspectAtPoint(
     x: number,
@@ -414,11 +419,10 @@ export async function inspectAtPoint(
 ): Promise<ExecutionResult> {
     const { includeProps = true, includeFrame = true, device } = options;
 
-    // --- Step 1: walk fiber tree + dispatch measureInWindow calls ---
-    const dispatchExpression = `
-        (function() {
+    const expression = `
+        new Promise(function(resolve) {
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return { error: 'React DevTools hook not available. Make sure you are running a development build.' };
+            if (!hook) return resolve({ error: 'React DevTools hook not available. Make sure you are running a development build.' });
 
             var roots = [];
             if (hook.getFiberRoots) {
@@ -432,7 +436,7 @@ export async function inspectAtPoint(
                     } catch(e) {}
                 }
             }
-            if (roots.length === 0) return { error: 'No fiber roots found. The app may not have rendered yet.' };
+            if (roots.length === 0) return resolve({ error: 'No fiber roots found. The app may not have rendered yet.' });
 
             // Paper: measureInWindow is on stateNode directly.
             // Fabric: measureInWindow is on stateNode.canonical.publicInstance.
@@ -472,48 +476,38 @@ export async function inspectAtPoint(
             }
             for (var root of roots) { walkFibers(root.current, 0); }
 
-            if (hostFibers.length === 0) return { error: 'No measurable host components found. App may not be fully rendered.' };
+            if (hostFibers.length === 0) return resolve({ error: 'No measurable host components found. App may not be fully rendered.' });
 
-            globalThis.__inspectFibers = hostFibers;
-            globalThis.__inspectMeasurements = new Array(hostFibers.length).fill(null);
+            var measurements = new Array(hostFibers.length).fill(null);
+            var pending = hostFibers.length;
+            var settled = false;
+
+            function done() {
+                if (settled) return;
+                settled = true;
+                resolve(buildResult(hostFibers, measurements));
+            }
 
             hostFibers.forEach(function(fiber, i) {
                 try {
                     getMeasurable(fiber).measureInWindow(function(fx, fy, fw, fh) {
-                        globalThis.__inspectMeasurements[i] = { x: fx, y: fy, width: fw, height: fh };
+                        measurements[i] = { x: fx, y: fy, width: fw, height: fh };
+                        if (--pending === 0) done();
                     });
-                } catch(e) {}
+                } catch(e) {
+                    // Subtract from pending so a throwing measureInWindow doesn't stall the
+                    // 'all callbacks fired' path. Slot stays null; hit-test ignores nulls.
+                    if (--pending === 0) done();
+                }
             });
 
-            return { count: hostFibers.length };
-        })()
-    `;
+            // Fallback: some measureInWindow callbacks never fire (off-screen Fabric leaves,
+            // detached ScrollView content). Resolve with whatever measurements landed in 300ms.
+            setTimeout(done, 300);
 
-    const dispatchResult = await executeInApp(dispatchExpression, false, {}, device);
-    if (!dispatchResult.success) return dispatchResult;
-
-    try {
-        const parsed = JSON.parse(dispatchResult.result || "{}");
-        if (parsed.error) return { success: false, error: parsed.error };
-    } catch {
-        /* ignore parse errors */
-    }
-
-    // Wait for native measureInWindow callbacks to fire
-    await delay(300);
-
-    // --- Step 2: read measurements, hit-test, return result ---
-    const resolveExpression = `
-        (function() {
-            var fibers = globalThis.__inspectFibers;
-            var measurements = globalThis.__inspectMeasurements;
-            globalThis.__inspectFibers = null;
-            globalThis.__inspectMeasurements = null;
-
-            if (!fibers || !measurements) return { error: 'No measurement data available. Run inspect_at_point again.' };
-
-            var targetX = ${x};
-            var targetY = ${y};
+            function buildResult(fibers, measurements) {
+                var targetX = ${x};
+                var targetY = ${y};
 
             var hits = [];
             for (var i = 0; i < measurements.length; i++) {
@@ -623,8 +617,12 @@ export async function inspectAtPoint(
             if (hierarchy.length > 1) result.hierarchy = hierarchy;
 
             return result;
-        })()
+            }
+        })
     `;
 
-    return executeInApp(resolveExpression, false, {}, device);
+    // awaitPromise:true so CDP Runtime.evaluate returns the resolved value.
+    // 5000ms timeout >> the inner 300ms cap; leaves headroom for slow Fabric
+    // measure paths without letting a hung Hermes runtime stall the tool.
+    return executeInApp(expression, true, { timeoutMs: 5000 }, device);
 }
