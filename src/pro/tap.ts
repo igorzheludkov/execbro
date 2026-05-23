@@ -93,6 +93,12 @@ export interface TapVerification {
     peakChangeRate?: number;
     peakFrame?: number;
     burstGroupId?: string;
+    // Typed verdict for burst analysis (swipe especially):
+    //   "settled_elsewhere" — persistent change, the gesture succeeded
+    //   "snap_back"         — mid-gesture motion but reverted (content fits viewport, or rejected drop)
+    //   "missed"            — no movement at any frame (gesture hit a non-responsive surface)
+    // Omitted when not computed (non-burst path, verify=false).
+    kind?: "settled_elsewhere" | "snap_back" | "missed";
     explanation: string;
 }
 
@@ -105,31 +111,41 @@ export function buildVerificationExplanation(v: {
     peakChangeRate?: number;
     peakFrame?: number;
     action?: "tap" | "swipe";
+    kind?: "settled_elsewhere" | "snap_back" | "missed";
 }): string {
     const pct = (rate: number) => (rate * 100).toFixed(1) + "%";
     const action = v.action ?? "tap";
     const Action = action[0].toUpperCase() + action.slice(1);
     const target = action === "swipe" ? "scroll surface" : "element";
 
-    if (v.meaningful && !v.transientChangeDetected) {
+    // Burst path with typed verdict
+    if (v.kind === "settled_elsewhere") {
         return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). The screen updated as expected.`;
     }
-
-    if (v.meaningful && v.transientChangeDetected) {
+    if (v.kind === "snap_back") {
+        if (action === "swipe") {
+            return (
+                `Snap-back detected: content moved during the drag (frame ${v.peakFrame} peak ${pct(v.peakChangeRate || 0)} diff) ` +
+                `but returned to the starting position. Classic 'content fits inside the viewport' pattern — ` +
+                `check contentSize vs layoutSize on the ScrollView, not gesture handling.`
+            );
+        }
         return (
-            `No persistent change, but transient visual feedback detected ` +
-            `(frame ${v.peakFrame} peak ${pct(v.peakChangeRate || 0)} diff). ` +
-            `${Action} triggered a momentary animation that settled back to original state.`
+            `Transient visual feedback detected (frame ${v.peakFrame} peak ${pct(v.peakChangeRate || 0)} diff) ` +
+            `but no persistent change. ${Action} triggered a momentary animation that settled back.`
         );
     }
-
-    if (v.transientChangeDetected === false) {
+    if (v.kind === "missed") {
         return (
             `No visual change detected — neither persistent nor transient across burst frames. ` +
-            `The ${target} may not respond visually or the ${action} may have missed.`
+            `The ${target} may not respond visually or the ${action} may have missed its target.`
         );
     }
 
+    // Legacy non-burst path
+    if (v.meaningful) {
+        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). The screen updated as expected.`;
+    }
     return (
         `No visual change detected between before and after screenshots. ` +
         `The ${target} may not respond visually or the ${action} may have missed.`
@@ -143,6 +159,7 @@ export interface BurstAnalysis {
     peakChangeRate: number;
     peakFrame: number;
     framesWithChange: number[];
+    kind: "settled_elsewhere" | "snap_back" | "missed";
 }
 
 const BURST_CHANGE_THRESHOLD = 0.005;
@@ -158,7 +175,8 @@ export async function analyzeBurstFrames(
             transientChangeDetected: false,
             peakChangeRate: 0,
             peakFrame: 0,
-            framesWithChange: []
+            framesWithChange: [],
+            kind: "missed"
         };
     }
 
@@ -180,7 +198,18 @@ export async function analyzeBurstFrames(
     const persistentDiff = await compareScreenshots(frames[0], frames[frames.length - 1], options);
     const persistentChangeRate = persistentDiff.changeRate;
     const transientChangeDetected = !persistentDiff.changed && framesWithChange.length > 0;
-    const meaningful = persistentDiff.changed || transientChangeDetected;
+    // Snap-back (transient motion that reverts) is NOT a successful gesture —
+    // the content moved during the drag but returned to its starting position.
+    // Callers diagnosing scroll failures need this to read as "didn't work".
+    const meaningful = persistentDiff.changed;
+    let kind: "settled_elsewhere" | "snap_back" | "missed";
+    if (persistentDiff.changed) {
+        kind = "settled_elsewhere";
+    } else if (transientChangeDetected) {
+        kind = "snap_back";
+    } else {
+        kind = "missed";
+    }
 
     return {
         meaningful,
@@ -188,7 +217,8 @@ export async function analyzeBurstFrames(
         transientChangeDetected,
         peakChangeRate,
         peakFrame,
-        framesWithChange
+        framesWithChange,
+        kind
     };
 }
 

@@ -16,6 +16,7 @@ describe("analyzeBurstFrames", () => {
         expect(result.peakChangeRate).toBeLessThan(0.005);
         expect(result.persistentChangeRate).toBeLessThan(0.005);
         expect(result.meaningful).toBe(false);
+        expect(result.kind).toBe("missed");
     });
 
     it("detects persistent change (last frame differs from first)", async () => {
@@ -24,14 +25,17 @@ describe("analyzeBurstFrames", () => {
         const result = await analyzeBurstFrames([before, before, before, after, after]);
         expect(result.meaningful).toBe(true);
         expect(result.persistentChangeRate).toBeGreaterThan(0.005);
+        expect(result.kind).toBe("settled_elsewhere");
     });
 
-    it("detects transient change (middle frame differs, last matches first)", async () => {
+    it("detects snap-back (middle frame differs, last matches first)", async () => {
         const normal = await solidImage(200, 200, 200);
         const highlight = await solidImage(255, 0, 0);
         const result = await analyzeBurstFrames([normal, highlight, normal, normal, normal]);
         expect(result.transientChangeDetected).toBe(true);
-        expect(result.meaningful).toBe(true);
+        // Snap-back is NOT a successful gesture — content reverted, nothing changed.
+        expect(result.meaningful).toBe(false);
+        expect(result.kind).toBe("snap_back");
         expect(result.peakFrame).toBe(1);
         expect(result.peakChangeRate).toBeGreaterThan(0.5);
         expect(result.persistentChangeRate).toBeLessThan(0.005);
