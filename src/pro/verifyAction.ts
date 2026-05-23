@@ -320,6 +320,7 @@ export async function burstCaptureAndVerify(args: {
         peakChangeRate: analysis.peakChangeRate,
         peakFrame: analysis.peakFrame,
         burstGroupId: groupId,
+        kind: analysis.kind,
         explanation: buildVerificationExplanation({
             meaningful: analysis.meaningful,
             changeRate: analysis.persistentChangeRate,
@@ -328,7 +329,8 @@ export async function burstCaptureAndVerify(args: {
             transientChangeDetected: analysis.transientChangeDetected,
             peakChangeRate: analysis.peakChangeRate,
             peakFrame: analysis.peakFrame,
-            action
+            action,
+            kind: analysis.kind
         })
     };
 

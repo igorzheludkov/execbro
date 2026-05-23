@@ -1,5 +1,5 @@
 import type { ExecutionResult } from "./types.js";
-import { executeInApp } from "./jsExecute.js";
+import { executeInApp, delay } from "./jsExecute.js";
 import { formatSummaryToTonl } from "./screenLayout.js";
 
 // ============================================================================
@@ -365,11 +365,114 @@ export async function inspectComponent(
                 result.children = getChildTree(fiber, childrenDepth);
             }
 
+            // Scroll introspection — dispatch measurements for ScrollView-like fibers.
+            // A second roundtrip in TypeScript reads globalThis.__scrollMeasure to
+            // compute layout vs content size and an isScrollable verdict.
+            const isScrollable = (
+                targetName === 'ScrollView' ||
+                targetName === 'FlatList' ||
+                targetName === 'SectionList' ||
+                targetName.indexOf('ScrollView') !== -1 ||
+                (fiber.memoizedProps && typeof fiber.memoizedProps.onScroll === 'function')
+            );
+            if (isScrollable) {
+                function findFirstHost(f, d) {
+                    if (!f || d > 10) return null;
+                    if (typeof f.type === 'string' && f.stateNode) return f;
+                    let c = f.child;
+                    while (c) {
+                        const h = findFirstHost(c, d + 1);
+                        if (h) return h;
+                        c = c.sibling;
+                    }
+                    return null;
+                }
+                function getMeasurable(f) {
+                    const sn = f.stateNode;
+                    if (!sn) return null;
+                    if (typeof sn.measureInWindow === 'function') return sn;
+                    if (sn.canonical && sn.canonical.publicInstance &&
+                        typeof sn.canonical.publicInstance.measureInWindow === 'function') {
+                        return sn.canonical.publicInstance;
+                    }
+                    return null;
+                }
+                const scrollHost = findFirstHost(fiber, 0);
+                const contentHost = scrollHost && scrollHost.child ? findFirstHost(scrollHost.child, 0) : null;
+                const sm = scrollHost ? getMeasurable(scrollHost) : null;
+                const cm = contentHost ? getMeasurable(contentHost) : null;
+                if (sm && cm) {
+                    globalThis.__scrollMeasure = { layout: null, content: null };
+                    try { sm.measureInWindow(function(x, y, w, h) { globalThis.__scrollMeasure.layout = { x: x, y: y, width: w, height: h }; }); } catch(e) {}
+                    try { cm.measureInWindow(function(x, y, w, h) { globalThis.__scrollMeasure.content = { x: x, y: y, width: w, height: h }; }); } catch(e) {}
+                    result.__scrollPending = true;
+                }
+                const sp = fiber.memoizedProps || {};
+                result.scroll = {
+                    scrollEnabled: sp.scrollEnabled !== false,
+                    horizontal: !!sp.horizontal,
+                    bounces: sp.bounces
+                };
+            }
+
             return result;
         })()
     `;
 
-    return executeInApp(expression, false, { timeoutMs: timeoutMs ?? 5000, originatingToolName: "inspect_component" }, device);
+    const firstResult = await executeInApp(expression, false, { timeoutMs: timeoutMs ?? 5000, originatingToolName: "inspect_component" }, device);
+    if (!firstResult.success || !firstResult.result) return firstResult;
+
+    // Parse and check for pending scroll measurement
+    let parsed: { __scrollPending?: boolean; scroll?: Record<string, unknown> } & Record<string, unknown>;
+    try {
+        parsed = JSON.parse(firstResult.result);
+    } catch {
+        return firstResult;
+    }
+    if (!parsed.__scrollPending) return firstResult;
+
+    delete parsed.__scrollPending;
+    await delay(120);
+
+    const resolveScrollExpr = `
+        (function() {
+            const m = globalThis.__scrollMeasure;
+            globalThis.__scrollMeasure = null;
+            if (!m || !m.layout || !m.content) return { error: 'no_measurement' };
+            const horizontal = ${JSON.stringify(parsed.scroll && (parsed.scroll as Record<string, unknown>).horizontal === true)};
+            const layoutWidth = m.layout.width;
+            const layoutHeight = m.layout.height;
+            const contentWidth = m.content.width;
+            const contentHeight = m.content.height;
+            const contentOffsetX = m.layout.x - m.content.x;
+            const contentOffsetY = m.layout.y - m.content.y;
+            const overflowAxis = horizontal ? contentWidth - layoutWidth : contentHeight - layoutHeight;
+            const offsetAxis = horizontal ? contentOffsetX : contentOffsetY;
+            const isScrollable = overflowAxis > 1;
+            const isAtTop = horizontal ? Math.abs(contentOffsetX) < 1 : Math.abs(contentOffsetY) < 1;
+            const isAtBottom = !isScrollable || (offsetAxis >= overflowAxis - 1);
+            return {
+                layoutWidth: Math.round(layoutWidth * 100) / 100,
+                layoutHeight: Math.round(layoutHeight * 100) / 100,
+                contentWidth: Math.round(contentWidth * 100) / 100,
+                contentHeight: Math.round(contentHeight * 100) / 100,
+                contentOffset: { x: Math.round(contentOffsetX * 100) / 100, y: Math.round(contentOffsetY * 100) / 100 },
+                isScrollable: isScrollable,
+                isAtTop: isAtTop,
+                isAtBottom: isAtBottom
+            };
+        })()
+    `;
+    const scrollResult = await executeInApp(resolveScrollExpr, false, { timeoutMs: 3000, originatingToolName: "inspect_component" }, device);
+    if (scrollResult.success && scrollResult.result) {
+        try {
+            const scrollData = JSON.parse(scrollResult.result);
+            if (!scrollData.error) {
+                parsed.scroll = { ...(parsed.scroll as Record<string, unknown>), ...scrollData };
+            }
+        } catch { /* keep partial scroll info */ }
+    }
+    return { ...firstResult, result: JSON.stringify(parsed, null, 2) };
 }
 
 /**

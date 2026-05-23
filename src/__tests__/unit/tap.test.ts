@@ -444,14 +444,25 @@ describe("buildVerificationExplanation", () => {
         expect(explanation).toContain("3.2%");
     });
 
-    it("explains transient change from burst", () => {
+    it("explains snap-back (tap burst with transient feedback)", () => {
         const explanation = buildVerificationExplanation({
-            meaningful: true, changeRate: 0.001, changedPixels: 1000, totalPixels: 1000000,
+            meaningful: false, changeRate: 0.001, changedPixels: 1000, totalPixels: 1000000,
             transientChangeDetected: true, peakChangeRate: 0.041, peakFrame: 2,
+            kind: "snap_back",
         });
-        expect(explanation).toContain("transient visual feedback");
+        expect(explanation).toContain("Transient visual feedback");
         expect(explanation).toContain("frame 2");
         expect(explanation).toContain("4.1%");
+    });
+
+    it("explains snap-back on swipe with scroll-fits-viewport hint", () => {
+        const explanation = buildVerificationExplanation({
+            meaningful: false, changeRate: 0.001, changedPixels: 1000, totalPixels: 1000000,
+            transientChangeDetected: true, peakChangeRate: 0.021, peakFrame: 1,
+            action: "swipe", kind: "snap_back",
+        });
+        expect(explanation).toContain("Snap-back detected");
+        expect(explanation).toContain("contentSize vs layoutSize");
     });
 
     it("explains no change in standard mode", () => {
@@ -462,10 +473,11 @@ describe("buildVerificationExplanation", () => {
         expect(explanation).toContain("before and after");
     });
 
-    it("explains no change in burst mode", () => {
+    it("explains no change in burst mode (missed)", () => {
         const explanation = buildVerificationExplanation({
             meaningful: false, changeRate: 0.0, changedPixels: 0, totalPixels: 1000000,
             transientChangeDetected: false, peakChangeRate: 0.001, peakFrame: 0,
+            kind: "missed",
         });
         expect(explanation).toContain("No visual change");
         expect(explanation).toContain("burst frames");

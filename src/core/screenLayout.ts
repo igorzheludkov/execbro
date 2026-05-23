@@ -108,7 +108,7 @@ interface LayoutNode {
  */
 function formatLayoutTree<T extends LayoutNode>(
     elements: T[],
-    renderLine: (el: T, indent: number, isLeaf: boolean) => string
+    renderLine: (el: T, indent: number, isLeaf: boolean, parent: T | null) => string
 ): string {
     // Build index: originalIndex -> element index in the filtered array
     const indexMap = new Map<number, number>();
@@ -183,13 +183,13 @@ function formatLayoutTree<T extends LayoutNode>(
     // Render tree
     const lines: string[] = [];
 
-    function printNode(idx: number, indent: number) {
+    function printNode(idx: number, indent: number, parent: T | null) {
         const isLeaf = !children.has(idx);
-        lines.push(renderLine(elements[idx], indent, isLeaf));
+        lines.push(renderLine(elements[idx], indent, isLeaf, parent));
         const kids = children.get(idx);
         if (kids) {
             for (const kid of kids) {
-                printNode(kid, indent + 1);
+                printNode(kid, indent + 1, elements[idx]);
             }
         }
     }
@@ -206,15 +206,43 @@ function formatLayoutTree<T extends LayoutNode>(
                 lines.push(`[${label}]`);
             }
             prevLabel = label;
-            printNode(roots[ri], 0);
+            printNode(roots[ri], 0, null);
         }
     } else {
         for (const root of roots) {
-            printNode(root, 0);
+            printNode(root, 0, null);
         }
     }
 
     return lines.join("\n");
+}
+
+/**
+ * Compute per-side overflow of a child frame relative to its parent.
+ * Returns null if neither has a frame, or overflow is within 1pt of rounding noise.
+ */
+function computeOverflow(
+    child: LayoutNode,
+    parent: LayoutNode
+): { sides: { left?: number; right?: number; top?: number; bottom?: number }; max: number; dominantSide: string } | null {
+    if (!child.frame || !parent.frame) return null;
+    const cf = child.frame, pf = parent.frame;
+    const sides: { left?: number; right?: number; top?: number; bottom?: number } = {};
+    const dLeft = pf.x - cf.x;
+    const dRight = (cf.x + cf.width) - (pf.x + pf.width);
+    const dTop = pf.y - cf.y;
+    const dBottom = (cf.y + cf.height) - (pf.y + pf.height);
+    if (dLeft > 1) sides.left = dLeft;
+    if (dRight > 1) sides.right = dRight;
+    if (dTop > 1) sides.top = dTop;
+    if (dBottom > 1) sides.bottom = dBottom;
+    const entries = Object.entries(sides) as [string, number][];
+    if (entries.length === 0) return null;
+    let max = 0, dominantSide = "";
+    for (const [k, v] of entries) {
+        if (v > max) { max = v; dominantSide = k; }
+    }
+    return { sides, max, dominantSide };
 }
 
 export function formatScreenLayoutTree(
@@ -222,7 +250,8 @@ export function formatScreenLayoutTree(
     extended: boolean = false,
     offScreen?: { offScreenBelow?: string[]; offScreenAbove?: string[] }
 ): string {
-    const tree = formatLayoutTree(elements, (el, indent, isLeaf) => {
+    const overflows: { child: string; parent: string; max: number; dominantSide: string }[] = [];
+    const tree = formatLayoutTree(elements, (el, indent, isLeaf, parent) => {
         const prefix = "  ".repeat(indent);
         const frame = el.frame
             ? ` (${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`
@@ -233,9 +262,25 @@ export function formatScreenLayoutTree(
         const layoutStr = extended && el.layout
             ? ` {${Object.entries(el.layout).map(([k, v]) => `${k}:${v}`).join("; ")}}`
             : "";
-        return `${prefix}${el.component}${frame}${idStr}${textStr}${layoutStr}`;
+        let overflowStr = "";
+        if (parent) {
+            const ovf = computeOverflow(el, parent);
+            if (ovf) {
+                overflowStr = ` ⚠ overflows parent by ${Math.round(ovf.max)}pt (${ovf.dominantSide})`;
+                overflows.push({ child: el.component, parent: parent.component, max: ovf.max, dominantSide: ovf.dominantSide });
+            }
+        }
+        return `${prefix}${el.component}${frame}${idStr}${textStr}${layoutStr}${overflowStr}`;
     });
     const suffix: string[] = [];
+    if (overflows.length > 0) {
+        const sorted = overflows.slice().sort((a, b) => b.max - a.max);
+        const lines = [`[overflows] ${sorted.length} node${sorted.length === 1 ? "" : "s"} extend beyond parent (largest first):`];
+        for (const o of sorted) {
+            lines.push(`  ${o.child} overflows ${o.parent} by ${Math.round(o.max)}pt (${o.dominantSide})`);
+        }
+        suffix.push(lines.join("\n"));
+    }
     if (offScreen?.offScreenAbove?.length) {
         suffix.push(formatOffScreenLine(offScreen.offScreenAbove, "above fold"));
     }
@@ -835,7 +880,7 @@ function formatEnrichedLayoutTree(
     elements: EnrichedElement[],
     offScreen?: { offScreenBelow?: string[]; offScreenAbove?: string[] }
 ): string {
-    const tree = formatLayoutTree(elements, (el, indent, isLeaf) => {
+    const tree = formatLayoutTree(elements, (el, indent, isLeaf, _parent) => {
         const prefix = "  ".repeat(indent);
         const frame = `(${Math.round(el.frame.x)},${Math.round(el.frame.y)} ${Math.round(el.frame.width)}x${Math.round(el.frame.height)})`;
         const tap = ` tap:(${el.tapX},${el.tapY})`;
