@@ -26,9 +26,9 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 ## Pricing
 
-ExecBro is and will remain free for typical workflows. A paid tier launches in summer 2026 with a single $9/month plan covering unlimited tool calls; the free tier will be capped at 300 tool calls / 30 days at that point. Everyone already using ExecBro before the announcement gets 3 months free of the paid tier — auto-applied via your installation ID, no action required.
+ExecBro is **free while in beta** — every feature, no limits, no account required. Use it as much as you like.
 
-Full details and exact dates will be published at [execbro.com/pricing](https://execbro.com/pricing) closer to launch. Until then, nothing changes for current users.
+When the beta ends, paid plans will be introduced and full details published at [execbro.com/pricing](https://execbro.com/pricing). Everyone already using ExecBro before that point gets rewarded for being an early adopter — auto-applied via your installation ID, no action required. Until then, nothing changes and everything stays free.
 
 ## Features
 
@@ -64,10 +64,6 @@ Full details and exact dates will be published at [execbro.com/pricing](https://
 - **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
 - **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
 - **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
-
-### Related
-
-- **[execbro-runner](https://github.com/igorzheludkov/execbro-runner)** _(early alpha, in active development)_ — queue-based autonomous task runner built on top of ExecBro. Drop in a markdown prompt and a background daemon spins up an isolated sandbox (git worktree + simulator/emulator + Metro), runs Claude Code headlessly, has the agent verify the change live on the device via ExecBro, and optionally pushes a branch with a PR URL. Fire-and-forget Claude Code runs for your React Native app.
 
 ## Setup
 
