@@ -14,6 +14,12 @@ import { CONFIG_DIR } from "./paths.js";
 const TELEMETRY_ENDPOINT = "https://rn-debugger-telemetry.500griven.workers.dev";
 const TELEMETRY_API_KEY = "6a630181cb391ed5c42a188428cc2d2623dfe9333ec048193bb711ab58afe85e";
 
+// Replaced at npm-publish time by scripts/inject-build-token.mjs, which
+// rewrites the compiled build/index.js. A source checkout (any fork) keeps
+// this literal — the telemetry Worker compares it to its own secret and
+// resolves a non-match to a fork. Never store/commit the real value here.
+const BUILD_TOKEN = "__BUILD_TOKEN__";
+
 export function getTelemetryEndpoint(): string { return TELEMETRY_ENDPOINT; }
 export function getTelemetryApiKey(): string { return TELEMETRY_API_KEY; }
 
@@ -145,6 +151,7 @@ interface TelemetryPayload {
     sessionId?: string;
     serverVersion: string;
     packageName: string;
+    buildToken: string;
     nodeVersion: string;
     platform: string;
     events: TelemetryEvent[];
@@ -716,6 +723,7 @@ function dispatch(event: TelemetryEvent): void {
         sessionId: sessionId || undefined,
         serverVersion: getServerVersion(),
         packageName: getPackageName(),
+        buildToken: BUILD_TOKEN,
         nodeVersion: process.version,
         platform: process.platform,
         events: [event]
