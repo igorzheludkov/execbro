@@ -31,3 +31,6 @@ Thumbs.db
 
 # Git worktrees
 .worktrees/
+
+# Claude Code harness-generated files
+.claude/scheduled_tasks.lock
