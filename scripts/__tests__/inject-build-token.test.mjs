@@ -34,6 +34,16 @@ test("replaces the placeholder with the env token", () => {
     rmSync(r.dir, { recursive: true, force: true });
 });
 
+test("writes tokens containing $ literally (no String.replace substitution)", () => {
+    const token = "ab$&cd$$ef$1gh";
+    const r = run({ BUILD_TOKEN: token }, 'const BUILD_TOKEN = "__BUILD_TOKEN__";');
+    assert.ok(r.ok, "script should succeed");
+    const out = readFileSync(r.target, "utf-8");
+    assert.ok(out.includes(token), "token must be written verbatim, including $ sequences");
+    assert.ok(!out.includes("__BUILD_TOKEN__"));
+    rmSync(r.dir, { recursive: true, force: true });
+});
+
 test("fails when BUILD_TOKEN env is missing", () => {
     const r = run({ BUILD_TOKEN: "" }, 'const x = "__BUILD_TOKEN__";');
     assert.equal(r.ok, false);
