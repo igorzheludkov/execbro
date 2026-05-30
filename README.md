@@ -481,6 +481,10 @@ To opt out while keeping the rest of the package working:
 "env": { "RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS": "1" }
 ```
 
+### Build attestation
+
+Official npm builds are stamped with a secret build token at publish time (via `npm run inject-token` in CI, which requires the `BUILD_TOKEN` secret). Builds from a source checkout carry an inert placeholder and are labeled "fork" in our telemetry dashboard. The token is never committed to source.
+
 ## License
 
 MIT
