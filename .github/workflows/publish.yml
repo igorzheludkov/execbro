@@ -23,6 +23,15 @@ jobs:
 
       - run: npm run build
 
+      # Stamp the official build token into the compiled output so the telemetry
+      # backend can distinguish this official npm release from source forks.
+      # BUILD_TOKEN is a repo secret and must equal the telemetry Worker's
+      # BUILD_TOKEN secret. inject-token fails the job if the token is missing
+      # or the placeholder is absent, so an unstamped build never publishes.
+      - run: npm run inject-token
+        env:
+          BUILD_TOKEN: ${{ secrets.BUILD_TOKEN }}
+
       - run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
