@@ -48,5 +48,7 @@ if (occurrences > 1) {
     process.exit(1);
 }
 
-writeFileSync(target, src.replace(PLACEHOLDER, token));
+// Use a replacer function so `$` sequences in the token (e.g. $&, $1, $$) are
+// written literally rather than interpreted as String.replace substitutions.
+writeFileSync(target, src.replace(PLACEHOLDER, () => token));
 console.error(`inject-build-token: injected build token into ${target}`);
