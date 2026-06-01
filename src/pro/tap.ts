@@ -1173,13 +1173,12 @@ async function tryAccessibilityStrategy(
 }
 
 /**
- * Run OCR sense (capture + recognize + match). When `probeOnly` is true,
- * populates `sink.ocr.bestCandidate` but does NOT tap — caller is responsible
- * for tapping via tryOcrRecovery() once it decides to use the result.
- * This is the foundation for Step 4's OCR pre-warm: run the slow OCR probe
- * concurrently with fiber/a11y so that when neither wins, OCR is already done.
+ * Run OCR sense (capture + recognize + match) and tap the match. Also records
+ * `sink.ocr.bestCandidate` with coordinates before tapping, so the orchestrator
+ * can salvage a perfect match via tryOcrRecovery() if this strategy times out
+ * ~30ms past its cap (the COMPRAR/Portuguese-Android cluster, journal 2026-05-16).
  */
-async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal, probeOnly = false): Promise<StrategyResult> {
+async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal): Promise<StrategyResult> {
     if (sink) sink.ocr.ran = true;
     const ocrStartedAt = Date.now();
     try {
@@ -1256,15 +1255,6 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             return {
                 success: false,
                 reason: `OCR did not find text "${searchText}" on screen`
-            };
-        }
-
-        // Step 4 pre-warm: bestCandidate is set; let the orchestrator decide
-        // whether to actually tap (it may have already won the race via fiber).
-        if (probeOnly) {
-            return {
-                success: false,
-                reason: `OCR probe completed (probeOnly) — match "${match.text}" recorded in evidence`
             };
         }
 
@@ -2018,27 +2008,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         beforeScaleFactor = before?.scaleFactor;
     }
 
-    // Step 4: pre-warm the OCR sense if it's in the chain after a faster strategy.
-    // Runs concurrently with fiber/a11y so that when the loop reaches OCR, the
-    // probe is likely already complete (saving ~5s in OCR-win rows). Probe
-    // populates evidence.ocr.bestCandidate; the orchestrator decides whether
-    // to actually tap based on bestCandidate score.
-    const ocrIdx = filteredStrategies.indexOf("ocr");
-    const ocrCanPrewarm = ocrIdx > 0 && !!query.text;
-    let ocrPrewarmCtrl: AbortController | null = null;
-    let ocrPrewarmPromise: Promise<{ result: StrategyResult; aborted: boolean }> | null = null;
-    if (ocrCanPrewarm) {
-        ocrPrewarmCtrl = new AbortController();
-        const ctrl = ocrPrewarmCtrl;
-        const ocrCap = maxStrategyMs("ocr", platform);
-        const timer = setTimeout(() => ctrl.abort(), ocrCap);
-        ocrPrewarmPromise = tryOcrStrategy(query, platform, targetUdid, evidence, ctrl.signal, /* probeOnly */ true)
-            .then(
-                (result) => { clearTimeout(timer); return { result, aborted: ctrl.signal.aborted }; },
-                (err) => { clearTimeout(timer); return { result: { success: false, reason: err instanceof Error ? err.message : String(err) }, aborted: ctrl.signal.aborted }; }
-            );
-    }
-
+    // OCR runs lazily when the loop reaches it (see the `case "ocr"` branch).
+    // A concurrent pre-warm probe used to fire here to shave ~5s off OCR-win
+    // rows, but it dispatched a paid Google Vision request at t=0 on every
+    // text-predicate tap — and since cloud OCR (~200ms) finishes well before
+    // the higher-priority strategy that usually wins, the post-win abort came
+    // too late to cancel the billed request. OCR wins only ~1.9% of taps, so
+    // the pre-warm paid for cloud Vision on ~42% of eligible taps to help a
+    // tiny minority. Removed 2026-06-02; the timeout-recovery path below still
+    // salvages the perfect-match-past-cap case.
     // Execute strategies in order with per-strategy caps and overall budget
     for (const strat of filteredStrategies) {
         const remaining = remainingMs();
@@ -2072,40 +2050,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     );
                     break;
                 case "ocr":
-                    if (ocrPrewarmPromise) {
-                        // Pre-warmed probe: await its completion (capped at the
-                        // remaining budget so we don't blow past the overall
-                        // tap timeout if the prewarm is taking forever) and then
-                        // tap based on the recorded bestCandidate.
-                        const prewarmRace = withCancelableTimeout(
-                            (signal) => Promise.race([
-                                ocrPrewarmPromise!,
-                                new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("ocr timed out after " + budget + "ms")), { once: true }))
-                            ]),
-                            budget,
-                            `ocr`
-                        );
-                        try {
-                            await prewarmRace;
-                        } catch (e) {
-                            // Pre-warm timed out beyond what budget allows. Abort it.
-                            ocrPrewarmCtrl?.abort();
-                            throw e;
-                        }
-                        const recovered = await tryOcrRecovery(evidence, platform, targetUdid);
-                        if (recovered) {
-                            result = recovered;
-                            strategyLabel = "ocr";  // not "ocr-recovered" — this is the normal path now
-                        } else {
-                            result = { success: false, reason: `OCR did not find a viable match for "${query.text}"` };
-                        }
-                    } else {
-                        result = await withCancelableTimeout(
-                            (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal),
-                            budget,
-                            `ocr`
-                        );
-                    }
+                    result = await withCancelableTimeout(
+                        (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal),
+                        budget,
+                        `ocr`
+                    );
                     break;
                 case "coordinate":
                     // Prefer `beforeScaleFactor` (captured against `targetUdid` this turn)
@@ -2158,9 +2107,6 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
 
         if (result.success) {
-            // Higher-priority strategy won — kill the OCR pre-warm so its
-            // device-side screencap doesn't keep running.
-            if (strat !== "ocr") ocrPrewarmCtrl?.abort();
             let screenshot: TapScreenshot | undefined;
             let verification: TapVerification | undefined;
             let afterWithMarkerBuffer: Buffer | undefined;
