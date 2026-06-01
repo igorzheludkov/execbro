@@ -9,8 +9,6 @@ import {
 } from "./telemetry.js";
 import { getTargetPlatform } from "./state.js";
 import { UserInputError } from "./errors.js";
-import { getUsageInfo, getPricingInfo, formatPlanPrice } from "./license.js";
-import { API_BASE_URL } from "./config.js";
 import { estimateImageTokens } from "./toolHelpers.js";
 import { connectedApps, shouldShowFeedbackHint, markFeedbackHintShown, pushLogBox } from "./index.js";
 
@@ -63,22 +61,9 @@ export function registerToolWithTelemetry(
 ): void {
     toolRegistry.set(toolName, { config, handler });
     server.registerTool(toolName, config, async (args: any) => {
-        // --- Usage limit check (runs on every tool call) ---
-        // Promo is client-enforced: while promotionalPeriodEndsAt is in the future,
-        // never block — even if the backend cached canUse=false before the promo
-        // started, or if a backend bug flips canUse incorrectly.
-        const usageInfo = getUsageInfo();
-        const inPromo = !!usageInfo?.promotionalPeriodEndsAt
-            && new Date(usageInfo.promotionalPeriodEndsAt).getTime() > Date.now();
-        if (!inPromo && usageInfo && !usageInfo.canUse) {
-            const proPricing = getPricingInfo()?.pro;
-            const upgradeClause = proPricing
-                ? `Upgrade to Pro for ${formatPlanPrice(proPricing)} unlimited usage`
-                : `Upgrade to Pro for unlimited usage`;
-            const message = `Monthly free limit reached (${usageInfo.used}/${usageInfo.limit}). ${upgradeClause} at ${API_BASE_URL}/pricing`;
-            return { content: [{ type: "text" as const, text: message }] };
-        }
-
+        // Open-core: the local product is free and uncapped — no usage-limit gate.
+        // License validation still runs (identity + dormant billing channel for the
+        // future hosted tier) but never blocks a tool call. See decisions/open-core-strategy.md.
         const startTime = Date.now();
         let success = true;
         let errorMessage: string | undefined;

@@ -26,9 +26,7 @@ Have an idea or found something that could be better? Head over to [GitHub Discu
 
 ## Pricing
 
-ExecBro is **free while in beta** — every feature, no limits, no account required. Use it as much as you like.
-
-When the beta ends, paid plans will be introduced and full details published at [execbro.com/pricing](https://execbro.com/pricing). Everyone already using ExecBro before that point gets rewarded for being an early adopter — auto-applied via your installation ID, no action required. Until then, nothing changes and everything stays free.
+ExecBro is **free and open** — every feature, no usage limits, no account required. Use it as much as you like. The tools you run locally stay free; that's the model.
 
 ## Features
 
@@ -440,7 +438,7 @@ This package collects anonymous usage telemetry to help improve the product. No 
 
 On first tool use, the package automatically registers your installation with our backend. No account or login is required — the Tool works fully out of the box.
 
-**Why we do this:** The product roadmap includes features that build on installation identity — project memory (your AI assistant gets smarter with every session by remembering navigation maps, element signatures, and debug patterns), cloud sync across machines, team collaboration with shared debugging context, and a Pro dashboard for managing installations and subscriptions. Auto-registration lays the groundwork so these features work seamlessly when they ship, without requiring a disruptive setup step later.
+**Why we do this:** The product roadmap includes features that build on installation identity — project memory (your AI assistant gets smarter with every session by remembering navigation maps, element signatures, and debug patterns), cloud sync across machines, team collaboration with shared debugging context, and a dashboard for managing your installations. Auto-registration lays the groundwork so these features work seamlessly when they ship, without requiring a disruptive setup step later.
 
 **What is sent:**
 

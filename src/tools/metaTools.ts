@@ -5,7 +5,7 @@ import { existsSync, unlinkSync } from "fs";
 
 import { registerToolWithTelemetry, toolRegistry } from "../core/register.js";
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "../core/guides.js";
-import { getLicenseStatus, getUsageInfo, getDashboardUrl } from "../core/license.js";
+import { getLicenseStatus, getDashboardUrl } from "../core/license.js";
 import { getServerVersion, TELEMETRY_JSONL_PATH } from "../core/telemetry.js";
 import { getTargetPlatform } from "../core/state.js";
 import { formatIssueBody, buildGitHubUrl } from "../core/feedback.js";
@@ -65,7 +65,7 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
         "get_license_status",
         {
             description:
-                "Get your installation ID and license status. Shows your unique Installation ID (needed to activate Pro in the dashboard), current license tier, and cache validity.",
+                "Get your installation ID and account status. Shows your unique Installation ID (used to link your account for future hosted features), current tier, and cache validity. The local product is free and uncapped — there are no usage limits.",
             inputSchema: {},
         },
         async () => {
@@ -81,32 +81,14 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
 
             lines.push(`Cache valid until: ${status.cacheExpiresAt}`);
 
-            // Usage limits
-            const usage = getUsageInfo();
-            if (usage) {
-                lines.push("");
-                lines.push("--- Usage ---");
-                if (usage.creditsRemaining !== null) {
-                    lines.push(`Credits remaining: ${usage.creditsRemaining.toLocaleString()}`);
-                    lines.push(`Used this month: ${usage.used.toLocaleString()}`);
-                } else {
-                    lines.push(`Monthly usage: ${usage.used} / ${usage.limit}`);
-                }
-                lines.push(`Month: ${usage.monthKey}`);
-                if (usage.promotionalPeriod) {
-                    const endsAt = usage.promotionalPeriodEndsAt
-                        ? new Date(usage.promotionalPeriodEndsAt).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
-                        : "unknown";
-                    lines.push(`Status: Active (promotional period — no limits until ${endsAt})`);
-                } else {
-                    lines.push(`Status: ${usage.canUse ? "Active" : "Limit reached"}`);
-                }
-            }
+            // Open-core: the local product is free and uncapped — no usage limits to display.
+            // License validation still runs (identity + dormant billing channel for the future
+            // hosted tier), but there is nothing to gate. See decisions/open-core-strategy.md.
 
             if (status.tier === "free") {
                 const dashboardUrl = getDashboardUrl();
-                lines.push("");
                 if (dashboardUrl) {
+                    lines.push("");
                     lines.push(`Link your account: ${dashboardUrl}/link?id=${status.installationId}`);
                 }
             }
