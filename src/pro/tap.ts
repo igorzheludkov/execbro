@@ -1174,9 +1174,8 @@ async function tryAccessibilityStrategy(
 
 /**
  * Run OCR sense (capture + recognize + match) and tap the match. Also records
- * `sink.ocr.bestCandidate` with coordinates before tapping, so the orchestrator
- * can salvage a perfect match via tryOcrRecovery() if this strategy times out
- * ~30ms past its cap (the COMPRAR/Portuguese-Android cluster, journal 2026-05-16).
+ * `sink.ocr.bestCandidate` (matched text + tap coords) into the evidence sink,
+ * which is serialized into the R2 failure bundle for diagnostics.
  */
 async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal): Promise<StrategyResult> {
     if (sink) sink.ocr.ran = true;
@@ -1235,12 +1234,10 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
 
         const match = findOcrMatch(ocrResult, searchText);
 
-        // Step 2 (2026-05-15 plan): record the best candidate with coordinates
-        // BEFORE any tap-execution code runs. If the strategy's withTimeout
-        // races us by 30ms (real production case: COMPRAR/Portuguese-Android
-        // cluster — `findOcrMatch` returned `COMPRAR@1.00` 30ms past the cap),
-        // the orchestrator can recover by tapping at these coords with the
-        // `ocr-recovered` strategy label.
+        // Record the best candidate (matched text + tap coords) into the
+        // evidence sink. This is serialized into the R2 failure bundle and is
+        // useful when diagnosing OCR taps (e.g. OCR found the match at these
+        // coords but the tap didn't register a visual change).
         if (sink && match) {
             const closest = sink.ocr.closestMatch;
             sink.ocr.bestCandidate = {
@@ -1298,48 +1295,6 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
         };
     } finally {
         if (sink) sink.ocr.durationMs = Date.now() - ocrStartedAt;
-    }
-}
-
-/**
- * Step 2 (2026-05-15 plan): OCR-strategy timeout recovery. If the OCR sense
- * already wrote a high-confidence candidate to the evidence sink (perfect
- * match found ~30ms past the strategy cap, COMPRAR cluster), tap directly at
- * the candidate's coordinates. Returns null when there's no candidate worth
- * acting on so the caller falls back to normal failure handling.
- */
-async function tryOcrRecovery(
-    evidence: EvidenceSink,
-    platform: "ios" | "android",
-    udid?: string
-): Promise<StrategyResult | null> {
-    const bc = evidence.ocr.bestCandidate;
-    if (!bc || bc.score < 0.9) return null;
-
-    try {
-        if (platform === "ios") {
-            const { getDevicePixelRatio } = await import("../core/ios.js");
-            const dpr = await getDevicePixelRatio(udid);
-            const tapResult = await iosTap(
-                Math.round((bc.tapCenter.x * bc.scaleFactor) / dpr),
-                Math.round((bc.tapCenter.y * bc.scaleFactor) / dpr),
-                { udid }
-            );
-            if (!tapResult.success) return null;
-        } else {
-            await androidTap(
-                Math.round(bc.tapCenter.x * bc.scaleFactor),
-                Math.round(bc.tapCenter.y * bc.scaleFactor)
-            );
-        }
-        return {
-            success: true,
-            reason: `OCR recovered after timeout — tapped "${bc.text}"@${bc.score.toFixed(2)}`,
-            text: bc.text,
-            convertedTo: { x: bc.tapCenter.x, y: bc.tapCenter.y, unit: "pixels" }
-        };
-    } catch {
-        return null;
     }
 }
 
@@ -2033,7 +1988,6 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         const budget = Math.min(cap, remaining);
 
         let result: StrategyResult;
-        let strategyLabel: string = strat;
 
         try {
             switch (strat) {
@@ -2079,31 +2033,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             }
         } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
-
-            // Step 2 recovery: when the OCR strategy times out but already
-            // produced a high-confidence candidate (race condition: the tap
-            // was queued ~30ms past the cap in the COMPRAR cluster), tap the
-            // candidate directly and label the strategy `ocr-recovered`.
-            // Score is from sink.ocr.closestMatch's similarity to the search;
-            // a perfect match is 1.0 — gate at 0.9 to skip "not on screen".
-            const recoveredResult = (strat === "ocr" && /ocr timed out after \d+ms$/.test(reason))
-                ? await tryOcrRecovery(evidence, platform, targetUdid)
-                : null;
-
-            if (recoveredResult) {
-                result = recoveredResult;
-                strategyLabel = "ocr-recovered";
-                // Fall through past the catch block to the success handler.
-            } else {
-                // Classify the throw: a strategy-level timeout means "result UNKNOWN"
-                // (the strategy didn't finish), distinct from "ran clean and found
-                // nothing". Agents must not infer absence from timeouts. The
-                // `outcome` field carries that distinction; `reason` stays the raw
-                // message so existing log-matchers / classifiers keep working.
-                const outcome: TapAttemptOutcome = STRATEGY_TIMEOUT_RE.test(reason) ? "timeout" : "error";
-                attempted.push({ strategy: strat, reason, outcome });
-                continue;
-            }
+            // Classify the throw: a strategy-level timeout means "result UNKNOWN"
+            // (the strategy didn't finish), distinct from "ran clean and found
+            // nothing". Agents must not infer absence from timeouts. The
+            // `outcome` field carries that distinction; `reason` stays the raw
+            // message so existing log-matchers / classifiers keep working.
+            const outcome: TapAttemptOutcome = STRATEGY_TIMEOUT_RE.test(reason) ? "timeout" : "error";
+            attempted.push({ strategy: strat, reason, outcome });
+            continue;
         }
 
         if (result.success) {
@@ -2118,7 +2055,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 } catch { dprForMarker = 3; }
             }
             const strategyMarker = computeMarkerPx({
-                strategy: strategyLabel,
+                strategy: strat,
                 input: strat === "coordinate" ? { x: query.x!, y: query.y! } : undefined,
                 convertedTo: result.convertedTo,
                 platform,
@@ -2161,7 +2098,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 };
             }
             const successResult = formatTapSuccess({
-                method: strategyLabel,
+                method: strat,
                 query,
                 pressed: result.pressed,
                 text: result.text,
