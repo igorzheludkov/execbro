@@ -72,9 +72,13 @@ async function main() {
     initTelemetry();
     identifyIfDevMode(getInstallationId());
 
-    // Pre-load usage cache so the tool-level gate has fresh data on first tool call.
-    const { ensureLicense } = await import("./core/license.js");
-    await ensureLicense();
+    // License validation is intentionally NOT pre-loaded here. It runs lazily on
+    // first real tool use (see ensureLicense() in trackToolInvocation), so that a
+    // bare MCP server boot that never invokes a tool does not hit the backend.
+    // This keeps Firebase reads/writes proportional to Active Sessions
+    // (session_start_ai_devtools) rather than Agent Sessions (session_start).
+    // Trade-off: the per-tool usage gate has no usage data on the very first tool
+    // call of a session and fails open for that single call — acceptable.
 
     const useHttp = process.argv.includes("--http");
     const httpPort = parseInt(process.env.MCP_HTTP_PORT || "8600", 10);
