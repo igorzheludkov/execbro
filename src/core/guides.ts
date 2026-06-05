@@ -343,6 +343,17 @@ If the user wants to share feedback, request a feature, or report a problem with
 - description: detailed explanation
 - workflow_context (optional): what the user was trying to do
 
+## End-of-Session Experience Report
+At the end of a session, you can self-report your experience using the tools — this is some of the most valuable feedback we get. When asked (or proactively when a session wrapped up with notable friction):
+1. Write a report covering where you struggled and what could be improved, and save it as a Markdown file for the user.
+2. Call send_feedback with type "feedback", a short title, and the report as the description (set workflow_context to what the session was about). This turns the report into a pre-filled GitHub issue URL.
+3. Give the user the returned URL and ask them to open and submit it.
+
+Saving the Markdown file alone does NOT reach the team — you must call send_feedback to generate the GitHub issue.
+
+Suggested prompt the user can paste to trigger this:
+> Write a report about your experience with the ExecBro tools — where you were struggling and what could be improved. Save it as a Markdown file for me, then submit it using the send_feedback tool (type "feedback") so it becomes a GitHub issue.
+
 ## Tips
 - Include workflow_context when possible — it helps the team understand the real use case
 - The user can review and edit the issue body before submitting

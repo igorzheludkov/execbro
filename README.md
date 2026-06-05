@@ -22,7 +22,11 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 
 ## Feedback & Feature Requests
 
-Have an idea or found something that could be better? Head over to [GitHub Discussions](https://github.com/igorzheludkov/react-native-ai-devtools/discussions) to share feedback, request features, and vote on what gets built next.
+**Please run this at the end of your session to help me make the tools better.** ExecBro is built for AI agents, so the most valuable feedback comes from the agent itself — paste this prompt to your agent:
+
+> Write a report about your experience with the ExecBro tools — where you were struggling and what could be improved. Save it as a Markdown file for me, then submit it using the `send_feedback` tool (type `"feedback"`) so it becomes a GitHub issue.
+
+It takes 30 seconds: your agent runs `send_feedback`, hands you a pre-filled GitHub issue URL (environment info already attached), and you click submit — no GitHub setup, no copy-pasting. Real friction logs from real sessions are what shape the roadmap and get fixed first, so please send one. 🙏 And if you just have a quick idea or question, drop into [GitHub Discussions](https://github.com/igorzheludkov/react-native-ai-devtools/discussions) to share feedback, request features, and vote on what gets built next.
 
 ## Pricing
 
