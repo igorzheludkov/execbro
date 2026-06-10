@@ -1,6 +1,5 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
-import { connectedApps } from "./state.js";
 import { getConnectedAppByDevice, getFirstConnectedApp, getConnectedAppBySimulatorUdid, getConnectedAppByAndroidDeviceId } from "./connection.js";
 
 // ============================================================================
@@ -102,6 +101,14 @@ export async function getPressableElements(
     let targetApp: ReturnType<typeof getFirstConnectedApp> = null;
     if (udid && platform === "ios") {
         targetApp = getConnectedAppBySimulatorUdid(udid);
+        // scan_metro links simulatorUdid asynchronously after the CDP connect; in
+        // that window the udid lookup misses even though the right app is already
+        // connected. Fall back to the device-name match so callers (ios_screenshot)
+        // don't silently degrade to the accessibility-tree pressables list.
+        if (!targetApp && device) {
+            const matched = getConnectedAppByDevice(device);
+            if (matched && matched.platform === "ios") targetApp = matched;
+        }
     } else if (device) {
         const matched = getConnectedAppByDevice(device);
         if (matched && (!platform || matched.platform === platform)) targetApp = matched;
@@ -293,6 +300,12 @@ export async function getPressableElements(
 
             var GENERIC_COMPONENT = /^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText|Unknown)$/;
 
+            // The components that render PressabilityDebugView in DEV builds. Used to walk
+            // up from a PDV's host view to the touchable that owns it — the composite chain
+            // in between is generic wrappers (View ForwardRef, Animated(View)) whose props
+            // carry no onPress, so they are useless as a collectText / identifier root.
+            var PDV_OWNER_COMPONENT = /^(Pressable|Touchable(Opacity|Highlight|WithoutFeedback|NativeFeedback|Bounce))$/;
+
             function buildPath(fiber) {
                 var parts = [];
                 var cur = fiber;
@@ -366,7 +379,166 @@ export async function getPressableElements(
                 }
             }
 
-            walkPressables(roots[0].current, 0);
+            // PRIMARY detection: PressabilityDebugView-based walk — mirrors RN Inspector "Touchables" exactly.
+            // In DEV mode, every Pressable / TouchableOpacity / TouchableHighlight /
+            // TouchableWithoutFeedback / TouchableNativeFeedback renders a PressabilityDebugView
+            // as a child.  Its immediate parent (fiber.return) is the HOST view that carries
+            // the event handlers — we measure that.
+            // FALLBACK: plain onPress detection for production builds (PDV not rendered).
+
+            var anyPDV = false;
+            (function quickCheckPDV(f, d) {
+                if (!f || d > 200 || anyPDV) return;
+                var n = getComponentName(f);
+                if (n === 'PressabilityDebugView') { anyPDV = true; return; }
+                quickCheckPDV(f.child, d + 1);
+                if (!anyPDV) quickCheckPDV(f.sibling, d);
+            })(roots[0].current, 0);
+
+            // Walk for TextInput elements (not covered by PressabilityDebugView in either mode).
+            function walkInputs(fiber, depth) {
+                if (!fiber || depth > 5000) return;
+                var name = getComponentName(fiber);
+                var props = fiber.memoizedProps;
+                if (name === 'MaybeScreen' && props && props.active === 0) return;
+                if (name === 'SceneView' && props && props.focused === false) return;
+                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+                var isInput = props && !props.onPress &&
+                    (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
+                if (isInput) {
+                    var hostsForThis = [];
+                    findHostsInSubtree(fiber, 0, hostsForThis, 16);
+                    if (hostsForThis.length > 0) {
+                        var text = collectText(fiber, 0, true);
+                        var componentName = findMeaningfulAncestorName(fiber) || name || 'Unknown';
+                        if (GENERIC_COMPONENT.test(componentName)) {
+                            var childName = findMeaningfulChildName(fiber);
+                            if (childName) componentName = childName;
+                        }
+                        var props2 = fiber.memoizedProps || {};
+                        var testID = (props2.testID || props2.nativeID) || null;
+                        var accessibilityLabel = props2.accessibilityLabel || null;
+                        var hostIndices = [];
+                        for (var hi3 = 0; hi3 < hostsForThis.length; hi3++) {
+                            hostIndices.push(hostFibers.length);
+                            hostFibers.push(hostsForThis[hi3]);
+                        }
+                        fiberMeta.push({
+                            component: componentName,
+                            path: buildPath(fiber),
+                            text: text ? text.slice(0, 100) : '',
+                            testID: testID,
+                            accessibilityLabel: accessibilityLabel,
+                            isInput: true,
+                            hostIndices: hostIndices
+                        });
+                    }
+                }
+                var child = fiber.child;
+                while (child) { walkInputs(child, depth + 1); child = child.sibling; }
+            }
+
+            function walkPressabilityDebugViews(fiber, depth, hidden) {
+                if (!fiber || depth > 5000) return;
+                var name = getComponentName(fiber);
+                var props = fiber.memoizedProps;
+                var nextHidden = hidden;
+                if (name === 'MaybeScreen' && props && props.active === 0) nextHidden = true;
+                if (name === 'SceneView' && props && props.focused === false) nextHidden = true;
+                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) nextHidden = true;
+
+                if (!nextHidden && name === 'PressabilityDebugView') {
+                    // fiber.return = the HOST view that wraps the pressable's children
+                    var hostFiber = fiber.return;
+                    if (hostFiber && getMeasurable(hostFiber)) {
+                        // Walk up from the host fiber to the touchable component that owns this
+                        // PDV. Match by name (PDV_OWNER_COMPONENT) — stopping at the first
+                        // composite ancestor is wrong because that's a generic wrapper
+                        // (ForwardRef displayName 'View', then Animated(View) for Touchables).
+                        var pressableFiber = hostFiber;
+                        var firstComposite = null;
+                        var cur = hostFiber.return;
+                        var upDepth = 0;
+                        while (cur && upDepth < 10) {
+                            if (typeof cur.type !== 'string' && cur.type !== null) {
+                                if (!firstComposite) firstComposite = cur;
+                                var curName = getComponentName(cur);
+                                if (curName && PDV_OWNER_COMPONENT.test(curName)) {
+                                    pressableFiber = cur;
+                                    break;
+                                }
+                            }
+                            cur = cur.return;
+                            upDepth++;
+                        }
+                        if (pressableFiber === hostFiber && firstComposite) pressableFiber = firstComposite;
+
+                        var pressableProps = pressableFiber.memoizedProps || {};
+                        var text = collectText(pressableFiber, 0, true);
+                        // Prefer the nearest semantic ancestor (FilterRow, RoleButton, ...) over
+                        // generic Touchable/Pressable/View wrappers. The climb is capped at a few
+                        // composite levels so a bare Pressable isn't named after its screen container.
+                        var componentName = null;
+                        var an = pressableFiber.return;
+                        var anComposites = 0;
+                        var anDepth = 0;
+                        while (an && anDepth < 12 && anComposites < 4 && !componentName) {
+                            if (typeof an.type !== 'string') {
+                                var anName = getComponentName(an);
+                                if (anName) {
+                                    anComposites++;
+                                    if (!RN_PRIMITIVES.test(anName) && !GENERIC_COMPONENT.test(anName)) {
+                                        componentName = anName;
+                                    }
+                                }
+                            }
+                            an = an.return;
+                            anDepth++;
+                        }
+                        if (!componentName) {
+                            componentName = findMeaningfulAncestorName(pressableFiber) || getComponentName(pressableFiber) || 'Unknown';
+                        }
+                        if (GENERIC_COMPONENT.test(componentName)) {
+                            var childName = findMeaningfulChildName(pressableFiber);
+                            if (childName) componentName = childName;
+                        }
+                        var path = buildPath(pressableFiber);
+
+                        // testID/accessibilityLabel are spread onto the host view by TouchableOpacity etc.
+                        var hostProps = hostFiber.memoizedProps || {};
+                        var testID = hostProps.testID || hostProps.nativeID || pressableProps.testID || pressableProps.nativeID || null;
+                        var accessibilityLabel = hostProps.accessibilityLabel || pressableProps.accessibilityLabel || null;
+
+                        var hostIdx = hostFibers.length;
+                        hostFibers.push(hostFiber);
+                        fiberMeta.push({
+                            component: componentName,
+                            path: path,
+                            text: text ? text.slice(0, 100) : '',
+                            testID: testID,
+                            accessibilityLabel: accessibilityLabel,
+                            isInput: false,
+                            hostIndices: [hostIdx]
+                        });
+                    }
+                    // Do not recurse into PressabilityDebugView's own children (debug overlay)
+                    return;
+                }
+
+                var child = fiber.child;
+                while (child) {
+                    walkPressabilityDebugViews(child, depth + 1, nextHidden);
+                    child = child.sibling;
+                }
+            }
+
+            if (anyPDV) {
+                walkPressabilityDebugViews(roots[0].current, 0, false);
+                walkInputs(roots[0].current, 0);
+            } else {
+                // Fallback: original onPress-based detection for production builds
+                walkPressables(roots[0].current, 0);
+            }
 
             // Collect text fibers that are NOT inside a pressable — used later to attach
             // spatial 'nearbyText' hints to icon-only pressables.
