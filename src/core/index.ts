@@ -149,6 +149,7 @@ export {
   getScreenLayout,
   formatScreenLayoutTree,
   getPressableElements,
+  getScreenState,
   enrichScreenshotWithLayout,
   inspectComponent,
   findComponents,
@@ -329,3 +330,11 @@ export type { OutputFormat } from "./format.js";
 // Measure (component on-screen geometry)
 export { measureComponent } from "./measureComponentTools.js";
 export type { MeasureBounds, MeasureOutcome, MeasureToolResult } from "./measureComponentTools.js";
+
+// Screen State
+export type {
+  ScreenState,
+  ScreenStateRoute,
+  ScreenStateOverlay,
+  ScreenStatePressable,
+} from "./screenState.js";
