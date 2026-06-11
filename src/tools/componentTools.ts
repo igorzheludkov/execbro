@@ -6,6 +6,7 @@ import {
     getScreenLayout,
     formatScreenLayoutTree,
     getPressableElements,
+    getScreenState,
     inspectComponent,
     findComponents,
     toggleElementInspector,
@@ -209,6 +210,7 @@ export function registerComponentTools(server: McpServer): void {
         "get_pressable_elements",
         {
             description:
+                "Prefer get_screen_state after navigation (route + overlays + pressables in one call).\n\n" +
                 "Find all pressable (onPress) and input (TextInput) elements currently visible on screen. Returns component names, ready-to-tap center coordinates in SCREENSHOT PIXELS (same space as ios_screenshot/android_screenshot — pass directly to tap(x, y)), text labels, testID, accessibilityLabel, and a spatial nearbyText hint for icon-only buttons. Each element includes hasLabel (true if it contains text) and isInput (true for TextInput fields).\n" +
                 "HELPER — call before `tap` when you need to enumerate candidate elements before committing to a target; not a replacement for tap itself.\n" +
                 "PURPOSE: Produce a ready-to-tap inventory of every interactive element on screen with screenshot-pixel coordinates that tap(x, y) accepts directly.\n" +
@@ -330,7 +332,54 @@ export function registerComponentTools(server: McpServer): void {
             };
         }
     );
-    
+
+    // Tool: Get current screen state — route, overlays, pressables (post-navigation checkpoint)
+    registerToolWithTelemetry(
+        server,
+        "get_screen_state",
+        {
+            description:
+                "Get the current screen orientation snapshot: active route name + params, any blocking overlays (bottom sheets, modals, alerts) and their tappable elements, and all pressable elements currently reachable. " +
+                "Call this after any tap or navigation to orient before the next action. " +
+                "Returns JSON with route (name, params, stackDepth), overlays[], and pressables[]. " +
+                "When overlays are present, root-level pressables covered by an overlay are excluded so you don't accidentally tap behind a sheet.\n\n" +
+                "WHEN TO USE: After every tap or swipe that may have triggered navigation. Replaces the get_pressable_elements + screenshot OCR pattern for orientation.\n" +
+                "LIMITATIONS: route is null when the app uses no React Navigation or Expo Router. Requires a live Metro connection. Coordinates are in points (iOS) / dp (Android).\n" +
+                "SEE ALSO: get_pressable_elements for raw pressable list without route context; get_screen_layout for full component tree with bounds.",
+            inputSchema: {
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+            }
+        },
+        async ({ device }) => {
+            if (!hasMetro()) {
+                const hint = await metroMissingHintIfAbsent("get_screen_state");
+                return {
+                    content: [{ type: "text", text: `get_screen_state unavailable.${hint}` }],
+                    isError: true
+                };
+            }
+
+            const result = await getScreenState({ device });
+
+            const metaNotes = collectMetaNotes(result);
+
+            if (!result.success) {
+                const errText = metaNotes.length > 0
+                    ? `Error: ${result.error}\n\n${metaNotes.join("\n")}`
+                    : `Error: ${result.error}`;
+                return {
+                    content: [{ type: "text", text: errText }],
+                    isError: true
+                };
+            }
+
+            const body = metaNotes.length > 0
+                ? `${result.result}\n\n${metaNotes.join("\n")}`
+                : result.result ?? "{}";
+            return { content: [{ type: "text", text: body }] };
+        }
+    );
+
     function formatPressablesInPixels(
         elements: NonNullable<Awaited<ReturnType<typeof getPressableElements>>["parsedElements"]>,
         opts: {
