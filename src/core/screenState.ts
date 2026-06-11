@@ -489,6 +489,127 @@ export async function getScreenState(
 
     await delay(300);
 
-    // Resolve phase is added in Task 4
-    return { success: false, error: "resolve phase not yet implemented" };
+    const resolveExpression = `
+(function() {
+    var hostFibers = globalThis.__screenStateFibers;
+    var meta = globalThis.__screenStateMeta;
+    var measurements = globalThis.__screenStateMeasurements;
+    var rootIdx = globalThis.__screenStateRootIdx;
+    var route = globalThis.__screenStateRoute;
+    var overlayMeta = globalThis.__screenStateOverlayMeta || [];
+    var overlayMeasurements = globalThis.__screenStateOverlayMeasurements || [];
+    globalThis.__screenStateFibers = null;
+    globalThis.__screenStateMeta = null;
+    globalThis.__screenStateMeasurements = null;
+    globalThis.__screenStateRootIdx = null;
+    globalThis.__screenStateRoute = null;
+    globalThis.__screenStateOverlayHostFibers = null;
+    globalThis.__screenStateOverlayMeta = null;
+    globalThis.__screenStateOverlayMeasurements = null;
+
+    if (!hostFibers || !measurements || !meta) {
+        return { error: 'No measurement data. Run get_screen_state again.' };
+    }
+
+    // Viewport
+    var viewportW = 9999, viewportH = 9999;
+    var rootM = (rootIdx != null && rootIdx >= 0) ? measurements[rootIdx] : null;
+    if (rootM && rootM.width > 0 && rootM.height > 0) {
+        viewportW = rootM.width;
+        viewportH = rootM.height + (rootM.y > 0 ? rootM.y : 0);
+    }
+
+    // Build overlay bounds by unioning their host measurements
+    var overlays = [];
+    for (var oi = 0; oi < overlayMeta.length; oi++) {
+        var om = overlayMeta[oi];
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        var valid = false;
+        for (var hi = om.hostStart; hi < om.hostEnd; hi++) {
+            var mm = overlayMeasurements[hi];
+            if (!mm || mm.width <= 0 || mm.height <= 0) continue;
+            valid = true;
+            if (mm.x < minX) minX = mm.x;
+            if (mm.y < minY) minY = mm.y;
+            if (mm.x + mm.width > maxX) maxX = mm.x + mm.width;
+            if (mm.y + mm.height > maxY) maxY = mm.y + mm.height;
+        }
+        // Only include overlay if it covers > 0 area and > 40% of viewport
+        if (!valid) continue;
+        var oBounds = { x: Math.round(minX), y: Math.round(minY), width: Math.round(maxX - minX), height: Math.round(maxY - minY) };
+        overlays.push({ type: om.type, title: om.title, bounds: oBounds, pressables: [] });
+    }
+
+    // Build pressable list
+    var allPressables = [];
+    for (var i = 0; i < meta.length; i++) {
+        if (i === rootIdx) continue;
+        var m = measurements[i];
+        if (!m || m.width <= 0 || m.height <= 0) continue;
+        if (m.x + m.width < 0 || m.y + m.height < 0) continue;
+        if (m.x > viewportW || m.y > viewportH) continue;
+        allPressables.push({
+            label: meta[i].label,
+            center: { x: Math.round(m.x + m.width / 2), y: Math.round(m.y + m.height / 2) },
+            bounds: { x: Math.round(m.x), y: Math.round(m.y), width: Math.round(m.width), height: Math.round(m.height) },
+            testID: meta[i].testID
+        });
+    }
+
+    // Assign pressables to overlays vs root based on overlay bounds
+    var rootPressables = [];
+    for (var pi = 0; pi < allPressables.length; pi++) {
+        var p = allPressables[pi];
+        var assignedToOverlay = false;
+        for (var ov = 0; ov < overlays.length; ov++) {
+            var ob = overlays[ov].bounds;
+            var fullyInside = p.bounds.x >= ob.x && p.bounds.y >= ob.y &&
+                p.bounds.x + p.bounds.width <= ob.x + ob.width &&
+                p.bounds.y + p.bounds.height <= ob.y + ob.height;
+            if (fullyInside) {
+                overlays[ov].pressables.push(p);
+                assignedToOverlay = true;
+                break;
+            }
+        }
+        if (!assignedToOverlay) {
+            // Exclude from root if fully covered by an overlay
+            var covered = false;
+            for (var ov2 = 0; ov2 < overlays.length; ov2++) {
+                var ob2 = overlays[ov2].bounds;
+                var fullyCovered = p.bounds.x >= ob2.x && p.bounds.y >= ob2.y &&
+                    p.bounds.x + p.bounds.width <= ob2.x + ob2.width &&
+                    p.bounds.y + p.bounds.height <= ob2.y + ob2.height;
+                if (fullyCovered) { covered = true; break; }
+            }
+            if (!covered) rootPressables.push(p);
+        }
+    }
+
+    // Strip bounds from overlay objects (not in public interface)
+    var cleanOverlays = overlays.map(function(o) {
+        return { type: o.type, title: o.title, pressables: o.pressables };
+    });
+
+    return { route: route, overlays: cleanOverlays, pressables: rootPressables };
+})()
+    `;
+
+    const resolveResult = await executeInApp(resolveExpression, false, { timeoutMs: 15000, originatingToolName: "get_screen_state" }, device);
+
+    if (!resolveResult.success) return resolveResult;
+
+    let screenState: ScreenState | undefined;
+    try {
+        const parsed = JSON.parse(resolveResult.result || "{}");
+        if (parsed.error) return { success: false, error: parsed.error };
+        screenState = parseScreenStateResponse(parsed) ?? undefined;
+    } catch {
+        return { success: false, error: "Failed to parse screen state response" };
+    }
+
+    if (!screenState) return { success: false, error: "Empty screen state response" };
+
+    const json = JSON.stringify(screenState, null, 2);
+    return { success: true, result: json, screenState };
 }
