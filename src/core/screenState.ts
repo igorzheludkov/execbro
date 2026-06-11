@@ -423,14 +423,7 @@ export async function getScreenState(
         for (var hi = 0; hi < om.hostFibers.length; hi++) {
             overlayHostFibers.push(om.hostFibers[hi]);
         }
-        // First text child as title
         var title = collectText(om.fiber, 0);
-        // Collect pressables inside the overlay
-        var ovPressHostFibers = [];
-        var ovPressMetaList = [];
-        walkPressabilityDebugViews(om.fiber, 0, false);
-        // After the walk above added to hostFibers/fiberMeta, separate them out
-        // Actually we can't easily separate — let's just record the overlay bounds range
         return {
             type: om.type,
             title: (title && title.length > 2) ? title.slice(0, 60) : null,
@@ -609,6 +602,17 @@ export async function getScreenState(
     }
 
     if (!screenState) return { success: false, error: "Empty screen state response" };
+
+    // Apply TS-side overlay filtering as a safety pass
+    for (const overlay of screenState.overlays) {
+        if (overlay.pressables.length === 0) continue;
+        const minX = Math.min(...overlay.pressables.map((p) => p.bounds.x));
+        const minY = Math.min(...overlay.pressables.map((p) => p.bounds.y));
+        const maxX = Math.max(...overlay.pressables.map((p) => p.bounds.x + p.bounds.width));
+        const maxY = Math.max(...overlay.pressables.map((p) => p.bounds.y + p.bounds.height));
+        const overlayBounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+        screenState.pressables = filterPressablesCoveredByOverlay(screenState.pressables, overlayBounds);
+    }
 
     const json = JSON.stringify(screenState, null, 2);
     return { success: true, result: json, screenState };
