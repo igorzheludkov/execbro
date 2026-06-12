@@ -1,7 +1,11 @@
 import { describe, it, expect } from "@jest/globals";
 import {
-    filterPressablesCoveredByOverlay,
+    markPressablesCoveredByOverlay,
     parseScreenStateResponse,
+    formatScreenStateSummary,
+    describePressHandler,
+    describePropHandlers,
+    type ScreenState,
     type ScreenStatePressable,
 } from "../../core/screenState.js";
 
@@ -15,29 +19,29 @@ function pressable(overrides: Partial<ScreenStatePressable> = {}): ScreenStatePr
     };
 }
 
-describe("filterPressablesCoveredByOverlay", () => {
+describe("markPressablesCoveredByOverlay", () => {
     const overlay = { x: 0, y: 400, width: 375, height: 300 };
 
-    it("keeps pressable fully above the overlay", () => {
+    it("does not flag pressable fully above the overlay", () => {
         const p = pressable({ bounds: { x: 10, y: 50, width: 100, height: 44 } });
-        const result = filterPressablesCoveredByOverlay([p], overlay);
-        expect(result).toHaveLength(1);
+        const result = markPressablesCoveredByOverlay([p], overlay);
+        expect(result[0].blockedByOverlay).toBeUndefined();
     });
 
-    it("removes pressable fully inside the overlay bounds", () => {
+    it("flags pressable fully inside the overlay bounds", () => {
         const p = pressable({ bounds: { x: 50, y: 450, width: 100, height: 44 } });
-        const result = filterPressablesCoveredByOverlay([p], overlay);
-        expect(result).toHaveLength(0);
+        const result = markPressablesCoveredByOverlay([p], overlay);
+        expect(result[0].blockedByOverlay).toBe(true);
     });
 
-    it("keeps pressable that partially overlaps (only fully covered ones are removed)", () => {
+    it("does not flag pressable that partially overlaps (only fully covered ones are blocked)", () => {
         const p = pressable({ bounds: { x: 50, y: 380, width: 100, height: 60 } });
-        const result = filterPressablesCoveredByOverlay([p], overlay);
-        expect(result).toHaveLength(1);
+        const result = markPressablesCoveredByOverlay([p], overlay);
+        expect(result[0].blockedByOverlay).toBeUndefined();
     });
 
     it("handles empty pressables list", () => {
-        expect(filterPressablesCoveredByOverlay([], overlay)).toHaveLength(0);
+        expect(markPressablesCoveredByOverlay([], overlay)).toHaveLength(0);
     });
 });
 
@@ -52,7 +56,7 @@ describe("parseScreenStateResponse", () => {
 
     it("parses a full response with route, overlays, and pressables", () => {
         const raw = {
-            route: { name: "ProductDetails", params: { productId: "123" }, stackDepth: 2 },
+            route: { name: "ProductDetails", params: { productId: "123" }, stack: ["Home", "ProductDetails"] },
             overlays: [
                 {
                     type: "BottomSheet",
@@ -69,7 +73,7 @@ describe("parseScreenStateResponse", () => {
         const result = parseScreenStateResponse(raw);
         expect(result).not.toBeNull();
         expect(result!.route!.name).toBe("ProductDetails");
-        expect(result!.route!.stackDepth).toBe(2);
+        expect(result!.route!.stack).toEqual(["Home", "ProductDetails"]);
         expect(result!.overlays).toHaveLength(1);
         expect(result!.overlays[0].type).toBe("BottomSheet");
         expect(result!.overlays[0].pressables).toHaveLength(1);
@@ -90,5 +94,126 @@ describe("parseScreenStateResponse", () => {
         const result = parseScreenStateResponse(raw);
         expect(result!.overlays).toEqual([]);
         expect(result!.pressables).toEqual([]);
+    });
+});
+
+describe("describePressHandler", () => {
+    it("returns named handlers as calls", () => {
+        expect(describePressHandler({ n: "handleSubmit", s: "" })).toBe("handleSubmit()");
+        expect(describePressHandler({ n: "startProcessing", s: "function startProcessing() {…}" })).toBe("startProcessing()");
+    });
+
+    it("strips the 'bound ' prefix", () => {
+        expect(describePressHandler({ n: "bound goBack", s: "" })).toBe("goBack()");
+    });
+
+    it("rejects generic and minified names, falling back to source", () => {
+        expect(describePressHandler({ n: "onPress", s: "() => setAccepted(prev => !prev)" })).toBe("{() => setAccepted(prev => !prev)}");
+        expect(describePressHandler({ n: "t12", s: "" })).toBeNull();
+        expect(describePressHandler({ n: "anonymous", s: "" })).toBeNull();
+        expect(describePressHandler({ n: "e", s: "" })).toBeNull();
+    });
+
+    it("truncates long source snippets", () => {
+        const longSrc = "() => " + "x".repeat(100);
+        const out = describePressHandler({ n: "", s: longSrc });
+        expect(out).toContain("…");
+        expect(out!.length).toBeLessThan(80);
+    });
+
+    it("returns null for bytecode bundles (source stripped in-app) and bad input", () => {
+        expect(describePressHandler({ n: "", s: "" })).toBeNull();
+        expect(describePressHandler(null)).toBeNull();
+        expect(describePressHandler(undefined)).toBeNull();
+    });
+});
+
+describe("describePropHandlers", () => {
+    it("prefers the identity-matched prop and shows its named handler", () => {
+        const raw = [
+            { p: "onRightPress", n: "", same: false },
+            { p: "onBack", n: "goBack", same: true },
+        ];
+        expect(describePropHandlers(raw)).toBe("onBack=goBack()");
+    });
+
+    it("reports the prop route when the matched handler is anonymous", () => {
+        expect(describePropHandlers([{ p: "onBack", n: "", same: true }])).toBe("onPress→onBack");
+    });
+
+    it("suppresses a nameless plain onPress prop (adds nothing)", () => {
+        expect(describePropHandlers([{ p: "onPress", n: "", same: true }])).toBeNull();
+        expect(describePropHandlers([{ p: "onPress", n: "onPress", same: true }])).toBeNull();
+    });
+
+    it("uses the only candidate when there is no identity match", () => {
+        expect(describePropHandlers([{ p: "onSelect", n: "", same: false }])).toBe("onPress→onSelect");
+    });
+
+    it("returns null on ambiguity (several candidates, none identity-matched)", () => {
+        const raw = [
+            { p: "onBack", n: "", same: false },
+            { p: "onRightPress", n: "", same: false },
+        ];
+        expect(describePropHandlers(raw)).toBeNull();
+    });
+
+    it("returns null for empty or malformed input", () => {
+        expect(describePropHandlers(null)).toBeNull();
+        expect(describePropHandlers([])).toBeNull();
+        expect(describePropHandlers("nope")).toBeNull();
+    });
+});
+
+describe("formatScreenStateSummary", () => {
+    const state: ScreenState = {
+        route: { name: "Checkout", params: { id: "7" }, stack: ["Tabs", "Cart", "Checkout"] },
+        overlays: [],
+        pressables: [
+            pressable({
+                label: "Send",
+                component: "Button",
+                center: { x: 210, y: 838 },
+                bounds: { x: 20, y: 810, width: 380, height: 56 },
+            }),
+            pressable({
+                label: "[CheckBox — possibly confirm/check button]",
+                component: "CheckBox",
+                nearbyText: "Skip verification.",
+                center: { x: 31, y: 719 },
+                bounds: { x: 20, y: 708, width: 22, height: 22 },
+            }),
+        ],
+    };
+
+    it("renders route, params, component tags, labels, nearby text, and frames", () => {
+        const out = formatScreenStateSummary(state);
+        expect(out).toContain('📍 Currently focused screen: "Checkout"  [navigation stack: Tabs > Cart > Checkout]');
+        expect(out).toContain('route params: {"id":"7"}');
+        expect(out).toContain('(210, 838) <Button /> "Send" frame:(20,810 380x56)');
+        expect(out).toContain('near "Skip verification."');
+    });
+
+    it("applies the coordinate converter to centers and frames", () => {
+        const out = formatScreenStateSummary(state, (p) => ({
+            center: { x: p.center.x * 2, y: p.center.y * 2 },
+            frame: { x: p.bounds.x * 2, y: p.bounds.y * 2, width: p.bounds.width * 2, height: p.bounds.height * 2 },
+        }));
+        expect(out).toContain('(420, 1676) <Button /> "Send" frame:(40,1620 760x112)');
+    });
+
+    it("groups overlay pressables and lists blocked root pressables separately", () => {
+        const withOverlay: ScreenState = {
+            route: null,
+            overlays: [{ type: "BottomSheet", title: null, pressables: [pressable({ label: "Submit" })] }],
+            pressables: [pressable({ label: "Send", blockedByOverlay: true })],
+        };
+        const out = formatScreenStateSummary(withOverlay);
+        expect(out).toContain("📍 Currently focused screen: unknown");
+        expect(out).toContain("🔲 BottomSheet:");
+        expect(out).toContain('"Submit"');
+        expect(out).toContain("🎯 Root pressables: (none reachable)");
+        expect(out).toContain("🚫 Blocked by overlay");
+        expect(out).toContain('"Send"');
     });
 });

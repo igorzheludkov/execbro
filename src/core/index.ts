@@ -332,9 +332,11 @@ export { measureComponent } from "./measureComponentTools.js";
 export type { MeasureBounds, MeasureOutcome, MeasureToolResult } from "./measureComponentTools.js";
 
 // Screen State
+export { formatScreenStateSummary } from "./screenState.js";
 export type {
   ScreenState,
   ScreenStateRoute,
   ScreenStateOverlay,
   ScreenStatePressable,
+  PressableCoordConverter,
 } from "./screenState.js";

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
+import { iconLabel } from "../core/iconSemantics.js";
 import {
     iosScreenshot,
     androidScreenshot,
@@ -10,6 +11,8 @@ import {
     recognizeText,
     inferIOSDevicePixelRatio,
     getPressableElements,
+    getScreenState,
+    formatScreenStateSummary,
     imageBuffer,
     getActiveOrBootedSimulatorUdid,
     enrichScreenshotWithLayout,
@@ -30,7 +33,7 @@ export function registerScreenshotTools(server: McpServer): void {
         server,
         "ios_screenshot",
         {
-            description: "Take a screenshot from an iOS simulator. Returns the image plus two lists: (1) pressable elements — the tappable components on screen with ready-to-use pixel tap coordinates, testIDs, and labels; (2) screen layout — all visible React components for context. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the pressables list — this is the most reliable way to tap icons or visually-identified elements. Use component names from the layout for inspect_component/find_components.\n" +
+            description: "Take a screenshot from an iOS simulator. Returns the image plus a screen-state summary: active route (name + navigation stack), overlay-grouped tappable elements (pressables behind an open sheet/modal are excluded), component names as JSX tags, labels, testIDs, and frames — all in ready-to-tap pixel coordinates. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the list — this is the most reliable way to tap icons or visually-identified elements. Use component names for inspect_component/find_components.\n" +
                 "PURPOSE: Snapshot what the user sees on iOS AND get tap-ready pressables + a structured component map in one call.\n" +
                 "WHEN TO USE: Any visual verification, before/after comparison, or as the starting point for tapping UI by coordinates.\n" +
                 "WORKFLOW: ios_screenshot -> pick element from pressables -> tap(x, y) or tap(testID=...) -> ios_screenshot to verify.\n" +
@@ -142,37 +145,67 @@ export function registerScreenshotTools(server: McpServer): void {
                 // explicitly when they need the tree. The Pressable elements block below is
                 // the signal most consumers actually want.
                 let pressablesText: string | null = null;
-    
-                // Enrich with pressable elements. With targetApp present we use the
-                // fiber path (most accurate). Without targetApp, getPressableElements
-                // falls back to iOS accessibility tree (E1) when we pass platform.
-                try {
-                    const pressables = await getPressableElements({
-                        device: targetDeviceName,
-                        platform: "ios",
-                        udid: resolvedUdid ?? undefined
-                    });
-                    if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
-                        const screenshotScale = result.scaleFactor || 1;
-                        pressablesText = pressables.parsedElements.map((el) => {
-                            // See enrichScreenshotWithLayout: shift y when fiber reports the element
-                            // inside the safe-area band (a react-native-screens modal artifact).
-                            let centerYPoints = el.center.y;
-                            if (safeAreaTop > 0 && centerYPoints < safeAreaTop) {
-                                centerYPoints += safeAreaTop;
-                            }
-                            const px = Math.round((el.center.x * scaleFactor) / screenshotScale);
-                            const py = Math.round((centerYPoints * scaleFactor) / screenshotScale);
-                            const label = el.accessibilityLabel || el.text || el.testID || (el.intent ? `${el.intent} icon` : el.component);
-                            const idPart = el.testID ? ` testID="${el.testID}"` : "";
-                            const kindPart = el.isInput ? " [input]" : "";
-                            const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
-                            const nearPart = !el.text && !el.accessibilityLabel && el.nearbyText ? ` near "${el.nearbyText}"` : "";
-                            return `  (${px}, ${py}) ${el.component}: "${label}"${nearPart}${idPart}${kindPart}${wrapPart}`;
-                        }).join("\n");
+                let pressablesIsScreenState = false;
+
+                // Enrich with the screen-state summary (route + overlay-grouped pressables —
+                // same engine as get_screen_state, so blocked pressables behind sheets are
+                // excluded). Requires a connected RN app; otherwise fall back to the flat
+                // pressables list (which degrades further to the iOS accessibility tree).
+                if (targetApp) {
+                    try {
+                        const ssResult = await getScreenState({ device: targetDeviceName });
+                        if (ssResult.success && ssResult.screenState) {
+                            const screenshotScale = result.scaleFactor || 1;
+                            const toPx = (v: number) => Math.round((v * scaleFactor) / screenshotScale);
+                            pressablesText = formatScreenStateSummary(ssResult.screenState, (p) => {
+                                // See enrichScreenshotWithLayout: shift y when fiber reports the
+                                // element inside the safe-area band (react-native-screens modals).
+                                const yShift = safeAreaTop > 0 && p.center.y < safeAreaTop ? safeAreaTop : 0;
+                                return {
+                                    center: { x: toPx(p.center.x), y: toPx(p.center.y + yShift) },
+                                    frame: {
+                                        x: toPx(p.bounds.x),
+                                        y: toPx(p.bounds.y + yShift),
+                                        width: toPx(p.bounds.width),
+                                        height: toPx(p.bounds.height),
+                                    },
+                                };
+                            });
+                            pressablesIsScreenState = true;
+                        }
+                    } catch {
+                        // Non-fatal: fall through to the flat pressables list below
                     }
-                } catch {
-                    // Non-fatal: screenshot works without pressables enrichment
+                }
+                if (!pressablesText) {
+                    try {
+                        const pressables = await getPressableElements({
+                            device: targetDeviceName,
+                            platform: "ios",
+                            udid: resolvedUdid ?? undefined
+                        });
+                        if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
+                            const screenshotScale = result.scaleFactor || 1;
+                            pressablesText = pressables.parsedElements.map((el) => {
+                                // See enrichScreenshotWithLayout: shift y when fiber reports the element
+                                // inside the safe-area band (a react-native-screens modal artifact).
+                                let centerYPoints = el.center.y;
+                                if (safeAreaTop > 0 && centerYPoints < safeAreaTop) {
+                                    centerYPoints += safeAreaTop;
+                                }
+                                const px = Math.round((el.center.x * scaleFactor) / screenshotScale);
+                                const py = Math.round((centerYPoints * scaleFactor) / screenshotScale);
+                                const label = el.accessibilityLabel || el.text || el.testID || iconLabel(el.component, el.icon) || (el.intent ? `${el.intent} icon` : el.component);
+                                const idPart = el.testID ? ` testID="${el.testID}"` : "";
+                                const kindPart = el.isInput ? " [input]" : "";
+                                const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
+                                const nearPart = !el.text && !el.accessibilityLabel && el.nearbyText ? ` near "${el.nearbyText}"` : "";
+                                return `  (${px}, ${py}) ${el.component}: "${label}"${nearPart}${idPart}${kindPart}${wrapPart}`;
+                            }).join("\n");
+                        }
+                    } catch {
+                        // Non-fatal: screenshot works without pressables enrichment
+                    }
                 }
     
                 const deliveredWidth = result.scaleFactor && result.scaleFactor > 1
@@ -191,7 +224,9 @@ export function registerScreenshotTools(server: McpServer): void {
                 infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
                 infoText += `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
                 if (pressablesText) {
-                    infoText += `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
+                    infoText += pressablesIsScreenState
+                        ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
+                        : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
                     infoText += `\n${pressablesText}`;
                     infoText += `\n\n💡 Next steps:`;
                     infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
@@ -279,7 +314,7 @@ export function registerScreenshotTools(server: McpServer): void {
         server,
         "android_screenshot",
         {
-            description: "Take a screenshot from an Android device/emulator. Returns the image plus two lists: (1) pressable elements — the tappable components on screen with ready-to-use pixel tap coordinates, testIDs, and labels; (2) screen layout — all visible React components for context. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the pressables list — this is the most reliable way to tap icons or visually-identified elements. Use component names from the layout for inspect_component/find_components.\n" +
+            description: "Take a screenshot from an Android device/emulator. Returns the image plus a screen-state summary: active route (name + navigation stack), overlay-grouped tappable elements (pressables behind an open sheet/modal are excluded), component names as JSX tags, labels, testIDs, and frames — all in ready-to-tap pixel coordinates. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the list — this is the most reliable way to tap icons or visually-identified elements. Use component names for inspect_component/find_components.\n" +
                 "PURPOSE: Snapshot what the user sees on Android AND get tap-ready pressables + a structured component map in one call.\n" +
                 "WHEN TO USE: Any visual verification, before/after comparison, or as the starting point for tapping UI by coordinates on Android.\n" +
                 "WORKFLOW: android_screenshot -> pick element from pressables -> tap(x, y) or tap(testID=...) -> android_screenshot to verify.\n" +
@@ -377,20 +412,49 @@ export function registerScreenshotTools(server: McpServer): void {
                 // for a button visually sitting near (445, 1370) in the JPEG. Drop the
                 // density factor; only the scaleFactor downscale is needed.
                 let pressablesText: string | null = null;
+                let pressablesIsScreenState = false;
                 // Screen Layout tree previously appended here was dropped — it was noisy
                 // (nested Svg/G/Path duplicates). Use get_screen_layout when the tree is needed.
-    
-                // Enrich with pressable elements. With targetApp present we use the
-                // fiber path (most accurate). Without targetApp, getPressableElements
-                // falls back to the Android accessibility (uiautomator) tree (E1).
+
+                // Prefer the screen-state summary (route + overlay-grouped pressables).
+                // Coordinates are fiber dp scaled by density + status-bar offset — the same
+                // best-effort conversion as the pressables fallback path (see pressables.ts);
+                // tap(text=)/tap(testID=) remain the precise options.
+                if (targetApp) {
+                    try {
+                        const ssResult = await getScreenState({ device: targetDeviceName });
+                        if (ssResult.success && ssResult.screenState) {
+                            const screenshotScale = result.scaleFactor || 1;
+                            const densityScale = densityDpi / 160;
+                            const toPx = (v: number) => Math.round((v * densityScale) / screenshotScale);
+                            const toPxY = (v: number) => Math.round((v * densityScale + statusBarPixels) / screenshotScale);
+                            pressablesText = formatScreenStateSummary(ssResult.screenState, (p) => ({
+                                center: { x: toPx(p.center.x), y: toPxY(p.center.y) },
+                                frame: {
+                                    x: toPx(p.bounds.x),
+                                    y: toPxY(p.bounds.y),
+                                    width: toPx(p.bounds.width),
+                                    height: toPx(p.bounds.height),
+                                },
+                            }));
+                            pressablesIsScreenState = true;
+                        }
+                    } catch {
+                        // Non-fatal: fall through to the flat pressables list below
+                    }
+                }
+
+                // Fallback: flat pressable elements. With targetApp present this uses the
+                // fiber path (uiautomator-reconciled coords). Without targetApp it degrades
+                // to the Android accessibility (uiautomator) tree (E1).
                 try {
-                    const pressables = await getPressableElements({ device: targetDeviceName, platform: "android" });
-                    if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
+                    const pressables = pressablesText ? null : await getPressableElements({ device: targetDeviceName, platform: "android" });
+                    if (pressables && pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
                         const screenshotScale = result.scaleFactor || 1;
                         pressablesText = pressables.parsedElements.map((el) => {
                             const px = Math.round(el.center.x / screenshotScale);
                             const py = Math.round(el.center.y / screenshotScale);
-                            const label = el.accessibilityLabel || el.text || el.testID || (el.intent ? `${el.intent} icon` : el.component);
+                            const label = el.accessibilityLabel || el.text || el.testID || iconLabel(el.component, el.icon) || (el.intent ? `${el.intent} icon` : el.component);
                             const idPart = el.testID ? ` testID="${el.testID}"` : "";
                             const kindPart = el.isInput ? " [input]" : "";
                             const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
@@ -413,7 +477,9 @@ export function registerScreenshotTools(server: McpServer): void {
                 infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
                 infoText += `\n📊 Display density: ${densityDpi}dpi`;
                 if (pressablesText) {
-                    infoText += `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
+                    infoText += pressablesIsScreenState
+                        ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
+                        : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
                     infoText += `\n${pressablesText}`;
                     infoText += `\n\n💡 Next steps:`;
                     infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
