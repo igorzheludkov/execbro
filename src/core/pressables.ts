@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
+import { iconLabel } from "./iconSemantics.js";
 import { getConnectedAppByDevice, getFirstConnectedApp, getConnectedAppBySimulatorUdid, getConnectedAppByAndroidDeviceId } from "./connection.js";
 
 // ============================================================================
@@ -21,6 +22,8 @@ interface PressableElement {
     isWrapper?: boolean;
     intent?: string;
     nearbyText?: string;
+    /** Meaningful icon child component name (e.g. SvgChevronBack) for icon-only pressables. */
+    icon?: string | null;
 }
 
 /**
@@ -224,17 +227,26 @@ export async function getPressableElements(
                                           typeof props.onFocus === 'function')) {
                     return '';
                 }
+                // Host text fibers carry the raw string as memoizedProps — needed when a
+                // mixed-children Text falls through to the fiber-child walk below.
+                if (typeof props === 'string') return props;
+                if (typeof props === 'number') return String(props);
                 if (props) {
                     var ch = props.children;
                     if (typeof ch === 'string') return ch;
                     if (typeof ch === 'number') return String(ch);
                     if (Array.isArray(ch)) {
                         var inline = [];
+                        var hasElement = false;
                         for (var ci = 0; ci < ch.length; ci++) {
                             if (typeof ch[ci] === 'string') inline.push(ch[ci]);
                             else if (typeof ch[ci] === 'number') inline.push(String(ch[ci]));
+                            else if (ch[ci] != null && ch[ci] !== false) hasElement = true;
                         }
-                        if (inline.length > 0) return inline.join('');
+                        // Mixed content ("Create " + <Text>2 digital items</Text>): fall through
+                        // to the fiber-child walk so nested Text elements are included; the host
+                        // text fibers re-supply the inline strings, so nothing is lost or doubled.
+                        if (inline.length > 0 && !hasElement) return inline.join('');
                     }
                 }
                 var parts = [];
@@ -244,7 +256,7 @@ export async function getPressableElements(
                     if (t) parts.push(t);
                     child = child.sibling;
                 }
-                return parts.join(' ').trim();
+                return parts.join(' ').replace(/\\s+/g, ' ').trim();
             }
 
             function getComponentName(fiber) {
@@ -345,12 +357,11 @@ export async function getPressableElements(
                     if (hostsForThis.length > 0) {
                         var text = collectText(fiber, 0, true);
                         var componentName = findMeaningfulAncestorName(fiber) || name || 'Unknown';
-                        // If name is generic (e.g. View, TouchableOpacity), scan children for a
-                        // meaningful name like SvgChevronBack so icon-only buttons are identifiable.
-                        if (GENERIC_COMPONENT.test(componentName)) {
-                            var childName = findMeaningfulChildName(fiber);
-                            if (childName) componentName = childName;
-                        }
+                        // Scan children for a meaningful name like SvgChevronBack: it replaces a
+                        // generic name (View, TouchableOpacity) and is also kept as the icon hint
+                        // for text-less buttons even when the ancestor name (FloatingHeader) wins.
+                        var childName = (!text || GENERIC_COMPONENT.test(componentName)) ? findMeaningfulChildName(fiber) : null;
+                        if (childName && GENERIC_COMPONENT.test(componentName)) componentName = childName;
                         var path = buildPath(fiber);
                         var testID = (props && (props.testID || props.nativeID)) || null;
                         var accessibilityLabel = (props && props.accessibilityLabel) || null;
@@ -367,6 +378,7 @@ export async function getPressableElements(
                             testID: testID,
                             accessibilityLabel: accessibilityLabel,
                             isInput: !!isInput,
+                            icon: childName || null,
                             hostIndices: hostIndices
                         });
                     }
@@ -498,10 +510,10 @@ export async function getPressableElements(
                         if (!componentName) {
                             componentName = findMeaningfulAncestorName(pressableFiber) || getComponentName(pressableFiber) || 'Unknown';
                         }
-                        if (GENERIC_COMPONENT.test(componentName)) {
-                            var childName = findMeaningfulChildName(pressableFiber);
-                            if (childName) componentName = childName;
-                        }
+                        // Keep the icon child name even when the ancestor name wins — icon-only
+                        // buttons get their semantics from it (SvgChevronBack → back button).
+                        var childName = (!text || GENERIC_COMPONENT.test(componentName)) ? findMeaningfulChildName(pressableFiber) : null;
+                        if (childName && GENERIC_COMPONENT.test(componentName)) componentName = childName;
                         var path = buildPath(pressableFiber);
 
                         // testID/accessibilityLabel are spread onto the host view by TouchableOpacity etc.
@@ -518,6 +530,7 @@ export async function getPressableElements(
                             testID: testID,
                             accessibilityLabel: accessibilityLabel,
                             isInput: false,
+                            icon: childName || null,
                             hostIndices: [hostIdx]
                         });
                     }
@@ -746,7 +759,8 @@ export async function getPressableElements(
                     testID: info.testID,
                     accessibilityLabel: info.accessibilityLabel,
                     hasLabel: text.length > 0,
-                    isInput: info.isInput
+                    isInput: info.isInput,
+                    icon: info.icon || null
                 });
             }
 
@@ -762,6 +776,7 @@ export async function getPressableElements(
                 }
                 if (!winner.testID && loser.testID) winner.testID = loser.testID;
                 if (!winner.accessibilityLabel && loser.accessibilityLabel) winner.accessibilityLabel = loser.accessibilityLabel;
+                if (!winner.icon && loser.icon) winner.icon = loser.icon;
                 return winner;
             }
             var deduped = {};
@@ -848,7 +863,7 @@ export async function getPressableElements(
             var NEARBY_RADIUS = 120; // points
             for (var ei = 0; ei < elements.length; ei++) {
                 var pe = elements[ei];
-                pe.intent = humanize(pe.component);
+                pe.intent = humanize(pe.icon || pe.component);
                 // Skip when the pressable already has its own human-readable text or a11y label.
                 // testID alone doesn't suppress nearbyText — the testID may be cryptic and the
                 // surrounding visible text is still a useful handle for an agent.
@@ -865,10 +880,24 @@ export async function getPressableElements(
                     if (tb.x >= pe.frame.x && tb.y >= pe.frame.y &&
                         tb.x + tb.width <= pe.frame.x + pe.frame.width &&
                         tb.y + tb.height <= pe.frame.y + pe.frame.height) continue;
-                    var dx = tb.cx - pcx;
-                    var dy = tb.cy - pcy;
-                    var d = Math.sqrt(dx * dx + dy * dy);
-                    if (d < bestDist && d <= NEARBY_RADIUS) {
+                    // Row siblings first: a checkbox's label sits in the same row but its
+                    // long text's CENTER is far away, so center distance alone misses it.
+                    // Row-aligned + small horizontal edge gap = strongest signal.
+                    var rowAligned = Math.abs(tb.cy - pcy) <= Math.max(24, pe.frame.height / 2);
+                    var gapL = pe.frame.x - (tb.x + tb.width);
+                    var gapR = tb.x - (pe.frame.x + pe.frame.width);
+                    var hGap = Math.max(gapL, gapR);
+                    if (hGap < 0) hGap = 0;
+                    var d;
+                    if (rowAligned && hGap <= 80) {
+                        d = hGap;
+                    } else {
+                        var dx = tb.cx - pcx;
+                        var dy = tb.cy - pcy;
+                        d = Math.sqrt(dx * dx + dy * dy);
+                        if (d > NEARBY_RADIUS) continue;
+                    }
+                    if (d < bestDist) {
                         bestDist = d;
                         best = tb;
                     }
@@ -1023,11 +1052,14 @@ export async function getPressableElements(
             for (let i = 0; i < pressableElements.length; i++) {
                 const el = pressableElements[i];
                 const num = i + 1;
+                const iconHint = !el.hasLabel ? iconLabel(el.component, el.icon) : null;
                 const label = el.hasLabel
                     ? `"${el.text}"`
-                    : el.intent
-                      ? `(${el.intent} icon)`
-                      : "(icon/image)";
+                    : iconHint
+                      ? `(${iconHint})`
+                      : el.intent
+                        ? `(${el.intent} icon)`
+                        : "(icon/image)";
                 const ids: string[] = [];
                 if (el.testID) ids.push(`testID="${el.testID}"`);
                 if (el.accessibilityLabel) ids.push(`a11y="${el.accessibilityLabel}"`);

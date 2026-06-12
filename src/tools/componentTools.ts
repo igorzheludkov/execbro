@@ -1,12 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
+import { iconLabel } from "../core/iconSemantics.js";
 import {
     getComponentTree,
     getScreenLayout,
     formatScreenLayoutTree,
     getPressableElements,
     getScreenState,
+    formatScreenStateSummary,
     inspectComponent,
     findComponents,
     toggleElementInspector,
@@ -341,8 +343,8 @@ export function registerComponentTools(server: McpServer): void {
             description:
                 "Get the current screen orientation snapshot: active route name + params, any blocking overlays (bottom sheets, modals, alerts) and their tappable elements, and all pressable elements currently reachable. " +
                 "Call this after any tap or navigation to orient before the next action. " +
-                "Returns JSON with route (name, params, stackDepth), overlays[], and pressables[]. " +
-                "When overlays are present, root-level pressables covered by an overlay are excluded so you don't accidentally tap behind a sheet.\n\n" +
+                "Returns a compact summary: route line (name + stack, params when present), then one line per pressable with center coordinates (x, y), custom component name as a JSX tag (greppable in the codebase), label, testID, and frame bounds. " +
+                "When overlays are present, root-level pressables covered by an overlay are listed under a 🚫 Blocked section — visible for context, but taps will NOT reach them until the overlay closes.\n\n" +
                 "WHEN TO USE: After every tap or swipe that may have triggered navigation. Replaces the get_pressable_elements + screenshot OCR pattern for orientation.\n" +
                 "LIMITATIONS: route is null when the app uses no React Navigation or Expo Router. Requires a live Metro connection. Coordinates are in points (iOS) / dp (Android).\n" +
                 "SEE ALSO: get_pressable_elements for raw pressable list without route context; get_screen_layout for full component tree with bounds.",
@@ -373,9 +375,11 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
+            const ss = result.screenState;
+            const summary = ss ? formatScreenStateSummary(ss) : (result.result ?? "{}");
             const body = metaNotes.length > 0
-                ? `${result.result}\n\n${metaNotes.join("\n")}`
-                : result.result ?? "{}";
+                ? `${summary}\n\n${metaNotes.join("\n")}`
+                : summary;
             return { content: [{ type: "text", text: body }] };
         }
     );
@@ -423,11 +427,14 @@ export function registerComponentTools(server: McpServer): void {
             const fh = toPx(el.frame.height);
     
             const num = i + 1;
+            const iconHint = !el.hasLabel ? iconLabel(el.component, el.icon) : null;
             const label = el.hasLabel
                 ? `"${el.text}"`
-                : el.intent
-                  ? `(${el.intent} icon)`
-                  : "(icon/image)";
+                : iconHint
+                  ? `(${iconHint})`
+                  : el.intent
+                    ? `(${el.intent} icon)`
+                    : "(icon/image)";
             const ids: string[] = [];
             if (el.testID) ids.push(`testID="${el.testID}"`);
             if (el.accessibilityLabel) ids.push(`a11y="${el.accessibilityLabel}"`);
