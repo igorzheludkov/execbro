@@ -49,36 +49,17 @@ npx tsc --noEmit src/index.ts
 
 ## Development with Hot Reload
 
-For development, use HTTP transport mode to avoid restarting Claude Code sessions:
+For development, the `execbro-dev` MCP server uses HTTP transport so code changes apply without restarting Claude Code sessions. Spec: `~/rn-devtools/docs/devtools-core/specs/2026-06-12-http-dev-loop-activation-design.md`.
 
-```bash
-npm run dev:mcp    # Builds + runs with HTTP transport on port 8600, auto-restarts on file changes
-```
+The configured setup (active on this machine):
 
-Configure Claude Code to connect via HTTP (in `~/.claude.json` mcpServers):
-```json
-{
-  "execbro-local": {
-    "type": "http",
-    "url": "http://localhost:8600/mcp"
-  }
-}
-```
+- `~/.claude.json` mcpServers: `"execbro-dev": { "type": "http", "url": "http://localhost:8600/mcp" }`
+- `scripts/dev-server.sh` — idempotent launcher: exits if port 8600 is busy, otherwise sets `EXECBRO_API_URL=https://execbro.com` and starts `npm run dev:mcp` detached, logging to `/tmp/execbro-dev-server.log`. Note: `--http` mode defaults the license/account API to `http://localhost:3000` (`src/core/config.ts`), so the script pins it to production; edit that line to test a local backend.
+- A SessionStart hook in `~/.claude/settings.json` runs the launcher script (empty `matcher` — SessionStart matchers match the start source, not a project name).
 
-A SessionStart hook can auto-launch the dev server (in `~/.claude/settings.json`):
-```json
-{
-  "hooks": {
-    "SessionStart": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "cd /path/to/react-native-ai-devtools && (lsof -ti:8600 > /dev/null 2>&1 || npm run dev:mcp > /tmp/rn-ai-devtools-dev.log 2>&1 &)"
-      }]
-    }]
-  }
-}
-```
+Iteration loop: save a file → nodemon rebuilds and restarts the server (~5-15 s) → the next `mcp__execbro-dev__*` call hits the new code. Each restart drops Metro/CDP connections and buffers — run `scan_metro` once after a save if you need a device connection.
+
+To run the dev server manually instead: `npm run dev:mcp` (port 8600, override with `MCP_HTTP_PORT`).
 
 Production users are unaffected — the default transport remains stdio.
 
@@ -91,10 +72,10 @@ In HTTP mode, a `dev` meta-tool is registered for full hot-reload testing. It pr
 
 This tool is only available in `--http` mode (dev). It does not appear in production (stdio).
 
-**IMPORTANT — validating changes during development:** When modifying any tool's handler in this repo, verify the change through the `mcp__execbro-local__*` (HTTP) tools, not the production `mcp__execbro__*` (stdio) tools. The stdio server runs the prebuilt `build/index.js` and won't pick up edits without a session restart; the HTTP server is rebuilt by nodemon on every save. Two valid verification paths:
+**IMPORTANT — validating changes during development:** When modifying any tool's handler in this repo, verify the change through the `mcp__execbro-dev__*` (HTTP) tools, not the production `mcp__execbro__*` (stdio) tools. The stdio server runs the published npm build and won't pick up edits; the HTTP server is rebuilt by nodemon on every save. Two valid verification paths:
 
-1. **Handler logic change** — call the tool directly via `mcp__execbro-local__<tool>` (immediate, uses latest code) OR via `dev(action="call", tool="<tool>", args={...})`.
-2. **Schema/description change** — the top-level `mcp__execbro-local__*` schemas are cached by Claude Code at session start and do NOT refresh on rebuild. Use `dev(action="list", filter="<tool>")` or `dev(action="list", verbose=true, filter="<tool>")` to see the live schema. A session restart is only needed if you want the new schema visible as a top-level tool.
+1. **Handler logic change** — call the tool directly via `mcp__execbro-dev__<tool>` (immediate, uses latest code) OR via `dev(action="call", tool="<tool>", args={...})`.
+2. **Schema/description change** — the top-level `mcp__execbro-dev__*` schemas are cached by Claude Code at session start and do NOT refresh on rebuild. Use `dev(action="list", filter="<tool>")` or `dev(action="list", verbose=true, filter="<tool>")` to see the live schema. A session restart is only needed if you want the new schema visible as a top-level tool.
 
 ## Architecture
 
