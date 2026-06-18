@@ -777,6 +777,18 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             return;
         }
 
+        // An arriving Network.requestWillBeSent is proof the CDP Network domain
+        // is active. Some backends (e.g. RN 0.85 Bridgeless/Hermes) enable the
+        // domain but never send a response to Network.enable, so the
+        // response-based detection above never fires and cdpNetworkSupported
+        // stays undefined — leaving the JS interceptor un-suppressed and every
+        // request double-captured (CDP + interceptor). Mark support here so the
+        // interceptor dedup guard (see Runtime.consoleAPICalled handler) trips.
+        if (nApp && !nApp.cdpNetworkSupported) {
+            nApp.cdpNetworkSupported = true;
+            console.error(`[execbro] CDP Network domain active (detected via requestWillBeSent on ${nApp.deviceInfo.title})`);
+        }
+
         const params = message.params as {
             requestId: string;
             request: {
