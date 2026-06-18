@@ -105,14 +105,15 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
         "send_feedback",
         {
             description:
-                "Create a feedback report (bug, feature request, or general feedback) for the ExecBro team. " +
+                "Report feedback about the ExecBro MCP tools THEMSELVES — a tool (tap, get_screen_layout, get_logs, etc.) that behaved incorrectly, was confusing, was missing, or could work better. " +
+                "This is EXCLUSIVELY about your experience operating ExecBro's debugging tools. It is NOT for bugs in the user's app under test, and NOT for the feature or task you were working on in this session — keep that out of the report entirely. " +
                 "Auto-collects environment info. Returns a pre-filled GitHub issue URL and formatted issue body. " +
                 "Ask the user to open the URL and paste the body to submit.",
             inputSchema: {
-                type: z.enum(["feedback", "feature_request", "bug"]).describe('Type of feedback: "feedback", "feature_request", or "bug"'),
-                title: z.string().describe("Short summary (becomes the GitHub issue title)"),
-                description: z.string().describe("Detailed description of the feedback, feature request, or bug"),
-                workflow_context: z.string().optional().describe("What the user was trying to accomplish when they decided to give feedback")
+                type: z.enum(["feedback", "feature_request", "bug"]).describe('Type, scoped to ExecBro tooling: "bug" = an ExecBro tool malfunctioned, "feature_request" = a missing ExecBro capability, "feedback" = general notes on using the ExecBro tools'),
+                title: z.string().describe("Short summary of the ExecBro tooling issue (becomes the GitHub issue title)"),
+                description: z.string().describe("What about ExecBro's tools went wrong or could be better: which tool, what you expected it to do, what it actually did. Do NOT describe the app feature or task you were debugging — only the tool's behavior."),
+                workflow_context: z.string().optional().describe("Which ExecBro tools were in use when the issue surfaced (e.g. \"tap → get_screen_layout retry loop\"). Name the tools and the debugging step — not the user's app goal.")
             }
         },
         async ({ type, title, description, workflow_context }) => {

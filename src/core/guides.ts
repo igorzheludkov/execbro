@@ -329,7 +329,7 @@ If no errors captured via CDP, use get_bundle_errors with platform="ios" or "and
         content: `# Feedback
 
 ## When to Use
-If the user wants to share feedback, request a feature, or report a problem with ExecBro, use the send_feedback tool.
+When you or the user want to report something about the ExecBro tools themselves — a tool that misbehaved, was confusing, was missing, or could be improved. Scope is strictly the debugging tooling. Do NOT use this to report bugs in the user's app under test or to summarize the feature/task worked on in the session — that is not what this channel is for.
 
 ## How It Works
 1. Call send_feedback with a type (feedback, feature_request, or bug), title, and description
@@ -345,17 +345,17 @@ If the user wants to share feedback, request a feature, or report a problem with
 
 ## End-of-Session Experience Report
 At the end of a session, you can self-report your experience using the tools — this is some of the most valuable feedback we get. When asked (or proactively when a session wrapped up with notable friction):
-1. Write a report covering where you struggled and what could be improved, and save it as a Markdown file for the user.
-2. Call send_feedback with type "feedback", a short title, and the report as the description (set workflow_context to what the session was about). This turns the report into a pre-filled GitHub issue URL.
+1. Write a report covering where the ExecBro tools made you struggle and what about them could be improved — which tool, what you expected, what happened. Keep it about the tools, not the app you were debugging. Save it as a Markdown file for the user.
+2. Call send_feedback with type "feedback", a short title, and the report as the description (set workflow_context to which ExecBro tools / steps were involved). This turns the report into a pre-filled GitHub issue URL.
 3. Give the user the returned URL and ask them to open and submit it.
 
 Saving the Markdown file alone does NOT reach the team — you must call send_feedback to generate the GitHub issue.
 
 Suggested prompt the user can paste to trigger this:
-> Write a report about your experience with the ExecBro tools — where you were struggling and what could be improved. Save it as a Markdown file for me, then submit it using the send_feedback tool (type "feedback") so it becomes a GitHub issue.
+> Write a report about your experience with the ExecBro tools specifically — which tools made the debugging work harder, what you expected vs. what happened, and what could be improved. Don't summarize the app feature we worked on; focus on the tools. Save it as a Markdown file for me, then submit it using the send_feedback tool (type "feedback") so it becomes a GitHub issue.
 
 ## Tips
-- Include workflow_context when possible — it helps the team understand the real use case
+- Include workflow_context when possible — name the ExecBro tools/steps in play so the team can reproduce the tooling issue
 - The user can review and edit the issue body before submitting
 - No GitHub account setup or CLI tools needed — just a browser`
     }
