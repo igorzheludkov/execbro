@@ -45,6 +45,15 @@ const pendingNetworkEnableIds: Set<number> = new Set();
 const pendingSdkProbeIds: Map<number, string> = new Map(); // msgId -> appKey
 const SDK_PROBE_INITIAL_DELAY_MS = 200;
 const SDK_PROBE_INTERVAL_MS = 3000;
+// Consecutive SDK-absent probes required to flip sdkPresent true→false.
+// Hysteresis against the post-reload window where the JS context exists but
+// the SDK's init() hasn't re-run yet (see ConnectedApp.sdkMissCount).
+const SDK_ABSENCE_CONFIRM_COUNT = 2;
+// Fast re-probe schedule after a context is (re)created, so the SDK is
+// re-detected within a few hundred ms instead of waiting up to a full
+// SDK_PROBE_INTERVAL_MS tick. Covers reloads not driven by reload_app
+// (shake-to-reload, Metro "r").
+const SDK_REPROBE_DELAYS_MS = [200, 500, 1000, 2000];
 
 function sendSdkProbe(ws: WebSocket, appKey: string): void {
     if (ws.readyState !== WebSocket.OPEN) return;
@@ -85,6 +94,20 @@ function startSdkProbeLoop(ws: WebSocket, appKey: string): void {
         clearTimeout(initial);
         clearInterval(interval);
     });
+}
+
+// Fire a burst of SDK probes on the heels of a (re)created execution context.
+// After a reload the context is recreated but the SDK's init() re-runs slightly
+// later; without this, sdkPresent only recovers on the next 3s interval tick,
+// widening the window where get_network_requests falls off the SDK buffer.
+function scheduleFastSdkReprobe(ws: WebSocket, appKey: string): void {
+    for (const delay of SDK_REPROBE_DELAYS_MS) {
+        const t = setTimeout(() => {
+            if (!connectedApps.has(appKey) || ws.readyState !== WebSocket.OPEN) return;
+            sendSdkProbe(ws, appKey);
+        }, delay);
+        ws.once("close", () => clearTimeout(t));
+    }
 }
 
 // Suppress auto-reconnection for intentionally disconnected devices
@@ -635,8 +658,23 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                 const result = (message.result as { result?: { value?: unknown } } | undefined)?.result;
                 const present = result?.value === true;
                 const wasPresent = app.sdkPresent === true;
-                app.sdkPresent = present;
-                if (present !== wasPresent) {
+                // Hysteresis on the true→false edge: tolerate transient SDK
+                // absence right after a reload (context recreated, init() not
+                // re-run yet) so we don't restore duplicate-prone CDP/interceptor
+                // writes and bounce get_network_requests off the SDK buffer.
+                let nextPresent = present;
+                if (!present && wasPresent) {
+                    app.sdkMissCount = (app.sdkMissCount ?? 0) + 1;
+                    if (app.sdkMissCount < SDK_ABSENCE_CONFIRM_COUNT) {
+                        nextPresent = true; // hold "present" until absence is confirmed
+                    } else {
+                        app.sdkMissCount = 0;
+                    }
+                } else {
+                    app.sdkMissCount = 0;
+                }
+                app.sdkPresent = nextPresent;
+                if (nextPresent !== wasPresent) {
                     console.error(`[execbro] SDK ${present ? "detected" : "no longer detected"} on ${app.deviceInfo.title}; CDP/JS-interceptor buffer writes ${present ? "suppressed" : "restored"}`);
                     // Toggle the in-app interceptor's emit flag so it stops
                     // (or resumes) producing console.debug lines and CDP
@@ -898,6 +936,10 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                 injectNetworkInterceptor(ctxApp.ws);
                 const nEnableId = sendNetworkEnable(ctxApp.ws);
                 pendingNetworkEnableIds.add(nEnableId);
+                // The context was just recreated (e.g. reload). Re-probe the SDK
+                // quickly so sdkPresent re-establishes within a few hundred ms
+                // instead of on the next 3s interval tick.
+                scheduleFastSdkReprobe(ctxApp.ws, appKey);
             }
         }
 
