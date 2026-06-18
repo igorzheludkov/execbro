@@ -6,6 +6,7 @@ import { getConnectedAppByDevice, connectToDevice, clearReconnectionSuppression,
 import { fetchDevices, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 import { executeInApp, delay } from "./jsExecute.js";
+import { isSDKInstalled } from "./sdkBridge.js";
 
 // Build the IIFE expression used by listDebugGlobals. Exported so tests can
 // assert structural invariants (e.g. that we probe __rn__, that we emit the
@@ -247,6 +248,12 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
     }
 
     const port = app.port;
+    // If the in-app SDK was the network/console source before the reload, the
+    // new JS context must re-run init() before get_network_requests can read
+    // the SDK buffer again. Remember this so we can wait for re-readiness below
+    // instead of returning into the window where the MCP falls back to the
+    // duplicate-prone CDP/interceptor buffer.
+    const sdkWasPresent = app.sdkPresent === true;
 
     // Fire-and-forget: send reload command via CDP without waiting for response.
     // The JS context is destroyed during reload, so Runtime.evaluate would always timeout.
@@ -337,9 +344,33 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
                 isReconnection: false,
                 reconnectionConfig: { ...DEFAULT_RECONNECTION_CONFIG, enabled: false }
             });
+
+            // If the SDK was the source before reload, wait for the new context
+            // to re-run init() and re-expose __RN_AI_DEVTOOLS__ before returning,
+            // so the caller's next get_network_requests reads the SDK buffer
+            // rather than falling back to the duplicate-prone CDP/interceptor
+            // buffer. Bounded; non-SDK apps and slow inits just fall through.
+            let sdkReady = true;
+            if (sdkWasPresent) {
+                const SDK_READY_TIMEOUT_MS = 5000;
+                const SDK_READY_POLL_MS = 300;
+                const deadline = Date.now() + SDK_READY_TIMEOUT_MS;
+                sdkReady = false;
+                while (Date.now() < deadline) {
+                    if (await isSDKInstalled()) {
+                        sdkReady = true;
+                        break;
+                    }
+                    await delay(SDK_READY_POLL_MS);
+                }
+            }
+
             return {
                 success: true,
                 result: `App reloaded and reconnected to ${targetDevice.deviceName || targetDevice.title}`
+                    + (sdkWasPresent && !sdkReady
+                        ? " (warning: in-app SDK did not re-initialize within 5s; network/console may briefly use the fallback buffer)"
+                        : "")
             };
         } else {
             return {

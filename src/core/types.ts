@@ -45,6 +45,11 @@ export interface ConnectedApp {
     // SDK's init() may run after we connect.
     sdkPresent?: boolean;
     sdkProbeTimer?: NodeJS.Timeout;
+    // Consecutive SDK-absent probe results while sdkPresent was true. Used as
+    // hysteresis so a single missed probe right after a reload (the new JS
+    // context recreated but the SDK's init() hasn't re-run yet) does not flip
+    // sdkPresent false and restore duplicate-prone CDP/interceptor writes.
+    sdkMissCount?: number;
     appDetection?: AppDetectionResult;
     // Resolves when scheduleAppDetection's probe finishes (success, error, or
     // timeout). Callers that want to display detection info — e.g. get_apps —
