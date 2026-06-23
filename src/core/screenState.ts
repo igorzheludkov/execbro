@@ -325,7 +325,8 @@ export async function getScreenState(
 
     // SDK navigation ref (highest priority — works even when NavigationContainer is wrapped)
     try {
-        var sdkNav = globalThis.__RN_AI_DEVTOOLS__ && globalThis.__RN_AI_DEVTOOLS__.navigation;
+        var sdk = globalThis.__EXECBRO__ || globalThis.__RN_AI_DEVTOOLS__;
+        var sdkNav = sdk && sdk.navigation;
         if (sdkNav && typeof sdkNav.getCurrentRoute === 'function') {
             var currentRoute = sdkNav.getCurrentRoute();
             var rootState = typeof sdkNav.getRootState === 'function' ? sdkNav.getRootState() : null;

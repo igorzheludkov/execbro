@@ -65,7 +65,7 @@ function sendSdkProbe(ws: WebSocket, appKey: string): void {
                 id,
                 method: "Runtime.evaluate",
                 params: {
-                    expression: 'typeof globalThis.__RN_AI_DEVTOOLS__?.getNetworkEntries === "function"',
+                    expression: 'typeof (globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__)?.getNetworkEntries === "function"',
                     returnByValue: true
                 }
             })

@@ -51,8 +51,10 @@ export function buildListDebugGlobalsExpression(): string {
             // the agent can hand straight to inspect_global / execute_in_app.
             var sdk = null;
             try {
-                if (typeof globalThis.__RN_AI_DEVTOOLS__ !== 'undefined' && globalThis.__RN_AI_DEVTOOLS__) {
-                    var dt = globalThis.__RN_AI_DEVTOOLS__;
+                var _sdkRoot = globalThis.__EXECBRO__ || globalThis.__RN_AI_DEVTOOLS__;
+                if (typeof _sdkRoot !== 'undefined' && _sdkRoot) {
+                    var rootName = typeof globalThis.__EXECBRO__ !== 'undefined' ? '__EXECBRO__' : '__RN_AI_DEVTOOLS__';
+                    var dt = _sdkRoot;
                     var paths = [];
                     // Map well-known store keys back into the legacy category
                     // buckets so SDK-registered stores don't appear missing to
@@ -67,7 +69,7 @@ export function buildListDebugGlobalsExpression(): string {
                         var sk = Object.keys(dt.stores);
                         for (var a = 0; a < sk.length; a++) {
                             var storeKey = sk[a];
-                            var path = '__RN_AI_DEVTOOLS__.stores.' + storeKey;
+                            var path = rootName + '.stores.' + storeKey;
                             paths.push(path);
                             var bucket = storeCategory[storeKey.toLowerCase()];
                             if (bucket && categories[bucket].indexOf(path) < 0) {
@@ -75,10 +77,10 @@ export function buildListDebugGlobalsExpression(): string {
                             }
                         }
                     }
-                    if (dt.navigation) paths.push('__RN_AI_DEVTOOLS__.navigation');
+                    if (dt.navigation) paths.push(rootName + '.navigation');
                     if (dt.custom && typeof dt.custom === 'object') {
                         var ck = Object.keys(dt.custom);
-                        for (var b = 0; b < ck.length; b++) paths.push('__RN_AI_DEVTOOLS__.custom.' + ck[b]);
+                        for (var b = 0; b < ck.length; b++) paths.push(rootName + '.custom.' + ck[b]);
                     }
                     sdk = {
                         version: dt.version || 'unknown',
@@ -86,8 +88,11 @@ export function buildListDebugGlobalsExpression(): string {
                         paths: paths,
                         hint: 'These paths are inspect_global / execute_in_app ready (dotted paths supported).'
                     };
-                    // Make sure the root global also appears in the listing,
-                    // even if Hermes hid it from Object.keys.
+                    // Make sure both root globals appear in the listing,
+                    // even if Hermes hid them from Object.keys.
+                    if (categories['Other Debug'].indexOf('__EXECBRO__') < 0) {
+                        categories['Other Debug'].push('__EXECBRO__');
+                    }
                     if (categories['Other Debug'].indexOf('__RN_AI_DEVTOOLS__') < 0) {
                         categories['Other Debug'].push('__RN_AI_DEVTOOLS__');
                     }
@@ -150,7 +155,7 @@ export async function inspectGlobal(objectName: string, device?: string): Promis
     if (!/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/.test(objectName)) {
         return {
             success: false,
-            error: `Invalid objectName: '${objectName}'. Expected an identifier or dotted path like '__APOLLO_CLIENT__' or '__RN_AI_DEVTOOLS__.stores.redux'. For arbitrary expressions, use execute_in_app.`
+            error: `Invalid objectName: '${objectName}'. Expected an identifier or dotted path like '__APOLLO_CLIENT__' or '__EXECBRO__.stores.redux'. For arbitrary expressions, use execute_in_app.`
         };
     }
 

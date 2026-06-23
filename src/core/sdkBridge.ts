@@ -34,7 +34,7 @@ type SDKResult<T> = { success: true; data: T } | { success: false; error: string
 export async function isSDKInstalled(): Promise<boolean> {
     if (connectedApps.size === 0) return false;
     const result = await executeInApp(
-        'typeof globalThis.__RN_AI_DEVTOOLS__?.getNetworkEntries === "function"',
+        'typeof (globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__)?.getNetworkEntries === "function"',
         false,
         { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
     );
@@ -45,7 +45,7 @@ export async function isSDKInstalled(): Promise<boolean> {
 
 async function readRawNetwork(): Promise<SDKResult<SDKNetworkEntry[]>> {
     const result = await executeInApp(
-        "JSON.stringify(globalThis.__RN_AI_DEVTOOLS__.getNetworkEntries())",
+        "JSON.stringify((globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).getNetworkEntries())",
         false,
         { timeoutMs: 5000, originatingToolName: "_sdk_bridge" }
     );
@@ -59,7 +59,7 @@ async function readRawNetwork(): Promise<SDKResult<SDKNetworkEntry[]>> {
 
 async function readRawConsole(): Promise<SDKResult<SDKConsoleEntry[]>> {
     const result = await executeInApp(
-        "JSON.stringify(globalThis.__RN_AI_DEVTOOLS__.getConsoleEntries())",
+        "JSON.stringify((globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).getConsoleEntries())",
         false,
         { timeoutMs: 5000, originatingToolName: "_sdk_bridge" }
     );
@@ -216,7 +216,7 @@ export async function getSDKConsoleStats(): Promise<SDKResult<{
 
 export async function clearSDKNetwork(): Promise<{ success: boolean; count?: number; error?: string }> {
     const result = await executeInApp(
-        "globalThis.__RN_AI_DEVTOOLS__.clearNetwork()",
+        "(globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).clearNetwork()",
         false,
         { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
     );
@@ -227,7 +227,7 @@ export async function clearSDKNetwork(): Promise<{ success: boolean; count?: num
 
 export async function clearSDKConsole(): Promise<{ success: boolean; count?: number; error?: string }> {
     const result = await executeInApp(
-        "globalThis.__RN_AI_DEVTOOLS__.clearConsole()",
+        "(globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).clearConsole()",
         false,
         { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
     );
