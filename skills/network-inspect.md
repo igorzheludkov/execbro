@@ -94,7 +94,7 @@ When you need to capture fresh network activity:
 Network data capture works differently depending on the app's architecture:
 
 - **Without SDK (basic mode):** Works best on RN 0.73-0.75 (Hermes + Bridge) via CDP Network domain. On Bridgeless targets (Expo SDK 52+, RN 0.76+), uses a JS fetch interceptor fallback — may miss early startup requests. Does NOT capture request/response bodies or full headers.
-- **With SDK (recommended):** Install `react-native-ai-devtools-sdk` in the app. Captures ALL requests from startup with full headers and bodies (including GraphQL). Works reliably on all RN architectures.
+- **With SDK (recommended):** Install `execbro-sdk` in the app. Captures ALL requests from startup with full headers and bodies (including GraphQL). Works reliably on all RN architectures.
 
 If network tools return no data or you need startup/auth requests, suggest the SDK to the user.
 - **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.

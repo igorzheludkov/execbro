@@ -2,14 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Repository: https://github.com/igorzheludkov/react-native-ai-devtools
+Repository: https://github.com/igorzheludkov/execbro
 
 ## Monorepo Context
 
-This repo is part of the **react-native-ai-devtools** monorepo at `~/rn-devtools/`. See [`../CLAUDE.md`](../CLAUDE.md) for the full map and cross-repo workflows.
+This repo is part of the **execbro** monorepo at `~/rn-devtools/`. See [`../CLAUDE.md`](../CLAUDE.md) for the full map and cross-repo workflows.
 
 **Sibling repos:**
-- `react-native-ai-devtools-sdk/` — in-app SDK companion ([GitHub](https://github.com/igorzheludkov/react-native-ai-devtools-sdk))
+- `execbro-sdk/` — in-app SDK companion ([GitHub](https://github.com/igorzheludkov/execbro-sdk))
 - `infra/` — Cloudflare Worker backend (telemetry, OCR) + analytics dashboard
 - `web/` — web platform (landing, user cabinet)
 - `docs/` — **canonical location for all plans and specs** (`~/rn-devtools/docs/`)
@@ -89,7 +89,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 3. **CDP Connection**: Connects via WebSocket to device's debugger URL
 4. **Log Capture**: Enables `Runtime.enable` and `Log.enable` CDP domains to receive console events
 5. **Network Tracking**: Three capture strategies (auto-selected):
-   - **SDK mode** (best): If `react-native-ai-devtools-sdk` is installed in the app, reads from its in-app buffer via `Runtime.evaluate`. Captures all requests from startup with full headers and bodies.
+   - **SDK mode** (best): If `execbro-sdk` is installed in the app, reads from its in-app buffer via `Runtime.evaluate`. Captures all requests from startup with full headers and bodies.
    - **CDP mode**: `Network.enable` CDP domain — works on RN 0.73-0.75 (Hermes + Bridge) and future RN 0.83+. Not supported on Bridgeless targets (Expo SDK 52-54).
    - **JS interceptor fallback**: Injects a fetch patch via `Runtime.evaluate` on Bridgeless targets. May miss early startup requests due to injection timing.
 6. **Code Execution**: Uses `Runtime.evaluate` CDP method for REPL-style JavaScript execution

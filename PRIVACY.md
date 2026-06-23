@@ -2,7 +2,7 @@
 
 **Last updated:** April 30, 2026
 
-ExecBro ("the Tool"), shipped as the npm package `react-native-ai-devtools`, is an MCP server for AI-powered React Native debugging. This document explains what data the Tool collects, how it is used, and how you can control it.
+ExecBro ("the Tool"), shipped as the npm package `execbro` (formerly `react-native-ai-devtools`), is an MCP server for AI-powered React Native debugging. This document explains what data the Tool collects, how it is used, and how you can control it.
 
 ## Summary
 
@@ -69,7 +69,7 @@ On the first tool use in each session, the Tool automatically registers your ins
 | Platform | macOS, Linux, or Windows |
 | Hostname | Your machine's hostname |
 | OS version | Operating system name and release version |
-| Server version | The installed version of react-native-ai-devtools |
+| Server version | The installed version of execbro |
 
 ### How the fingerprint works
 
@@ -284,4 +284,4 @@ We may update this privacy policy from time to time. Changes will be reflected i
 
 ## 12. Contact
 
-If you have questions about this privacy policy or data practices, please open an issue on [GitHub](https://github.com/igorzheludkov/react-native-ai-devtools/issues).
+If you have questions about this privacy policy or data practices, please open an issue on [GitHub](https://github.com/igorzheludkov/execbro/issues).

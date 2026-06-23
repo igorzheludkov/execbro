@@ -7,13 +7,13 @@ Monitor HTTP requests and responses from your running React Native app, with fil
 For complete network capture including **startup requests**, **full headers**, and **response bodies**, install the companion SDK in your React Native app:
 
 ```bash
-npm install react-native-ai-devtools-sdk
+npm install execbro-sdk
 ```
 
 Add to your app's entry file (e.g., `index.js` or `app/_layout.tsx`) — **must be the first import**:
 
 ```js
-import { init } from 'react-native-ai-devtools-sdk';
+import { init } from 'execbro-sdk';
 if (__DEV__) {
   init();
 }

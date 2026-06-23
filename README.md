@@ -12,7 +12,7 @@ Build, debug, and verify features end-to-end — without leaving the chat.
 ExecBro is the runtime bridge between your AI coding assistant and your running React Native app — exposing MCP tools to read logs and network, inspect component state, capture screenshots, tap the UI, and run JS. Zero config, no SDK or code changes required — an optional SDK unlocks richer log and network capture when you want it.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/igorzheludkov/react-native-ai-devtools/main/docs/demo/get_logs_demo.gif" alt="ExecBro demo" width="800" />
+  <img src="https://raw.githubusercontent.com/igorzheludkov/execbro/main/docs/demo/get_logs_demo.gif" alt="ExecBro demo" width="800" />
 </p>
 
 ## Get started
@@ -26,7 +26,7 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 
 > Write a report about your experience with the ExecBro tools — where you were struggling and what could be improved. Save it as a Markdown file for me, then submit it using the `send_feedback` tool (type `"feedback"`) so it becomes a GitHub issue.
 
-It takes 30 seconds: your agent runs `send_feedback`, hands you a pre-filled GitHub issue URL (environment info already attached), and you click submit — no GitHub setup, no copy-pasting. Real friction logs from real sessions are what shape the roadmap and get fixed first, so please send one. 🙏 And if you just have a quick idea or question, drop into [GitHub Discussions](https://github.com/igorzheludkov/react-native-ai-devtools/discussions) to share feedback, request features, and vote on what gets built next.
+It takes 30 seconds: your agent runs `send_feedback`, hands you a pre-filled GitHub issue URL (environment info already attached), and you click submit — no GitHub setup, no copy-pasting. Real friction logs from real sessions are what shape the roadmap and get fixed first, so please send one. 🙏 And if you just have a quick idea or question, drop into [GitHub Discussions](https://github.com/igorzheludkov/execbro/discussions) to share feedback, request features, and vote on what gets built next.
 
 ## Pricing
 
@@ -36,8 +36,8 @@ ExecBro is **free and open** — every feature, no usage limits, no account requ
 
 ### Runtime Interaction
 
-- **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. Note: on a cold start (first app launch), logs emitted before the MCP server connects are missed — subsequent reloads capture everything. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) to buffer logs from the very first line of app startup
-- **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Like logs, early network requests on cold start may be missed before the connection is established. Install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk) for full capture from app startup including request/response bodies
+- **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. Note: on a cold start (first app launch), logs emitted before the MCP server connects are missed — subsequent reloads capture everything. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) to buffer logs from the very first line of app startup
+- **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Like logs, early network requests on cold start may be missed before the connection is established. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for full capture from app startup including request/response bodies
 - **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
 - **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals
 - **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
@@ -423,7 +423,7 @@ The server prioritizes devices in this order:
 - Ensure the app is actively running (not just Metro)
 - Try `clear_logs` then trigger some actions in the app
 - Check `get_apps` to verify connection status
-- **On cold start (first launch):** The CDP connection is established after the app's early initialization code has already run, so startup logs and network requests are missed. Once connected, use `reload_app` — the subsequent reload captures everything from the beginning because the connection is already in place. To capture startup events on every launch, install the optional [SDK](https://www.npmjs.com/package/react-native-ai-devtools-sdk)
+- **On cold start (first launch):** The CDP connection is established after the app's early initialization code has already run, so startup logs and network requests are missed. Once connected, use `reload_app` — the subsequent reload captures everything from the beginning because the connection is already in place. To capture startup events on every launch, install the optional [SDK](https://www.npmjs.com/package/execbro-sdk)
 
 ## Telemetry & Data Collection
 
