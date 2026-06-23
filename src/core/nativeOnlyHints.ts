@@ -59,7 +59,7 @@ export function buildMetroMissingHint({ toolName, devices }: MetroMissingHintOpt
         lines.push(`Native-only alternatives you can use now: ${fallbacks.join(", ")}.`);
     }
 
-    lines.push("For in-app console/network capture without Metro, install the SDK: npm install react-native-ai-devtools-sdk");
+    lines.push("For in-app console/network capture without Metro, install the SDK: npm install execbro-sdk");
     return lines.join("\n");
 }
 

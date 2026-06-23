@@ -27,11 +27,11 @@ export function registerNetworkTools(server: McpServer): void {
         "get_network_requests",
         {
             description:
-                "Retrieve captured network requests from connected React Native app. Shows URL, method, status, and timing. Note: On Bridgeless targets (Expo SDK 52+) without the SDK, capture may miss early startup requests. Install react-native-ai-devtools-sdk for full capture with headers and response bodies. Tip: Use summary=true first for stats overview.\n" +
+                "Retrieve captured network requests from connected React Native app. Shows URL, method, status, and timing. Note: On Bridgeless targets (Expo SDK 52+) without the SDK, capture may miss early startup requests. Install execbro-sdk for full capture with headers and response bodies. Tip: Use summary=true first for stats overview.\n" +
                 "PURPOSE: Inspect HTTP traffic the app made since connection — URLs, methods, status codes, and timings — to debug API, auth, and caching issues.\n" +
                 "WHEN TO USE: User reports a failed login/load, slow screen, or wrong data. Confirm a request fired, check its status, and pivot to get_request_details for headers/body.\n" +
                 "WORKFLOW: scan_metro -> reproduce action -> get_network_requests({ summary: true }) -> get_network_requests({ status: 500 }) or search_network -> get_request_details(id).\n" +
-                "LIMITATIONS: Bridgeless targets without the SDK may miss pre-connect requests and response bodies — install react-native-ai-devtools-sdk for full fidelity.\n" +
+                "LIMITATIONS: Bridgeless targets without the SDK may miss pre-connect requests and response bodies — install execbro-sdk for full fidelity.\n" +
                 "GOOD: get_network_requests({ summary: true }) then get_network_requests({ urlPattern: \"/login\", status: 401 })\n" +
                 "BAD: get_network_requests({ maxRequests: 500 }) as the first call — start with summary=true.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
@@ -112,7 +112,7 @@ export function registerNetworkTools(server: McpServer): void {
                     const connStatus = await checkAndEnsureConnection(device);
                     connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
                     if (!sdkAvailable) {
-                        connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
+                        connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
                     }
                     connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
                 }
@@ -139,7 +139,7 @@ export function registerNetworkTools(server: McpServer): void {
                 const connStatus = await checkAndEnsureConnection(device);
                 connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
                 if (!sdkAvailable) {
-                    connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install react-native-ai-devtools-sdk";
+                    connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
                 }
                 connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
             } else {
@@ -289,7 +289,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "PURPOSE: Drill into a single network entry — full request/response headers, body, status, and timing breakdown.\n" +
                 "WHEN TO USE: After get_network_requests or search_network returns a suspect ID and you need the payload to diagnose.\n" +
                 "WORKFLOW: get_network_requests / search_network -> copy id -> get_request_details(requestId).\n" +
-                "LIMITATIONS: Bodies require the react-native-ai-devtools-sdk in the app; on CDP-only targets response bodies are missing. Large bodies are truncated — raise maxBodyLength.\n" +
+                "LIMITATIONS: Bodies require the execbro-sdk in the app; on CDP-only targets response bodies are missing. Large bodies are truncated — raise maxBodyLength.\n" +
                 "GOOD: get_request_details({ requestId: \"42\", maxBodyLength: 4000 })\n" +
                 "BAD: Guessing requestIds — always get them from get_network_requests / search_network first.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
