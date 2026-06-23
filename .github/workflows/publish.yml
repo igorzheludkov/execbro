@@ -36,10 +36,19 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Mirror publish to legacy react-native-ai-devtools
+        run: |
+          npm pkg set name=react-native-ai-devtools
+          npm pkg set bin.react-native-ai-devtools=./build/index.js
+          npm pkg delete bin.execbro
+          npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Mirror publish to deprecated react-native-ai-debugger
         run: |
-          VERSION=$(npm pkg get version | tr -d '"')
+          # Inherits bin.react-native-ai-devtools from the previous mirror step; only the name changes.
           npm pkg set name=react-native-ai-debugger
-          npm publish
+          npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

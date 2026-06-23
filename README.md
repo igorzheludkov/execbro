@@ -1,9 +1,9 @@
 # ExecBro
 
 > [!IMPORTANT]
-> **Already using ExecBro?** `npx` caches packages indefinitely, so you may be stuck on an old version without realizing it. Update your MCP config to use `npx -y react-native-ai-devtools@latest` (see [Setup](#setup)) so every session pulls the latest release with new tools and bug fixes. New installs after this change auto-update automatically.
+> **Already using ExecBro?** `npx` caches packages indefinitely, so you may be stuck on an old version without realizing it. Update your MCP config to use `npx -y execbro@latest` (see [Setup](#setup)) so every session pulls the latest release with new tools and bug fixes. New installs after this change auto-update automatically.
 
-> Ships as the npm package `react-native-ai-devtools`.
+> Ships as the npm package `execbro`. Legacy `react-native-ai-devtools` and `react-native-ai-debugger` packages keep receiving identical builds via mirror-publish.
 
 **Give your AI assistant eyes and hands into your running React Native app.** Like Chrome DevTools — but for AI agents.
 
@@ -75,14 +75,18 @@ No installation required — every client below uses `npx` to fetch the latest v
 
 After adding the server, fully restart the client (quit and relaunch, not just reload) so it picks up the new configuration.
 
+### Legacy package names
+
+The npm package was previously published as `react-native-ai-devtools` and before that as `react-native-ai-debugger`. Both legacy names continue to receive identical builds via mirror-publish — existing installations and MCP configs keep working unchanged. New installs should use `execbro`.
+
 ### Claude Code
 
 ```bash
 # Global (all projects)
-claude mcp add execbro --scope user -- npx -y react-native-ai-devtools@latest
+claude mcp add execbro --scope user -- npx -y execbro@latest
 
 # Project-specific
-claude mcp add execbro --scope project -- npx -y react-native-ai-devtools@latest
+claude mcp add execbro --scope project -- npx -y execbro@latest
 ```
 
 Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
@@ -93,7 +97,7 @@ Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
         "execbro": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"]
+            "args": ["-y", "execbro@latest"]
         }
     }
 }
@@ -111,7 +115,7 @@ Edit the config at:
     "mcpServers": {
         "execbro": {
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"]
+            "args": ["-y", "execbro@latest"]
         }
     }
 }
@@ -122,7 +126,7 @@ You can also open this file from **Settings → Developer → Edit Config**. Ful
 ### Codex CLI (OpenAI)
 
 ```bash
-codex mcp add execbro -- npx -y react-native-ai-devtools@latest
+codex mcp add execbro -- npx -y execbro@latest
 ```
 
 Or edit `~/.codex/config.toml` directly:
@@ -130,7 +134,7 @@ Or edit `~/.codex/config.toml` directly:
 ```toml
 [mcp_servers.execbro]
 command = "npx"
-args = ["-y", "react-native-ai-devtools@latest"]
+args = ["-y", "execbro@latest"]
 ```
 
 ### Cursor
@@ -142,7 +146,7 @@ args = ["-y", "react-native-ai-devtools@latest"]
     "mcpServers": {
         "execbro": {
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"]
+            "args": ["-y", "execbro@latest"]
         }
     }
 }
@@ -158,7 +162,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
         "execbro": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"]
+            "args": ["-y", "execbro@latest"]
         }
     }
 }
@@ -173,7 +177,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
     "mcpServers": {
         "execbro": {
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"]
+            "args": ["-y", "execbro@latest"]
         }
     }
 }
@@ -188,7 +192,7 @@ Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/
     "context_servers": {
         "execbro": {
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"],
+            "args": ["-y", "execbro@latest"],
             "env": {}
         }
     }
@@ -204,7 +208,7 @@ Edit `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project):
     "mcpServers": {
         "execbro": {
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"]
+            "args": ["-y", "execbro@latest"]
         }
     }
 }
@@ -252,7 +256,7 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
         "execbro": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"],
+            "args": ["-y", "execbro@latest"],
             "env": { "IOS_DRIVER": "idb" }
         }
     }
@@ -464,7 +468,7 @@ To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `
         "execbro": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "react-native-ai-devtools@latest"],
+            "args": ["-y", "execbro@latest"],
             "env": { "RN_DEBUGGER_TELEMETRY": "false" }
         }
     }
