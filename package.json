@@ -31,11 +31,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/igorzheludkov/react-native-ai-devtools.git"
+    "url": "git+https://github.com/igorzheludkov/execbro.git"
   },
-  "homepage": "https://github.com/igorzheludkov/react-native-ai-devtools#readme",
+  "homepage": "https://github.com/igorzheludkov/execbro#readme",
   "bugs": {
-    "url": "https://github.com/igorzheludkov/react-native-ai-devtools/issues"
+    "url": "https://github.com/igorzheludkov/execbro/issues"
   },
   "engines": {
     "node": ">=18.0.0"
