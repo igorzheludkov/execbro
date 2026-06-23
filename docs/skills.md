@@ -25,7 +25,7 @@ Copy the skill files into your project's `.claude/skills/` directory:
 ```bash
 # Install all skills
 mkdir -p .claude/skills
-curl -s https://api.github.com/repos/igorzheludkov/react-native-ai-devtools/contents/skills \
+curl -s https://api.github.com/repos/igorzheludkov/execbro/contents/skills \
   | grep download_url \
   | cut -d '"' -f 4 \
   | xargs -I {} sh -c 'curl -sL {} -o .claude/skills/$(basename {})'
