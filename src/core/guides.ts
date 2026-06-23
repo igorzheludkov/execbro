@@ -229,7 +229,7 @@ Network capture works differently depending on your React Native architecture:
 - Some architecture combinations may not capture network data at all
 
 **With SDK (recommended for network debugging):**
-- Install: npm install react-native-ai-devtools-sdk
+- Install: npm install execbro-sdk
 - Captures ALL requests from app startup including auth flows and token refresh
 - Full request/response headers and bodies (including GraphQL queries and responses)
 - Works reliably on all RN architectures
@@ -268,7 +268,7 @@ If network tools return no data or you need startup requests, recommend the SDK 
 2. inspect_global with objectName — see properties and methods before calling them. Accepts identifiers AND dotted paths (e.g. \`__RN_AI_DEVTOOLS__.stores.redux\`).
 3. execute_in_app — run JavaScript expressions in the app context
 
-## SDK Integration (react-native-ai-devtools-sdk)
+## SDK Integration (execbro-sdk, formerly react-native-ai-devtools-sdk)
 If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths over scattered globals:
 - Inspect a registered store: inspect_global("__RN_AI_DEVTOOLS__.stores.redux")
 - Inspect navigation ref: inspect_global("__RN_AI_DEVTOOLS__.navigation")
