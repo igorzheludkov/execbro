@@ -228,7 +228,6 @@ export interface TapResult {
     query: TapQuery;
     pressed?: string;
     text?: string;
-    screen?: string | null;
     path?: string | null;
     component?: string | null;
     tappedAt?: { x: number; y: number };
@@ -472,90 +471,11 @@ export function convertScreenshotToTapCoords(
 /** @deprecated Use convertScreenshotToTapCoords instead */
 export const convertPixelsToPoints = convertScreenshotToTapCoords;
 
-export async function getCurrentScreen(): Promise<string | null> {
-  try {
-      // Note: Uses var instead of let/const because Hermes Runtime.evaluate
-      // sometimes has issues with block-scoped declarations
-      const expression = `(function() {
-            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return null;
-            var roots = [];
-            if (hook.getFiberRoots) {
-                hook.renderers.forEach(function(r, id) {
-                    var fiberRoots = hook.getFiberRoots(id);
-                    if (fiberRoots) fiberRoots.forEach(function(root) { roots.push(root); });
-                });
-            }
-            if (roots.length === 0) return null;
-
-            function findScreen(fiber, depth) {
-                if (!fiber || depth > 5000) return null;
-                var name = fiber.type && (fiber.type.displayName || fiber.type.name || (typeof fiber.type === 'string' ? fiber.type : null));
-
-                if (name === 'RNSScreen') {
-                    var props = fiber.memoizedProps || {};
-                    if (props['aria-hidden'] === true) return null;
-                    var child = fiber.child;
-                    while (child) {
-                        var childName = child.type && (child.type.displayName || child.type.name);
-                        if (childName && typeof child.type !== 'string' && childName !== 'RNSScreenContentWrapper') {
-                            return childName;
-                        }
-                        child = child.child;
-                    }
-                }
-
-                var child = fiber.child;
-                while (child) {
-                    var found = findScreen(child, depth + 1);
-                    if (found) return found;
-                    child = child.sibling;
-                }
-                return null;
-            }
-
-            for (var i = 0; i < roots.length; i++) {
-                var root = roots[i].current;
-                var screen = findScreen(root, 0);
-                if (screen) return screen;
-            }
-
-            function findFirstUserComponent(fiber, depth) {
-                if (!fiber || depth > 5000) return null;
-                var name = fiber.type && (fiber.type.displayName || fiber.type.name);
-                if (name && typeof fiber.type !== 'string') return name;
-                var child = fiber.child;
-                while (child) {
-                    var found = findFirstUserComponent(child, depth + 1);
-                    if (found) return found;
-                    child = child.sibling;
-                }
-                return null;
-            }
-
-            for (var i = 0; i < roots.length; i++) {
-                var fallback = findFirstUserComponent(roots[i].current, 0);
-                if (fallback) return fallback;
-            }
-            return null;
-        })()`;
-
-      const result = await executeInApp(expression, false, { originatingToolName: "tap" });
-      if (result.success && result.result && result.result !== "null" && result.result !== "undefined") {
-          return result.result.replace(/^"|"$/g, "");
-      }
-      return null;
-  } catch {
-      return null;
-  }
-}
-
 export function formatTapSuccess(data: {
     method: string;
     query: TapQuery;
     pressed?: string;
     text?: string;
-    screen?: string | null;
     path?: string | null;
     component?: string | null;
     tappedAt?: { x: number; y: number };
@@ -589,7 +509,6 @@ export function formatTapSuccess(data: {
 
 export function formatTapFailure(data: {
     query: TapQuery;
-    screen?: string | null;
     error?: string;
     attempted: TapAttempt[];
     suggestion: string;
@@ -609,7 +528,6 @@ export function formatTapFailure(data: {
         success: false,
         method: lastStrategy,
         query: data.query,
-        screen: data.screen,
         error: errorMsg,
         attempted: data.attempted,
         suggestion: data.suggestion,
@@ -669,7 +587,6 @@ interface StrategyResult {
     reason: string;
     pressed?: string;
     text?: string;
-    screen?: string | null;
     path?: string | null;
     component?: string | null;
     matches?: Array<{ index: number; component: string; text: string; testID?: string | null; x?: number; y?: number }>;
@@ -1324,17 +1241,9 @@ async function tryCoordinateStrategy(
                 };
             }
 
-            // Best-effort: identify what was tapped via fiber tree
-            let screen: string | null = null;
-            try {
-                screen = await getCurrentScreen();
-            } catch {
-                // Inspection failure is non-fatal
-            }
             return {
                 success: true,
                 reason: "Tapped at coordinates (iOS)",
-                screen,
                 convertedTo: { x: converted.x, y: converted.y, unit: "points" }
             };
         } else {
@@ -1342,17 +1251,9 @@ async function tryCoordinateStrategy(
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "android", 1, scaleFactor);
             await androidTap(converted.x, converted.y);
 
-            // Best-effort: identify what was tapped via fiber tree
-            let screen: string | null = null;
-            try {
-                screen = await getCurrentScreen();
-            } catch {
-                // Inspection failure is non-fatal
-            }
             return {
                 success: true,
                 reason: "Tapped at coordinates (Android)",
-                screen,
                 convertedTo: { x: converted.x, y: converted.y, unit: "pixels" }
             };
         }
@@ -2102,7 +2003,6 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 query,
                 pressed: result.pressed,
                 text: result.text,
-                screen: result.screen,
                 path: result.path,
                 component: result.component,
                 convertedTo: result.convertedTo,

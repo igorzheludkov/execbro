@@ -229,7 +229,6 @@ describe("formatTapSuccess", () => {
             query: { text: "Submit" },
             pressed: "PrimaryButton",
             text: "Submit",
-            screen: "LoginScreen",
             path: "LoginScreen > Form > PrimaryButton",
         });
         expect(result.success).toBe(true);
@@ -242,7 +241,6 @@ describe("formatTapFailure", () => {
     it("includes attempted strategies and suggestion", () => {
         const result = formatTapFailure({
             query: { text: "hamburger" },
-            screen: "HomeScreen",
             attempted: [{ strategy: "fiber", reason: "No match" }],
             suggestion: "Use screenshot",
         });
