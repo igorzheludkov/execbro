@@ -322,7 +322,7 @@ describe("formatScreenStateSummary", () => {
         const out = formatScreenStateSummary(state);
         expect(out).toContain('📍 Currently focused screen: "Checkout"  [navigation stack: Tabs > Cart > Checkout]');
         expect(out).toContain('route params: {"id":"7"}');
-        expect(out).toContain('(210, 838) <Button /> "Send" frame:(20,810 380x56)');
+        expect(out).toContain('(210, 838) 🔘 <Button /> "Send" frame:(20,810 380x56)');
         expect(out).toContain('near "Skip verification."');
     });
 
@@ -331,7 +331,7 @@ describe("formatScreenStateSummary", () => {
             center: { x: p.center.x * 2, y: p.center.y * 2 },
             frame: { x: p.bounds.x * 2, y: p.bounds.y * 2, width: p.bounds.width * 2, height: p.bounds.height * 2 },
         }));
-        expect(out).toContain('(420, 1676) <Button /> "Send" frame:(40,1620 760x112)');
+        expect(out).toContain('(420, 1676) 🔘 <Button /> "Send" frame:(40,1620 760x112)');
     });
 
     it("groups overlay pressables and lists blocked root pressables separately", () => {
@@ -342,7 +342,7 @@ describe("formatScreenStateSummary", () => {
             texts: [],
             images: [],
         };
-        const out = formatScreenStateSummary(withOverlay);
+        const out = formatScreenStateSummary(withOverlay, undefined, { pressablesOnly: true });
         expect(out).toContain("📍 Currently focused screen: unknown");
         expect(out).toContain("🔲 BottomSheet:");
         expect(out).toContain('"Submit"');
@@ -382,6 +382,42 @@ describe("formatScreenStateSummary — merged content", () => {
         expect(out).not.toContain("📝");
         expect(out).not.toContain("🖼");
         expect(out).toContain('"In cart"');
+    });
+
+    it("uses a content-accurate header (not 'Pressables') when text/images are included", () => {
+        const out = formatScreenStateSummary(base);
+        expect(out).toContain("🎯 On screen:");
+        expect(out).not.toContain("🎯 Pressables:");
+    });
+
+    it("keeps the legacy 'Pressables' header under pressablesOnly", () => {
+        const out = formatScreenStateSummary(base, undefined, { pressablesOnly: true });
+        expect(out).toContain("🎯 Pressables:");
+        expect(out).not.toContain("🎯 On screen:");
+    });
+
+    it("marks pressables with 🔘 in the enriched view so tap targets stand out", () => {
+        const out = formatScreenStateSummary(base);
+        expect(out).toContain('🔘 "In cart"');
+    });
+
+    it("omits the 🔘 marker under pressablesOnly (byte-compatible legacy lines)", () => {
+        const out = formatScreenStateSummary(base, undefined, { pressablesOnly: true });
+        expect(out).not.toContain("🔘");
+        expect(out).toContain('(210, 838) "In cart"');
+    });
+
+    it("labels the reachable root group as content, not 'Root pressables', when enriched", () => {
+        const ss: ScreenState = {
+            route: null,
+            overlays: [{ type: "BottomSheet", title: "Sheet", pressables: [pressable({ label: "OK" })], texts: [], images: [] }],
+            pressables: [pressable({ label: "Back", blockedByOverlay: true, center: { x: 40, y: 100 }, bounds: { x: 16, y: 76, width: 48, height: 48 } })],
+            texts: [{ text: "Heading", center: { x: 100, y: 200 }, bounds: { x: 0, y: 190, width: 200, height: 20 } }],
+            images: [],
+        };
+        const out = formatScreenStateSummary(ss);
+        expect(out).toContain("🎯 Reachable (outside any overlay):");
+        expect(out).not.toContain("🎯 Root pressables:");
     });
 
     it("does not list a text that duplicates a pressable's nearbyText", () => {
