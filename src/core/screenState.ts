@@ -938,7 +938,7 @@ export async function getScreenState(
         // for proxy bounds (Fabric RCTText has no publicInstance).
         if (!insidePressable && !nextHidden && name !== 'RCTText' && typeof fiber.type !== 'string') {
             var str = extractTextString(fiber);
-            if (str && str.length > 0 && str.length <= 120) {
+            if (str && str.length > 0 && str.length <= 300) {
                 var up = fiber;
                 var upDepth = 0;
                 var measurableT = null;
@@ -964,6 +964,55 @@ export async function getScreenState(
         }
     }
     walkTexts(roots[0].current, 0, false, false);
+
+    // ------------------------------------------------------------------
+    // 3c. Images — host image components, with source + a11y label. Climb to
+    //     the nearest measurable host (same proxy-bounds trick as text).
+    // ------------------------------------------------------------------
+
+    var imageFibers = [];
+    var imageMeta = [];   // { src, alt }
+    var IMG_NAME = /^(Image|RCTImageView|ExpoImage|FastImage|ImageBackground)$/;
+
+    function imageSource(props) {
+        if (!props) return null;
+        var s = props.source;
+        if (s == null) return null;
+        if (Array.isArray(s)) s = s[0];
+        if (typeof s === 'number') return 'asset#' + s;
+        if (s && typeof s === 'object' && typeof s.uri === 'string') {
+            return s.uri.length > 200 ? s.uri.slice(0, 200) : s.uri;
+        }
+        if (typeof s === 'string') return s.length > 200 ? s.slice(0, 200) : s;
+        return null;
+    }
+
+    function walkImages(fiber, depth, inHidden) {
+        if (!fiber || depth > 5000) return;
+        var name = getComponentName(fiber);
+        var props = fiber.memoizedProps;
+        var nextHidden = inHidden || isScreenHidden(name, props);
+        if (!nextHidden && name && IMG_NAME.test(name) && typeof fiber.type !== 'string') {
+            var up = fiber;
+            var upD = 0;
+            var measurableI = null;
+            while (up && upD < 20) {
+                if (typeof up.type === 'string' && getMeasurable(up)) { measurableI = up; break; }
+                up = up.return;
+                upD++;
+            }
+            if (measurableI) {
+                imageFibers.push(measurableI);
+                imageMeta.push({
+                    src: imageSource(props),
+                    alt: (props && typeof props.accessibilityLabel === 'string') ? props.accessibilityLabel.slice(0, 80) : null
+                });
+            }
+        }
+        var child = fiber.child;
+        while (child) { walkImages(child, depth + 1, nextHidden); child = child.sibling; }
+    }
+    walkImages(roots[0].current, 0, false);
 
     // ------------------------------------------------------------------
     // 4. Store everything in globalThis for the resolve call
@@ -1002,6 +1051,8 @@ export async function getScreenState(
     globalThis.__screenStateOverlayMeasurements = new Array(overlayHostFibers.length).fill(null);
     globalThis.__screenStateTextContents = textContents;
     globalThis.__screenStateTextMeasurements = new Array(textFibers.length).fill(null);
+    globalThis.__screenStateImageMeta = imageMeta;
+    globalThis.__screenStateImageMeasurements = new Array(imageFibers.length).fill(null);
 
     // Dispatch all measureInWindow calls (pressables + root + overlay hosts)
     for (var i = 0; i < hostFibers.length; i++) {
@@ -1031,6 +1082,15 @@ export async function getScreenState(
             })(txi);
         } catch(e) {}
     }
+    for (var imi = 0; imi < imageFibers.length; imi++) {
+        try {
+            (function(idx) {
+                getMeasurable(imageFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                    globalThis.__screenStateImageMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                });
+            })(imi);
+        } catch(e) {}
+    }
 
     return { count: hostFibers.length, overlayCount: overlayFiberMeta.length };
 })()
@@ -1057,8 +1117,12 @@ export async function getScreenState(
     var overlayMeasurements = globalThis.__screenStateOverlayMeasurements || [];
     var textContents = globalThis.__screenStateTextContents || [];
     var textMeasurements = globalThis.__screenStateTextMeasurements || [];
+    var imageMeta = globalThis.__screenStateImageMeta || [];
+    var imageMeasurements = globalThis.__screenStateImageMeasurements || [];
     globalThis.__screenStateTextContents = null;
     globalThis.__screenStateTextMeasurements = null;
+    globalThis.__screenStateImageMeta = null;
+    globalThis.__screenStateImageMeasurements = null;
     globalThis.__screenStateFibers = null;
     globalThis.__screenStateMeta = null;
     globalThis.__screenStateMeasurements = null;
@@ -1216,6 +1280,40 @@ export async function getScreenState(
         delete allPressables[si].hasOwnLabel;
     }
 
+    // Build typed text/image lists (pair each measurement with its meta by index,
+    // viewport-filter) and assign each to a reachability group via the same overlay
+    // logic used for pressables (content containment vs blocking backdrop).
+    var rootTexts = [], rootImages = [];
+    for (var ov = 0; ov < overlays.length; ov++) { overlays[ov].texts = []; overlays[ov].images = []; }
+    function pushClassified(entry, kind) {
+        for (var a = 0; a < overlays.length; a++) {
+            if (overlays[a].hasContent && inside(entry.bounds, overlays[a].contentBounds)) { overlays[a][kind].push(entry); return; }
+        }
+        var blk = false;
+        for (var b = 0; b < overlays.length; b++) { if (inside(entry.bounds, overlays[b].blockBounds)) { blk = true; break; } }
+        if (blk) entry.blockedByOverlay = true;
+        (kind === 'texts' ? rootTexts : rootImages).push(entry);
+    }
+
+    for (var ti = 0; ti < textContents.length; ti++) {
+        var tm = textMeasurements[ti];
+        if (!tm || tm.width <= 0 || tm.height <= 0) continue;
+        if (tm.x + tm.width < 0 || tm.y + tm.height < 0) continue;
+        if (tm.x > viewportW || tm.y > viewportH) continue;
+        pushClassified({ text: textContents[ti],
+            center: { x: Math.round(tm.x + tm.width/2), y: Math.round(tm.y + tm.height/2) },
+            bounds: { x: Math.round(tm.x), y: Math.round(tm.y), width: Math.round(tm.width), height: Math.round(tm.height) } }, 'texts');
+    }
+    for (var ii = 0; ii < imageMeta.length; ii++) {
+        var im = imageMeasurements[ii];
+        if (!im || im.width <= 0 || im.height <= 0) continue;
+        if (im.x + im.width < 0 || im.y + im.height < 0) continue;
+        if (im.x > viewportW || im.y > viewportH) continue;
+        pushClassified({ src: imageMeta[ii].src, alt: imageMeta[ii].alt,
+            center: { x: Math.round(im.x + im.width/2), y: Math.round(im.y + im.height/2) },
+            bounds: { x: Math.round(im.x), y: Math.round(im.y), width: Math.round(im.width), height: Math.round(im.height) } }, 'images');
+    }
+
     // Sort visually (top-to-bottom, left-to-right) — walk order is mount order,
     // which puts late-mounted overlays like floating headers at the end.
     function byPosition(a, b) {
@@ -1223,14 +1321,20 @@ export async function getScreenState(
         return a.center.x - b.center.x;
     }
     rootPressables.sort(byPosition);
-    for (var so = 0; so < overlays.length; so++) overlays[so].pressables.sort(byPosition);
+    rootTexts.sort(byPosition);
+    rootImages.sort(byPosition);
+    for (var so = 0; so < overlays.length; so++) {
+        overlays[so].pressables.sort(byPosition);
+        overlays[so].texts.sort(byPosition);
+        overlays[so].images.sort(byPosition);
+    }
 
     // Strip bounds from overlay objects (not in public interface)
     var cleanOverlays = overlays.map(function(o) {
-        return { type: o.type, title: o.title, pressables: o.pressables };
+        return { type: o.type, title: o.title, pressables: o.pressables, texts: o.texts, images: o.images };
     });
 
-    return { route: route, overlays: cleanOverlays, pressables: rootPressables };
+    return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages };
 })()
     `;
 
