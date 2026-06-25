@@ -351,3 +351,70 @@ describe("formatScreenStateSummary", () => {
         expect(out).toContain('"Send"');
     });
 });
+
+describe("formatScreenStateSummary — merged content", () => {
+    const base: ScreenState = {
+        route: { name: "Detail", params: null, stack: ["Detail"] },
+        overlays: [],
+        pressables: [
+            pressable({ label: "In cart", center: { x: 210, y: 838 }, bounds: { x: 20, y: 810, width: 380, height: 56 } }),
+        ],
+        texts: [
+            { text: "Valya product", center: { x: 146, y: 394 }, bounds: { x: 20, y: 382, width: 251, height: 24 } },
+        ],
+        images: [
+            { src: "https://x/tiger.jpg", alt: null, center: { x: 210, y: 175 }, bounds: { x: 0, y: 0, width: 420, height: 350 } },
+        ],
+    };
+
+    it("merges text, image, and pressable lines ordered top-to-bottom", () => {
+        const out = formatScreenStateSummary(base);
+        const idxImg = out.indexOf("🖼 Image");
+        const idxText = out.indexOf('📝 "Valya product"');
+        const idxPress = out.indexOf('"In cart"');
+        expect(idxImg).toBeGreaterThan(-1);
+        expect(idxImg).toBeLessThan(idxText);   // image y=175 < text y=394
+        expect(idxText).toBeLessThan(idxPress); // text y=394 < pressable y=838
+    });
+
+    it("pressablesOnly omits text and image lines", () => {
+        const out = formatScreenStateSummary(base, undefined, { pressablesOnly: true });
+        expect(out).not.toContain("📝");
+        expect(out).not.toContain("🖼");
+        expect(out).toContain('"In cart"');
+    });
+
+    it("does not list a text that duplicates a pressable's nearbyText", () => {
+        const ss: ScreenState = {
+            ...base,
+            pressables: [pressable({ label: "[SvgCartNew — possibly cart button]", nearbyText: "1", center: { x: 380, y: 100 }, bounds: { x: 356, y: 76, width: 48, height: 48 } })],
+            texts: [{ text: "1", center: { x: 390, y: 82 }, bounds: { x: 384, y: 80, width: 16, height: 16 } }],
+        };
+        const out = formatScreenStateSummary(ss);
+        expect(out).not.toContain('📝 "1"');
+    });
+
+    it("caps texts at 60 with an explicit overflow marker", () => {
+        const many = Array.from({ length: 75 }, (_, i) => ({ text: "t" + i, center: { x: 0, y: i }, bounds: { x: 0, y: i, width: 1, height: 1 } }));
+        const out = formatScreenStateSummary({ ...base, texts: many });
+        expect(out).toContain("… +15 more text");
+    });
+
+    it("places overlay text in the overlay group and blocked text in the Blocked group", () => {
+        const ss: ScreenState = {
+            route: null,
+            overlays: [{ type: "BottomSheet", title: "Sheet", pressables: [], texts: [{ text: "Added to Cart!", center: { x: 210, y: 175 }, bounds: { x: 0, y: 160, width: 420, height: 30 } }], images: [] }],
+            pressables: [pressable({ label: "Back", blockedByOverlay: true, center: { x: 40, y: 100 }, bounds: { x: 16, y: 76, width: 48, height: 48 } })],
+            texts: [{ text: "Valya product", blockedByOverlay: true, center: { x: 146, y: 394 }, bounds: { x: 20, y: 382, width: 251, height: 24 } }],
+            images: [],
+        };
+        const out = formatScreenStateSummary(ss);
+        const idxSheet = out.indexOf("🔲 BottomSheet");
+        const idxAdded = out.indexOf('📝 "Added to Cart!"');
+        const idxBlocked = out.indexOf("🚫 Blocked");
+        const idxValya = out.indexOf('📝 "Valya product"');
+        expect(idxSheet).toBeLessThan(idxAdded);
+        expect(idxAdded).toBeLessThan(idxBlocked);
+        expect(idxBlocked).toBeLessThan(idxValya);
+    });
+});
