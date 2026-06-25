@@ -345,14 +345,17 @@ export function registerComponentTools(server: McpServer): void {
                 "Call this after any tap or navigation to orient before the next action. " +
                 "Returns a compact summary: route line (name + stack, params when present), then one line per pressable with center coordinates (x, y), custom component name as a JSX tag (greppable in the codebase), label, testID, and frame bounds. " +
                 "When overlays are present, root-level pressables covered by an overlay are listed under a 🚫 Blocked section — visible for context, but taps will NOT reach them until the overlay closes.\n\n" +
-                "WHEN TO USE: After every tap or swipe that may have triggered navigation. Replaces the get_pressable_elements + screenshot OCR pattern for orientation.\n" +
+                "By default the snapshot also includes on-screen text (📝) and images (🖼), each with the same (x, y) center + frame bounds as pressables, merged top-to-bottom within each reachability group — enough to read and navigate the screen without a screenshot. Text/images are tap targets too: tap(x, y) straight from the list. Long text is truncated to 80 chars (pass fullText=true for full strings); pass pressablesOnly=true for just the tappable elements (the lean orientation snapshot).\n\n" +
+                "WHEN TO USE: After every tap or swipe that may have triggered navigation. Replaces the get_pressable_elements + screenshot OCR pattern for orientation, and the screenshot+OCR pattern for reading screen content.\n" +
                 "LIMITATIONS: route is null when the app uses no React Navigation or Expo Router. Requires a live Metro connection. Coordinates are in points (iOS) / dp (Android).\n" +
-                "SEE ALSO: get_pressable_elements for raw pressable list without route context; get_screen_layout for full component tree with bounds.",
+                "SEE ALSO: get_pressable_elements for raw pressable list without route context; get_screen_layout for the full hierarchical component tree (deep inspection) — get_screen_state gives a flat, tap-ready content list instead.",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false."),
+                fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false.")
             }
         },
-        async ({ device }) => {
+        async ({ device, pressablesOnly, fullText }) => {
             if (!hasMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_state");
                 return {
@@ -376,7 +379,7 @@ export function registerComponentTools(server: McpServer): void {
             }
 
             const ss = result.screenState;
-            const summary = ss ? formatScreenStateSummary(ss) : (result.result ?? "{}");
+            const summary = ss ? formatScreenStateSummary(ss, undefined, { pressablesOnly, fullText }) : (result.result ?? "{}");
             const body = metaNotes.length > 0
                 ? `${summary}\n\n${metaNotes.join("\n")}`
                 : summary;
