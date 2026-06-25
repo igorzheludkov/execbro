@@ -6,6 +6,8 @@ import {
     describePressHandler,
     describePropHandlers,
     applyIconHintToLabel,
+    formatTextEntry,
+    formatImageEntry,
     type ScreenState,
     type ScreenStatePressable,
 } from "../../core/screenState.js";
@@ -241,6 +243,55 @@ describe("applyIconHintToLabel", () => {
         const p = pressable({ label: "Submit", icon: null });
         applyIconHintToLabel(p);
         expect(p.label).toBe("Submit");
+    });
+});
+
+describe("formatTextEntry", () => {
+    const t = (text: string) => ({ text, center: { x: 100, y: 50 }, bounds: { x: 80, y: 40, width: 200, height: 20 } });
+
+    it("renders coordinates, emoji tag, quoted text, and frame", () => {
+        expect(formatTextEntry(t("Valya product"), undefined, {})).toBe(
+            '  (100, 50) 📝 "Valya product" frame:(80,40 200x20)'
+        );
+    });
+
+    it("truncates to 80 chars with an ellipsis by default", () => {
+        const long = "x".repeat(100);
+        const out = formatTextEntry(t(long), undefined, {});
+        expect(out).toContain('"' + "x".repeat(80) + '…"');
+    });
+
+    it("emits the full string when fullText is set", () => {
+        const long = "x".repeat(100);
+        const out = formatTextEntry(t(long), undefined, { fullText: true });
+        expect(out).toContain('"' + "x".repeat(100) + '"');
+        expect(out).not.toContain("…");
+    });
+});
+
+describe("formatImageEntry", () => {
+    const img = (over = {}) => ({ center: { x: 210, y: 175 }, bounds: { x: 0, y: 0, width: 420, height: 350 }, ...over });
+
+    it("renders size, truncated src (60 chars), alt, and frame", () => {
+        const longSrc = "https://x/" + "a".repeat(70); // 80 chars → truncates to 60 + …
+        expect(formatImageEntry({ ...img(), src: longSrc, alt: "Valya" }, undefined)).toBe(
+            '  (210, 175) 🖼 Image 420x350 src="https://x/' + "a".repeat(50) + '…" alt="Valya" frame:(0,0 420x350)'
+        );
+    });
+
+    it("leaves a short src untouched", () => {
+        expect(formatImageEntry({ ...img(), src: "https://x/y.jpg" }, undefined)).toContain('src="https://x/y.jpg"');
+    });
+
+    it("omits src when absent and alt when absent", () => {
+        expect(formatImageEntry(img(), undefined)).toBe(
+            '  (210, 175) 🖼 Image 420x350 frame:(0,0 420x350)'
+        );
+    });
+
+    it("shows asset ids verbatim (already short)", () => {
+        const out = formatImageEntry({ ...img(), src: "asset#42" }, undefined);
+        expect(out).toContain('src="asset#42"');
     });
 });
 
