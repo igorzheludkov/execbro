@@ -96,6 +96,25 @@ describe("parseScreenStateResponse", () => {
         expect(result!.overlays).toEqual([]);
         expect(result!.pressables).toEqual([]);
     });
+
+    it("parses texts and images arrays", () => {
+        const parsed = parseScreenStateResponse({
+            route: null,
+            overlays: [],
+            pressables: [],
+            texts: [{ text: "Total", center: { x: 10, y: 20 }, bounds: { x: 0, y: 10, width: 40, height: 20 } }],
+            images: [{ src: "https://x/y.jpg", alt: "hero", center: { x: 5, y: 5 }, bounds: { x: 0, y: 0, width: 10, height: 10 } }],
+        });
+        expect(parsed?.texts).toHaveLength(1);
+        expect(parsed?.texts[0].text).toBe("Total");
+        expect(parsed?.images[0].src).toBe("https://x/y.jpg");
+    });
+
+    it("defaults texts and images to empty arrays when absent (back-compat)", () => {
+        const parsed = parseScreenStateResponse({ route: null, overlays: [], pressables: [] });
+        expect(parsed?.texts).toEqual([]);
+        expect(parsed?.images).toEqual([]);
+    });
 });
 
 describe("describePressHandler", () => {
@@ -244,6 +263,8 @@ describe("formatScreenStateSummary", () => {
                 bounds: { x: 20, y: 708, width: 22, height: 22 },
             }),
         ],
+        texts: [],
+        images: [],
     };
 
     it("renders route, params, component tags, labels, nearby text, and frames", () => {
@@ -267,6 +288,8 @@ describe("formatScreenStateSummary", () => {
             route: null,
             overlays: [{ type: "BottomSheet", title: null, pressables: [pressable({ label: "Submit" })] }],
             pressables: [pressable({ label: "Send", blockedByOverlay: true })],
+            texts: [],
+            images: [],
         };
         const out = formatScreenStateSummary(withOverlay);
         expect(out).toContain("📍 Currently focused screen: unknown");
