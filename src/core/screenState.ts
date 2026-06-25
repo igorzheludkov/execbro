@@ -25,10 +25,27 @@ export interface ScreenStatePressable {
     onPressHint?: string | null;
 }
 
+export interface ScreenStateText {
+    text: string;
+    center: { x: number; y: number };
+    bounds: { x: number; y: number; width: number; height: number };
+    blockedByOverlay?: boolean;
+}
+
+export interface ScreenStateImage {
+    src?: string | null;
+    alt?: string | null;
+    center: { x: number; y: number };
+    bounds: { x: number; y: number; width: number; height: number };
+    blockedByOverlay?: boolean;
+}
+
 export interface ScreenStateOverlay {
     type: "BottomSheet" | "Modal" | "Alert" | "ActionSheet" | "Unknown";
     title: string | null;
     pressables: ScreenStatePressable[];
+    texts?: ScreenStateText[];
+    images?: ScreenStateImage[];
 }
 
 export interface ScreenStateRoute {
@@ -41,6 +58,8 @@ export interface ScreenState {
     route: ScreenStateRoute | null;
     overlays: ScreenStateOverlay[];
     pressables: ScreenStatePressable[];
+    texts: ScreenStateText[];
+    images: ScreenStateImage[];
 }
 
 // ============================================================================
@@ -214,6 +233,8 @@ export function parseScreenStateResponse(raw: unknown): ScreenState | null {
         route: (r.route as ScreenStateRoute | null) ?? null,
         overlays: (r.overlays as ScreenStateOverlay[]) ?? [],
         pressables: (r.pressables as ScreenStatePressable[]) ?? [],
+        texts: (r.texts as ScreenStateText[]) ?? [],
+        images: (r.images as ScreenStateImage[]) ?? [],
     };
 }
 
