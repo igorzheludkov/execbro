@@ -5,6 +5,7 @@ import {
     formatScreenStateSummary,
     describePressHandler,
     describePropHandlers,
+    applyIconHintToLabel,
     type ScreenState,
     type ScreenStatePressable,
 } from "../../core/screenState.js";
@@ -146,8 +147,20 @@ describe("describePropHandlers", () => {
         expect(describePropHandlers([{ p: "onPress", n: "onPress", same: true }])).toBeNull();
     });
 
-    it("uses the only candidate when there is no identity match", () => {
-        expect(describePropHandlers([{ p: "onSelect", n: "", same: false }])).toBe("onPress→onSelect");
+    it("ignores a lone non-identity-matched candidate (the touchable's onPress is some other internal handler)", () => {
+        // A minified internal handler (e.g. handleCartPress) is NOT a pass-through of
+        // the component's only on* prop (onBack). Guessing onBack here mislabels every
+        // button in a multi-button container like FloatingHeader, so we emit nothing.
+        expect(describePropHandlers([{ p: "onSelect", n: "", same: false }])).toBeNull();
+        expect(describePropHandlers([{ p: "onBack", n: "", same: false }])).toBeNull();
+    });
+
+    it("picks the identity-matched prop even when other candidates exist", () => {
+        const raw = [
+            { p: "onMenuPress", n: "", same: false },
+            { p: "onBack", n: "", same: true },
+        ];
+        expect(describePropHandlers(raw)).toBe("onPress→onBack");
     });
 
     it("returns null on ambiguity (several candidates, none identity-matched)", () => {
@@ -162,6 +175,53 @@ describe("describePropHandlers", () => {
         expect(describePropHandlers(null)).toBeNull();
         expect(describePropHandlers([])).toBeNull();
         expect(describePropHandlers("nope")).toBeNull();
+    });
+});
+
+describe("applyIconHintToLabel", () => {
+    it("upgrades a fallback container label to the icon's semantic hint", () => {
+        const p = pressable({ label: "[FloatingHeader]", icon: "SvgChevronBackward" });
+        applyIconHintToLabel(p);
+        expect(p.label).toBe("[SvgChevronBackward — possibly back button]");
+    });
+
+    it("upgrades a count-badge label to the icon hint and preserves the count as nearby text", () => {
+        const p = pressable({ label: "1", icon: "SvgCartNew" });
+        applyIconHintToLabel(p);
+        expect(p.label).toBe("[SvgCartNew — possibly cart button]");
+        expect(p.nearbyText).toBe("1");
+    });
+
+    it("treats a '99+' overflow badge as a count badge", () => {
+        const p = pressable({ label: "99+", icon: "SvgCartNew" });
+        applyIconHintToLabel(p);
+        expect(p.label).toBe("[SvgCartNew — possibly cart button]");
+        expect(p.nearbyText).toBe("99+");
+    });
+
+    it("does not overwrite existing nearby text when preserving a badge", () => {
+        const p = pressable({ label: "2", icon: "SvgCartNew", nearbyText: "Checkout" });
+        applyIconHintToLabel(p);
+        expect(p.nearbyText).toBe("Checkout");
+    });
+
+    it("keeps the count badge as the label when the icon has no recognizable semantics", () => {
+        const p = pressable({ label: "3", icon: "SvgBlob" });
+        applyIconHintToLabel(p);
+        expect(p.label).toBe("3");
+        expect(p.nearbyText).toBeUndefined();
+    });
+
+    it("falls back to the bare icon name when there is no label and no hint", () => {
+        const p = pressable({ label: null, icon: "SvgBlob" });
+        applyIconHintToLabel(p);
+        expect(p.label).toBe("[SvgBlob]");
+    });
+
+    it("leaves pressables without an icon untouched", () => {
+        const p = pressable({ label: "Submit", icon: null });
+        applyIconHintToLabel(p);
+        expect(p.label).toBe("Submit");
     });
 });
 

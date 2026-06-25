@@ -63,18 +63,30 @@ export function markPressablesCoveredByOverlay(
     return pressables;
 }
 
+/** A count badge such as "1" or "99+" — the only "label" an icon button like a cart carries. */
+const COUNT_BADGE_LABEL = /^\d{1,3}\+?$/;
+
 /**
  * Replace component-name fallback labels with semantic icon labels when the
  * pressable's icon child name carries recognizable semantics:
  *   { label: "[FloatingHeader]", icon: "SvgChevronBackward" }
  *     → label "[SvgChevronBackward — possibly back button]"
+ * An icon button whose only text is a count badge (cart with "1") keeps that
+ * count as nearby context while the label is upgraded to the icon's meaning:
+ *   { label: "1", icon: "SvgCartNew" } → label "[SvgCartNew — possibly cart button]", nearbyText "1"
  * Labels from text/a11y are never touched (icon is null for those).
  */
 export function applyIconHintToLabel(p: ScreenStatePressable): ScreenStatePressable {
     if (!p.icon) return p;
     const hint = iconSemanticHint(p.icon);
-    if (hint) p.label = `[${p.icon} — ${hint}]`;
-    else if (!p.label) p.label = `[${p.icon}]`;
+    if (hint) {
+        if (p.label && COUNT_BADGE_LABEL.test(p.label.trim()) && !p.nearbyText) {
+            p.nearbyText = p.label;
+        }
+        p.label = `[${p.icon} — ${hint}]`;
+    } else if (!p.label) {
+        p.label = `[${p.icon}]`;
+    }
     return p;
 }
 
@@ -174,8 +186,10 @@ export function describePressHandler(raw: unknown): string | null {
  * Fallback handler context from the custom component's on* props, for when the
  * direct onPress is anonymous (Hermes discards source even in dev bundles, and
  * names like navigation.goBack are lost to computed assignment):
- * - prefer the prop whose value IS the touchable's onPress (pass-through), else
- *   the only on* function prop; ambiguity (several candidates) yields null
+ * - only trust the prop whose value IS the touchable's onPress (pass-through);
+ *   a non-matched candidate is an unverifiable guess that mislabels every button
+ *   in a multi-button container (FloatingHeader exposes only onBack, but its menu
+ *   and cart buttons run internal handlers) — so it yields null
  * - named fn → "onBack=goBack()"; nameless → "onPress→onBack" (the prop name
  *   alone is greppable context); a bare nameless "onPress" prop adds nothing → null
  */
@@ -184,7 +198,7 @@ export function describePropHandlers(raw: unknown): string | null {
     type Entry = { p?: string; n?: string; same?: boolean };
     const entries = raw.filter((e): e is Entry & { p: string } =>
         !!e && typeof e === "object" && typeof (e as Entry).p === "string");
-    const pick = entries.find((e) => e.same) ?? (entries.length === 1 ? entries[0] : null);
+    const pick = entries.find((e) => e.same) ?? null;
     if (!pick) return null;
     const name = meaningfulHandlerName(pick.n);
     if (name) return `${pick.p}=${name}()`;
@@ -540,6 +554,9 @@ export async function getScreenState(
 
     var hostFibers = [];
     var fiberMeta = [];
+    // A count badge ("1", "99+") is the only text on icon buttons like a cart — treat it
+    // as no-own-label so the icon child still surfaces (the count is kept as nearby text).
+    var COUNT_BADGE = /^\\d{1,3}\\+?$/;
 
     var RN_PRIMITIVES = /^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|ScrollViewContext(Base)?|VirtualizedListContext(Resetter)?|TextInputContext|KeyboardAvoidingViewContext|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/;
     var GENERIC_COMPONENT = /^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText|Unknown)$/;
@@ -715,7 +732,8 @@ export async function getScreenState(
                 var a11y = hProps.accessibilityLabel || pProps.accessibilityLabel || null;
                 var baseLabel = a11y || (text && text.length > 0 ? text.slice(0, 80) : null) || null;
                 var label = resolveLabel(pressableFiber, hostFiber, baseLabel, testID);
-                var icon = baseLabel ? null : findMeaningfulChildName(pressableFiber);
+                var badgeOnly = baseLabel ? COUNT_BADGE.test(baseLabel.trim()) : false;
+                var icon = (baseLabel && !badgeOnly) ? null : findMeaningfulChildName(pressableFiber);
                 if (!baseLabel && !icon) {
                     var ownName = getComponentName(pressableFiber);
                     if (ownName && !GENERIC_COMPONENT.test(ownName) && !RN_PRIMITIVES.test(ownName)) icon = ownName;
@@ -739,7 +757,8 @@ export async function getScreenState(
                 var testID2 = p2.testID || p2.nativeID || null;
                 var baseLabel2 = a11y2 || (text2 && text2.length > 0 ? text2.slice(0, 80) : null) || null;
                 var label2 = resolveLabel(fiber, hosts3[0], baseLabel2, testID2);
-                var icon2 = baseLabel2 ? null : findMeaningfulChildName(fiber);
+                var badgeOnly2 = baseLabel2 ? COUNT_BADGE.test(baseLabel2.trim()) : false;
+                var icon2 = (baseLabel2 && !badgeOnly2) ? null : findMeaningfulChildName(fiber);
                 if (!baseLabel2 && !icon2) {
                     var ownName2 = getComponentName(fiber);
                     if (ownName2 && !GENERIC_COMPONENT.test(ownName2) && !RN_PRIMITIVES.test(ownName2)) icon2 = ownName2;
