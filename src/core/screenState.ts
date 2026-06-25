@@ -189,7 +189,10 @@ export function formatScreenStateSummary(
     }
     const formatPressable = (p: ScreenStatePressable) => {
         const { center, frame } = convert(p);
-        return `  (${center.x}, ${center.y})${p.component ? ` <${p.component} />` : ""} ${p.label ? `"${p.label}"` : "(unlabeled)"}` +
+        // 🔘 marks tap targets in the enriched view (where 📝 text / 🖼 images also
+        // appear); omitted under pressablesOnly to keep the lean legacy lines.
+        const marker = opts.pressablesOnly ? "" : " 🔘";
+        return `  (${center.x}, ${center.y})${marker}${p.component ? ` <${p.component} />` : ""} ${p.label ? `"${p.label}"` : "(unlabeled)"}` +
             `${p.nearbyText ? ` near "${p.nearbyText}"` : ""}${p.onPressHint ? ` ${p.onPressHint}` : ""}` +
             `${p.testID ? ` testID="${p.testID}"` : ""}${p.isInput ? " [input]" : ""}` +
             ` frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
@@ -238,14 +241,19 @@ export function formatScreenStateSummary(
         const blockedT = ss.texts.filter((t) => t.blockedByOverlay);
         const reachableI = ss.images.filter((i) => !i.blockedByOverlay);
         const blockedI = ss.images.filter((i) => i.blockedByOverlay);
-        lines.push(`\n🎯 Root pressables: ${reachableP.length > 0 ? "" : "(none reachable)"}`);
-        renderGroup(reachableP, reachableT, reachableI).forEach((l) => lines.push(l));
+        const rootBody = renderGroup(reachableP, reachableT, reachableI);
+        if (opts.pressablesOnly) {
+            lines.push(`\n🎯 Root pressables: ${reachableP.length > 0 ? "" : "(none reachable)"}`);
+        } else {
+            lines.push(`\n🎯 Reachable (outside any overlay):${rootBody.length > 0 ? "" : " (nothing reachable)"}`);
+        }
+        rootBody.forEach((l) => lines.push(l));
         if (blockedP.length > 0 || blockedT.length > 0 || blockedI.length > 0) {
             lines.push(`\n🚫 Blocked by overlay (visible on the underlying screen but taps will NOT reach them until the overlay closes):`);
             renderGroup(blockedP, blockedT, blockedI).forEach((l) => lines.push(l));
         }
     } else {
-        lines.push("\n🎯 Pressables:");
+        lines.push(opts.pressablesOnly ? "\n🎯 Pressables:" : "\n🎯 On screen:");
         const body = renderGroup(ss.pressables, ss.texts, ss.images);
         if (body.length > 0) body.forEach((l) => lines.push(l));
         else lines.push("  (none)");
@@ -905,6 +913,7 @@ export async function getScreenState(
 
     var textFibers = [];
     var textContents = [];
+    var textOverlayIdx = [];
 
     function extractTextString(fiber) {
         var p = fiber.memoizedProps;
@@ -923,11 +932,19 @@ export async function getScreenState(
         return '';
     }
 
-    function walkTexts(fiber, depth, insidePressable, inHidden) {
+    function walkTexts(fiber, depth, insidePressable, inHidden, ovIdx) {
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
         var props = fiber.memoizedProps;
         var nextHidden = inHidden || isScreenHidden(name, props);
+
+        // Overlay membership by ancestry (same as the pressable walk) so a sheet's
+        // text is grouped with the sheet, not flagged as blocked behind it.
+        if (ovIdx == null) {
+            for (var ofiT = 0; ofiT < overlayFiberMeta.length; ofiT++) {
+                if (overlayFiberMeta[ofiT].fiber === fiber) { ovIdx = ofiT; break; }
+            }
+        }
 
         var hasOnPress = props && typeof props.onPress === 'function';
         var isInputHere = props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
@@ -953,17 +970,18 @@ export async function getScreenState(
                 if (measurableT) {
                     textFibers.push(measurableT);
                     textContents.push(str);
+                    textOverlayIdx.push(ovIdx);
                 }
             }
         }
 
         var child = fiber.child;
         while (child) {
-            walkTexts(child, depth + 1, nextInside, nextHidden);
+            walkTexts(child, depth + 1, nextInside, nextHidden, ovIdx);
             child = child.sibling;
         }
     }
-    walkTexts(roots[0].current, 0, false, false);
+    walkTexts(roots[0].current, 0, false, false, null);
 
     // ------------------------------------------------------------------
     // 3c. Images — host image components, with source + a11y label. Climb to
@@ -987,11 +1005,16 @@ export async function getScreenState(
         return null;
     }
 
-    function walkImages(fiber, depth, inHidden) {
+    function walkImages(fiber, depth, inHidden, ovIdx) {
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
         var props = fiber.memoizedProps;
         var nextHidden = inHidden || isScreenHidden(name, props);
+        if (ovIdx == null) {
+            for (var ofiI = 0; ofiI < overlayFiberMeta.length; ofiI++) {
+                if (overlayFiberMeta[ofiI].fiber === fiber) { ovIdx = ofiI; break; }
+            }
+        }
         if (!nextHidden && name && IMG_NAME.test(name) && typeof fiber.type !== 'string') {
             var up = fiber;
             var upD = 0;
@@ -1005,14 +1028,15 @@ export async function getScreenState(
                 imageFibers.push(measurableI);
                 imageMeta.push({
                     src: imageSource(props),
-                    alt: (props && typeof props.accessibilityLabel === 'string') ? props.accessibilityLabel.slice(0, 80) : null
+                    alt: (props && typeof props.accessibilityLabel === 'string') ? props.accessibilityLabel.slice(0, 80) : null,
+                    overlayIdx: ovIdx
                 });
             }
         }
         var child = fiber.child;
-        while (child) { walkImages(child, depth + 1, nextHidden); child = child.sibling; }
+        while (child) { walkImages(child, depth + 1, nextHidden, ovIdx); child = child.sibling; }
     }
-    walkImages(roots[0].current, 0, false);
+    walkImages(roots[0].current, 0, false, null);
 
     // ------------------------------------------------------------------
     // 4. Store everything in globalThis for the resolve call
@@ -1051,6 +1075,7 @@ export async function getScreenState(
     globalThis.__screenStateOverlayMeasurements = new Array(overlayHostFibers.length).fill(null);
     globalThis.__screenStateTextContents = textContents;
     globalThis.__screenStateTextMeasurements = new Array(textFibers.length).fill(null);
+    globalThis.__screenStateTextOverlayIdx = textOverlayIdx;
     globalThis.__screenStateImageMeta = imageMeta;
     globalThis.__screenStateImageMeasurements = new Array(imageFibers.length).fill(null);
 
@@ -1117,10 +1142,12 @@ export async function getScreenState(
     var overlayMeasurements = globalThis.__screenStateOverlayMeasurements || [];
     var textContents = globalThis.__screenStateTextContents || [];
     var textMeasurements = globalThis.__screenStateTextMeasurements || [];
+    var textOverlayIdx = globalThis.__screenStateTextOverlayIdx || [];
     var imageMeta = globalThis.__screenStateImageMeta || [];
     var imageMeasurements = globalThis.__screenStateImageMeasurements || [];
     globalThis.__screenStateTextContents = null;
     globalThis.__screenStateTextMeasurements = null;
+    globalThis.__screenStateTextOverlayIdx = null;
     globalThis.__screenStateImageMeta = null;
     globalThis.__screenStateImageMeasurements = null;
     globalThis.__screenStateFibers = null;
@@ -1285,9 +1312,15 @@ export async function getScreenState(
     // logic used for pressables (content containment vs blocking backdrop).
     var rootTexts = [], rootImages = [];
     for (var ov = 0; ov < overlays.length; ov++) { overlays[ov].texts = []; overlays[ov].images = []; }
-    function pushClassified(entry, kind) {
+    // Group an item: by fiber ancestry (overlayIdx) first — a sheet's own text/image
+    // belongs to the sheet; else geometric containment in an overlay's content; else
+    // root, flagged blocked when it sits under a blocking overlay (the screen behind).
+    function pushClassified(entry, kind, ovIdx) {
         for (var a = 0; a < overlays.length; a++) {
-            if (overlays[a].hasContent && inside(entry.bounds, overlays[a].contentBounds)) { overlays[a][kind].push(entry); return; }
+            if (ovIdx != null && ovIdx === overlays[a].origIdx) { overlays[a][kind].push(entry); return; }
+        }
+        for (var c = 0; c < overlays.length; c++) {
+            if (overlays[c].hasContent && inside(entry.bounds, overlays[c].contentBounds)) { overlays[c][kind].push(entry); return; }
         }
         var blk = false;
         for (var b = 0; b < overlays.length; b++) { if (inside(entry.bounds, overlays[b].blockBounds)) { blk = true; break; } }
@@ -1302,7 +1335,7 @@ export async function getScreenState(
         if (tm.x > viewportW || tm.y > viewportH) continue;
         pushClassified({ text: textContents[ti],
             center: { x: Math.round(tm.x + tm.width/2), y: Math.round(tm.y + tm.height/2) },
-            bounds: { x: Math.round(tm.x), y: Math.round(tm.y), width: Math.round(tm.width), height: Math.round(tm.height) } }, 'texts');
+            bounds: { x: Math.round(tm.x), y: Math.round(tm.y), width: Math.round(tm.width), height: Math.round(tm.height) } }, 'texts', textOverlayIdx[ti]);
     }
     for (var ii = 0; ii < imageMeta.length; ii++) {
         var im = imageMeasurements[ii];
@@ -1311,7 +1344,7 @@ export async function getScreenState(
         if (im.x > viewportW || im.y > viewportH) continue;
         pushClassified({ src: imageMeta[ii].src, alt: imageMeta[ii].alt,
             center: { x: Math.round(im.x + im.width/2), y: Math.round(im.y + im.height/2) },
-            bounds: { x: Math.round(im.x), y: Math.round(im.y), width: Math.round(im.width), height: Math.round(im.height) } }, 'images');
+            bounds: { x: Math.round(im.x), y: Math.round(im.y), width: Math.round(im.width), height: Math.round(im.height) } }, 'images', imageMeta[ii].overlayIdx);
     }
 
     // Sort visually (top-to-bottom, left-to-right) — walk order is mount order,
@@ -1366,6 +1399,27 @@ export async function getScreenState(
     screenState.pressables = dedupPressables(screenState.pressables);
     for (const overlay of screenState.overlays) {
         overlay.pressables = dedupPressables(overlay.pressables);
+    }
+
+    // Dedup texts/images: a single visual element often maps to nested host nodes
+    // (Image > ExpoImage) or repeated text spans that all measure to the same box.
+    const dedupBy = <T extends { center: { x: number; y: number } }>(
+        list: T[],
+        keyExtra: (item: T) => string
+    ): T[] => {
+        const seen = new Set<string>();
+        return list.filter((item) => {
+            const key = `${item.center.x},${item.center.y}|${keyExtra(item)}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    };
+    screenState.texts = dedupBy(screenState.texts, (t) => t.text);
+    screenState.images = dedupBy(screenState.images, (i) => i.src ?? "");
+    for (const overlay of screenState.overlays) {
+        if (overlay.texts) overlay.texts = dedupBy(overlay.texts, (t) => t.text);
+        if (overlay.images) overlay.images = dedupBy(overlay.images, (i) => i.src ?? "");
     }
 
     // Semantic icon hints + onPress handler hints

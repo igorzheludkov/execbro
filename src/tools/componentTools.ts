@@ -341,14 +341,12 @@ export function registerComponentTools(server: McpServer): void {
         "get_screen_state",
         {
             description:
-                "Get the current screen orientation snapshot: active route name + params, any blocking overlays (bottom sheets, modals, alerts) and their tappable elements, and all pressable elements currently reachable. " +
-                "Call this after any tap or navigation to orient before the next action. " +
-                "Returns a compact summary: route line (name + stack, params when present), then one line per pressable with center coordinates (x, y), custom component name as a JSX tag (greppable in the codebase), label, testID, and frame bounds. " +
-                "When overlays are present, root-level pressables covered by an overlay are listed under a 🚫 Blocked section — visible for context, but taps will NOT reach them until the overlay closes.\n\n" +
-                "By default the snapshot also includes on-screen text (📝) and images (🖼), each with the same (x, y) center + frame bounds as pressables, merged top-to-bottom within each reachability group — enough to read and navigate the screen without a screenshot. Text/images are tap targets too: tap(x, y) straight from the list. Long text is truncated to 80 chars (pass fullText=true for full strings); pass pressablesOnly=true for just the tappable elements (the lean orientation snapshot).\n\n" +
-                "WHEN TO USE: After every tap or swipe that may have triggered navigation. Replaces the get_pressable_elements + screenshot OCR pattern for orientation, and the screenshot+OCR pattern for reading screen content.\n" +
-                "LIMITATIONS: route is null when the app uses no React Navigation or Expo Router. Requires a live Metro connection. Coordinates are in points (iOS) / dp (Android).\n" +
-                "SEE ALSO: get_pressable_elements for raw pressable list without route context; get_screen_layout for the full hierarchical component tree (deep inspection) — get_screen_state gives a flat, tap-ready content list instead.",
+                "Screenshot-free snapshot of the current screen: active route + params, blocking overlays (sheets, modals, alerts), and every on-screen element merged top-to-bottom within reachability groups. Call after any tap or navigation to orient before the next action. " +
+                "Each line carries an (x, y) center + frame bounds (so anything is a tap(x, y) target), typed by a leading marker: 🔘 pressable (with component JSX tag, label, testID, onPress hint), 📝 text, 🖼 image (with src/alt). " +
+                "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
+                "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
+                "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection. Coordinates in points (iOS) / dp (Android); text frames are container-level (climb to nearest measurable host).\n" +
+                "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
                 pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false."),
