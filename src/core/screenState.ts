@@ -110,15 +110,51 @@ export function applyIconHintToLabel(p: ScreenStatePressable): ScreenStatePressa
 }
 
 /**
- * Per-pressable coordinate converter — lets screenshot tools map points/dp into
- * screenshot pixels (including conditional shifts like the iOS safe-area band).
+ * Coordinate converter for any positioned item (pressable, text, image) — lets
+ * screenshot tools map points/dp into screenshot pixels (including conditional
+ * shifts like the iOS safe-area band). Reads only center/bounds, so it applies
+ * uniformly across item types.
  */
-export type PressableCoordConverter = (p: ScreenStatePressable) => {
+export type ItemCoordConverter = (item: {
+    center: { x: number; y: number };
+    bounds: { x: number; y: number; width: number; height: number };
+}) => {
     center: { x: number; y: number };
     frame: { x: number; y: number; width: number; height: number };
 };
+/** Alias kept for existing call sites; prefer ItemCoordConverter. */
+export type PressableCoordConverter = ItemCoordConverter;
 
-const identityCoords: PressableCoordConverter = (p) => ({ center: p.center, frame: p.bounds });
+const identityCoords: ItemCoordConverter = (item) => ({ center: item.center, frame: item.bounds });
+
+const TEXT_DISPLAY_MAX = 80;
+const IMAGE_SRC_DISPLAY_MAX = 60;
+
+function truncate(s: string, max: number): string {
+    return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+/** One merged-list line for a static text node — coordinates match pressable lines. */
+export function formatTextEntry(
+    t: ScreenStateText,
+    convert: ItemCoordConverter = identityCoords,
+    opts: { fullText?: boolean } = {}
+): string {
+    const { center, frame } = convert(t);
+    const body = opts.fullText ? t.text : truncate(t.text, TEXT_DISPLAY_MAX);
+    return `  (${center.x}, ${center.y}) 📝 "${body}" frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
+}
+
+/** One merged-list line for an image node — coordinates match pressable lines. */
+export function formatImageEntry(
+    img: ScreenStateImage,
+    convert: ItemCoordConverter = identityCoords
+): string {
+    const { center, frame } = convert(img);
+    const src = img.src ? ` src="${truncate(img.src, IMAGE_SRC_DISPLAY_MAX)}"` : "";
+    const alt = img.alt ? ` alt="${img.alt}"` : "";
+    return `  (${center.x}, ${center.y}) 🖼 Image ${frame.width}x${frame.height}${src}${alt} frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
+}
 
 /**
  * Render a ScreenState as the compact orientation summary used by
