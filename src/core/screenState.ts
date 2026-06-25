@@ -156,14 +156,27 @@ export function formatImageEntry(
     return `  (${center.x}, ${center.y}) 🖼 Image ${frame.width}x${frame.height}${src}${alt} frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
 }
 
+const TEXT_CAP = 60;
+const IMAGE_CAP = 40;
+
 /**
- * Render a ScreenState as the compact orientation summary used by
- * get_screen_state and the screenshot tools:
- *   📍 Checkout  [Tabs > Cart > Checkout]
+ * Render a ScreenState as the orientation summary used by get_screen_state and the
+ * screenshot tools. By default it merges pressables, static text (📝), and images
+ * (🖼) into one spatially-ordered list per reachability group — enough to read and
+ * navigate the screen without a screenshot:
+ *   📍 Detail  [Detail]
  *   🎯 Pressables:
- *     (40, 100) <FloatingHeader /> "[SvgChevronBackward — possibly back button]" frame:(16,76 48x48)
+ *     (210, 175) 🖼 Image 420x350 src="…"
+ *     (146, 394) 📝 "Valya product" frame:(20,382 251x24)
+ *     (210, 838) <Button /> "In cart" frame:(20,810 380x56)
+ * pressablesOnly restores the lean pressable-only snapshot; fullText disables the
+ * 80-char text truncation.
  */
-export function formatScreenStateSummary(ss: ScreenState, convert: PressableCoordConverter = identityCoords): string {
+export function formatScreenStateSummary(
+    ss: ScreenState,
+    convert: ItemCoordConverter = identityCoords,
+    opts: { pressablesOnly?: boolean; fullText?: boolean } = {}
+): string {
     const lines: string[] = [];
     if (ss.route) {
         lines.push(`📍 Currently focused screen: "${ss.route.name}"  [navigation stack: ${ss.route.stack.join(" > ")}]`);
@@ -181,30 +194,61 @@ export function formatScreenStateSummary(ss: ScreenState, convert: PressableCoor
             `${p.testID ? ` testID="${p.testID}"` : ""}${p.isInput ? " [input]" : ""}` +
             ` frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
     };
+
+    // Merge pressables + (unless pressablesOnly) texts + images for one reachability
+    // group, sorted spatially (top→bottom, then left→right). A text duplicating a
+    // pressable's nearbyText is dropped; texts/images cap with an explicit marker.
+    const renderGroup = (
+        pressables: ScreenStatePressable[],
+        texts: ScreenStateText[],
+        images: ScreenStateImage[]
+    ): string[] => {
+        const out: string[] = [];
+        const nearby = new Set(pressables.map((p) => (p.nearbyText || "").trim()).filter(Boolean));
+        const freshTexts = opts.pressablesOnly ? [] : texts.filter((t) => !nearby.has(t.text.trim()));
+        const useTexts = freshTexts.slice(0, TEXT_CAP);
+        const useImages = opts.pressablesOnly ? [] : images.slice(0, IMAGE_CAP);
+        type Row = { y: number; x: number; line: string };
+        const rows: Row[] = [
+            ...pressables.map((p) => ({ y: p.center.y, x: p.center.x, line: formatPressable(p) })),
+            ...useTexts.map((t) => ({ y: t.center.y, x: t.center.x, line: formatTextEntry(t, convert, opts) })),
+            ...useImages.map((img) => ({ y: img.center.y, x: img.center.x, line: formatImageEntry(img, convert) })),
+        ];
+        rows.sort((a, b) => (a.y !== b.y ? a.y - b.y : a.x - b.x));
+        rows.forEach((r) => out.push(r.line));
+        if (!opts.pressablesOnly) {
+            const droppedT = freshTexts.length - useTexts.length;
+            const droppedI = images.length - useImages.length;
+            if (droppedT > 0) out.push(`  … +${droppedT} more text`);
+            if (droppedI > 0) out.push(`  … +${droppedI} more images`);
+        }
+        return out;
+    };
+
     if (ss.overlays.length > 0) {
         for (const overlay of ss.overlays) {
             lines.push(`\n🔲 ${overlay.type}${overlay.title ? ` — "${overlay.title}"` : ""}:`);
-            if (overlay.pressables.length > 0) {
-                overlay.pressables.forEach((p) => lines.push(formatPressable(p)));
-            } else {
-                lines.push("  (no pressables)");
-            }
+            const body = renderGroup(overlay.pressables, overlay.texts ?? [], overlay.images ?? []);
+            if (body.length > 0) body.forEach((l) => lines.push(l));
+            else lines.push("  (no pressables)");
         }
-        const reachable = ss.pressables.filter((p) => !p.blockedByOverlay);
-        const blocked = ss.pressables.filter((p) => p.blockedByOverlay);
-        lines.push(`\n🎯 Root pressables: ${reachable.length > 0 ? "" : "(none reachable)"}`);
-        reachable.forEach((p) => lines.push(formatPressable(p)));
-        if (blocked.length > 0) {
+        const reachableP = ss.pressables.filter((p) => !p.blockedByOverlay);
+        const blockedP = ss.pressables.filter((p) => p.blockedByOverlay);
+        const reachableT = ss.texts.filter((t) => !t.blockedByOverlay);
+        const blockedT = ss.texts.filter((t) => t.blockedByOverlay);
+        const reachableI = ss.images.filter((i) => !i.blockedByOverlay);
+        const blockedI = ss.images.filter((i) => i.blockedByOverlay);
+        lines.push(`\n🎯 Root pressables: ${reachableP.length > 0 ? "" : "(none reachable)"}`);
+        renderGroup(reachableP, reachableT, reachableI).forEach((l) => lines.push(l));
+        if (blockedP.length > 0 || blockedT.length > 0 || blockedI.length > 0) {
             lines.push(`\n🚫 Blocked by overlay (visible on the underlying screen but taps will NOT reach them until the overlay closes):`);
-            blocked.forEach((p) => lines.push(formatPressable(p)));
+            renderGroup(blockedP, blockedT, blockedI).forEach((l) => lines.push(l));
         }
     } else {
         lines.push("\n🎯 Pressables:");
-        if (ss.pressables.length > 0) {
-            ss.pressables.forEach((p) => lines.push(formatPressable(p)));
-        } else {
-            lines.push("  (none)");
-        }
+        const body = renderGroup(ss.pressables, ss.texts, ss.images);
+        if (body.length > 0) body.forEach((l) => lines.push(l));
+        else lines.push("  (none)");
     }
     return lines.join("\n");
 }
