@@ -1,7 +1,7 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { iconSemanticHint } from "./iconSemantics.js";
-import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
+import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
 
 // ============================================================================
 // Types matching the spec response shape
@@ -49,6 +49,12 @@ export interface ScreenStateOverlay {
     images?: ScreenStateImage[];
 }
 
+export interface ScreenStateNativeOverlay {
+    kind: "sheet" | "unknown";
+    component?: string;
+    note: string;
+}
+
 export interface ScreenStateRoute {
     name: string;
     params: Record<string, unknown> | null;
@@ -61,6 +67,8 @@ export interface ScreenState {
     pressables: ScreenStatePressable[];
     texts: ScreenStateText[];
     images: ScreenStateImage[];
+    nativeOverlay?: ScreenStateNativeOverlay | null;
+    notes?: string[];
 }
 
 // ============================================================================
@@ -188,6 +196,16 @@ export function formatScreenStateSummary(
     } else {
         lines.push("📍 Currently focused screen: unknown (no React Navigation / Expo Router detected)");
     }
+    if (ss.nativeOverlay) {
+        const comp = ss.nativeOverlay.component ? ` (${ss.nativeOverlay.component})` : "";
+        lines.push(
+            `⚠️ Native sheet detected${comp} — its content is presented outside the RN coordinate ` +
+            `space, so tap targets below may be wrong. Verify with ios_screenshot / ocr_screenshot.`
+        );
+    }
+    if (ss.notes && ss.notes.length > 0) {
+        for (const n of ss.notes) lines.push(`ℹ️ ${n}`);
+    }
     const formatPressable = (p: ScreenStatePressable) => {
         const { center, frame } = convert(p);
         // 🔘 marks tap targets in the enriched view (where 📝 text / 🖼 images also
@@ -229,7 +247,10 @@ export function formatScreenStateSummary(
         return out;
     };
 
-    if (ss.overlays.length > 0) {
+    // A native sheet has no entry in ss.overlays (it's not in the fiber-measured tree), but
+    // it flags the underlying pressables blockedByOverlay — so take the split reachable/blocked
+    // path even when overlays is empty, so those flags surface in the summary.
+    if (ss.overlays.length > 0 || ss.nativeOverlay) {
         for (const overlay of ss.overlays) {
             lines.push(`\n🔲 ${overlay.type}${overlay.title ? ` — "${overlay.title}"` : ""}:`);
             const body = renderGroup(overlay.pressables, overlay.texts ?? [], overlay.images ?? []);
@@ -324,6 +345,8 @@ export function parseScreenStateResponse(raw: unknown): ScreenState | null {
         pressables: (r.pressables as ScreenStatePressable[]) ?? [],
         texts: (r.texts as ScreenStateText[]) ?? [],
         images: (r.images as ScreenStateImage[]) ?? [],
+        nativeOverlay: (r.nativeOverlay as ScreenStateNativeOverlay | null) ?? null,
+        notes: (r.notes as string[]) ?? [],
     };
 }
 
@@ -1063,6 +1086,20 @@ export async function getScreenState(
     }
     walkImages(roots[0].current, 0, false, null);
 
+    // Native-presented sheets (e.g. True Sheet) render their content into a detached native
+    // context whose measureInWindow data is unreliable. Collect open-sheet host markers so
+    // the resolve pass can flag a nativeOverlay and steer the agent to screenshot/OCR.
+    var __nativeSheetMarkers = [];
+    var __NATIVE_SHEET_RE = /^(${NATIVE_SHEET_MARKER_RE_SRC})$/;
+    (function scanNative(fiber, depth) {
+        if (!fiber || depth > 5000) return;
+        var nm = getComponentName(fiber);
+        if (nm && __NATIVE_SHEET_RE.test(nm)) __nativeSheetMarkers.push(nm);
+        var c = fiber.child;
+        while (c) { scanNative(c, depth + 1); c = c.sibling; }
+    })(roots[0].current, 0);
+    globalThis.__screenStateNativeMarkers = __nativeSheetMarkers;
+
     // ------------------------------------------------------------------
     // 4. Store everything in globalThis for the resolve call
     // ------------------------------------------------------------------
@@ -1171,6 +1208,8 @@ export async function getScreenState(
     var textOverlayIdx = globalThis.__screenStateTextOverlayIdx || [];
     var imageMeta = globalThis.__screenStateImageMeta || [];
     var imageMeasurements = globalThis.__screenStateImageMeasurements || [];
+    var nativeMarkers = globalThis.__screenStateNativeMarkers || [];
+    globalThis.__screenStateNativeMarkers = null;
     globalThis.__screenStateTextContents = null;
     globalThis.__screenStateTextMeasurements = null;
     globalThis.__screenStateTextOverlayIdx = null;
@@ -1398,7 +1437,7 @@ export async function getScreenState(
         return { type: o.type, title: o.title, pressables: o.pressables, texts: o.texts, images: o.images };
     });
 
-    return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages };
+    return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages, nativeMarkers: nativeMarkers };
 })()
     `;
 
@@ -1476,6 +1515,27 @@ export async function getScreenState(
         const maxY = Math.max(...overlay.pressables.map((p) => p.bounds.y + p.bounds.height));
         const overlayBounds = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
         markPressablesCoveredByOverlay(screenState.pressables, overlayBounds);
+    }
+
+    // Native-presented sheet detection: when an open native sheet covers the screen, its
+    // (and the underlying screen's) coordinates are unreliable — flag it and mark the
+    // underlying pressables blocked so agents fall back to screenshot/OCR.
+    try {
+        const parsedRaw = JSON.parse(resolveResult.result || "{}");
+        const markers: string[] = Array.isArray(parsedRaw.nativeMarkers) ? parsedRaw.nativeMarkers : [];
+        const sheet = detectNativeSheet(markers);
+        if (sheet) {
+            const note =
+                `Native ${sheet.kind} (${sheet.component}) is open — its content is presented outside ` +
+                `the RN coordinate space; reported coordinates for it (and the screen behind it) are ` +
+                `unreliable. Use ios_screenshot / ocr_screenshot to read and tap it.`;
+            screenState.nativeOverlay = { kind: sheet.kind, component: sheet.component, note };
+            screenState.notes = [...(screenState.notes ?? []), note];
+            // The native sheet dims/blocks the underlying screen — flag root pressables.
+            for (const p of screenState.pressables) p.blockedByOverlay = true;
+        }
+    } catch {
+        /* detection is best-effort; never fail the call over it */
     }
 
     const json = JSON.stringify(screenState, null, 2);
