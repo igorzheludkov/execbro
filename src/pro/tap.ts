@@ -478,7 +478,8 @@ export type SwipeDirection = "up" | "down" | "left" | "right";
  * start/end coordinates, centered on the screen. Content-scroll semantics:
  * "up" = finger travels bottom→top, revealing content below.
  * Distance defaults to 33% of the relevant axis and endpoints clamp to the
- * 10%–90% margin so the gesture never runs off-screen.
+ * 10%–90% margin so the gesture never runs off-screen. Exact travel length is
+ * preserved; for odd distances the band may sit ≤1px off the axis midpoint.
  */
 export function computeSwipeFromDirection(
     direction: SwipeDirection,
