@@ -14,7 +14,7 @@ import {
     getDevicePixelRatio,
     connectedApps,
 } from "../core/index.js";
-import { tap, convertScreenshotToTapCoords, type TapResult } from "../pro/tap.js";
+import { tap, convertScreenshotToTapCoords, computeSwipeFromDirection, type SwipeDirection, type TapResult } from "../pro/tap.js";
 import {
     captureScreenshot,
     verifyAndCapture,
@@ -261,10 +261,24 @@ export function registerInteractionTools(server: McpServer): void {
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
             inputSchema: {
-                startX: z.coerce.number().describe("Starting X coordinate in screenshot pixels"),
-                startY: z.coerce.number().describe("Starting Y coordinate in screenshot pixels"),
-                endX: z.coerce.number().describe("Ending X coordinate in screenshot pixels"),
-                endY: z.coerce.number().describe("Ending Y coordinate in screenshot pixels"),
+                direction: z
+                    .enum(["up", "down", "left", "right"])
+                    .optional()
+                    .describe(
+                        "Shorthand for a centered scroll gesture (content-scroll semantics): " +
+                        "\"up\" reveals content below (finger moves bottom→top), \"down\" reveals content above, " +
+                        "\"left\"/\"right\" page horizontally. A bare swipe() with no params defaults to \"up\". " +
+                        "Ignored when all four explicit coordinates are provided."
+                    ),
+                distance: z.coerce
+                    .number()
+                    .positive()
+                    .optional()
+                    .describe("Travel length in screenshot pixels for the direction shorthand. Default: 33% of the relevant screen axis."),
+                startX: z.coerce.number().optional().describe("Starting X coordinate in screenshot pixels (explicit-coordinate mode)"),
+                startY: z.coerce.number().optional().describe("Starting Y coordinate in screenshot pixels (explicit-coordinate mode)"),
+                endX: z.coerce.number().optional().describe("Ending X coordinate in screenshot pixels (explicit-coordinate mode)"),
+                endY: z.coerce.number().optional().describe("Ending Y coordinate in screenshot pixels (explicit-coordinate mode)"),
                 durationMs: z.coerce
                     .number()
                     .optional()
@@ -311,7 +325,7 @@ export function registerInteractionTools(server: McpServer): void {
                     ),
             }
         },
-        async ({ startX, startY, endX, endY, durationMs, delta, device, verify, screenshot, burst }) => {
+        async ({ direction, distance, startX, startY, endX, endY, durationMs, delta, device, verify, screenshot, burst }) => {
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
                 return {
@@ -326,11 +340,53 @@ export function registerInteractionTools(server: McpServer): void {
             const shouldScreenshot = screenshot !== false;
             const shouldBurst = burst === true;
 
+            const coordCount = [startX, startY, endX, endY].filter((v) => v !== undefined).length;
+            const hasAllCoords = coordCount === 4;
+            const useDirection = !hasAllCoords;
+            if (!hasAllCoords && coordCount > 0) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: "Error: swipe needs either all four coordinates (startX/startY/endX/endY in screenshot pixels) or a direction (up/down/left/right, with optional distance in pixels). Got partial coordinates.",
+                    }],
+                    isError: true,
+                };
+            }
+
             // Capture before-screenshot only if we'll need it (verify or burst).
             const wantBefore = shouldVerify || shouldBurst;
-            const beforeCapture = wantBefore
+            let beforeCapture = wantBefore
                 ? await captureScreenshot(resolvedPlatform!, resolvedUdid)
                 : null;
+
+            if (useDirection) {
+                // Need screen dimensions to compute the centered gesture. Reuse the
+                // before-frame if we captured one; otherwise grab one measurement frame.
+                let dims = beforeCapture;
+                if (!dims) {
+                    dims = await captureScreenshot(resolvedPlatform!, resolvedUdid);
+                }
+                if (!dims || !dims.width || !dims.height) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: "Error: could not read screen dimensions to compute the swipe gesture. Pass explicit startX/startY/endX/endY coordinates instead.",
+                        }],
+                        isError: true,
+                    };
+                }
+                const computed = computeSwipeFromDirection(
+                    (direction ?? "up") as SwipeDirection,
+                    distance,
+                    dims.width,
+                    dims.height
+                );
+                startX = computed.startX;
+                startY = computed.startY;
+                endX = computed.endX;
+                endY = computed.endY;
+            }
+
             const beforeBuffer = beforeCapture?.buffer ?? null;
             const beforeScaleFactor = beforeCapture?.scaleFactor;
 
