@@ -58,3 +58,22 @@ describe("computeSwipeFromDirection — clamping to 10%–90% margin", () => {
         expect(r.endY).toBeLessThanOrEqual(Math.round(0.9 * 100));
     });
 });
+
+describe("computeSwipeFromDirection — odd distance and one-sided clamp", () => {
+    it("odd explicit distance preserves exact travel length", () => {
+        // d=333 is odd; Math.round(333/2)=167, so near-far would be 334 with the buggy code
+        const r = computeSwipeFromDirection("up", 333, W, H);
+        expect(r.startY - r.endY).toBe(333);
+    });
+
+    it("over-large distance collapses band to full margin span", () => {
+        // d=1700 > span=1600 (hi=1800, lo=200); both sides overflow after shift
+        // correct behavior: collapse to [lo, hi] giving travel = hi - lo = 1600
+        const lo = Math.round(0.1 * H); // 200
+        const hi = Math.round(0.9 * H); // 1800
+        const r = computeSwipeFromDirection("up", 1700, W, H);
+        expect(r.startY - r.endY).toBe(hi - lo);
+        expect(r.startY).toBeLessThanOrEqual(hi);
+        expect(r.endY).toBeGreaterThanOrEqual(lo);
+    });
+});
