@@ -1,6 +1,7 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { formatSummaryToTonl } from "./screenLayout.js";
+import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 
 // ============================================================================
 // Component Search (findComponents, inspectComponent)
@@ -488,9 +489,10 @@ export async function findComponents(
         format?: "json" | "tonl";
         device?: string;
         timeoutMs?: number;
+        visibleOnly?: boolean;
     } = {}
 ): Promise<ExecutionResult> {
-    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl", device, timeoutMs } = options;
+    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl", device, timeoutMs, visibleOnly = false } = options;
     const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
     const expression = `
@@ -517,6 +519,8 @@ export async function findComponents(
             const shortPath = ${shortPath};
             const summaryMode = ${summary};
             const pathSegments = 3;
+            const visibleOnly = ${visibleOnly};
+            ${VISIBILITY_HELPERS_JS}
 
             function getComponentName(fiber) {
                 if (!fiber || !fiber.type) return null;
@@ -560,6 +564,7 @@ export async function findComponents(
 
                 try {
                     var name = getComponentName(fiber);
+                    if (visibleOnly && isHiddenNavigationScene(name, fiber.memoizedProps)) return;
                     if (name && regex.test(name)) {
                         var entry = {
                             component: name,

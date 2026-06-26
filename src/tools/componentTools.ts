@@ -572,6 +572,11 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Return only component counts by name instead of full list (default: false)"),
+                visibleOnly: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe("Skip components inside hidden/inactive navigation scenes (unfocused Drawer/Tab destinations, inactive screens). Default false = search the entire fiber tree."),
                 format: z
                     .enum(["json", "tonl"])
                     .optional()
@@ -584,11 +589,11 @@ export function registerComponentTools(server: McpServer): void {
                     .describe("Per-call timeout in milliseconds. Default: 5000. Hard cap: 120000.")
             }
         },
-        async ({ pattern, maxResults, includeLayout, shortPath, summary, format, device, timeoutMs }) => {
+        async ({ pattern, maxResults, includeLayout, shortPath, summary, format, device, timeoutMs, visibleOnly }) => {
             const effectiveTimeoutMs = timeoutMs ?? 5000;
             const result = await findComponents(pattern, {
                 maxResults, includeLayout, shortPath, summary, format, device,
-                timeoutMs: effectiveTimeoutMs,
+                timeoutMs: effectiveTimeoutMs, visibleOnly,
             });
 
             const metaNotes = collectMetaNotes(result);
