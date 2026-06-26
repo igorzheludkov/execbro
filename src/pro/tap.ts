@@ -497,8 +497,12 @@ export function computeSwipeFromDirection(
 
     // Center a band of length d on the axis midpoint, then clamp to [lo, hi].
     const mid = Math.round(axis / 2);
-    let near = mid + Math.round(d / 2); // larger coordinate end of the band
-    let far = mid - Math.round(d / 2); // smaller coordinate end of the band
+    const half = Math.floor(d / 2);
+    let far = mid - half;        // smaller-coordinate end
+    let near = far + d;          // exact length d
+    if (near > hi) { near = hi; far = near - d; }
+    if (far < lo) { far = lo; near = far + d; }
+    // distance exceeds the available span — collapse to the full margin
     if (near > hi) near = hi;
     if (far < lo) far = lo;
 
