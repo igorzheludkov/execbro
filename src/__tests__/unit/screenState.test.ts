@@ -12,6 +12,39 @@ import {
     type ScreenStatePressable,
 } from "../../core/screenState.js";
 
+describe("formatScreenStateSummary nativeOverlay", () => {
+    function emptyState(over: Partial<ScreenState> = {}): ScreenState {
+        return { route: null, overlays: [], pressables: [], texts: [], images: [], ...over };
+    }
+
+    it("renders a native-sheet warning line when nativeOverlay is set", () => {
+        const out = formatScreenStateSummary(
+            emptyState({ nativeOverlay: { kind: "sheet", component: "TrueSheet", note: "x" } })
+        );
+        expect(out).toContain("Native sheet detected");
+        expect(out).toContain("TrueSheet");
+    });
+
+    it("renders notes lines", () => {
+        const out = formatScreenStateSummary(emptyState({ notes: ["heads up"] }));
+        expect(out).toContain("heads up");
+    });
+
+    it("omits the warning when nativeOverlay is absent", () => {
+        const out = formatScreenStateSummary(emptyState());
+        expect(out).not.toContain("Native sheet detected");
+    });
+
+    it("groups blocked pressables under Blocked when a native sheet is open", () => {
+        const blocked = pressable({ label: "Submit", blockedByOverlay: true });
+        const out = formatScreenStateSummary(
+            emptyState({ nativeOverlay: { kind: "sheet", component: "TrueSheet", note: "x" }, pressables: [blocked] })
+        );
+        expect(out).toContain("🚫 Blocked by overlay");
+        expect(out).toContain("Submit");
+    });
+});
+
 function pressable(overrides: Partial<ScreenStatePressable> = {}): ScreenStatePressable {
     return {
         label: "Button",
