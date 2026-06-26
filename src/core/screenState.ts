@@ -1,6 +1,7 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { iconSemanticHint } from "./iconSemantics.js";
+import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 
 // ============================================================================
 // Types matching the spec response shape
@@ -359,6 +360,8 @@ export async function getScreenState(
         if (typeof fiber.type === 'string') return fiber.type;
         return fiber.type.displayName || fiber.type.name || null;
     }
+
+    ${VISIBILITY_HELPERS_JS}
 
     function getMeasurable(fiber) {
         var sn = fiber.stateNode;
@@ -824,11 +827,7 @@ export async function getScreenState(
     }
 
     function isScreenHidden(name, props) {
-        if (!props) return false;
-        if (name === 'MaybeScreen' && props.active === 0) return true;
-        if (name === 'SceneView' && props.focused === false) return true;
-        if (name === 'RNSScreen' && props['aria-hidden'] === true) return true;
-        return false;
+        return isHiddenNavigationScene(name, props);
     }
 
     function walkPressabilityDebugViews(fiber, depth, hidden, ovIdx) {
