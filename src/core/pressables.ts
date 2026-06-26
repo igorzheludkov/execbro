@@ -2,6 +2,7 @@ import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { iconLabel } from "./iconSemantics.js";
 import { getConnectedAppByDevice, getFirstConnectedApp, getConnectedAppBySimulatorUdid, getConnectedAppByAndroidDeviceId } from "./connection.js";
+import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 
 // ============================================================================
 // Pressable Elements & onPress invocation
@@ -265,6 +266,8 @@ export async function getPressableElements(
                 return fiber.type.displayName || fiber.type.name || null;
             }
 
+            ${VISIBILITY_HELPERS_JS}
+
             var RN_PRIMITIVES = /^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|ScrollViewContext(Base)?|VirtualizedListContext(Resetter)?|TextInputContext|KeyboardAvoidingViewContext|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/;
 
             var hostFibers = [];
@@ -344,9 +347,7 @@ export async function getPressableElements(
                 var props = fiber.memoizedProps;
 
                 // Skip inactive/unfocused screens
-                if (name === 'MaybeScreen' && props && props.active === 0) return;
-                if (name === 'SceneView' && props && props.focused === false) return;
-                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+                if (isHiddenNavigationScene(name, props)) return;
 
                 var isPressable = props && typeof props.onPress === 'function';
                 var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
@@ -412,9 +413,7 @@ export async function getPressableElements(
                 if (!fiber || depth > 5000) return;
                 var name = getComponentName(fiber);
                 var props = fiber.memoizedProps;
-                if (name === 'MaybeScreen' && props && props.active === 0) return;
-                if (name === 'SceneView' && props && props.focused === false) return;
-                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) return;
+                if (isHiddenNavigationScene(name, props)) return;
                 var isInput = props && !props.onPress &&
                     (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
                 if (isInput) {
@@ -455,9 +454,7 @@ export async function getPressableElements(
                 var name = getComponentName(fiber);
                 var props = fiber.memoizedProps;
                 var nextHidden = hidden;
-                if (name === 'MaybeScreen' && props && props.active === 0) nextHidden = true;
-                if (name === 'SceneView' && props && props.focused === false) nextHidden = true;
-                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) nextHidden = true;
+                if (isHiddenNavigationScene(name, props)) nextHidden = true;
 
                 if (!nextHidden && name === 'PressabilityDebugView') {
                     // fiber.return = the HOST view that wraps the pressable's children
@@ -581,9 +578,7 @@ export async function getPressableElements(
                 // can enclose BOTH the active and inactive siblings, so we must keep walking
                 // to find the active one while still skipping the inactive subtree's texts.
                 var nextHidden = inHidden;
-                if (name === 'MaybeScreen' && props && props.active === 0) nextHidden = true;
-                if (name === 'SceneView' && props && props.focused === false) nextHidden = true;
-                if (name === 'RNSScreen' && props && props['aria-hidden'] === true) nextHidden = true;
+                if (isHiddenNavigationScene(name, props)) nextHidden = true;
 
                 var hasOnPress = props && typeof props.onPress === 'function';
                 var isInputHere = props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
@@ -1143,6 +1138,8 @@ export async function pressElement(options: {
                 return fiber.type.displayName || fiber.type.name || null;
             }
 
+            ${VISIBILITY_HELPERS_JS}
+
             // When a fiber holds a string/number child via memoizedProps.children, return it
             // without recursing — Text > RCTText > NativeText all carry the same string,
             // and walking through every layer duplicates it (e.g. "CircularsCircularsCirculars").
@@ -1201,11 +1198,7 @@ export async function pressElement(options: {
             var RN_PRIMITIVES = /^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|ScrollViewContext(Base)?|VirtualizedListContext(Resetter)?|TextInputContext|KeyboardAvoidingViewContext|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/;
 
             function isScreenHidden(name, props) {
-                if (!props) return false;
-                if (name === 'RNSScreen' && props['aria-hidden'] === true) return true;
-                if (name === 'MaybeScreen' && props.active === 0) return true;
-                if (name === 'SceneView' && props.focused === false) return true;
-                return false;
+                return isHiddenNavigationScene(name, props);
             }
 
             function findMeaningfulAncestorName(fiber) {
