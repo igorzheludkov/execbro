@@ -254,10 +254,10 @@ export function registerInteractionTools(server: McpServer): void {
             description:
                 "Swipe gesture that auto-routes to the correct platform (iOS or Android), with pixel-diff verification." +
                 primaryInteractionBanner() + "\n" +
-                "PURPOSE: Single unified swipe entry point. Easiest form: swipe({ direction: \"up\" }) scrolls to reveal more content (content-scroll semantics; \"down\"/\"left\"/\"right\" also supported). A bare swipe() defaults to \"up\". Optional distance is in screenshot pixels (default 33% of the axis). For pixel-perfect control, pass all four explicit coordinates (startX/startY/endX/endY) — they take precedence over direction.\n" +
+                "PURPOSE: Single unified swipe entry point. Easiest form: swipe({ direction: \"up\" }) scrolls to reveal more content (\"down\"/\"left\"/\"right\" also work; bare swipe() defaults to \"up\"). Optional distance in screenshot pixels (default 33% of axis). For precise control, pass all four coordinates (startX/startY/endX/endY) — they take precedence over direction.\n" +
                 "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers — anything that needs a gesture rather than a tap. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
                 "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means the scroll did nothing (end-of-list, non-scrollable surface, or missed coordinates). burst=true catches transient feedback like overscroll bounce.\n" +
-                "WORKFLOW: swipe({ direction: \"up\" }) -> read response.verification.meaningful to confirm it worked. Advanced: ios_screenshot/android_screenshot -> swipe({ startX, startY, endX, endY }) for coordinate-precise gestures.\n" +
+                "WORKFLOW: swipe({ direction: \"up\" }) -> read response.verification.meaningful. Advanced: pass startX/startY/endX/endY for coordinate-precise gestures.\n" +
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
             inputSchema: {
@@ -343,7 +343,9 @@ export function registerInteractionTools(server: McpServer): void {
             const coordCount = [startX, startY, endX, endY].filter((v) => v !== undefined).length;
             const hasAllCoords = coordCount === 4;
             const useDirection = !hasAllCoords;
-            if (!hasAllCoords && coordCount > 0) {
+            // Partial coordinates are only an error when no direction was given; an
+            // explicit direction takes the shorthand path and ignores stray coords.
+            if (!hasAllCoords && coordCount > 0 && direction === undefined) {
                 return {
                     content: [{
                         type: "text",
