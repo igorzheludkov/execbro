@@ -585,6 +585,10 @@ export async function getScreenState(
     // ------------------------------------------------------------------
 
     var OVERLAY_NAMES = /^(Modal|BottomSheet|BottomSheetModal|BottomSheetView|ActionSheet|Alert)$/;
+    // react-native-screens native-stack presentations that opaquely cover the screens
+    // beneath them. transparentModal / containedTransparentModal are excluded — the
+    // underlying screen genuinely shows through, so its elements stay reachable.
+    var COVERING_PRESENTATIONS = /^(modal|fullScreenModal|containedModal|formSheet)$/;
     var overlayFiberMeta = []; // { type, fiberRoot, hostFibers }
 
     function classifyOverlay(name) {
@@ -613,6 +617,28 @@ export async function getScreenState(
             }
             // Don't recurse deeper — nested overlays are unusual
             return;
+        }
+
+        // Native-stack modal (react-native-screens): a route presented as a modal /
+        // formSheet covers the screens beneath it, but its component name ("Screen",
+        // "RNSModalScreen") never matches OVERLAY_NAMES — so without this branch the
+        // underlying route's pressables/text leak into the reachable list as if visible.
+        // Detect via the stackPresentation prop. activityState === 0 means the screen is
+        // inactive/offscreen (e.g. mid-dismiss) — skip it; undefined is treated as active.
+        var sp = props.stackPresentation;
+        if (typeof sp === 'string' && COVERING_PRESENTATIONS.test(sp) && props.activityState !== 0) {
+            var modalHosts = [];
+            findHostsInSubtree(fiber, 0, modalHosts, 64);
+            if (modalHosts.length > 0) {
+                // fullCover: a native covering modal occludes the entire screen beneath
+                // it, so its block region is the whole viewport — not just its measured
+                // content frame, which can sit inset from the screen edges (e.g. the tab
+                // bar peeks past the modal's measured bottom and would wrongly read as
+                // reachable). Resolved against viewport bounds in the resolve pass.
+                overlayFiberMeta.push({ type: 'Modal', fiber: fiber, hostFibers: modalHosts, fullCover: true });
+                // Don't recurse — the modal's own subtree is its content, captured above.
+                return;
+            }
         }
 
         // Heuristic: absolute-positioned node with high zIndex covering > 40% screen
@@ -1054,7 +1080,8 @@ export async function getScreenState(
             type: om.type,
             title: (title && title.length > 2) ? title.slice(0, 60) : null,
             hostStart: startIdx,
-            hostEnd: overlayHostFibers.length
+            hostEnd: overlayHostFibers.length,
+            fullCover: !!om.fullCover
         };
     });
 
@@ -1198,7 +1225,12 @@ export async function getScreenState(
             if (mm.y + mm.height > cMaxY) cMaxY = mm.y + mm.height;
         }
         if (!bValid) continue;
-        var blockBounds = { x: Math.round(bMinX), y: Math.round(bMinY), width: Math.round(bMaxX - bMinX), height: Math.round(bMaxY - bMinY) };
+        // Native covering modals occlude the whole screen — expand their block region to
+        // the full viewport so elements that extend past the modal's measured content
+        // frame (e.g. the bottom tab bar) are still flagged as blocked, not reachable.
+        var blockBounds = om.fullCover
+            ? { x: 0, y: 0, width: Math.round(viewportW), height: Math.round(viewportH) }
+            : { x: Math.round(bMinX), y: Math.round(bMinY), width: Math.round(bMaxX - bMinX), height: Math.round(bMaxY - bMinY) };
         // When every host is backdrop-sized (gorhom sheets measure only full-screen
         // containers), there is no usable content rect — geometric fallback would
         // swallow the underlying screen's pressables, so it is disabled (hasContent).
