@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp } from "./jsExecute.js";
+import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 
 // ============================================================================
 // React Component Tree (via DevTools Global Hook)
@@ -140,6 +141,8 @@ export async function getComponentTree(
                 return fiber.type.displayName || fiber.type.name || null;
             }
 
+            ${VISIBILITY_HELPERS_JS}
+
             function shouldHide(name) {
                 if (!hideInternals || !name) return false;
                 return internalPatterns.test(name);
@@ -244,6 +247,10 @@ export async function getComponentTree(
                 if (!fiber || depth > 5000) return null;
 
                 const name = getComponentName(fiber);
+
+                // Skip hidden/inactive navigation scenes (unfocused drawer/tab destinations) so
+                // the focused screen — not an off-screen sibling found earlier in DFS — is returned.
+                if (isHiddenNavigationScene(name, fiber.memoizedProps)) return null;
 
                 // Skip overlays (BottomSheet, Modal, Toast, etc.) - don't traverse into them
                 if (name && overlayPatterns.test(name)) {
