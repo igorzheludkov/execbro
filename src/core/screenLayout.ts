@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
+import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 
 export interface ComponentSummary {
     component: string;
@@ -377,6 +378,8 @@ export async function getScreenLayout(
                 return fiber.type.displayName || fiber.type.name || null;
             }
 
+            ${VISIBILITY_HELPERS_JS}
+
             // Find the first measurable host descendant of a fiber
             function findFirstHost(fiber, depth) {
                 if (!fiber || depth > 20) return null;
@@ -429,12 +432,8 @@ export async function getScreenLayout(
                     var name = getComponentName(fiber);
                     var isHost = typeof fiber.type === 'string';
 
-                    // Skip inactive screens (react-native-screens MaybeScreen with active=0)
-                    // active: 0 = inactive/detached, 1 = transitioning, 2 = active
-                    if (name === 'MaybeScreen' && fiber.memoizedProps && fiber.memoizedProps.active === 0) return;
-
-                    // Skip unfocused screens in NativeStackNavigator (SceneView with focused=false)
-                    if (name === 'SceneView' && fiber.memoizedProps && fiber.memoizedProps.focused === false) return;
+                    // Skip hidden/inactive navigation scenes (shared predicate: focus rule + activityState + display:none)
+                    if (isHiddenNavigationScene(name, fiber.memoizedProps)) return;
 
                     var isMeaningful = name && !isHost && !RN_PRIMITIVES.test(name);
 
@@ -478,11 +477,8 @@ export async function getScreenLayout(
                     var name = getComponentName(fiber);
                     var isHost = typeof fiber.type === 'string';
 
-                    // Skip inactive screens (react-native-screens MaybeScreen with active=0)
-                    if (name === 'MaybeScreen' && fiber.memoizedProps && fiber.memoizedProps.active === 0) return;
-
-                    // Skip unfocused screens in NativeStackNavigator (SceneView with focused=false)
-                    if (name === 'SceneView' && fiber.memoizedProps && fiber.memoizedProps.focused === false) return;
+                    // Skip hidden/inactive navigation scenes (shared predicate: focus rule + activityState + display:none)
+                    if (isHiddenNavigationScene(name, fiber.memoizedProps)) return;
 
                     if (name && isHost && getMeasurable(fiber)) {
                         // Find nearest meaningful custom component ancestor for display
