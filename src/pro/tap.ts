@@ -471,6 +471,49 @@ export function convertScreenshotToTapCoords(
 /** @deprecated Use convertScreenshotToTapCoords instead */
 export const convertPixelsToPoints = convertScreenshotToTapCoords;
 
+export type SwipeDirection = "up" | "down" | "left" | "right";
+
+/**
+ * Turn a swipe direction (+ optional pixel distance) into screenshot-pixel
+ * start/end coordinates, centered on the screen. Content-scroll semantics:
+ * "up" = finger travels bottom→top, revealing content below.
+ * Distance defaults to 33% of the relevant axis and endpoints clamp to the
+ * 10%–90% margin so the gesture never runs off-screen.
+ */
+export function computeSwipeFromDirection(
+    direction: SwipeDirection,
+    distance: number | undefined,
+    width: number,
+    height: number
+): { startX: number; startY: number; endX: number; endY: number } {
+    const vertical = direction === "up" || direction === "down";
+    const axis = vertical ? height : width;
+    const d = distance && distance > 0 ? distance : Math.round(0.33 * axis);
+
+    const cx = Math.round(width / 2);
+    const cy = Math.round(height / 2);
+    const lo = Math.round(0.1 * axis);
+    const hi = Math.round(0.9 * axis);
+
+    // Center a band of length d on the axis midpoint, then clamp to [lo, hi].
+    const mid = Math.round(axis / 2);
+    let near = mid + Math.round(d / 2); // larger coordinate end of the band
+    let far = mid - Math.round(d / 2); // smaller coordinate end of the band
+    if (near > hi) near = hi;
+    if (far < lo) far = lo;
+
+    switch (direction) {
+        case "up": // finger bottom→top: start at larger Y, end at smaller Y
+            return { startX: cx, startY: near, endX: cx, endY: far };
+        case "down": // finger top→bottom
+            return { startX: cx, startY: far, endX: cx, endY: near };
+        case "left": // finger right→left
+            return { startX: near, startY: cy, endX: far, endY: cy };
+        case "right": // finger left→right
+            return { startX: far, startY: cy, endX: near, endY: cy };
+    }
+}
+
 export function formatTapSuccess(data: {
     method: string;
     query: TapQuery;
