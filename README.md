@@ -9,7 +9,7 @@
 
 Build, debug, and verify features end-to-end — without leaving the chat.
 
-ExecBro is the runtime bridge between your AI coding assistant and your running React Native app — exposing MCP tools to read logs and network, inspect component state, capture screenshots, tap the UI, and run JS. Zero config, no SDK or code changes required — an optional SDK unlocks richer log and network capture when you want it.
+ExecBro is the runtime bridge between your AI coding assistant and your running React Native app — exposing MCP tools to read logs and network, inspect component state, capture screenshots, tap the UI, and run JS. Zero config, no SDK or code changes required to start — and installing the [optional SDK](#install-the-sdk-recommended) is recommended for the most robust log and network capture.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/igorzheludkov/execbro/main/docs/demo/get_logs_demo.gif" alt="ExecBro demo" width="800" />
@@ -19,6 +19,7 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 
 1. [Setup ExecBro as an MCP server for your agent of choice](#setup)
 2. [Setup UI automation helpers](#ios-simulator--ui-automation-setup)
+3. [Install the SDK for richer capture](#install-the-sdk-recommended) — optional, but recommended for the most robust log, network, and state experience
 
 ## Feedback & Feature Requests
 
@@ -39,7 +40,7 @@ ExecBro is **free and open** — every feature, no usage limits, no account requ
 - **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. Note: on a cold start (first app launch), logs emitted before the MCP server connects are missed — subsequent reloads capture everything. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) to buffer logs from the very first line of app startup
 - **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Like logs, early network requests on cold start may be missed before the connection is established. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for full capture from app startup including request/response bodies
 - **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
-- **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals
+- **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals. Wire stores and other app internals straight into the agent with the optional [SDK](#install-the-sdk-recommended) for direct, reliable state access
 - **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
 
 ### Device Control
@@ -279,10 +280,51 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
 
 > **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"AXe is not installed"` in tap results, install the appropriate driver with the commands above and retry.
 
+## Install the SDK (recommended)
+
+ExecBro works with zero app changes, but installing the companion [`execbro-sdk`](https://www.npmjs.com/package/execbro-sdk) package is the single biggest upgrade to debugging quality. It lets you **wire up the important parts of your app — your state stores and your network layer — directly into the agent's reach**, so the AI inspects real Redux/TanStack Query state and full request/response bodies instead of guessing from the outside.
+
+Under the hood, the MCP server connects over Chrome DevTools Protocol (CDP), which misses events that fire before it attaches and can't read request/response bodies on newer architectures. The SDK patches `fetch` and `console` at import time and buffers everything in-app from the very first line — the MCP server auto-detects it and reads from it, no extra config.
+
+|                                          | Without SDK             | With SDK                       |
+| ---------------------------------------- | ----------------------- | ------------------------------ |
+| State stores (Redux, TanStack Query, …)  | Manual via `execute_in_app` | **Wired up — direct references** |
+| Request/response bodies                  | Not available           | Full (including GraphQL)       |
+| Startup network requests (auth, config)  | Missed                  | Captured from first fetch      |
+| Console logs from startup                | May miss early logs     | Captured from first log        |
+| Works on Bridgeless (Expo SDK 52+)       | Partial                 | Full                           |
+
+**Install:**
+
+```bash
+npm install execbro-sdk
+```
+
+**Initialize** — add to your app's entry file (`index.js`, `App.tsx`, or `app/_layout.tsx` for Expo Router) as the **first import**, and pass in the stores and references you want the agent to reach:
+
+```js
+import { init } from 'execbro-sdk';
+import { store } from './store'; // Redux store
+import { queryClient } from './queryClient'; // TanStack Query
+import { navigationRef } from './navigation';
+
+if (__DEV__) {
+  init({
+    stores: { redux: store, queryClient },
+    navigation: navigationRef,
+  });
+}
+
+// ... rest of your imports
+```
+
+`init()` alone (no arguments) already unlocks full log and network capture. Wiring `stores`, `navigation`, or `custom` references is what makes the agent able to read and reason about your app's state directly. See the [SDK README](https://github.com/igorzheludkov/execbro-sdk#readme) for every config option.
+
 ## Requirements
 
 - Node.js 18+
 - React Native app running with Metro bundler
+- **Recommended**: [`execbro-sdk`](#install-the-sdk-recommended) in your app — wires stores and the network layer into the agent for dramatically better debugging (optional; ExecBro works without it)
 - **iOS UI automation**: [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`, default) or [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`, opt in via `IOS_DRIVER=idb`) — required for tap, swipe, text input, accessibility on iOS Simulator
 - **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
 
