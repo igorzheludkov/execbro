@@ -49,13 +49,24 @@ export function registerScreenshotTools(server: McpServer): void {
                 udid: z
                     .string()
                     .optional()
-                    .describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
+                    .describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified."),
+                device: z
+                    .string()
+                    .optional()
+                    .describe("Alias for `udid` — same accepted values. Provided for consistency with tap/get_screen_layout/get_screen_state, which all use `device`. If both are given, `udid` wins.")
             }
         },
-        async ({ outputPath, udid }) => {
-            const resolved = await resolveIosUdid(udid);
+        async ({ outputPath, udid, device }) => {
+            const resolved = await resolveIosUdid(udid ?? device);
             if (!resolved.ok) return resolved.response;
-            const result = await iosScreenshot(outputPath, resolved.udid);
+            // Resolve ONCE to a single canonical UDID and use it for BOTH the
+            // framebuffer capture and the pressable/screen-state enrichment, so
+            // the pixels and the element list always describe the same simulator.
+            // Previously the capture used the fuzzy-resolved UDID while enrichment
+            // fell back to the raw arg (getActiveOrBootedSimulatorUdid) — on a
+            // multi-sim setup that split the image and the tree across two sims.
+            const targetUdid = resolved.udid ?? (await getActiveOrBootedSimulatorUdid());
+            const result = await iosScreenshot(outputPath, targetUdid ?? undefined);
     
             if (!result.success) {
                 return {
@@ -78,7 +89,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 // Resolve the RN app running on THIS simulator so enrichment pulls
                 // fiber/layout data from the right app (not the first-connected one,
                 // which may belong to a different simulator).
-                const resolvedUdid = udid || (await getActiveOrBootedSimulatorUdid());
+                const resolvedUdid = targetUdid;
                 const targetApp = resolvedUdid ? getConnectedAppBySimulatorUdid(resolvedUdid) : null;
                 const targetDeviceName = targetApp?.deviceInfo.deviceName;
     
@@ -97,7 +108,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 let scaleFactor = 3; // Default to 3x for modern iPhones
                 let safeAreaTop = 59; // Default safe area offset
                 try {
-                    const describeResult = await iosDescribeAll(udid);
+                    const describeResult = await iosDescribeAll(targetUdid ?? undefined);
                     if (describeResult.success && describeResult.elements && describeResult.elements.length > 0) {
                         // First element is typically the Application with full screen frame
                         const rootElement = describeResult.elements[0];
@@ -219,6 +230,11 @@ export function registerScreenshotTools(server: McpServer): void {
                     infoText = `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${deliveredWidth}x${deliveredHeight} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`;
                 } else {
                     infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+                }
+                // Echo the simulator actually captured so a wrong-device grab is
+                // detectable at a glance (esp. with multiple sims booted).
+                if (targetUdid) {
+                    infoText += `\n📸 Captured from: ${targetDeviceName ? `${targetDeviceName} ` : ""}(${targetUdid})`;
                 }
                 infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
                 infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
