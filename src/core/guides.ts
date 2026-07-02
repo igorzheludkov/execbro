@@ -210,7 +210,8 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 ## Tips
 - Always start with summary=true to avoid token overload
 - Use verbose=true with low maxLogs for full error details
-- Use startFromText to begin reading from a specific point`
+- Use startFromText to begin reading from a specific point
+- Instrumenting a flow to verify behavior? Prefer flowpoint() over console.log — see get_usage_guide(topic="flowpoints")`
     },
     {
         id: "network",
@@ -358,6 +359,46 @@ Suggested prompt the user can paste to trigger this:
 - Include workflow_context when possible — name the ExecBro tools/steps in play so the team can reproduce the tooling issue
 - The user can review and edit the issue body before submitting
 - No GitHub account setup or CLI tools needed — just a browser`
+    },
+    {
+        id: "flowpoints",
+        title: "Flowpoints — Flow Tracing & Verification",
+        summary: "Instrument app flows with flowpoint() breadcrumbs, then query, wait on, and assert them",
+        content: `# Flowpoints — Flow Tracing & Verification
+
+Flowpoints are structured, timestamped breadcrumbs emitted by flowpoint() calls in app
+code (execbro-sdk). They replace console.log spraying when you need to VERIFY what a
+flow actually did — steps, order, timing, failures — with factual assertions.
+
+## Workflow (verify a flow)
+1. Instrument the flow (edit app code; execbro-sdk must be installed and init()-ed):
+   import { flowpoint } from 'execbro-sdk'
+   flowpoint({ name: 'add-to-cart', step: 'start', begin: true })   // flow entry
+   flowpoint({ name: 'add-to-cart', step: 'cleared', meta: { removed: 3 } })
+   flowpoint({ name: 'add-to-cart', step: 'failed', level: 'error' })  // error paths
+2. Reload the app so the instrumented code is live.
+3. Drive the flow (tap, swipe, input).
+4. wait_for_flowpoint({ name: 'add-to-cart', step: 'done' }) — blocks until the flow
+   finishes instead of sleeping and re-polling.
+5. verify_flow({ name: 'add-to-cart', expect: ['start', 'cleared', 'done'] }) —
+   factual PASS/FAIL diff against the expected sequence.
+6. get_flowpoints({ name: 'add-to-cart', run: 'last' }) — full trail with timing
+   deltas when diagnosing a failure.
+
+## Key Tools
+- get_flowpoints: query the trail (filters: name, step, run, level, metaIncludes, since)
+- wait_for_flowpoint: block until a matching point arrives (or timeout with partial trail)
+- verify_flow: assert an expected step sequence against one run
+- clear_flowpoints: reset stored points (rarely needed — prefer run filters)
+
+## Tips
+- Prefer flowpoint() over console.log when instrumenting a flow to verify behavior.
+- Keep name and step low-cardinality and stable; dynamic payload goes in meta.
+- begin: true on the flow's entry point separates retries into runs; run: 'last'
+  queries only the newest attempt.
+- get_flowpoints({ level: 'error' }) answers "did anything fail?" across every flow.
+- flowpoint() is a production no-op — instrumentation can stay in the code.
+- Runtime TDD: write the verify_flow expectation FIRST, then implement until it passes.`
     }
 ];
 
@@ -378,6 +419,7 @@ export const DECISION_TREE: string = [
     "  layout    — on-screen layout check (get_screen_layout, get_pressable_elements)",
     "  inspect   — component inspection (find_components, inspect_component, get_inspector_selection)",
     "  network   — network request inspection (get_network_requests, search_network)",
+    "  flowpoints — verify a flow's behavior (flowpoint() breadcrumbs, wait_for_flowpoint, verify_flow)",
     "  state     — app state & JS execution (execute_in_app, list_debug_globals)",
     "  bundle    — bundle / Metro error checks (get_bundle_status, get_bundle_errors)",
     "  feedback  — share feedback, feature requests, or bug reports (send_feedback)"
