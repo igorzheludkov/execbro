@@ -45,6 +45,15 @@ The server also sends instructions on connection, so MCP clients automatically l
 
 > **Tip:** Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for a more robust approach — it provides full network capture from app startup (including request/response bodies), enhanced log collection, and access to global variables for navigation, state management, and more.
 
+## Flow Verification
+
+| Tool                 | Description                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `get_flowpoints`     | Read `flowpoint()` breadcrumbs grouped by flow and run, with inter-point timing deltas (SDK)          |
+| `wait_for_flowpoint` | Block until a flowpoint matching criteria arrives, or timeout — deterministic sync instead of polling |
+| `verify_flow`        | Assert a flow's actual step sequence against an expected one; factual PASS/FAIL diff                  |
+| `clear_flowpoints`   | Clear stored flowpoints, server-side and/or the in-app buffer                                          |
+
 ## Layout & Component Inspection
 
 | Tool                       | Description                                                                                                     |

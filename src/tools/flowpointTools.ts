@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerToolWithTelemetry } from "../core/register.js";
-import { getConnectedAppByDevice, connectedApps, executeInApp } from "../core/index.js";
+import { getConnectedAppByDevice, getFirstConnectedApp, executeInApp } from "../core/index.js";
 import { UserInputError } from "../core/errors.js";
 import {
     allStoredFlowpoints,
@@ -31,7 +31,7 @@ export function resolveTargetDeviceName(device?: string): string {
         if (!app) throw new UserInputError(`No connected device matches "${device}"`);
         return app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
     }
-    const first = connectedApps.values().next().value;
+    const first = getFirstConnectedApp();
     if (!first) throw new UserInputError("No connected app. Run scan_metro first.");
     return first.deviceInfo.deviceName || first.deviceInfo.title || "unknown";
 }
@@ -71,7 +71,7 @@ export function registerFlowpointTools(server: McpServer): void {
                     .string()
                     .optional()
                     .describe("Case-insensitive substring match against the stringified meta payload."),
-                since: z.number().optional().describe("Epoch-ms lower bound on the point timestamp."),
+                since: z.number().optional().describe("Epoch-ms lower bound on the point timestamp (exclusive)."),
                 limit: z.number().optional().default(200).describe("Max points returned, newest kept (default 200)."),
                 device: deviceParam,
             },
@@ -93,7 +93,19 @@ export function registerFlowpointTools(server: McpServer): void {
                 limit,
             });
             if (entries.length === 0) {
-                return { content: [{ type: "text" as const, text: NO_FLOWPOINTS_HINT }] };
+                if (sourceEntries.length === 0) {
+                    return { content: [{ type: "text" as const, text: NO_FLOWPOINTS_HINT }] };
+                }
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text:
+                                `${sourceEntries.length} flowpoints stored, but 0 matched your filters. ` +
+                                "Loosen or drop filters (name/step/run/level/metaIncludes/since) to see them.",
+                        },
+                    ],
+                };
             }
             const flows = new Set(entries.map((e) => e.name)).size;
             return {
@@ -105,7 +117,7 @@ export function registerFlowpointTools(server: McpServer): void {
                 ],
             };
         },
-        () => allStoredFlowpoints().length === 0,
+        (result) => !!result?.content?.[0]?.text?.startsWith("No flowpoints captured"),
     );
 
     registerToolWithTelemetry(
@@ -118,11 +130,19 @@ export function registerFlowpointTools(server: McpServer): void {
                 "the in-app buffer. Usually unnecessary — prefer begin: true + run: 'last' filtering.",
             inputSchema: {
                 name: z.string().optional().describe("Clear only this flow (server-side). Omit to clear all."),
-                device: deviceParam,
+                device: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Target device (substring match). Scopes both the server-store clear and the in-app " +
+                            "buffer clear. Omit for all devices.",
+                    ),
             },
         },
         async ({ name, device }) => {
-            let cleared = clearFlowpointStores(name);
+            const deviceName = device ? resolveTargetDeviceName(device) : undefined;
+            let cleared = clearFlowpointStores(name, deviceName);
+            let caveat = "";
             if (!name) {
                 const result = await executeInApp(
                     buildClearExpression(),
@@ -133,10 +153,12 @@ export function registerFlowpointTools(server: McpServer): void {
                 if (result.success) {
                     const inApp = parseInt(result.result || "0", 10);
                     if (!isNaN(inApp)) cleared = Math.max(cleared, inApp);
+                } else {
+                    caveat = " (in-app buffer clear failed — still-buffered points may re-drain after the next app event)";
                 }
             }
             const scope = name ? ` for flow "${name}"` : "";
-            return { content: [{ type: "text" as const, text: `Cleared ${cleared} flowpoints${scope}.` }] };
+            return { content: [{ type: "text" as const, text: `Cleared ${cleared} flowpoints${scope}.${caveat}` }] };
         },
     );
 
@@ -262,7 +284,8 @@ export function registerFlowpointTools(server: McpServer): void {
             if (!drained.ok) {
                 return { isError: true, content: [{ type: "text" as const, text: drained.error }] };
             }
-            const flowEntries = allStoredFlowpoints().filter((e) => e.name === name);
+            const sourceEntries = device ? getFlowpointStore(deviceName).entries : allStoredFlowpoints();
+            const flowEntries = sourceEntries.filter((e) => e.name === name);
             if (flowEntries.length === 0) {
                 return {
                     content: [

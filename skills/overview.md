@@ -13,6 +13,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 | `/component-inspect` | Inspect component tree | Exploring hierarchy, props, state, hooks of components |
 | `/layout-check` | Capture device screenshots | Verifying UI changes, comparing across devices/Figma |
 | `/device-interact` | Tap, swipe, type on device | Automating UI interactions, reproducing bugs |
+| `/flow-verify` | Instrument a flow with flowpoint(), drive it, and factually verify the expected step sequence | Verifying a user flow behaves correctly end to end, runtime TDD, debugging step order/timing |
 | `/bundle-check` | Check Metro bundler health | Red screens, compilation errors, reload issues |
 | `/native-rebuild` | Rebuild after native installs | After adding native Expo packages that need dev client |
 
@@ -33,6 +34,8 @@ Quick reference for all available React Native debugging skills. Use this to pic
 - Added a native package → `/native-rebuild`
 
 **"I need to interact with the app"** → `/device-interact`
+
+**"I need to verify a flow actually happened as expected"** → `/flow-verify` — instrument a flow with flowpoint(), drive it, and factually verify the expected step sequence
 
 **"I want to use the built-in React Native debugger"** → `/session-setup` with `disconnect_metro`, then `scan_metro` to reconnect
 

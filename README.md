@@ -135,6 +135,9 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
     ```
     The list won't scroll — scroll it down and check what's going on
     ```
+    ```
+    Instrument the checkout flow with flowpoints, run it, and verify the steps fire in order
+    ```
 
     The agent connects to Metro, reads logs and network, inspects the screen, and drives the UI as needed to answer.
 
