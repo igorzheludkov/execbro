@@ -13,6 +13,8 @@ import {
     getFlowpointStore,
     matchesPoint,
     buildClearExpression,
+    verifyFlow,
+    resolveLastRuns,
 } from "../core/flowpoints.js";
 
 const NO_FLOWPOINTS_HINT =
@@ -215,6 +217,73 @@ export function registerFlowpointTools(server: McpServer): void {
                 }
                 await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now()))));
             }
+        },
+    );
+
+    registerToolWithTelemetry(
+        server,
+        "verify_flow",
+        {
+            description:
+                "Assert a flow behaved as expected: compare the actual flowpoint trail of one run " +
+                "against an expected step sequence and get a factual PASS/FAIL diff.\n" +
+                "Matching is subsequence: expected steps must appear in order; extra points in between " +
+                "are fine. Any unexpected error-level point fails the run unless allowErrors is true or " +
+                "that step is explicitly expected.\n" +
+                "WORKFLOW: write the expected sequence (even before implementing — runtime TDD), drive " +
+                "the flow, wait_for_flowpoint on the terminal step, then verify_flow.\n" +
+                'SEE ALSO: get_usage_guide(topic="flowpoints").',
+            inputSchema: {
+                name: z.string().describe("Flow name to verify."),
+                expect: z
+                    .array(
+                        z.union([
+                            z.string(),
+                            z.object({
+                                step: z.string(),
+                                level: z.enum(["info", "warn", "error"]).optional(),
+                                metaIncludes: z.string().optional(),
+                            }),
+                        ]),
+                    )
+                    .describe("Expected step sequence, in order. Strings are shorthand for { step }."),
+                run: z.string().optional().default("last").describe("Run id to check, or 'last' (default)."),
+                allowErrors: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe("Tolerate unexpected error-level points (default false)."),
+                device: deviceParam,
+            },
+        },
+        async ({ name, expect: expected, run, allowErrors, device }) => {
+            const deviceName = resolveTargetDeviceName(device);
+            const drained = await drainFlowpoints(deviceName, device);
+            if (!drained.ok) {
+                return { isError: true, content: [{ type: "text" as const, text: drained.error }] };
+            }
+            const flowEntries = allStoredFlowpoints().filter((e) => e.name === name);
+            if (flowEntries.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: `No flowpoints recorded for flow "${name}".\n\n${NO_FLOWPOINTS_HINT}`,
+                        },
+                    ],
+                };
+            }
+            const runId = run === "last" || run === undefined ? resolveLastRuns(flowEntries).get(name)! : run;
+            const runEntries = flowEntries.filter((e) => e.run === runId);
+            if (runEntries.length === 0) {
+                return {
+                    isError: true,
+                    content: [{ type: "text" as const, text: `No entries for flow "${name}" run "${runId}".` }],
+                };
+            }
+            const result = verifyFlow(name, runId, runEntries, expected, allowErrors ?? false);
+            // A FAIL verdict is a successful verification, not a tool error — never set isError for it.
+            return { content: [{ type: "text" as const, text: result.text }] };
         },
     );
 }
