@@ -28,7 +28,7 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
                     .string()
                     .optional()
                     .describe(
-                        "Topic to get the full guide for. Available topics: setup, inspect, layout, interact, logs, network, state, bundle. Omit to see the overview of all topics."
+                        "Topic to get the full guide for. Available topics: setup, inspect, layout, interact, logs, network, state, bundle, feedback, flowpoints. Omit to see the overview of all topics."
                     )
             }
         },
