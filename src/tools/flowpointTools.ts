@@ -9,6 +9,7 @@ import {
     drainFlowpoints,
     filterFlowpoints,
     formatFlowpoints,
+    formatMeta,
     getFlowpointStore,
     matchesPoint,
     buildClearExpression,
@@ -134,6 +135,75 @@ export function registerFlowpointTools(server: McpServer): void {
             }
             const scope = name ? ` for flow "${name}"` : "";
             return { content: [{ type: "text" as const, text: `Cleared ${cleared} flowpoints${scope}.` }] };
+        },
+    );
+
+    registerToolWithTelemetry(
+        server,
+        "wait_for_flowpoint",
+        {
+            description:
+                "Block until a flowpoint matching the criteria arrives, or timeout. Deterministic " +
+                "synchronization for drive-then-verify: tap/act first, then call this with the flow's " +
+                "terminal step instead of sleeping and re-polling.\n" +
+                "Points emitted after your action but before this call still match (only points already " +
+                "seen by a previous flowpoint tool call are excluded).\n" +
+                "On timeout, returns whatever points DID arrive for the flow — that partial trail is the " +
+                "diagnostic for what stalled.\n" +
+                'SEE ALSO: get_usage_guide(topic="flowpoints").',
+            inputSchema: {
+                name: z.string().describe("Flow name to watch."),
+                step: z.string().optional().describe("Step label to wait for (exact match). Omit to match any step."),
+                level: z.enum(["info", "warn", "error"]).optional().describe("Only match this severity."),
+                metaIncludes: z
+                    .string()
+                    .optional()
+                    .describe("Case-insensitive substring the stringified meta must contain."),
+                timeoutMs: z.number().optional().default(5000).describe("Max wait in ms (default 5000, cap 30000)."),
+                device: deviceParam,
+            },
+        },
+        async ({ name, step, level, metaIncludes, timeoutMs, device }) => {
+            const effectiveTimeout = Math.min(timeoutMs ?? 5000, 30000);
+            const deviceName = resolveTargetDeviceName(device);
+            const store = getFlowpointStore(deviceName);
+            const baseline = store.entries.length;
+            const start = Date.now();
+            for (;;) {
+                const drained = await drainFlowpoints(deviceName, device);
+                if (!drained.ok) {
+                    return { isError: true, content: [{ type: "text" as const, text: drained.error }] };
+                }
+                const fresh = store.entries.slice(baseline).filter((e) => e.name === name);
+                const match = fresh.find((e) => matchesPoint(e, { step, level, metaIncludes }));
+                if (match) {
+                    const meta = match.meta !== undefined ? `\nmeta: ${formatMeta(match.meta)}` : "";
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text:
+                                    `Matched after ${Date.now() - start}ms: flow "${match.name}" ` +
+                                    `run ${match.run} step "${match.step}" [${match.level}]${meta}`,
+                            },
+                        ],
+                    };
+                }
+                if (Date.now() - start >= effectiveTimeout) {
+                    const trail = fresh.length
+                        ? `Points that DID arrive for "${name}" during the wait:\n\n${formatFlowpoints(fresh)}`
+                        : `No new points arrived for flow "${name}" during the wait.`;
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text: `Timeout after ${effectiveTimeout}ms waiting for flow "${name}"${step ? ` step "${step}"` : ""}.\n${trail}`,
+                            },
+                        ],
+                    };
+                }
+                await new Promise((resolve) => setTimeout(resolve, 250));
+            }
         },
     );
 }
