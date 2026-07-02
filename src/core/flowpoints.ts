@@ -159,6 +159,7 @@ function formatRunBlock(runId: string, runEntries: FlowpointEntry[], latest: boo
 
 /** Compact grouped text: flow → run → points with inter-point deltas. Assumes entries sorted by t. */
 export function formatFlowpoints(entries: FlowpointEntry[]): string {
+    const lastRuns = resolveLastRuns(entries);
     const byName = new Map<string, Map<string, FlowpointEntry[]>>();
     for (const entry of entries) {
         let runs = byName.get(entry.name);
@@ -183,7 +184,7 @@ export function formatFlowpoints(entries: FlowpointEntry[]): string {
             blocks.push([header, ...runEntries.map((e) => formatPointLine(e, runEntries[0].t, "  "))].join("\n"));
         } else {
             const header = `Flow "${name}" — ${runIds.length} runs`;
-            const runBlocks = runIds.map((id, i) => formatRunBlock(id, runs.get(id)!, i === runIds.length - 1, "  "));
+            const runBlocks = runIds.map((id) => formatRunBlock(id, runs.get(id)!, id === lastRuns.get(name), "  "));
             blocks.push([header, ...runBlocks].join("\n"));
         }
     }

@@ -96,4 +96,14 @@ describe("formatFlowpoints", () => {
         expect(out).toContain("run aaaa — 1 points");
         expect(out).toContain("run bbbb (latest) — 1 points");
     });
+
+    it("labels (latest) by last activity, not first appearance, under interleaved runs", () => {
+        const out = formatFlowpoints([
+            e(1, { run: "aaaa", t: 1000 }),
+            e(2, { run: "bbbb", t: 1500 }),
+            e(3, { run: "aaaa", t: 2000 }),
+        ]);
+        expect(out).toContain("run aaaa (latest)");
+        expect(out).not.toContain("bbbb (latest)");
+    });
 });
