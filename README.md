@@ -102,6 +102,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `scan_metro`                            | **Start here** — scan for Metro servers and auto-connect                                 |
 | `get_logs` / `search_logs`              | Capture and search console logs with filtering and summaries                             |
 | `get_network_requests`                  | Monitor HTTP requests with method/status filtering                                       |
+| `get_flowpoints` / `verify_flow`         | Flow tracing + factual verification: query, wait on, and assert `flowpoint()` breadcrumbs (SDK) |
 | `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
 | `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
 | `ios_input_text` / `android_input_text` | Type text into the focused field. `replace:true` clears pre-filled values first (Fabric) |
