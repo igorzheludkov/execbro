@@ -1,10 +1,5 @@
 # ExecBro
 
-> [!IMPORTANT]
-> **Already using ExecBro?** `npx` caches packages indefinitely, so you may be stuck on an old version without realizing it. Update your MCP config to use `npx -y execbro@latest` (see [Setup](#setup)) so every session pulls the latest release with new tools and bug fixes. New installs after this change auto-update automatically.
-
-> Ships as the npm package `execbro`. Legacy `react-native-ai-devtools` and `react-native-ai-debugger` packages keep receiving identical builds via mirror-publish.
-
 **Give your AI assistant eyes and hands into your running React Native app.** Like Chrome DevTools — but for AI agents.
 
 Build, debug, and verify features end-to-end — without leaving the chat.
@@ -18,20 +13,12 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 ## Get started
 
 1. [Setup ExecBro as an MCP server for your agent of choice](#setup)
-2. [Setup UI automation helpers](#ios-simulator--ui-automation-setup)
+2. [Setup UI automation helpers](docs/setup.md#ios-simulator--ui-automation-setup)
 3. [Install the SDK for richer capture](#install-the-sdk-recommended) — optional, but recommended for the most robust log, network, and state experience
 
-## Feedback & Feature Requests
+## See your usage — [execbro.com](https://execbro.com)
 
-**Please run this at the end of your session to help me make the tools better.** ExecBro is built for AI agents, so the most valuable feedback comes from the agent itself — paste this prompt to your agent:
-
-> Write a report about your experience with the ExecBro tools — where you were struggling and what could be improved. Save it as a Markdown file for me, then submit it using the `send_feedback` tool (type `"feedback"`) so it becomes a GitHub issue.
-
-It takes 30 seconds: your agent runs `send_feedback`, hands you a pre-filled GitHub issue URL (environment info already attached), and you click submit — no GitHub setup, no copy-pasting. Real friction logs from real sessions are what shape the roadmap and get fixed first, so please send one. 🙏 And if you just have a quick idea or question, drop into [GitHub Discussions](https://github.com/igorzheludkov/execbro/discussions) to share feedback, request features, and vote on what gets built next.
-
-## Pricing
-
-ExecBro is **free and open** — every feature, no usage limits, no account required. Use it as much as you like. The tools you run locally stay free; that's the model.
+Log in at **[execbro.com](https://execbro.com)** to see your ExecBro activity rendered back to you: which tools you use most, tool **error rates**, and your **session history** — so you can spot flaky tools, track usage over time, and understand how your agent drives the app across sessions. It's built from the same anonymous telemetry described in [Telemetry & Privacy](#telemetry--privacy), tied to your installation ID.
 
 ## Features
 
@@ -70,221 +57,19 @@ ExecBro is **free and open** — every feature, no usage limits, no account requ
 
 ## Setup
 
-No installation required — every client below uses `npx` to fetch the latest version on demand. Pick your agent:
-
-- [Claude Code](#claude-code) · [Claude Desktop](#claude-desktop) · [Codex CLI](#codex-cli-openai) · [Cursor](#cursor) · [VS Code Copilot](#vs-code-copilot) · [Windsurf](#windsurf) · [Zed](#zed) · [Gemini CLI](#gemini-cli)
-
-After adding the server, fully restart the client (quit and relaunch, not just reload) so it picks up the new configuration.
-
-### Legacy package names
-
-The npm package was previously published as `react-native-ai-devtools` and before that as `react-native-ai-debugger`. Both legacy names continue to receive identical builds via mirror-publish — existing installations and MCP configs keep working unchanged. New installs should use `execbro`.
-
-### Claude Code
+Add ExecBro to Claude Code in one command — no installation, `npx` fetches the latest version on demand:
 
 ```bash
-# Global (all projects)
 claude mcp add execbro --scope user -- npx -y execbro@latest
-
-# Project-specific
-claude mcp add execbro --scope project -- npx -y execbro@latest
 ```
 
-Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
+Then fully restart the client (quit and relaunch) so it picks up the new server.
 
-```json
-{
-    "mcpServers": {
-        "execbro": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "execbro@latest"]
-        }
-    }
-}
-```
-
-### Claude Desktop
-
-Edit the config at:
-
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-    "mcpServers": {
-        "execbro": {
-            "command": "npx",
-            "args": ["-y", "execbro@latest"]
-        }
-    }
-}
-```
-
-You can also open this file from **Settings → Developer → Edit Config**. Fully quit and relaunch Claude Desktop after saving.
-
-### Codex CLI (OpenAI)
-
-```bash
-codex mcp add execbro -- npx -y execbro@latest
-```
-
-Or edit `~/.codex/config.toml` directly:
-
-```toml
-[mcp_servers.execbro]
-command = "npx"
-args = ["-y", "execbro@latest"]
-```
-
-### Cursor
-
-[Docs](https://docs.cursor.com/context/model-context-protocol). Add via `Cmd+Shift+P` → "View: Open MCP Settings", or edit `.cursor/mcp.json` (project) / `~/.cursor/mcp.json` (global):
-
-```json
-{
-    "mcpServers": {
-        "execbro": {
-            "command": "npx",
-            "args": ["-y", "execbro@latest"]
-        }
-    }
-}
-```
-
-### VS Code Copilot
-
-Requires VS Code 1.102+ with Copilot ([docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)). Add via `Cmd+Shift+P` → "MCP: Add Server", or edit `.vscode/mcp.json`:
-
-```json
-{
-    "servers": {
-        "execbro": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "execbro@latest"]
-        }
-    }
-}
-```
-
-### Windsurf
-
-[Docs](https://docs.windsurf.com/windsurf/cascade/mcp). Edit `~/.codeium/windsurf/mcp_config.json`:
-
-```json
-{
-    "mcpServers": {
-        "execbro": {
-            "command": "npx",
-            "args": ["-y", "execbro@latest"]
-        }
-    }
-}
-```
-
-### Zed
-
-[Docs](https://zed.dev/docs/ai/mcp). Open the Agent Panel settings → "Add Custom Server", or add to `settings.json`:
-
-```json
-{
-    "context_servers": {
-        "execbro": {
-            "command": "npx",
-            "args": ["-y", "execbro@latest"],
-            "env": {}
-        }
-    }
-}
-```
-
-### Gemini CLI
-
-Edit `~/.gemini/settings.json` (user) or `.gemini/settings.json` (project):
-
-```json
-{
-    "mcpServers": {
-        "execbro": {
-            "command": "npx",
-            "args": ["-y", "execbro@latest"]
-        }
-    }
-}
-```
-
-### Android
-
-Android works out of the box — all device control tools use ADB, which ships with Android Studio. Verify it's available:
-
-```bash
-adb devices
-```
-
-### iOS Simulator — UI Automation Setup
-
-iOS UI automation tools (tap, swipe, text input, accessibility queries) require a UI driver. Install one of the following:
-
-**Option A: AXe CLI (default)**
-
-[AXe](https://github.com/cameroncooke/AXe) is a standalone CLI for iOS simulator automation. No daemon required — single binary, simple setup. Used by default; no `IOS_DRIVER` env var needed.
-
-```bash
-brew install cameroncooke/axe/axe
-```
-
-Verify: `axe --version`
-
-> **Note:** AXe text input only supports US keyboard layout characters.
-
-**Option B: IDB (alternative)**
-
-[IDB (iOS Development Bridge)](https://github.com/facebook/idb) is a tool built by Meta for automating iOS Simulators. Requires a background daemon. Use this if you prefer IDB or hit AXe limitations.
-
-```bash
-brew install idb-companion
-```
-
-Verify: `idb_companion --list 1`
-
-Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
-
-```json
-{
-    "mcpServers": {
-        "execbro": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "execbro@latest"],
-            "env": { "IOS_DRIVER": "idb" }
-        }
-    }
-}
-```
-
-**What works without a UI driver:**
-
-| Capability                        | Without AXe/IDB | With AXe/IDB |
-| --------------------------------- | --------------- | ------------ |
-| Screenshots                       | Yes (simctl)    | Yes          |
-| App install/launch/terminate      | Yes (simctl)    | Yes          |
-| URL opening                       | Yes (simctl)    | Yes          |
-| Boot simulator                    | Yes (simctl)    | Yes          |
-| **Tap / swipe / gestures**        | **No**          | Yes          |
-| **Text input**                    | **No**          | Yes          |
-| **Accessibility tree queries**    | **No**          | Yes          |
-| **Element finding / waiting**     | **No**          | Yes          |
-| **Hardware buttons (Home, Lock)** | **No**          | Yes          |
-
-> **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"AXe is not installed"` in tap results, install the appropriate driver with the commands above and retry.
+**Using a different client or need platform setup?** The [full setup guide](docs/setup.md) covers Claude Desktop, Codex CLI, Cursor, VS Code Copilot, Windsurf, Zed, and Gemini CLI, plus [Android](docs/setup.md#android) and [iOS simulator UI automation](docs/setup.md#ios-simulator--ui-automation-setup) requirements.
 
 ## Install the SDK (recommended)
 
 ExecBro works with zero app changes, but installing the companion [`execbro-sdk`](https://www.npmjs.com/package/execbro-sdk) package is the single biggest upgrade to debugging quality. It lets you **wire up the important parts of your app — your state stores and your network layer — directly into the agent's reach**, so the AI inspects real Redux/TanStack Query state and full request/response bodies instead of guessing from the outside.
-
-Under the hood, the MCP server connects over Chrome DevTools Protocol (CDP), which misses events that fire before it attaches and can't read request/response bodies on newer architectures. The SDK patches `fetch` and `console` at import time and buffers everything in-app from the very first line — the MCP server auto-detects it and reads from it, no extra config.
 
 |                                          | Without SDK             | With SDK                       |
 | ---------------------------------------- | ----------------------- | ------------------------------ |
@@ -294,31 +79,7 @@ Under the hood, the MCP server connects over Chrome DevTools Protocol (CDP), whi
 | Console logs from startup                | May miss early logs     | Captured from first log        |
 | Works on Bridgeless (Expo SDK 52+)       | Partial                 | Full                           |
 
-**Install:**
-
-```bash
-npm install execbro-sdk
-```
-
-**Initialize** — add to your app's entry file (`index.js`, `App.tsx`, or `app/_layout.tsx` for Expo Router) as the **first import**, and pass in the stores and references you want the agent to reach:
-
-```js
-import { init } from 'execbro-sdk';
-import { store } from './store'; // Redux store
-import { queryClient } from './queryClient'; // TanStack Query
-import { navigationRef } from './navigation';
-
-if (__DEV__) {
-  init({
-    stores: { redux: store, queryClient },
-    navigation: navigationRef,
-  });
-}
-
-// ... rest of your imports
-```
-
-`init()` alone (no arguments) already unlocks full log and network capture. Wiring `stores`, `navigation`, or `custom` references is what makes the agent able to read and reason about your app's state directly. See the [SDK README](https://github.com/igorzheludkov/execbro-sdk#readme) for every config option.
+It's one `npm install` plus a single `init()` call in your app's entry file. See the [SDK guide](docs/sdk.md) for install, initialization, and every config option.
 
 ## Requirements
 
@@ -326,7 +87,7 @@ if (__DEV__) {
 - React Native app running with Metro bundler
 - **Recommended**: [`execbro-sdk`](#install-the-sdk-recommended) in your app — wires stores and the network layer into the agent for dramatically better debugging (optional; ExecBro works without it)
 - **iOS UI automation**: [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`, default) or [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`, opt in via `IOS_DRIVER=idb`) — required for tap, swipe, text input, accessibility on iOS Simulator
-- **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR Setup](#ocr-text-extraction))
+- **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR guide](docs/ocr.md))
 
 ## Claude Code Skills
 
@@ -359,21 +120,29 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
     expo start
     ```
 
-2. In Claude Code, scan for Metro:
+2. Just describe what you want in plain language — the agent picks the right tools. You don't need to know tool names or ask for a specific one. For example:
 
     ```
-    Use scan_metro to find and connect to Metro
+    Check the network logs and investigate why this error is happening
+    ```
+    ```
+    Why is the current screen empty? Take a look and figure it out
+    ```
+    ```
+    Tap the "Sign in" button and tell me what happens
+    ```
+    ```
+    The list won't scroll — scroll it down and check what's going on
     ```
 
-3. Get logs:
-    ```
-    Use get_logs to see recent console output
-    ```
+    The agent connects to Metro, reads logs and network, inspects the screen, and drives the UI as needed to answer.
 
 ## Detailed Guides
 
 | Guide                                                      | Description                                                                     |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [Setup](docs/setup.md)                                     | Per-client MCP config (Claude, Codex, Cursor, VS Code, …), Android & iOS setup  |
+| [SDK Setup](docs/sdk.md)                                   | Install & `init()` the in-app SDK to wire stores + network layer into the agent |
 | [Console Logging](docs/logging.md)                         | `get_logs` parameters, filtering, summary mode, TONL format, token optimization |
 | [Network Tracking](docs/network.md)                        | SDK setup for full capture, filtering, request details, statistics              |
 | [App Inspection](docs/app-inspection.md)                   | Debug globals (Apollo, Redux, Expo Router), `execute_in_app`, limitations       |
@@ -382,16 +151,6 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | [OCR Text Extraction](docs/ocr.md)                         | Cloud Vision OCR, offline fallback, language config, workflows                  |
 | [Claude Code Skills](docs/skills.md)                       | Pre-built skills for session setup, debugging, and automation                   |
 | [Full Tool Reference](docs/tools.md)                       | Complete list of all 40+ tools with descriptions                                |
-
-## Supported React Native Versions
-
-| Version        | Architecture          | Engine       | Status                                           |
-| -------------- | --------------------- | ------------ | ------------------------------------------------ |
-| Expo SDK 54+   | Bridgeless (New Arch) | Hermes       | ✓ Fully supported                                |
-| RN 0.76+       | Bridgeless (New Arch) | Hermes       | ✓ Fully supported                                |
-| RN 0.73 - 0.75 | Bridge (Old Arch)     | Hermes       | ✓ Fully supported (best network capture via CDP) |
-| RN 0.70 - 0.72 | Bridge (Old Arch)     | Hermes / JSC | ✓ Supported                                      |
-| RN < 0.70      | Bridge                | JSC          | Not tested                                       |
 
 ## How It Works
 
@@ -405,45 +164,10 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 
 ## Connection Management
 
-### Explicit Connection
-
-The server does **not** auto-connect on startup. Call `scan_metro` to discover and connect to Metro servers. This prevents multiple MCP server instances (from parallel agent sessions) from competing for the single CDP WebSocket slot, which would cause connection thrashing and dropped tools.
-
-### Graceful Shutdown
-
-When the MCP server process is terminated (`SIGINT`/`SIGTERM`), it closes all CDP WebSocket connections and cancels reconnection timers, freeing the CDP slot immediately for other sessions.
-
-### Reconnection on Disconnect
-
-When the connection to Metro is lost (e.g., app restart, Metro restart, or network issues):
-
-1. The server automatically attempts to reconnect
-2. Uses exponential backoff: 500ms, 1s, 2s, 4s, 8s (up to 8 attempts)
-3. Re-fetches device list to handle new WebSocket URLs
-4. Preserves existing log and network buffers
-
-### Connection Gap Warnings
-
-If there was a recent disconnect, `get_logs` and `get_network_requests` will include a warning:
-
-```
-[WARNING] Connection was restored 5s ago. Some logs may have been missed during the 3s gap.
-```
-
-### Monitor Connection Health
-
-Use `get_connection_status` to see detailed connection information:
-
-```
-=== Connection Status ===
-
---- React Native (Port 8081) ---
-  Status: CONNECTED
-  Connected since: 2:45:30 PM
-  Uptime: 5m 23s
-  Recent gaps: 1
-    - 2:43:15 PM (2s): Connection closed
-```
+- **One server per session** — each agent session (each terminal or IDE window) runs its own ExecBro MCP server instance.
+- **Connects on request, not on startup** — the server never auto-connects. It only attaches to your running React Native app when you ask it to (e.g. `scan_metro`), so it stays out of the way until you actually need a device.
+- **One driver per device** — if two or more sessions in the same project point at the same Metro/device, they'll compete to control it, like a car with two steering wheels. Keep interaction to a single session per device.
+- **Want parallel sessions? Give each its own device + port** — run separate work in a [git worktree](https://git-scm.com/docs/git-worktree) with its own Metro instance on a different port, and connect a second device (simulator/emulator) to it. For example, keep `main` on the default `8081` and start the worktree's Metro on `8082` (`npx react-native start --port 8082`, or `npx expo start --port 8082`), then launch that worktree's app pointed at `8082`. Each agent session then `scan_metro`s and drives its own device, so the two never fight over the connection.
 
 ## Troubleshooting
 
@@ -452,14 +176,6 @@ Use `get_connection_status` to see detailed connection information:
 - Make sure the app is running on a simulator/device
 - Check that Metro bundler is running (`npm start`)
 
-### Wrong device connected
-
-The server prioritizes devices in this order:
-
-1. React Native Bridgeless (SDK 54+)
-2. Hermes React Native
-3. Any React Native (excluding Reanimated/Experimental)
-
 ### Logs not appearing
 
 - Ensure the app is actively running (not just Metro)
@@ -467,71 +183,40 @@ The server prioritizes devices in this order:
 - Check `get_apps` to verify connection status
 - **On cold start (first launch):** The CDP connection is established after the app's early initialization code has already run, so startup logs and network requests are missed. Once connected, use `reload_app` — the subsequent reload captures everything from the beginning because the connection is already in place. To capture startup events on every launch, install the optional [SDK](https://www.npmjs.com/package/execbro-sdk)
 
-## Telemetry & Data Collection
+## Telemetry & Privacy
 
-This package collects anonymous usage telemetry to help improve the product. No personal information is collected.
+ExecBro collects anonymous usage telemetry — tool names, success/failure, and durations — to improve the product. **No source code, file paths, or app content is ever sent.** This is what powers your [usage dashboard](#see-your-usage--execbrocom).
 
-### What is collected
+See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full breakdown of what's collected, auto-registration, and how to opt out, and [PRIVACY.md](./PRIVACY.md) for the complete privacy policy.
 
-| Data              | Purpose                                  |
-| ----------------- | ---------------------------------------- |
-| Tool names        | Which MCP tools are used most            |
-| Success/failure   | Error rates for reliability improvements |
-| Duration (ms)     | Performance monitoring                   |
-| Session start/end | Retention analysis                       |
-| Platform          | macOS/Linux/Windows distribution         |
-| Server version    | Adoption of new versions                 |
+## Supported React Native Versions
 
-**Not collected**: No file paths, code content, network data, or personally identifiable information.
+| Version        | Architecture          | Engine       | Status                                           |
+| -------------- | --------------------- | ------------ | ------------------------------------------------ |
+| Expo SDK 54+   | Bridgeless (New Arch) | Hermes       | ✓ Fully supported                                |
+| RN 0.76+       | Bridgeless (New Arch) | Hermes       | ✓ Fully supported                                |
+| RN 0.73 - 0.75 | Bridge (Old Arch)     | Hermes       | ✓ Fully supported (best network capture via CDP) |
+| RN 0.70 - 0.72 | Bridge (Old Arch)     | Hermes / JSC | ✓ Supported                                      |
+| RN < 0.70      | Bridge                | JSC          | Not tested                                       |
 
-### Auto-registration
+## Pricing
 
-On first tool use, the package automatically registers your installation with our backend. No account or login is required — the Tool works fully out of the box.
+ExecBro is **free and open** — every feature, no usage limits, no account required. Use it as much as you like. The tools you run locally stay free; that's the model.
 
-**Why we do this:** The product roadmap includes features that build on installation identity — project memory (your AI assistant gets smarter with every session by remembering navigation maps, element signatures, and debug patterns), cloud sync across machines, team collaboration with shared debugging context, and a dashboard for managing your installations. Auto-registration lays the groundwork so these features work seamlessly when they ship, without requiring a disruptive setup step later.
+## Feedback & Feature Requests
 
-**What is sent:**
+**Please run this at the end of your session to help me make the tools better.** ExecBro is built for AI agents, so the most valuable feedback comes from the agent itself — paste this prompt to your agent:
 
-- A random installation ID (UUID)
-- A device fingerprint (one-way SHA-256 hash — cannot be reversed to recover its components)
-- Platform, hostname, OS version, and server version
+> Write a report about your experience with the ExecBro tools — where you were struggling and what could be improved. Save it as a Markdown file for me, then submit it using the `send_feedback` tool (type `"feedback"`) so it becomes a GitHub issue.
 
-**What is NOT sent:** No source code, file paths, console logs, network data, component names, or any content from your app. The fingerprint exists solely to prevent installation hijacking — it ties your installation to your physical machine so no one else can claim it.
+It takes 30 seconds: your agent runs `send_feedback`, hands you a pre-filled GitHub issue URL (environment info already attached), and you click submit — no GitHub setup, no copy-pasting. Real friction logs from real sessions are what shape the roadmap and get fixed first, so please send one. 🙏 And if you just have a quick idea or question, drop into [GitHub Discussions](https://github.com/igorzheludkov/execbro/discussions) to share feedback, request features, and vote on what gets built next.
 
-Registration is fire-and-forget — it never blocks your work, fails silently if the network is unavailable, and can be disabled entirely (see Opt-out below). See [PRIVACY.md](./PRIVACY.md) for full details on data handling, storage, and your rights.
+## Package names & staying up to date
 
-### Opt-out
+Ships as the npm package `execbro`. The package was previously published as `react-native-ai-devtools` and before that as `react-native-ai-debugger` — both legacy names keep receiving identical builds via mirror-publish, so existing installations and MCP configs keep working unchanged. New installs should use `execbro`.
 
-To disable telemetry and auto-registration, add `RN_DEBUGGER_TELEMETRY` to the `env` field in your MCP server configuration:
-
-```json
-{
-    "mcpServers": {
-        "execbro": {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "execbro@latest"],
-            "env": { "RN_DEBUGGER_TELEMETRY": "false" }
-        }
-    }
-}
-```
-
-All debugging tools work normally with telemetry disabled. For the complete privacy policy, see [PRIVACY.md](./PRIVACY.md).
-
-### Tap failure artifacts
-
-When the `tap` tool fails or produces no visible change on screen, the package uploads a small JSON bundle and up to three downscaled PNG screenshots (before, after, and after-with-marker showing exactly where the tap landed) to a 10-day-retention store so we can diagnose and fix tap reliability issues. We do **not** use this data to train AI models and do **not** share it with third parties. See [PRIVACY.md](./PRIVACY.md#4-tap-failure-diagnostic-artifacts) for details.
-
-To opt out while keeping the rest of the package working:
-
-```json
-"env": { "RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS": "1" }
-```
-
-### Build attestation
-
-Official npm builds are stamped with a secret build token at publish time (via `npm run inject-token` in CI, which requires the `BUILD_TOKEN` secret). Builds from a source checkout carry an inert placeholder and are labeled "fork" in our telemetry dashboard. The token is never committed to source.
+> [!IMPORTANT]
+> **Already using ExecBro?** `npx` caches packages indefinitely, so you may be stuck on an old version without realizing it. Update your MCP config to use `npx -y execbro@latest` (see [Setup](#setup)) so every session pulls the latest release with new tools and bug fixes. New installs after this change auto-update automatically.
 
 ## License
 
