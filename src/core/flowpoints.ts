@@ -256,3 +256,58 @@ export async function drainFlowpoints(deviceName: string, device?: string): Prom
     applyDrain(getFlowpointStore(deviceName), parsed);
     return { ok: true };
 }
+
+export type ExpectStep = string | { step: string; level?: FlowpointLevel; metaIncludes?: string };
+
+export interface VerifyOutcome {
+    pass: boolean;
+    text: string;
+}
+
+/**
+ * Subsequence assertion: expected steps must appear in order within the run; extra
+ * points in between are allowed. Unexpected error-level points fail the verification
+ * unless allowErrors is true or the error point matched an expected step.
+ */
+export function verifyFlow(
+    name: string,
+    runId: string,
+    runEntries: FlowpointEntry[],
+    expect: ExpectStep[],
+    allowErrors: boolean,
+): VerifyOutcome {
+    const matchers = expect.map((x) => (typeof x === "string" ? { step: x } : x));
+    const t0 = runEntries.length > 0 ? runEntries[0].t : 0;
+    const matchedIndexes = new Set<number>();
+    const lines: string[] = [];
+    let pass = true;
+    let cursor = 0;
+    for (const matcher of matchers) {
+        let found = -1;
+        for (let i = cursor; i < runEntries.length; i++) {
+            if (matchesPoint(runEntries[i], matcher)) {
+                found = i;
+                break;
+            }
+        }
+        if (found === -1) {
+            pass = false;
+            lines.push(`  ✗ ${matcher.step} — not seen`);
+        } else {
+            matchedIndexes.add(found);
+            cursor = found + 1;
+            lines.push(`  ✓ ${matcher.step} (+${runEntries[found].t - t0}ms)`);
+        }
+    }
+    if (!allowErrors) {
+        runEntries.forEach((entry, i) => {
+            if (entry.level === "error" && !matchedIndexes.has(i)) {
+                pass = false;
+                const meta = entry.meta !== undefined ? ` ${formatMeta(entry.meta)}` : "";
+                lines.push(`  ! ${entry.step} [error] (+${entry.t - t0}ms)${meta} — unexpected error point`);
+            }
+        });
+    }
+    const header = `${pass ? "PASS" : "FAIL"} — flow "${name}" run ${runId}:`;
+    return { pass, text: [header, ...lines].join("\n") };
+}
