@@ -164,17 +164,28 @@ export function registerFlowpointTools(server: McpServer): void {
             },
         },
         async ({ name, step, level, metaIncludes, timeoutMs, device }) => {
-            const effectiveTimeout = Math.min(timeoutMs ?? 5000, 30000);
+            const effectiveTimeout = Math.min(timeoutMs, 30000);
             const deviceName = resolveTargetDeviceName(device);
             const store = getFlowpointStore(deviceName);
-            const baseline = store.entries.length;
+            const baselineEntry = store.entries.length > 0 ? store.entries[store.entries.length - 1] : null;
             const start = Date.now();
+            const deadline = start + effectiveTimeout;
+            const freshEntries = () => {
+                const startIdx = baselineEntry ? store.entries.indexOf(baselineEntry) + 1 : 0;
+                return store.entries.slice(startIdx).filter((e) => e.name === name);
+            };
             for (;;) {
-                const drained = await drainFlowpoints(deviceName, device);
-                if (!drained.ok) {
-                    return { isError: true, content: [{ type: "text" as const, text: drained.error }] };
+                const remaining = deadline - Date.now();
+                if (remaining > 0) {
+                    const drained = await Promise.race([
+                        drainFlowpoints(deviceName, device),
+                        new Promise<null>((resolve) => setTimeout(() => resolve(null), remaining)),
+                    ]);
+                    if (drained && !drained.ok) {
+                        return { isError: true, content: [{ type: "text" as const, text: drained.error }] };
+                    }
                 }
-                const fresh = store.entries.slice(baseline).filter((e) => e.name === name);
+                const fresh = freshEntries();
                 const match = fresh.find((e) => matchesPoint(e, { step, level, metaIncludes }));
                 if (match) {
                     const meta = match.meta !== undefined ? `\nmeta: ${formatMeta(match.meta)}` : "";
@@ -189,7 +200,7 @@ export function registerFlowpointTools(server: McpServer): void {
                         ],
                     };
                 }
-                if (Date.now() - start >= effectiveTimeout) {
+                if (Date.now() >= deadline) {
                     const trail = fresh.length
                         ? `Points that DID arrive for "${name}" during the wait:\n\n${formatFlowpoints(fresh)}`
                         : `No new points arrived for flow "${name}" during the wait.`;
@@ -202,7 +213,7 @@ export function registerFlowpointTools(server: McpServer): void {
                         ],
                     };
                 }
-                await new Promise((resolve) => setTimeout(resolve, 250));
+                await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now()))));
             }
         },
     );
