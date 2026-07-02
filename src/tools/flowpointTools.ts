@@ -125,9 +125,11 @@ export function registerFlowpointTools(server: McpServer): void {
         "clear_flowpoints",
         {
             description:
-                "Clear stored flowpoints. With name: clears one flow from the server store only " +
-                "(cleared entries never re-drain). Without name: clears everything server-side AND " +
-                "the in-app buffer. Usually unnecessary — prefer begin: true + run: 'last' filtering.",
+                "Clear stored flowpoints.\n" +
+                "PURPOSE: reset flowpoint history between test sessions.\n" +
+                "WHEN TO USE: rarely — prefer begin: true + run: 'last' filtering between attempts. " +
+                "With name: clears one flow from the server store only (cleared entries never re-drain). " +
+                "Without name: clears everything server-side AND the in-app buffer.",
             inputSchema: {
                 name: z.string().optional().describe("Clear only this flow (server-side). Omit to clear all."),
                 device: z
@@ -167,9 +169,10 @@ export function registerFlowpointTools(server: McpServer): void {
         "wait_for_flowpoint",
         {
             description:
-                "Block until a flowpoint matching the criteria arrives, or timeout. Deterministic " +
-                "synchronization for drive-then-verify: tap/act first, then call this with the flow's " +
+                "Block until a flowpoint matching the criteria arrives, or timeout.\n" +
+                "PURPOSE: deterministic synchronization for drive-then-verify — act first, then block on the flow's " +
                 "terminal step instead of sleeping and re-polling.\n" +
+                "WHEN TO USE: after tapping/driving an instrumented flow, with the flow's terminal step.\n" +
                 "Points emitted after your action but before this call still match (only points already " +
                 "seen by a previous flowpoint tool call are excluded).\n" +
                 "On timeout, returns whatever points DID arrive for the flow — that partial trail is the " +
@@ -249,6 +252,9 @@ export function registerFlowpointTools(server: McpServer): void {
             description:
                 "Assert a flow behaved as expected: compare the actual flowpoint trail of one run " +
                 "against an expected step sequence and get a factual PASS/FAIL diff.\n" +
+                "PURPOSE: factual PASS/FAIL assertion of a flow run against an expected step sequence.\n" +
+                "WHEN TO USE: after wait_for_flowpoint confirms the flow finished; or write the expectation first " +
+                "(runtime TDD) and iterate until PASS.\n" +
                 "Matching is subsequence: expected steps must appear in order; extra points in between " +
                 "are fine. Any unexpected error-level point fails the run unless allowErrors is true or " +
                 "that step is explicitly expected.\n" +
