@@ -12,7 +12,6 @@ import {
     getFlowpointStore,
     matchesPoint,
     buildClearExpression,
-    SDK_FLOWPOINTS_MISSING,
 } from "../core/flowpoints.js";
 
 const NO_FLOWPOINTS_HINT =
@@ -80,7 +79,8 @@ export function registerFlowpointTools(server: McpServer): void {
             if (!drained.ok) {
                 return { isError: true, content: [{ type: "text" as const, text: drained.error }] };
             }
-            const entries = filterFlowpoints(allStoredFlowpoints(), {
+            const sourceEntries = device ? getFlowpointStore(deviceName).entries : allStoredFlowpoints();
+            const entries = filterFlowpoints(sourceEntries, {
                 name,
                 step,
                 run,
