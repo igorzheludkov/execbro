@@ -1,3 +1,5 @@
+import { executeInApp } from "./executor.js";
+
 export type FlowpointLevel = "info" | "warn" | "error";
 
 export interface FlowpointEntry {
@@ -189,4 +191,68 @@ export function formatFlowpoints(entries: FlowpointEntry[]): string {
         }
     }
     return blocks.join("\n\n");
+}
+
+const flowpointStores = new Map<string, FlowpointStoreState>();
+
+export function getFlowpointStore(deviceName: string): FlowpointStoreState {
+    let store = flowpointStores.get(deviceName);
+    if (!store) {
+        store = createFlowpointStore();
+        flowpointStores.set(deviceName, store);
+    }
+    return store;
+}
+
+/** All stored entries across devices, sorted chronologically. */
+export function allStoredFlowpoints(): FlowpointEntry[] {
+    const all: FlowpointEntry[] = [];
+    for (const store of flowpointStores.values()) {
+        all.push(...store.entries);
+    }
+    return all.sort((a, b) => a.t - b.t);
+}
+
+/** Remove entries from the server stores. Cursors/contextIds are kept so cleared entries never re-drain. */
+export function clearFlowpointStores(name?: string): number {
+    let removed = 0;
+    for (const store of flowpointStores.values()) {
+        if (name === undefined) {
+            removed += store.entries.length;
+            store.entries = [];
+        } else {
+            const before = store.entries.length;
+            store.entries = store.entries.filter((e) => e.name !== name);
+            removed += before - store.entries.length;
+        }
+    }
+    return removed;
+}
+
+export const SDK_FLOWPOINTS_MISSING =
+    "Flowpoints require the execbro-sdk: npm install execbro-sdk, call init() at app start, " +
+    "then instrument the flow with flowpoint({ name, step }). Older SDK versions without " +
+    'flowpoint support must be upgraded. See get_usage_guide(topic="flowpoints").';
+
+export type DrainOutcome = { ok: true } | { ok: false; error: string; sdkMissing?: boolean };
+
+export async function drainFlowpoints(deviceName: string, device?: string): Promise<DrainOutcome> {
+    const result = await executeInApp(
+        buildDrainExpression(),
+        false,
+        { timeoutMs: 5000, originatingToolName: "flowpoints" },
+        device,
+    );
+    if (!result.success) {
+        return { ok: false, error: result.error || "executeInApp failed" };
+    }
+    const parsed = parseDrainResult(result.result ?? "");
+    if (parsed === null) {
+        return { ok: false, error: "Failed to parse flowpoint snapshot from the app" };
+    }
+    if ("missing" in parsed) {
+        return { ok: false, error: SDK_FLOWPOINTS_MISSING, sdkMissing: true };
+    }
+    applyDrain(getFlowpointStore(deviceName), parsed);
+    return { ok: true };
 }
