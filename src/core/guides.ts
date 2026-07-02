@@ -375,6 +375,7 @@ flow actually did — steps, order, timing, failures — with factual assertions
    import { flowpoint } from 'execbro-sdk'
    flowpoint({ name: 'add-to-cart', step: 'start', begin: true })   // flow entry
    flowpoint({ name: 'add-to-cart', step: 'cleared', meta: { removed: 3 } })
+   flowpoint({ name: 'add-to-cart', step: 'done' })
    flowpoint({ name: 'add-to-cart', step: 'failed', level: 'error' })  // error paths
 2. Reload the app so the instrumented code is live.
 3. Drive the flow (tap, swipe, input).
@@ -388,8 +389,8 @@ flow actually did — steps, order, timing, failures — with factual assertions
 ## Key Tools
 - get_flowpoints: query the trail (filters: name, step, run, level, metaIncludes, since)
 - wait_for_flowpoint: block until a matching point arrives (or timeout with partial trail)
-- verify_flow: assert an expected step sequence against one run
-- clear_flowpoints: reset stored points (rarely needed — prefer run filters)
+- verify_flow: assert an expected step sequence against one run (any unexpected error-level point fails it unless allowErrors: true)
+- clear_flowpoints: reset stored points (name-scoped clears touch only the server store; rarely needed — prefer run filters)
 
 ## Tips
 - Prefer flowpoint() over console.log when instrumenting a flow to verify behavior.
@@ -398,7 +399,8 @@ flow actually did — steps, order, timing, failures — with factual assertions
   queries only the newest attempt.
 - get_flowpoints({ level: 'error' }) answers "did anything fail?" across every flow.
 - flowpoint() is a production no-op — instrumentation can stay in the code.
-- Runtime TDD: write the verify_flow expectation FIRST, then implement until it passes.`
+- Runtime TDD: write the verify_flow expectation FIRST, then implement until it passes.
+- verify_flow FAILS on any unexpected error-level point in the run — pass allowErrors: true to tolerate them, or include the error step in expect.`
     }
 ];
 
@@ -413,16 +415,16 @@ export const DECISION_TREE: string = [
     "Platform-specific ios_* / android_* tools (ios_button, android_input_text, android_key_event, android_long_press, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
-    "  setup     — session setup (scan_metro, connect_metro, ensure_connection)",
-    "  logs      — console debugging (get_logs, search_logs)",
-    "  interact  — device interaction (tap, swipe, screenshots, android_input_text, clear_focused_input, dismiss_keyboard)",
-    "  layout    — on-screen layout check (get_screen_layout, get_pressable_elements)",
-    "  inspect   — component inspection (find_components, inspect_component, get_inspector_selection)",
-    "  network   — network request inspection (get_network_requests, search_network)",
-    "  flowpoints — verify a flow's behavior (flowpoint() breadcrumbs, wait_for_flowpoint, verify_flow)",
-    "  state     — app state & JS execution (execute_in_app, list_debug_globals)",
-    "  bundle    — bundle / Metro error checks (get_bundle_status, get_bundle_errors)",
-    "  feedback  — share feedback, feature requests, or bug reports (send_feedback)"
+    "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
+    "  logs        — console debugging (get_logs, search_logs)",
+    "  interact    — device interaction (tap, swipe, screenshots, android_input_text, clear_focused_input, dismiss_keyboard)",
+    "  layout      — on-screen layout check (get_screen_layout, get_pressable_elements)",
+    "  inspect     — component inspection (find_components, inspect_component, get_inspector_selection)",
+    "  network     — network request inspection (get_network_requests, search_network)",
+    "  flowpoints  — verify a flow's behavior (flowpoint() breadcrumbs, wait_for_flowpoint, verify_flow)",
+    "  state       — app state & JS execution (execute_in_app, list_debug_globals)",
+    "  bundle      — bundle / Metro error checks (get_bundle_status, get_bundle_errors)",
+    "  feedback    — share feedback, feature requests, or bug reports (send_feedback)"
 ].join("\n");
 
 export function getGuideOverview(): string {
