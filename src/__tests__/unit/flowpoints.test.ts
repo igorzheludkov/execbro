@@ -7,6 +7,8 @@ import {
     buildDrainExpression,
     buildClearExpression,
     parseDrainResult,
+    clearFlowpointStores,
+    getFlowpointStore,
 } from "../../core/flowpoints.js";
 
 function makeEntry(seq: number, overrides: Partial<FlowpointEntry> = {}): FlowpointEntry {
@@ -81,5 +83,59 @@ describe("parseDrainResult", () => {
 
     it("returns null on garbage", () => {
         expect(parseDrainResult("not json")).toBeNull();
+    });
+});
+
+describe("clearFlowpointStores", () => {
+    it("device-scoped clear touches only that device's store", () => {
+        const deviceA = getFlowpointStore("clear-test-device-a");
+        const deviceB = getFlowpointStore("clear-test-device-b");
+        applyDrain(deviceA, { contextId: "ctx-a", entries: [makeEntry(1), makeEntry(2)] });
+        applyDrain(deviceB, { contextId: "ctx-b", entries: [makeEntry(1), makeEntry(2), makeEntry(3)] });
+
+        const removed = clearFlowpointStores(undefined, "clear-test-device-a");
+
+        expect(removed).toBe(2);
+        expect(deviceA.entries).toHaveLength(0);
+        expect(deviceB.entries).toHaveLength(3);
+        // cursor/contextId retained so cleared entries never re-drain
+        expect(deviceA.cursor).toBe(2);
+        expect(deviceA.contextId).toBe("ctx-a");
+    });
+
+    it("undefined deviceName clears all stores", () => {
+        // Reset any state left by other stores/tests sharing the module-level map.
+        clearFlowpointStores(undefined, undefined);
+        const deviceC = getFlowpointStore("clear-test-device-c");
+        const deviceD = getFlowpointStore("clear-test-device-d");
+        applyDrain(deviceC, { contextId: "ctx-c", entries: [makeEntry(1)] });
+        applyDrain(deviceD, { contextId: "ctx-d", entries: [makeEntry(1), makeEntry(2)] });
+
+        const removed = clearFlowpointStores(undefined, undefined);
+
+        expect(removed).toBe(3);
+        expect(deviceC.entries).toHaveLength(0);
+        expect(deviceD.entries).toHaveLength(0);
+    });
+
+    it("combines name filter with device scoping", () => {
+        const deviceE = getFlowpointStore("clear-test-device-e");
+        applyDrain(deviceE, {
+            contextId: "ctx-e",
+            entries: [
+                makeEntry(1, { name: "checkout" }),
+                makeEntry(2, { name: "onboarding" }),
+                makeEntry(3, { name: "checkout" }),
+            ],
+        });
+        const deviceF = getFlowpointStore("clear-test-device-f");
+        applyDrain(deviceF, { contextId: "ctx-f", entries: [makeEntry(1, { name: "checkout" })] });
+
+        const removed = clearFlowpointStores("checkout", "clear-test-device-e");
+
+        expect(removed).toBe(2);
+        expect(deviceE.entries.map((e) => e.name)).toEqual(["onboarding"]);
+        // other device's "checkout" entries untouched since deviceName scoped the clear
+        expect(deviceF.entries).toHaveLength(1);
     });
 });

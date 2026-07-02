@@ -213,10 +213,15 @@ export function allStoredFlowpoints(): FlowpointEntry[] {
     return all.sort((a, b) => a.t - b.t);
 }
 
-/** Remove entries from the server stores. Cursors/contextIds are kept so cleared entries never re-drain. */
-export function clearFlowpointStores(name?: string): number {
+/**
+ * Remove entries from the server stores. Cursors/contextIds are kept so cleared
+ * entries never re-drain. When deviceName is given, only that device's store is
+ * touched; otherwise all stores are.
+ */
+export function clearFlowpointStores(name?: string, deviceName?: string): number {
     let removed = 0;
-    for (const store of flowpointStores.values()) {
+    const stores = deviceName !== undefined ? [getFlowpointStore(deviceName)] : [...flowpointStores.values()];
+    for (const store of stores) {
         if (name === undefined) {
             removed += store.entries.length;
             store.entries = [];
