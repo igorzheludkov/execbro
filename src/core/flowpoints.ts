@@ -73,3 +73,119 @@ export function parseDrainResult(raw: string): FlowpointSnapshot | { missing: tr
         return null;
     }
 }
+
+export interface FlowpointFilters {
+    name?: string;
+    step?: string;
+    run?: string; // "last" or an explicit run id
+    level?: FlowpointLevel;
+    metaIncludes?: string;
+    since?: number;
+    limit?: number;
+}
+
+export function formatMeta(meta: unknown): string {
+    if (meta === undefined) return "";
+    if (typeof meta === "string") return meta;
+    try {
+        return JSON.stringify(meta);
+    } catch {
+        return String(meta);
+    }
+}
+
+export interface PointMatch {
+    step?: string;
+    level?: FlowpointLevel;
+    metaIncludes?: string;
+}
+
+export function matchesPoint(entry: FlowpointEntry, match: PointMatch): boolean {
+    if (match.step !== undefined && entry.step !== match.step) return false;
+    if (match.level !== undefined && entry.level !== match.level) return false;
+    if (
+        match.metaIncludes !== undefined &&
+        !formatMeta(entry.meta).toLowerCase().includes(match.metaIncludes.toLowerCase())
+    ) {
+        return false;
+    }
+    return true;
+}
+
+/** Per flow name, the run id of the chronologically last entry. Assumes entries sorted by t. */
+export function resolveLastRuns(entries: FlowpointEntry[]): Map<string, string> {
+    const last = new Map<string, string>();
+    for (const entry of entries) {
+        last.set(entry.name, entry.run);
+    }
+    return last;
+}
+
+export function filterFlowpoints(entries: FlowpointEntry[], filters: FlowpointFilters): FlowpointEntry[] {
+    let result = entries;
+    if (filters.name !== undefined) result = result.filter((e) => e.name === filters.name);
+    if (filters.run === "last") {
+        const lastRuns = resolveLastRuns(result);
+        result = result.filter((e) => lastRuns.get(e.name) === e.run);
+    } else if (filters.run !== undefined) {
+        result = result.filter((e) => e.run === filters.run);
+    }
+    if (filters.step !== undefined) result = result.filter((e) => e.step === filters.step);
+    if (filters.level !== undefined) result = result.filter((e) => e.level === filters.level);
+    if (filters.metaIncludes !== undefined) {
+        const needle = filters.metaIncludes.toLowerCase();
+        result = result.filter((e) => formatMeta(e.meta).toLowerCase().includes(needle));
+    }
+    if (filters.since !== undefined) result = result.filter((e) => e.t > filters.since!);
+    const limit = filters.limit ?? 200;
+    if (result.length > limit) result = result.slice(result.length - limit);
+    return result;
+}
+
+function formatPointLine(entry: FlowpointEntry, t0: number, indent: string): string {
+    const delta = `+${entry.t - t0}ms`.padEnd(9);
+    const levelPrefix = entry.level !== "info" ? `[${entry.level}] ` : "";
+    const meta = entry.meta !== undefined ? `  ${formatMeta(entry.meta)}` : "";
+    return `${indent}${delta}${levelPrefix}${entry.step}${meta}`;
+}
+
+function formatRunBlock(runId: string, runEntries: FlowpointEntry[], latest: boolean, indent: string): string {
+    const span = runEntries[runEntries.length - 1].t - runEntries[0].t;
+    const label = latest ? ` (latest)` : "";
+    const header = `${indent}run ${runId}${label} — ${runEntries.length} points (${span}ms span):`;
+    const lines = runEntries.map((e) => formatPointLine(e, runEntries[0].t, indent + "  "));
+    return [header, ...lines].join("\n");
+}
+
+/** Compact grouped text: flow → run → points with inter-point deltas. Assumes entries sorted by t. */
+export function formatFlowpoints(entries: FlowpointEntry[]): string {
+    const byName = new Map<string, Map<string, FlowpointEntry[]>>();
+    for (const entry of entries) {
+        let runs = byName.get(entry.name);
+        if (!runs) {
+            runs = new Map();
+            byName.set(entry.name, runs);
+        }
+        let run = runs.get(entry.run);
+        if (!run) {
+            run = [];
+            runs.set(entry.run, run);
+        }
+        run.push(entry);
+    }
+    const blocks: string[] = [];
+    for (const [name, runs] of byName) {
+        const runIds = [...runs.keys()];
+        if (runIds.length === 1) {
+            const runEntries = runs.get(runIds[0])!;
+            const span = runEntries[runEntries.length - 1].t - runEntries[0].t;
+            const header = `Flow "${name}" run ${runIds[0]} — ${runEntries.length} points (${span}ms span):`;
+            blocks.push([header, ...runEntries.map((e) => formatPointLine(e, runEntries[0].t, "  "))].join("\n"));
+        } else {
+            const header = `Flow "${name}" — ${runIds.length} runs`;
+            const runBlocks = runIds.map((id, i) => formatRunBlock(id, runs.get(id)!, i === runIds.length - 1, "  "));
+            blocks.push([header, ...runBlocks].join("\n"));
+        }
+    }
+    return blocks.join("\n\n");
+}
