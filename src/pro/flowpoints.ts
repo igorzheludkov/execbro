@@ -1,5 +1,5 @@
-import { executeInApp } from "./executor.js";
-import { pushLogBox } from "./logbox.js";
+import { executeInApp } from "../core/executor.js";
+import { pushLogBox } from "../core/logbox.js";
 
 export type FlowpointLevel = "info" | "warn" | "error";
 

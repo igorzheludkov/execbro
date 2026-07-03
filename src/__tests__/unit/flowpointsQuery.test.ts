@@ -6,7 +6,7 @@ import {
     resolveLastRuns,
     filterFlowpoints,
     formatFlowpoints,
-} from "../../core/flowpoints.js";
+} from "../../pro/flowpoints.js";
 
 function e(seq: number, overrides: Partial<FlowpointEntry> = {}): FlowpointEntry {
     return { seq, t: 1000 + seq, name: "add-to-cart", step: `s${seq}`, run: "r1", level: "info", ...overrides };

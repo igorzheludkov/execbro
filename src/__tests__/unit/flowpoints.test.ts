@@ -9,7 +9,7 @@ import {
     parseDrainResult,
     clearFlowpointStores,
     getFlowpointStore,
-} from "../../core/flowpoints.js";
+} from "../../pro/flowpoints.js";
 
 function makeEntry(seq: number, overrides: Partial<FlowpointEntry> = {}): FlowpointEntry {
     return { seq, t: 1000 + seq, name: "add-to-cart", step: `step-${seq}`, run: "r1", level: "info", ...overrides };
