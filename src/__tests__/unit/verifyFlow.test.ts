@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@jest/globals";
-import { FlowpointEntry, verifyFlow } from "../../core/flowpoints.js";
+import { FlowpointEntry, verifyFlow } from "../../pro/flowpoints.js";
 
 function e(seq: number, step: string, overrides: Partial<FlowpointEntry> = {}): FlowpointEntry {
     return { seq, t: 1000 + seq * 10, name: "add-to-cart", step, run: "r1", level: "info", ...overrides };

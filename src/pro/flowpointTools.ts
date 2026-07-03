@@ -15,7 +15,7 @@ import {
     buildClearExpression,
     verifyFlow,
     resolveLastRuns,
-} from "../core/flowpoints.js";
+} from "./flowpoints.js";
 
 const NO_FLOWPOINTS_HINT =
     "No flowpoints captured. Instrument the flow under test (execbro-sdk required):\n\n" +
