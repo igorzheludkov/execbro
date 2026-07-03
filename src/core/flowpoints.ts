@@ -1,4 +1,5 @@
 import { executeInApp } from "./executor.js";
+import { pushLogBox } from "./logbox.js";
 
 export type FlowpointLevel = "info" | "warn" | "error";
 
@@ -249,16 +250,27 @@ export function clearFlowpointStores(name?: string, deviceName?: string): number
     return removed;
 }
 
+const LOGBOX_FLOWPOINTS_OUTDATED =
+    "An AI agent tried to use flowpoints, but this app's execbro-sdk version does not support them.\n" +
+    "Upgrade it: npm install execbro-sdk@latest, then rebuild/reload.";
+
+const LOGBOX_FLOWPOINTS_UNINITIALIZED =
+    "An AI agent tried to use flowpoints, but execbro-sdk is not initialized.\n" +
+    "Install it (npm install execbro-sdk) and call init() at app start.";
+
+// Once per device+reason per server session — LogBox banners must not repeat on every poll.
+const flowpointLogBoxNotified = new Set<string>();
+
 export const SDK_FLOWPOINTS_MISSING =
     "Flowpoints require the execbro-sdk: npm install execbro-sdk, call init() at app start, " +
     "then instrument the flow with flowpoint({ name, step }). Older SDK versions without " +
-    "flowpoint support must be upgraded. A warning with these instructions was also raised in " +
-    'the app\'s LogBox. See get_usage_guide(topic="flowpoints").';
+    "flowpoint support must be upgraded. A notice with these instructions was also shown on " +
+    'the device (LogBox error banner). See get_usage_guide(topic="flowpoints").';
 
 export const SDK_FLOWPOINTS_OUTDATED =
     "This app's execbro-sdk version predates flowpoints. Upgrade it (npm install execbro-sdk@latest), " +
-    "rebuild/reload the app, then retry. A warning with these instructions was also raised in the " +
-    'app\'s LogBox. See get_usage_guide(topic="flowpoints").';
+    "rebuild/reload the app, then retry. A notice with these instructions was also shown on the " +
+    'device (LogBox error banner). See get_usage_guide(topic="flowpoints").';
 
 export type DrainOutcome = { ok: true } | { ok: false; error: string; sdkMissing?: boolean };
 
@@ -277,6 +289,18 @@ export async function drainFlowpoints(deviceName: string, device?: string): Prom
         return { ok: false, error: "Failed to parse flowpoint snapshot from the app" };
     }
     if ("missing" in parsed) {
+        const notifyKey = `${deviceName}:${parsed.reason}`;
+        if (!flowpointLogBoxNotified.has(notifyKey)) {
+            flowpointLogBoxNotified.add(notifyKey);
+            await pushLogBox(
+                parsed.reason === "outdated" ? LOGBOX_FLOWPOINTS_OUTDATED : LOGBOX_FLOWPOINTS_UNINITIALIZED,
+                "error",
+                false,
+                "logbox",
+                "Flowpoints",
+                device
+            );
+        }
         return {
             ok: false,
             error: parsed.reason === "outdated" ? SDK_FLOWPOINTS_OUTDATED : SDK_FLOWPOINTS_MISSING,
