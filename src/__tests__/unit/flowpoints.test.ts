@@ -64,6 +64,10 @@ describe("expression builders", () => {
         expect(expr).toContain("getFlowpointSnapshot");
         expect(expr).toContain("__missing");
         expect(expr).toContain("meta not JSON-serializable");
+        expect(expr).toContain("__EXECBRO_FLOWPOINT_WARNED__");
+        expect(expr).toContain("console.warn");
+        expect(expr).toContain("outdated");
+        expect(expr).toContain("execbro-sdk@latest");
     });
 
     it("clear expression calls clearFlowpoints", () => {
@@ -77,8 +81,18 @@ describe("parseDrainResult", () => {
         expect(parsed).toEqual({ contextId: "c", entries: [makeEntry(1)] });
     });
 
-    it("detects the SDK-missing marker", () => {
-        expect(parseDrainResult(JSON.stringify({ __missing: true }))).toEqual({ missing: true });
+    it("detects the SDK-missing marker, defaulting to uninitialized when no reason is given", () => {
+        expect(parseDrainResult(JSON.stringify({ __missing: true }))).toEqual({
+            missing: true,
+            reason: "uninitialized",
+        });
+    });
+
+    it("detects the outdated-SDK marker", () => {
+        expect(parseDrainResult(JSON.stringify({ __missing: true, __reason: "outdated" }))).toEqual({
+            missing: true,
+            reason: "outdated",
+        });
     });
 
     it("returns null on garbage", () => {

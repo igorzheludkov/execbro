@@ -46,7 +46,16 @@ export function applyDrain(store: FlowpointStoreState, snapshot: FlowpointSnapsh
 export function buildDrainExpression(): string {
     return `(() => {
         const g = globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__;
-        if (!g || typeof g.getFlowpointSnapshot !== "function") return JSON.stringify({ __missing: true });
+        if (!g || typeof g.getFlowpointSnapshot !== "function") {
+            const reason = g ? "outdated" : "uninitialized";
+            if (!globalThis.__EXECBRO_FLOWPOINT_WARNED__) {
+                globalThis.__EXECBRO_FLOWPOINT_WARNED__ = true;
+                console.warn(reason === "outdated"
+                    ? "[execbro] An AI agent tried to use flowpoints, but this app's execbro-sdk version does not support them. Upgrade it: npm install execbro-sdk@latest, then reload."
+                    : "[execbro] An AI agent tried to use flowpoints, but execbro-sdk is not initialized. Install it (npm install execbro-sdk) and call init() at app start.");
+            }
+            return JSON.stringify({ __missing: true, __reason: reason });
+        }
         const s = g.getFlowpointSnapshot();
         const entries = s.entries.map((e) => {
             try { JSON.stringify(e.meta); return e; }
@@ -63,10 +72,16 @@ export function buildClearExpression(): string {
     })()`;
 }
 
-export function parseDrainResult(raw: string): FlowpointSnapshot | { missing: true } | null {
+export type FlowpointMissingReason = "uninitialized" | "outdated";
+
+export function parseDrainResult(
+    raw: string,
+): FlowpointSnapshot | { missing: true; reason: FlowpointMissingReason } | null {
     try {
         const parsed = JSON.parse(raw);
-        if (parsed && parsed.__missing === true) return { missing: true };
+        if (parsed && parsed.__missing === true) {
+            return { missing: true, reason: parsed.__reason === "outdated" ? "outdated" : "uninitialized" };
+        }
         if (parsed && typeof parsed.contextId === "string" && Array.isArray(parsed.entries)) {
             return parsed as FlowpointSnapshot;
         }
@@ -237,7 +252,13 @@ export function clearFlowpointStores(name?: string, deviceName?: string): number
 export const SDK_FLOWPOINTS_MISSING =
     "Flowpoints require the execbro-sdk: npm install execbro-sdk, call init() at app start, " +
     "then instrument the flow with flowpoint({ name, step }). Older SDK versions without " +
-    'flowpoint support must be upgraded. See get_usage_guide(topic="flowpoints").';
+    "flowpoint support must be upgraded. A warning with these instructions was also raised in " +
+    'the app\'s LogBox. See get_usage_guide(topic="flowpoints").';
+
+export const SDK_FLOWPOINTS_OUTDATED =
+    "This app's execbro-sdk version predates flowpoints. Upgrade it (npm install execbro-sdk@latest), " +
+    "rebuild/reload the app, then retry. A warning with these instructions was also raised in the " +
+    'app\'s LogBox. See get_usage_guide(topic="flowpoints").';
 
 export type DrainOutcome = { ok: true } | { ok: false; error: string; sdkMissing?: boolean };
 
@@ -256,7 +277,11 @@ export async function drainFlowpoints(deviceName: string, device?: string): Prom
         return { ok: false, error: "Failed to parse flowpoint snapshot from the app" };
     }
     if ("missing" in parsed) {
-        return { ok: false, error: SDK_FLOWPOINTS_MISSING, sdkMissing: true };
+        return {
+            ok: false,
+            error: parsed.reason === "outdated" ? SDK_FLOWPOINTS_OUTDATED : SDK_FLOWPOINTS_MISSING,
+            sdkMissing: true,
+        };
     }
     applyDrain(getFlowpointStore(deviceName), parsed);
     return { ok: true };
