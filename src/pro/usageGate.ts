@@ -20,11 +20,9 @@ let blockMessage: string | null = null;
 
 function formatReset(usage: UsageInfo): string {
     if (!usage.resetsAt) return "next month";
-    try {
-        return new Date(usage.resetsAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-    } catch {
-        return "next month";
-    }
+    const d = new Date(usage.resetsAt);
+    if (Number.isNaN(d.getTime())) return "next month";
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
 function buildBlockMessage(usage: UsageInfo): string {
