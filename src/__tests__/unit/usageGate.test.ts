@@ -46,6 +46,20 @@ describe("session verdict freeze", () => {
     it("before freeze (null verdict): allow", () => {
         expect(isToolBlocked("tap").blocked).toBe(false);
     });
+
+    it("freeze is idempotent — stays blocked", () => {
+        freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        expect(isToolBlocked("tap").blocked).toBe(true);
+        freezeSessionVerdict(usage({ used: 100, canUse: true }));
+        expect(isToolBlocked("tap").blocked).toBe(true);
+    });
+
+    it("freeze is idempotent — stays unblocked", () => {
+        freezeSessionVerdict(usage({ used: 100, canUse: true }));
+        expect(isToolBlocked("tap").blocked).toBe(false);
+        freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        expect(isToolBlocked("tap").blocked).toBe(false);
+    });
 });
 
 describe("warning line", () => {
@@ -60,5 +74,9 @@ describe("warning line", () => {
     it("deferred or uncapped: no warning", () => {
         expect(usageWarningLine(usage({ capActive: false }))).toBeNull();
         expect(usageWarningLine(usage({ limit: null }))).toBeNull();
+    });
+    it("invalid resetsAt falls back to 'next month'", () => {
+        const line = usageWarningLine(usage({ used: 500, resetsAt: "not-a-date" }))!;
+        expect(line).toMatch(/next month/);
     });
 });
