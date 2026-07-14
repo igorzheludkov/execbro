@@ -11,6 +11,8 @@ import { getTargetPlatform } from "./state.js";
 import { UserInputError } from "./errors.js";
 import { estimateImageTokens } from "./toolHelpers.js";
 import { connectedApps, shouldShowFeedbackHint, markFeedbackHintShown, pushLogBox } from "./index.js";
+import { ensureLicense, getUsageInfo } from "./license.js";
+import { freezeSessionVerdict, isToolBlocked, usageWarningLine } from "../pro/usageGate.js";
 
 // Tools that do NOT require an active Metro connection — excluded from feedback hint trigger
 const NON_METRO_TOOLS = new Set([
@@ -61,9 +63,15 @@ export function registerToolWithTelemetry(
 ): void {
     toolRegistry.set(toolName, { config, handler });
     server.registerTool(toolName, config, async (args: any) => {
-        // Open-core: the local product is free and uncapped — no usage-limit gate.
-        // License validation still runs (identity + dormant billing channel for the
-        // future hosted tier) but never blocks a tool call. See decisions/open-core-strategy.md.
+        // Resolve + freeze the session verdict once (session-start semantics),
+        // then gate. Cap logic lives in src/pro/ (commercial); this MIT wrapper
+        // only calls into it.
+        await ensureLicense();
+        freezeSessionVerdict(getUsageInfo());
+        const gate = isToolBlocked(toolName);
+        if (gate.blocked) {
+            return { content: [{ type: "text" as const, text: gate.message! }] };
+        }
         const startTime = Date.now();
         let success = true;
         let errorMessage: string | undefined;
@@ -153,6 +161,10 @@ export function registerToolWithTelemetry(
                 ).catch(() => {
                     // Non-fatal — hint delivery failure should not affect tool execution
                 });
+            }
+            const warn = usageWarningLine(getUsageInfo());
+            if (warn && Array.isArray(result?.content)) {
+                result.content.push({ type: "text" as const, text: warn });
             }
             return result;
         } catch (error) {
