@@ -189,7 +189,10 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 
 ## Telemetry & Privacy
 
-ExecBro collects anonymous usage telemetry — tool names, success/failure, and durations — to improve the product. **No source code, file paths, or app content is ever sent.** This is what powers your [usage dashboard](#see-your-usage--execbrocom).
+ExecBro sends two separate signals, not one:
+
+- **Usage metering** (required, always on) — a counted tool-call signal that powers the free tier and enforces its monthly cap. This stays on whenever you're using the free tier; it cannot be disabled and still use ExecBro's free tools.
+- **Product analytics** (optional) — tool names, success/failure, and durations, used to improve the product. **No source code, file paths, or app content is ever sent.** This is what powers your [usage dashboard](#see-your-usage--execbrocom). Disable it with `EXECBRO_TELEMETRY=false` in your MCP server config. Doing so turns off analytics only — it does **not** disable usage metering, which keeps counting tool calls against the free-tier cap regardless.
 
 See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full breakdown of what's collected, auto-registration, and how to opt out, and [PRIVACY.md](./PRIVACY.md) for the complete privacy policy.
 
@@ -205,7 +208,7 @@ See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full brea
 
 ## Pricing
 
-ExecBro is **free and open** — every feature, no usage limits, no account required. Use it as much as you like. The tools you run locally stay free; that's the model.
+ExecBro is **free to use** — every feature, fully intelligent — up to **600 tool calls per month**. That covers evaluation and everyday debugging. Heavy users can remove the cap with **ExecBro Pro** ($9/mo) for unlimited calls and every future hosted feature. See [execbro.com/pricing](https://execbro.com/pricing). Existing users get an extra month before the cap applies, with in-app notice.
 
 ## Feedback & Feature Requests
 
