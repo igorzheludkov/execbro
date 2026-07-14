@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { getInstallationId, getServerVersion, getPackageName } from "../core/telemetry.js";
 import { getDeviceFingerprint } from "../core/fingerprint.js";
-import { resetLicense, getDashboardUrl, ensureLicense } from "../core/license.js";
+import { resetLicense, getDashboardUrl, ensureLicense, getUsageInfo } from "../core/license.js";
+import { refreezeSessionVerdict } from "../pro/usageGate.js";
 import { existsSync, unlinkSync } from "fs";
 import { join } from "path";
 import { getPostHogClient } from "../core/posthog.js";
@@ -59,6 +60,7 @@ export async function handleActivateLicense({ token }: { token: string }) {
         if (response.ok) {
             resetLicense();
             await ensureLicense();
+            refreezeSessionVerdict(getUsageInfo());
             const distinctId = getInstallationId();
             const posthog = getPostHogClient();
             if (posthog) {

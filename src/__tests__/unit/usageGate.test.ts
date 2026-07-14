@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
-import { freezeSessionVerdict, isToolBlocked, usageWarningLine, resetGateForTests } from "../../pro/usageGate.js";
+import {
+    freezeSessionVerdict,
+    refreezeSessionVerdict,
+    isToolBlocked,
+    usageWarningLine,
+    resetGateForTests,
+} from "../../pro/usageGate.js";
 import type { UsageInfo } from "../../core/license.js";
 
 function usage(over: Partial<UsageInfo> = {}): UsageInfo {
@@ -58,6 +64,13 @@ describe("session verdict freeze", () => {
         freezeSessionVerdict(usage({ used: 100, canUse: true }));
         expect(isToolBlocked("tap").blocked).toBe(false);
         freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        expect(isToolBlocked("tap").blocked).toBe(false);
+    });
+
+    it("refreezeSessionVerdict lifts a frozen block after mid-session upgrade", () => {
+        freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        expect(isToolBlocked("tap").blocked).toBe(true);
+        refreezeSessionVerdict(usage({ used: 0, canUse: true, limit: null }));
         expect(isToolBlocked("tap").blocked).toBe(false);
     });
 });

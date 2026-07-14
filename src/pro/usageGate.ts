@@ -46,6 +46,15 @@ export function freezeSessionVerdict(usage: UsageInfo | null): void {
     }
 }
 
+// Clear the frozen session verdict and re-evaluate from fresh usage. Used after
+// a successful activate_license so a mid-session upgrade lifts a stale block
+// instead of leaving the process blocked until restart.
+export function refreezeSessionVerdict(usage: UsageInfo | null): void {
+    frozen = false;
+    blockMessage = null;
+    freezeSessionVerdict(usage);
+}
+
 export function isToolBlocked(toolName: string): { blocked: boolean; message?: string } {
     if (!frozen || !blockMessage) return { blocked: false };
     if (EXEMPT.has(toolName)) return { blocked: false };
