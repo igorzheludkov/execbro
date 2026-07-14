@@ -5,7 +5,7 @@ import { existsSync, unlinkSync } from "fs";
 
 import { registerToolWithTelemetry, toolRegistry } from "../core/register.js";
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "../core/guides.js";
-import { getLicenseStatus, getDashboardUrl } from "../core/license.js";
+import { getLicenseStatus, getUsageInfo, getDashboardUrl } from "../core/license.js";
 import { getServerVersion, TELEMETRY_JSONL_PATH } from "../core/telemetry.js";
 import { getTargetPlatform } from "../core/state.js";
 import { formatIssueBody, buildGitHubUrl } from "../core/feedback.js";
@@ -65,7 +65,7 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
         "get_license_status",
         {
             description:
-                "Get your installation ID and account status. Shows your unique Installation ID (used to link your account for future hosted features), current tier, and cache validity. The local product is free and uncapped — there are no usage limits.",
+                "Get your installation ID, license tier, and this month's usage against the free cap. Shows the Installation ID (needed to link Pro in the dashboard), current tier, cache validity, and calls used / remaining this month.",
             inputSchema: {},
         },
         async () => {
@@ -81,9 +81,23 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
 
             lines.push(`Cache valid until: ${status.cacheExpiresAt}`);
 
-            // Open-core: the local product is free and uncapped — no usage limits to display.
-            // License validation still runs (identity + dormant billing channel for the future
-            // hosted tier), but there is nothing to gate. See decisions/open-core-strategy.md.
+            const usage = getUsageInfo();
+            if (usage && usage.limit != null) {
+                lines.push("");
+                lines.push("--- Usage ---");
+                lines.push(`Monthly usage: ${usage.used} / ${usage.limit}`);
+                lines.push(`Month: ${usage.monthKey}`);
+                if (usage.resetsAt) lines.push(`Resets: ${new Date(usage.resetsAt).toLocaleDateString()}`);
+                if (usage.capActive === false && usage.enforcementStartsAt) {
+                    lines.push(
+                        `Status: Grace period — cap applies ${new Date(usage.enforcementStartsAt).toLocaleDateString()}`
+                    );
+                } else {
+                    lines.push(
+                        `Status: ${usage.canUse ? "Active" : "Limit reached — upgrade at " + getDashboardUrl() + "/upgrade"}`
+                    );
+                }
+            }
 
             if (status.tier === "free") {
                 const dashboardUrl = getDashboardUrl();
