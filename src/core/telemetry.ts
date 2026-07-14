@@ -162,6 +162,12 @@ interface TelemetryPayload {
 // ============================================================================
 
 let telemetryEnabled = true;
+// Metering heartbeat: the counted tool_invocation signal required to run the
+// free tier. Stays on under the analytics opt-out; only disabled in dev/unconfigured.
+let meteringEnabled = true;
+export function isMeteringEnabled(): boolean {
+    return meteringEnabled;
+}
 let config: TelemetryConfig | null = null;
 let sessionStartTime: number | null = null;
 let sessionId: string | null = null;
@@ -239,43 +245,77 @@ function isFirstRun(): boolean {
 // Telemetry Control
 // ============================================================================
 
+/**
+ * Pure decision function for the analytics/metering split. Kept side-effect
+ * free so it can be unit-tested without touching env vars, disk config, or
+ * the network.
+ *
+ * Rules:
+ * - Unconfigured endpoint or dev mode: both off (no telemetry of any kind
+ *   should leave a dev/unconfigured install).
+ * - Env opt-out (EXECBRO_TELEMETRY=false|0|off): analytics off, but metering
+ *   stays on — the free-tier cap requires the counted signal regardless of
+ *   the user's analytics preference.
+ * - Otherwise: both on.
+ */
+export function resolveTelemetryModes(opts: {
+    envOptOut: boolean;
+    devMode: boolean;
+    endpointConfigured: boolean;
+}): { telemetryEnabled: boolean; meteringEnabled: boolean } {
+    if (!opts.endpointConfigured || opts.devMode) {
+        return { telemetryEnabled: false, meteringEnabled: false };
+    }
+    if (opts.envOptOut) {
+        return { telemetryEnabled: false, meteringEnabled: true };
+    }
+    return { telemetryEnabled: true, meteringEnabled: true };
+}
+
 export function initTelemetry(): void {
     // Check environment variable for opt-out
     const envValue = process.env.EXECBRO_TELEMETRY ?? process.env.RN_DEBUGGER_TELEMETRY;
-    if (envValue === "false" || envValue === "0" || envValue === "off") {
-        telemetryEnabled = false;
-        console.error("[execbro] Telemetry disabled via EXECBRO_TELEMETRY");
-        return;
-    }
+    const envOptOut = envValue === "false" || envValue === "0" || envValue === "off";
 
     // Check if dev mode is enabled in config (for local development)
     const cfg = loadOrCreateConfig();
-    if (cfg.devMode) {
-        telemetryEnabled = false;
-        return;
-    }
 
     // Check if endpoint is configured (placeholder detection)
-    if (TELEMETRY_ENDPOINT.includes("YOUR_SUBDOMAIN") || TELEMETRY_API_KEY.includes("YOUR_API_KEY")) {
-        telemetryEnabled = false;
-        // Silently disable - endpoint not configured yet
+    const endpointConfigured =
+        !TELEMETRY_ENDPOINT.includes("YOUR_SUBDOMAIN") && !TELEMETRY_API_KEY.includes("YOUR_API_KEY");
+
+    const modes = resolveTelemetryModes({ envOptOut, devMode: !!cfg.devMode, endpointConfigured });
+    telemetryEnabled = modes.telemetryEnabled;
+    meteringEnabled = modes.meteringEnabled;
+
+    if (!meteringEnabled) {
+        // Dev mode or unconfigured endpoint — no telemetry of any kind.
         return;
     }
 
-    // Load/create config (generates installation ID)
+    if (envOptOut) {
+        console.error(
+            "[execbro] Product analytics disabled via EXECBRO_TELEMETRY. Usage metering (required for the free tier) remains active.",
+        );
+    }
+
+    // Load/create config (generates installation ID) — needed for metering
+    // dispatch even when analytics is opted out.
     loadOrCreateConfig();
     sessionId = randomUUID();
 
-    // Track that an AI agent session loaded our MCP server (regardless of tool usage)
-    trackEvent("session_start", {
-        isFirstRun: isFirstRun()
-    });
+    if (telemetryEnabled) {
+        // Track that an AI agent session loaded our MCP server (regardless of tool usage)
+        trackEvent("session_start", {
+            isFirstRun: isFirstRun()
+        });
+    }
 
     // Track session end on SIGINT/SIGTERM. Each event is dispatched immediately
     // with keepalive, so no flush is needed — the OS completes the request even
     // if the process exits right after.
     const handleExit = () => {
-        if (sessionStarted && sessionStartTime) {
+        if (telemetryEnabled && sessionStarted && sessionStartTime) {
             trackEvent("session_end", {
                 duration: Date.now() - sessionStartTime
             });
@@ -373,11 +413,18 @@ export function trackToolInvocation(
         // Non-critical — local file sink failure should never affect tool execution
     }
 
-    if (!telemetryEnabled) return;
+    // Metering (the counted dispatch below) fires whenever meteringEnabled is
+    // true, even if the user opted out of analytics via EXECBRO_TELEMETRY.
+    // Only bail out entirely when both are off (dev mode / unconfigured
+    // endpoint) — nothing downstream has anything to do in that case.
+    if (!meteringEnabled && !telemetryEnabled) return;
 
     const now = Date.now();
 
-    // Start a new session on first tool use or after inactivity gap
+    // Start a new session on first tool use or after inactivity gap. This is
+    // analytics bookkeeping only — trackEvent/trackAppDetection/trackLicenseCheck
+    // each internally no-op when telemetryEnabled is false, so this block has
+    // no effect on opted-out users beyond harmless local state updates.
     if (!sessionStarted || (lastToolTimestamp && (now - lastToolTimestamp) > SESSION_INACTIVITY_MS)) {
         if (sessionStarted) {
             // End previous session before starting a new one
@@ -443,53 +490,66 @@ export function trackToolInvocation(
     if (accessibilityMatchCount) event.accessibilityMatchCount = accessibilityMatchCount;
     if (appRoute) event.appRoute = appRoute;
 
-    dispatch(event);
-
-    // Mirror tool_invocation to PostHog so insights/cohort filters can count
-    // per-tool usage natively. Cloudflare remains the source of truth; PostHog
-    // gets a parallel stream keyed on the same installation id.
-    try {
-        const client = getPostHogClient();
-        if (client) {
-            const phProps: Record<string, unknown> = {
-                tool_name: toolName,
-                success,
-                duration_ms: durationMs,
-                is_first_run: isFirstRun(),
-                server_version: getServerVersion(),
-                package_name: getPackageName(),
-                session_id: sessionId?.substring(0, 12) ?? "",
-            };
-            if (event.errorCategory) phProps.error_category = event.errorCategory;
-            if (event.errorMessage) phProps.error_message = event.errorMessage;
-            if (event.errorContext) phProps.error_context = event.errorContext;
-            if (targetPlatform) phProps.target_platform = targetPlatform;
-            if (emptyResult !== undefined) phProps.empty_result = emptyResult;
-            if (meaningful !== undefined) phProps.meaningful = meaningful;
-            if (changeRate !== undefined) phProps.change_rate = changeRate;
-            if (tapStrategy) phProps.tap_strategy = tapStrategy;
-            if (iosDriver) phProps.ios_driver = iosDriver;
-            if (emptyReason) phProps.empty_reason = emptyReason;
-            if (inputTokens !== undefined && inputTokens > 0) phProps.input_tokens = inputTokens;
-            if (outputTokens !== undefined && outputTokens > 0) phProps.output_tokens = outputTokens;
-
-            client.capture({
-                distinctId: getInstallationId(),
-                event: "tool_invocation",
-                properties: phProps,
-            });
-        }
-    } catch {
-        // PostHog errors must never affect tool flow.
+    // Counted signal: this is the metering heartbeat the free-tier cap relies
+    // on. Fires whenever meteringEnabled — including when the user opted out
+    // of analytics — so opting out of PostHog/analytics can never freeze
+    // (bypass) the usage count.
+    if (meteringEnabled) {
+        dispatch(event);
     }
 
-    // Increment local usage counter
-    incrementLocalUsage();
+    if (telemetryEnabled) {
+        // Mirror tool_invocation to PostHog so insights/cohort filters can count
+        // per-tool usage natively. Cloudflare remains the source of truth; PostHog
+        // gets a parallel stream keyed on the same installation id.
+        try {
+            const client = getPostHogClient();
+            if (client) {
+                const phProps: Record<string, unknown> = {
+                    tool_name: toolName,
+                    success,
+                    duration_ms: durationMs,
+                    is_first_run: isFirstRun(),
+                    server_version: getServerVersion(),
+                    package_name: getPackageName(),
+                    session_id: sessionId?.substring(0, 12) ?? "",
+                };
+                if (event.errorCategory) phProps.error_category = event.errorCategory;
+                if (event.errorMessage) phProps.error_message = event.errorMessage;
+                if (event.errorContext) phProps.error_context = event.errorContext;
+                if (targetPlatform) phProps.target_platform = targetPlatform;
+                if (emptyResult !== undefined) phProps.empty_result = emptyResult;
+                if (meaningful !== undefined) phProps.meaningful = meaningful;
+                if (changeRate !== undefined) phProps.change_rate = changeRate;
+                if (tapStrategy) phProps.tap_strategy = tapStrategy;
+                if (iosDriver) phProps.ios_driver = iosDriver;
+                if (emptyReason) phProps.empty_reason = emptyReason;
+                if (inputTokens !== undefined && inputTokens > 0) phProps.input_tokens = inputTokens;
+                if (outputTokens !== undefined && outputTokens > 0) phProps.output_tokens = outputTokens;
 
-    // Mirror platform-cohort signal to PostHog for native users.
-    // Mirrors the infra's native-user inference (backend/worker.ts:deriveNativePlatform)
-    // so PostHog cohort filters match the Cloudflare dashboard.
-    mirrorNativeCohortToPostHog(toolName);
+                client.capture({
+                    distinctId: getInstallationId(),
+                    event: "tool_invocation",
+                    properties: phProps,
+                });
+            }
+        } catch {
+            // PostHog errors must never affect tool flow.
+        }
+    }
+
+    // Increment local usage counter — powers the live 80% warning, so it must
+    // run whenever the counted dispatch runs, regardless of analytics opt-out.
+    if (meteringEnabled) {
+        incrementLocalUsage();
+    }
+
+    if (telemetryEnabled) {
+        // Mirror platform-cohort signal to PostHog for native users.
+        // Mirrors the infra's native-user inference (backend/worker.ts:deriveNativePlatform)
+        // so PostHog cohort filters match the Cloudflare dashboard.
+        mirrorNativeCohortToPostHog(toolName);
+    }
 }
 
 // Track what we've already sent to PostHog so we don't re-identify on every tool call.
