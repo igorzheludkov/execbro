@@ -19,6 +19,9 @@ describe("nextThreshold", () => {
     test("below 80% → null", () => expect(nextThreshold(usage({ used: 100 }))).toBeNull());
     test("80–99% → 80", () => expect(nextThreshold(usage({ used: 500 }))).toBe(80));
     test("100%+ → 100", () => expect(nextThreshold(usage({ used: 600 }))).toBe(100));
+    test("exactly 80% boundary → 80", () => expect(nextThreshold(usage({ limit: 600, used: 480 }))).toBe(80));
+    test("just below 80% boundary → null", () => expect(nextThreshold(usage({ limit: 600, used: 479 }))).toBeNull());
+    test("exactly 100% boundary → 100", () => expect(nextThreshold(usage({ limit: 600, used: 600 }))).toBe(100));
     test("deferred/uncapped → null", () => {
         expect(nextThreshold(usage({ capActive: false, used: 600 }))).toBeNull();
         expect(nextThreshold(usage({ limit: null, used: 9999 }))).toBeNull();
