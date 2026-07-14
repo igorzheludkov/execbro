@@ -55,9 +55,13 @@ export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string)
             threshold === 100
                 ? `ExecBro: free monthly limit reached (${usage.used}/${usage.limit}). Unlimited at ${UPGRADE_URL}`
                 : `ExecBro: ${usage.used}/${usage.limit} free calls used this month. Unlimited at ${UPGRADE_URL}`;
-        await pushLogBox(msg, "warning", false, "logbox", "ExecBro", device);
+        // Persist the dedup state BEFORE awaiting the push so the check-and-set window is
+        // synchronous. This closes a TOCTOU race where two concurrent tool calls both read
+        // stale state and both fire. Trade-off: if pushLogBox later fails, we do not retry
+        // this threshold this month — "at most once" wins over "guaranteed delivery".
         state.lastThreshold = threshold;
         write(state);
+        await pushLogBox(msg, "warning", false, "logbox", "ExecBro", device);
     } catch {
         /* best-effort — never throw into the caller */
     }
@@ -69,14 +73,17 @@ export async function maybeNotifyDeferral(usage: UsageInfo | null, device?: stri
         if (!usage || usage.capActive !== false || !usage.enforcementStartsAt) return;
         const state = read();
         if (state.deferralNotifiedFor === usage.enforcementStartsAt) return;
-        const date = new Date(usage.enforcementStartsAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long" });
+        const enforcementDate = new Date(usage.enforcementStartsAt);
+        if (Number.isNaN(enforcementDate.getTime())) return; // malformed date — skip, don't mark notified
+        const date = enforcementDate.toLocaleDateString("en-GB", { day: "2-digit", month: "long" });
         const msg =
             `ExecBro becomes metered on ${date}: 600 free tool calls per month, ` +
             `unlimited with Pro ($9/mo) at ${UPGRADE_URL}. Nothing changes until then.`;
-        // warning level (grey) + expanded=true → dismissible full-screen LogBox view.
-        await pushLogBox(msg, "warning", true, "logbox", "ExecBro", device);
+        // Persist BEFORE awaiting the push (see maybeNotifyUsage) to close the same TOCTOU race.
         state.deferralNotifiedFor = usage.enforcementStartsAt;
         write(state);
+        // warning level (grey) + expanded=true → dismissible full-screen LogBox view.
+        await pushLogBox(msg, "warning", true, "logbox", "ExecBro", device);
     } catch {
         /* best-effort — never throw into the caller */
     }
