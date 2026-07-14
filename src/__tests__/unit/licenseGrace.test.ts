@@ -1,19 +1,27 @@
 import { describe, it, expect } from "@jest/globals";
 import { computeOfflineUsage, GRACE_WINDOW_MS, type UsageInfo } from "../../core/license.js";
 
+const NOW = 1_000_000_000_000;
+
+// Default monthKey matches NOW's UTC month so existing tests (which aren't
+// exercising month-rollover behavior) don't unintentionally cross a month
+// boundary between the cached verdict and the "now" they're evaluated at.
+function currentMonthKeyFor(ts: number): string {
+    const d = new Date(ts);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 function base(over: Partial<UsageInfo> = {}): UsageInfo {
     return {
         used: 100,
         limit: 600,
-        monthKey: "2026-08",
+        monthKey: currentMonthKeyFor(NOW),
         creditsRemaining: null,
         canUse: true,
         capActive: true,
         ...over,
     };
 }
-
-const NOW = 1_000_000_000_000;
 
 describe("computeOfflineUsage (fail-closed after grace)", () => {
     it("null cache stays null (fail-open when never seen)", () => {
@@ -48,5 +56,16 @@ describe("computeOfflineUsage (fail-closed after grace)", () => {
 
     it("GRACE_WINDOW_MS is 72h", () => {
         expect(GRACE_WINDOW_MS).toBe(72 * 60 * 60 * 1000);
+    });
+
+    it("past grace + over cap but month has rolled over: allow (monthly counter reset)", () => {
+        const cached = base({
+            used: 650,
+            canUse: false,
+            monthKey: "2026-05",
+            verdictFreshUntil: new Date(NOW - 1000).toISOString(),
+        });
+        const laterMonth = Date.UTC(2026, 5, 15); // June 2026, well past May
+        expect(computeOfflineUsage(cached, laterMonth)!.canUse).toBe(true);
     });
 });

@@ -112,6 +112,16 @@ export function computeOfflineUsage(cached: UsageInfo | null, now: number): Usag
     if (!cached) return null;
     const fresh = cached.verdictFreshUntil ? new Date(cached.verdictFreshUntil).getTime() : 0;
     if (now < fresh) return cached;
+    // The cap is monthly — if we've rolled into a new calendar month (UTC) since
+    // the cached verdict, the counter has reset server-side even though we can't
+    // reach the API to confirm it, so don't keep blocking on last month's usage.
+    if (cached.monthKey) {
+        const d = new Date(now);
+        const currentMonthKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+        if (cached.monthKey !== currentMonthKey) {
+            return { ...cached, canUse: true };
+        }
+    }
     const overCap = cached.capActive !== false && cached.limit != null && cached.used >= cached.limit;
     return { ...cached, canUse: !overCap };
 }
