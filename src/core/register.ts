@@ -13,6 +13,7 @@ import { estimateImageTokens } from "./toolHelpers.js";
 import { connectedApps, shouldShowFeedbackHint, markFeedbackHintShown, pushLogBox } from "./index.js";
 import { ensureLicense, getUsageInfo } from "./license.js";
 import { freezeSessionVerdict, isToolBlocked, usageWarningLine } from "../pro/usageGate.js";
+import { maybeNotifyUsage, maybeNotifyDeferral } from "../pro/usageNotifications.js";
 
 // Tools that do NOT require an active Metro connection — excluded from feedback hint trigger
 const NON_METRO_TOOLS = new Set([
@@ -68,6 +69,9 @@ export function registerToolWithTelemetry(
         // only calls into it.
         await ensureLicense();
         freezeSessionVerdict(getUsageInfo());
+        const usageNow = getUsageInfo();
+        void maybeNotifyDeferral(usageNow);
+        void maybeNotifyUsage(usageNow);
         const gate = isToolBlocked(toolName);
         if (gate.blocked) {
             return { content: [{ type: "text" as const, text: gate.message! }] };
