@@ -47,6 +47,13 @@ export interface UsageInfo {
     canUse: boolean;
     promotionalPeriod?: boolean;
     promotionalPeriodEndsAt?: string | null;
+    // Metered-freemium additions:
+    resetsAt?: string;
+    warnThreshold?: number;
+    capActive?: boolean;
+    enforcementStartsAt?: string | null;
+    // Stamped locally at write time; drives the fail-closed grace window.
+    verdictFreshUntil?: string;
 }
 
 export interface PlanPricing {
@@ -93,6 +100,20 @@ export function formatPlanPrice(p: PlanPricing): string {
     const symbol = p.currency === "USD" ? "$" : `${p.currency} `;
     const period = p.interval === "month" ? "mo" : "yr";
     return `${symbol}${p.amount}/${period}`;
+}
+
+export const GRACE_WINDOW_MS = 72 * 60 * 60 * 1000; // 72h fail-closed grace
+
+// Offline verdict resolution. Within the grace window we trust the last server
+// verdict verbatim (including canUse:false — this is the anti-bypass reversal of
+// the old "never load stale usage" behavior). Past the window we block only if the
+// last-known state was over cap; deferred (capActive:false) users are never blocked.
+export function computeOfflineUsage(cached: UsageInfo | null, now: number): UsageInfo | null {
+    if (!cached) return null;
+    const fresh = cached.verdictFreshUntil ? new Date(cached.verdictFreshUntil).getTime() : 0;
+    if (now < fresh) return cached;
+    const overCap = cached.capActive !== false && cached.limit != null && cached.used >= cached.limit;
+    return { ...cached, canUse: !overCap };
 }
 
 function readUsageCache(): UsageInfo | null {
@@ -289,6 +310,7 @@ async function resolveLicense(): Promise<LicenseResult> {
         // Parse usage info from API response
         if ((apiResponse as any).usage) {
             const usageData = (apiResponse as any).usage as UsageInfo;
+            usageData.verdictFreshUntil = new Date(Date.now() + GRACE_WINDOW_MS).toISOString();
             currentUsage = usageData;
             writeUsageCache(usageData);
         }
@@ -301,13 +323,13 @@ async function resolveLicense(): Promise<LicenseResult> {
     }
 
     // API failed — fall back to stale license cache (fail open on tier).
-    // Intentionally do NOT load stale usage.json: a stale `canUse: false` would
-    // block tools during a transient backend outage even when the user should
-    // be allowed (e.g. new month rolled over, or promo period is active).
-    // Leaving currentUsage as null makes the per-tool block in index.ts a no-op.
     if (cache && cache.installationId === installationId) {
         currentStatus = cache;
         source = "cache";
+        // Fail-closed-after-grace: reuse the last usage verdict within the grace
+        // window; past it, block only if last-known over cap. (Replaces the old
+        // fail-open no-op which let anyone bypass the cap by blocking the endpoint.)
+        currentUsage = computeOfflineUsage(readUsageCache(), Date.now());
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
