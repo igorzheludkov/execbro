@@ -5,7 +5,7 @@ import { existsSync, unlinkSync } from "fs";
 
 import { registerToolWithTelemetry, toolRegistry } from "../core/register.js";
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "../core/guides.js";
-import { getLicenseStatus, getUsageInfo, getDashboardUrl } from "../core/license.js";
+import { getLicenseStatus, getUsageInfo, getDashboardUrl, requestLinkToken } from "../core/license.js";
 import { getServerVersion, TELEMETRY_JSONL_PATH } from "../core/telemetry.js";
 import { getTargetPlatform } from "../core/state.js";
 import { formatIssueBody, buildGitHubUrl } from "../core/feedback.js";
@@ -102,8 +102,11 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
             if (status.tier === "free") {
                 const dashboardUrl = getDashboardUrl();
                 if (dashboardUrl) {
-                    lines.push("");
-                    lines.push(`Link your account: ${dashboardUrl}/link?id=${status.installationId}`);
+                    const linkToken = await requestLinkToken();
+                    if (linkToken) {
+                        lines.push("");
+                        lines.push(`Link your account: ${dashboardUrl}/link?token=${linkToken}`);
+                    }
                 }
             }
 

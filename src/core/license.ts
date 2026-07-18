@@ -371,6 +371,39 @@ export function getDashboardUrl(): string {
     return DASHBOARD_URL;
 }
 
+// Mints a short-lived, single-use link token bound to this installation's
+// fingerprint, so the printed /link URL can't be redeemed by anyone who just
+// sees it — only someone who can also prove they hold this machine's fingerprint.
+export async function requestLinkToken(): Promise<string | null> {
+    if (!VALIDATION_ENDPOINT) return null;
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+        const response = await fetch(`${VALIDATION_ENDPOINT}/api/accounts/link-token`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-API-Key": ACCOUNTS_API_KEY,
+            },
+            body: JSON.stringify({
+                installationId: getInstallationId(),
+                fingerprint: getDeviceFingerprint(),
+            }),
+            signal: controller.signal,
+        });
+
+        clearTimeout(timeout);
+        if (!response.ok) return null;
+
+        const data = (await response.json()) as { token?: string };
+        return typeof data.token === "string" ? data.token : null;
+    } catch {
+        return null;
+    }
+}
+
 export function resetLicense(): void {
     currentStatus = null;
     licensePromise = null;

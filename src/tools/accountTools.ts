@@ -106,6 +106,16 @@ export async function handleActivateLicense({ token }: { token: string }) {
             };
         }
 
+        if (data.error === "already_linked_elsewhere") {
+            return {
+                content: [{
+                    type: "text" as const,
+                    text: "This installation is already linked to a different account. Unlink it from that account's dashboard first, or run delete_account here to reset this installation and get a fresh one.",
+                }],
+                isError: true,
+            };
+        }
+
         if (data.error === "installation_not_found") {
             return {
                 content: [{ type: "text" as const, text: "Installation not found. Please restart your MCP server and try again." }],
