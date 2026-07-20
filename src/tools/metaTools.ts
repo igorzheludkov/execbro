@@ -5,7 +5,8 @@ import { existsSync, unlinkSync } from "fs";
 
 import { registerToolWithTelemetry, toolRegistry } from "../core/register.js";
 import { getGuideOverview, getGuideByTopic, getAvailableTopics } from "../core/guides.js";
-import { getLicenseStatus, getUsageInfo, getDashboardUrl, requestLinkToken } from "../core/license.js";
+import { getLicenseStatus, getUsageInfo, getDashboardUrl, requestLinkToken, refreshLicense } from "../core/license.js";
+import { refreezeSessionVerdict } from "../pro/usageGate.js";
 import { getServerVersion, TELEMETRY_JSONL_PATH } from "../core/telemetry.js";
 import { getTargetPlatform } from "../core/state.js";
 import { formatIssueBody, buildGitHubUrl } from "../core/feedback.js";
@@ -69,6 +70,12 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
             inputSchema: {},
         },
         async () => {
+            // Re-validate against the server so a mid-session upgrade (e.g. bought
+            // on the dashboard) is reflected here, then lift/re-apply the frozen
+            // session block accordingly — no MCP restart needed to clear a stale block.
+            await refreshLicense();
+            refreezeSessionVerdict(getUsageInfo());
+
             const status = getLicenseStatus();
             const lines: string[] = [];
 

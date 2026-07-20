@@ -278,6 +278,15 @@ export function ensureLicense(): Promise<LicenseResult> {
     return licensePromise;
 }
 
+// Force a fresh validate, bypassing the per-process memo but WITHOUT clearing the
+// cache first (unlike resetLicense) — so if the API is unreachable, resolveLicense()
+// still falls back to the last-known verdict instead of dropping to free. Lets
+// get_license_status pick up a mid-session dashboard upgrade without an MCP restart.
+export function refreshLicense(): Promise<LicenseResult> {
+    licensePromise = resolveLicense();
+    return licensePromise;
+}
+
 async function resolveLicense(): Promise<LicenseResult> {
     const startTime = Date.now();
     const installationId = getInstallationId();

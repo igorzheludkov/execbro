@@ -1,4 +1,4 @@
-import type { UsageInfo } from "../core/license.js";
+import { getPricingInfo, formatPlanPrice, type UsageInfo } from "../core/license.js";
 import { API_BASE_URL } from "../core/config.js";
 
 const UPGRADE_URL = `${API_BASE_URL}/upgrade`;
@@ -26,10 +26,12 @@ function formatReset(usage: UsageInfo): string {
 }
 
 function buildBlockMessage(usage: UsageInfo): string {
+    const pricing = getPricingInfo();
+    const price = pricing?.pro ? formatPlanPrice(pricing.pro) : "$8.99/mo";
     return (
         `Action not performed — ExecBro free monthly limit reached ` +
         `(${usage.used}/${usage.limit}, resets ${formatReset(usage)}). ` +
-        `Please tell the user: unlimited usage is available for $9/mo at ${UPGRADE_URL}.`
+        `Please tell the user: unlimited usage is available for ${price} at ${UPGRADE_URL}.`
     );
 }
 
