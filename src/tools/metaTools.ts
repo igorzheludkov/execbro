@@ -83,7 +83,11 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
             lines.push(`License: ${status.tier.charAt(0).toUpperCase() + status.tier.slice(1)}`);
 
             if (status.plan) {
-                lines.push(`Plan expires: ${status.plan.expiresAt}`);
+                const exp = new Date(status.plan.expiresAt);
+                const expStr = Number.isNaN(exp.getTime())
+                    ? String(status.plan.expiresAt)
+                    : exp.toLocaleDateString();
+                lines.push(`Plan expires: ${expStr}`);
             }
 
             lines.push(`Cache valid until: ${status.cacheExpiresAt}`);
