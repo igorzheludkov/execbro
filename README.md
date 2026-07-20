@@ -14,11 +14,16 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 
 1. [Setup ExecBro as an MCP server for your agent of choice](#setup)
 2. [Setup UI automation helpers](docs/setup.md#ios-simulator--ui-automation-setup)
-3. [Install the SDK for richer capture](#install-the-sdk-recommended) — optional, but recommended for the most robust log, network, and state experience
+3. [Install the SDK in your React Native app](#install-the-sdk-recommended) — optional, but recommended for the most robust log, network, and state experience
+4. [Authorize and link to the web dashboard](#see-your-usage--execbrocom) — optional for usage stats and session history, **required to unlock unlimited usage via ExecBro Pro**
+5. Start your React Native app (`npm start` / `expo start`)
+6. [Ask your AI assistant](#usage) in plain language — e.g. "Connect to the simulator and investigate what caused the error on the screen"
 
 ## See your usage — [execbro.com](https://execbro.com)
 
 Log in at **[execbro.com](https://execbro.com)** to see your ExecBro activity rendered back to you: which tools you use most, tool **error rates**, and your **session history** — so you can spot flaky tools, track usage over time, and understand how your agent drives the app across sessions. It's built from the same anonymous telemetry described in [Telemetry & Privacy](#telemetry--privacy), tied to your installation ID.
+
+Linking your installation here is also **required to unlock [ExecBro Pro](#pricing)** — signing in and authorizing your installation is what lets the unlimited-usage plan take effect; without it, the free tier's monthly cap applies even after subscribing.
 
 ## Features
 
@@ -123,6 +128,9 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 
 2. Just describe what you want in plain language — the agent picks the right tools. You don't need to know tool names or ask for a specific one. For example:
 
+    ```
+    Connect to the simulator and investigate what caused the error on the screen
+    ```
     ```
     Check the network logs and investigate why this error is happening
     ```
