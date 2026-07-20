@@ -8,8 +8,14 @@ When this skill is invoked, follow these steps:
 
 ### 1. Check Current State
 
-- Run `git status` to ensure the working tree is clean
-- If there are uncommitted changes, warn the user and stop
+- Run `git status` to check the working tree
+- If the working tree is clean, continue to step 2
+- If there are uncommitted changes, commit them first before releasing:
+    - Run `git diff` to review the changes
+    - Draft a concise commit message following the repo's existing style (feat/fix/refactor/docs/test), focusing on the "why"
+    - Do NOT commit files that likely contain secrets (`.env`, credentials, etc.) — if any are present, warn the user and stop
+    - Stage the relevant files (prefer specific files over `git add -A`) and commit with a HEREDOC message (no "Co-Authored-By" footer)
+    - Then continue to step 2
 
 ### 2. Get Version Bump Type
 
@@ -55,5 +61,5 @@ When this skill is invoked, follow these steps:
 ## Notes
 
 - Requires `gh` CLI to be installed and authenticated
-- Requires clean git working tree
+- Uncommitted changes are committed automatically as part of step 1 (no separate `/commit` needed)
 - The GitHub Actions workflow handles the actual npm publish
