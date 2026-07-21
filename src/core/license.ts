@@ -11,12 +11,11 @@ import { CONFIG_DIR } from "./paths.js";
 // Configuration
 // ============================================================================
 
-import { API_BASE_URL } from "./config.js";
+import { API_BASE_URL, ACCOUNTS_API_KEY } from "./config.js";
 
 const IS_DEV = process.argv.includes("--http");
 const CACHE_TTL_MS = IS_DEV ? 0 : 24 * 60 * 60 * 1000; // No cache in dev, 24h in prod
 const VALIDATION_ENDPOINT = API_BASE_URL;
-const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 5_000;
 const LICENSE_FILE = join(CONFIG_DIR, "license.json");
 const DASHBOARD_URL = API_BASE_URL;
