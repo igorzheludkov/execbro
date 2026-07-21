@@ -141,6 +141,7 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
 }
 
 interface TelemetryConfig {
+    _comment?: string;
     installationId: string;
     firstRunTimestamp: number;
     isFirstRun: boolean;
@@ -201,6 +202,7 @@ function loadOrCreateConfig(): TelemetryConfig {
 
     // Create new installation
     const newConfig: TelemetryConfig = {
+        _comment: "machine-managed by execbro — do not edit",
         installationId: randomUUID(),
         firstRunTimestamp: Date.now(),
         isFirstRun: true

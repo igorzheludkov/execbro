@@ -93,3 +93,13 @@ describe("warning line", () => {
         expect(line).toMatch(/next month/);
     });
 });
+
+describe("agent-resistance", () => {
+    it("block message tells the agent this is a paid limit and not to modify config files", () => {
+        freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        const r = isToolBlocked("tap");
+        expect(r.message).toContain("not an error");
+        expect(r.message).toContain("Do not modify");
+        expect(r.message).toContain(".execbro");
+    });
+});
