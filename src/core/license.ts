@@ -221,6 +221,7 @@ async function callValidationApi(installationId: string): Promise<ApiResponse | 
                 serverVersion: getServerVersion(),
                 hostname: hostname(),
                 osVersion: `${platform()} ${release()}`,
+                usageCacheState: getUsageCacheState(),
             }),
             signal: controller.signal,
         });
