@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import { generateKeyPairSync, sign } from "crypto";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { canonicalVerdictPayload, setVerdictPublicKeyForTests, type SignedVerdictFields } from "../../core/signedVerdict.js";
@@ -115,5 +115,17 @@ describe("usage cache v2", () => {
         const out = readUsageCache(INSTALL_ID, file);
         expect(out).not.toBeNull();
         expect(out!.used).toBe(100);
+    });
+
+    it("self-verify guard: skips the write entirely when the provided sig doesn't match the derived signed block", () => {
+        const u = usage();
+        // Sign for a different set of field values than the ones actually
+        // passed to writeUsageCache — the re-derived `signed` block for `u`
+        // will not verify against this sig, so the write must be skipped.
+        const mismatchedSig = sigFor(usage({ used: 999, canUse: false }), INSTALL_ID);
+        writeUsageCache(u, mismatchedSig, INSTALL_ID, file);
+        expect(existsSync(file)).toBe(false);
+        expect(readUsageCache(INSTALL_ID, file)).toBeNull();
+        expect(getUsageCacheState()).toBe("missing");
     });
 });

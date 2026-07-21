@@ -75,6 +75,18 @@ export function writeUsageCache(
             resetsAt: usage.resetsAt ?? null,
             verdictFreshUntil: usage.verdictFreshUntil ?? "",
         };
+        // Self-verify before persisting: writeUsageCache re-derives `signed` from
+        // the client-side usage object with `?? true` / `?? null` normalization
+        // that must match the server's own normalization byte-for-byte, or the
+        // signature won't verify on the next read. If the server ever emits a
+        // value that normalizes differently here than it did there (e.g. an
+        // undefined capActive), don't persist a cache that will fail its own
+        // round-trip — that would poison the cache into permanent invalid_sig
+        // and silently disable offline enforcement. Skipping the write instead
+        // fails open-and-loud: the next read just reports "missing".
+        if (!verifyVerdictSig(signed, verdictSig)) {
+            return;
+        }
         const {
             monthKey: _mk, used: _u, limit: _l, canUse: _c, capActive: _ca,
             resetsAt: _r, verdictFreshUntil: _v,
