@@ -216,7 +216,10 @@ See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full brea
 
 ## Pricing
 
-ExecBro is **free to use** — every feature, fully intelligent — up to **600 tool calls per month**. That covers evaluation and everyday debugging. Heavy users can remove the cap with **ExecBro Pro** ($9/mo) for unlimited calls and every future hosted feature. See [execbro.com/pricing](https://execbro.com/pricing). Existing users get an extra month before the cap applies, with in-app notice.
+ExecBro is **free to use** — every feature, fully intelligent — up to **600 tool calls per month**. That covers evaluation and everyday debugging. Heavy users can remove the cap with **ExecBro Pro** ($8.99/mo) for unlimited calls and every future hosted feature. See [execbro.com/pricing](https://execbro.com/pricing).
+
+> [!NOTE]
+> **Grandfather notice:** the 600-call monthly cap starts applying **2026-08-01** for new installs. If you already had ExecBro installed before then, you get a free month on top — your cap doesn't start until **2026-08-31**. You'll also see this as an in-app notice. No action needed unless you want to [link your account and upgrade to Pro](#see-your-usage--execbrocom) ahead of time. Questions? [zigor535@gmail.com](mailto:zigor535@gmail.com).
 
 ## Feedback & Feature Requests
 

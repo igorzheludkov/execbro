@@ -33,3 +33,7 @@ const config = loadConfig();
  */
 export const API_BASE_URL: string =
     process.env.EXECBRO_API_URL ?? config.apiUrl ?? (IS_DEV ? LOCAL_URL : PRODUCTION_URL);
+
+// Write-only server API key shared by license validation and metering reports.
+// Safe to embed in client code (grants no read access).
+export const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";

@@ -6,6 +6,7 @@ import { ensureLicense, incrementLocalUsage } from "./license.js";
 import { connectedApps } from "./state.js";
 import { getPostHogClient } from "./posthog.js";
 import { CONFIG_DIR } from "./paths.js";
+import { API_BASE_URL, ACCOUNTS_API_KEY } from "./config.js";
 
 // ============================================================================
 // Configuration
@@ -22,6 +23,7 @@ const BUILD_TOKEN = "__BUILD_TOKEN__";
 
 export function getTelemetryEndpoint(): string { return TELEMETRY_ENDPOINT; }
 export function getTelemetryApiKey(): string { return TELEMETRY_API_KEY; }
+export function getMeteringEndpoint(): string { return `${API_BASE_URL}/api/usage/report`; }
 
 const REQUEST_TIMEOUT_MS = 5_000;
 const CONFIG_FILE = join(CONFIG_DIR, "telemetry.json");
@@ -139,6 +141,7 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
 }
 
 interface TelemetryConfig {
+    _comment?: string;
     installationId: string;
     firstRunTimestamp: number;
     isFirstRun: boolean;
@@ -199,6 +202,7 @@ function loadOrCreateConfig(): TelemetryConfig {
 
     // Create new installation
     const newConfig: TelemetryConfig = {
+        _comment: "machine-managed by execbro — do not edit",
         installationId: randomUUID(),
         firstRunTimestamp: Date.now(),
         isFirstRun: true
@@ -495,7 +499,7 @@ export function trackToolInvocation(
     // of analytics — so opting out of PostHog/analytics can never freeze
     // (bypass) the usage count.
     if (meteringEnabled) {
-        dispatch(event);
+        dispatchMetering(event);
     }
 
     if (telemetryEnabled) {
@@ -777,8 +781,8 @@ export function trackFastRefreshInstall(detection: {
 // Node 18+) tells the runtime to complete the request even if the process
 // exits right after — the Node equivalent of navigator.sendBeacon. No queue,
 // no flush timer, no data loss on abrupt exit.
-function dispatch(event: TelemetryEvent): void {
-    const payload: TelemetryPayload = {
+function buildPayload(event: TelemetryEvent): TelemetryPayload {
+    return {
         installationId: getInstallationId(),
         sessionId: sessionId || undefined,
         serverVersion: getServerVersion(),
@@ -788,17 +792,37 @@ function dispatch(event: TelemetryEvent): void {
         platform: process.platform,
         events: [event]
     };
+}
 
+function dispatch(event: TelemetryEvent): void {
     fetch(TELEMETRY_ENDPOINT, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             "X-API-Key": TELEMETRY_API_KEY
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(buildPayload(event)),
         keepalive: true,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }).catch(() => {
         // Silent: telemetry must never impact the user.
+    });
+}
+
+// Counted metering signal. Goes to the API domain (relayed server-side to the
+// same Analytics Engine dataset) so that blocking metering also blocks license
+// validation — reachability of one implies countability by the other.
+function dispatchMetering(event: TelemetryEvent): void {
+    fetch(getMeteringEndpoint(), {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": ACCOUNTS_API_KEY
+        },
+        body: JSON.stringify(buildPayload(event)),
+        keepalive: true,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    }).catch(() => {
+        // Silent: metering must never impact the user.
     });
 }
