@@ -6,17 +6,17 @@ import { getInstallationId } from "./telemetry.js";
 import { getDeviceFingerprint, getFingerprintVersion } from "./fingerprint.js";
 import { getPostHogClient } from "./posthog.js";
 import { CONFIG_DIR } from "./paths.js";
+import { readUsageCache, writeUsageCache, getUsageCacheState } from "./usageCache.js";
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
-import { API_BASE_URL } from "./config.js";
+import { API_BASE_URL, ACCOUNTS_API_KEY } from "./config.js";
 
 const IS_DEV = process.argv.includes("--http");
 const CACHE_TTL_MS = IS_DEV ? 0 : 24 * 60 * 60 * 1000; // No cache in dev, 24h in prod
 const VALIDATION_ENDPOINT = API_BASE_URL;
-const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
 const API_TIMEOUT_MS = 5_000;
 const LICENSE_FILE = join(CONFIG_DIR, "license.json");
 const DASHBOARD_URL = API_BASE_URL;
@@ -83,8 +83,6 @@ interface ApiResponse {
 
 let currentStatus: LicenseStatus | null = null;
 
-const USAGE_FILE = join(CONFIG_DIR, "usage.json");
-
 let currentUsage: UsageInfo | null = null;
 let currentPricing: PricingInfo | null = null;
 
@@ -102,7 +100,10 @@ export function formatPlanPrice(p: PlanPricing): string {
     return `${symbol}${p.amount}/${period}`;
 }
 
-export const GRACE_WINDOW_MS = 72 * 60 * 60 * 1000; // 72h fail-closed grace
+// Grace window length. The authoritative stamp now comes from the server
+// (verdictFreshUntil is signed inside the verdict); this constant remains for
+// tests and documentation.
+export const GRACE_WINDOW_MS = 72 * 60 * 60 * 1000;
 
 // Offline verdict resolution. Within the grace window we trust the last server
 // verdict verbatim (including canUse:false — this is the anti-bypass reversal of
@@ -124,25 +125,6 @@ export function computeOfflineUsage(cached: UsageInfo | null, now: number): Usag
     }
     const overCap = cached.capActive !== false && cached.limit != null && cached.used >= cached.limit;
     return { ...cached, canUse: !overCap };
-}
-
-function readUsageCache(): UsageInfo | null {
-    try {
-        if (!existsSync(USAGE_FILE)) return null;
-        return JSON.parse(readFileSync(USAGE_FILE, "utf-8"));
-    } catch {
-        return null;
-    }
-}
-
-function writeUsageCache(usage: UsageInfo): void {
-    try {
-        const dir = dirname(USAGE_FILE);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        writeFileSync(USAGE_FILE, JSON.stringify(usage, null, 2));
-    } catch {
-        // Silent fail
-    }
 }
 
 // ============================================================================
@@ -239,6 +221,7 @@ async function callValidationApi(installationId: string): Promise<ApiResponse | 
                 serverVersion: getServerVersion(),
                 hostname: hostname(),
                 osVersion: `${platform()} ${release()}`,
+                usageCacheState: getUsageCacheState(),
             }),
             signal: controller.signal,
         });
@@ -294,6 +277,10 @@ async function resolveLicense(): Promise<LicenseResult> {
     const cache = readCache();
     let source: "cache" | "api" | "default" = "default";
 
+    // Probe the signed usage cache up front: sets the cache-state flag that is
+    // reported to the server (tamper evidence) and doubles as the offline verdict.
+    const cachedUsage = readUsageCache(installationId);
+
     // Always call API for fresh usage data (even if license cache is fresh)
     const apiResponse = await callValidationApi(installationId);
 
@@ -326,12 +313,15 @@ async function resolveLicense(): Promise<LicenseResult> {
             },
         });
 
-        // Parse usage info from API response
+        // Parse usage info from API response. Persist only server-signed
+        // verdicts — verdictFreshUntil is stamped and signed server-side.
         if ((apiResponse as any).usage) {
             const usageData = (apiResponse as any).usage as UsageInfo;
-            usageData.verdictFreshUntil = new Date(Date.now() + GRACE_WINDOW_MS).toISOString();
             currentUsage = usageData;
-            writeUsageCache(usageData);
+            const verdictSig = (apiResponse as any).verdictSig;
+            if (typeof verdictSig === "string" && verdictSig && usageData.verdictFreshUntil) {
+                writeUsageCache(usageData, verdictSig, installationId);
+            }
         }
 
         if ((apiResponse as any).pricing) {
@@ -348,7 +338,7 @@ async function resolveLicense(): Promise<LicenseResult> {
         // Fail-closed-after-grace: reuse the last usage verdict within the grace
         // window; past it, block only if last-known over cap. (Replaces the old
         // fail-open no-op which let anyone bypass the cap by blocking the endpoint.)
-        currentUsage = computeOfflineUsage(readUsageCache(), Date.now());
+        currentUsage = computeOfflineUsage(cachedUsage, Date.now());
         return { status: currentStatus, source, durationMs: Date.now() - startTime };
     }
 
@@ -369,11 +359,9 @@ export function getLicenseStatus(): LicenseStatus {
 
 export function incrementLocalUsage(): void {
     if (!currentUsage) return;
+    // In-memory only: powers the live 80% warning. The on-disk cache is
+    // server-signed content and is never client-mutated.
     currentUsage.used += 1;
-    // Write periodically, not on every call (write every 10 increments)
-    if (currentUsage.used % 10 === 0) {
-        writeUsageCache(currentUsage);
-    }
 }
 
 export function getDashboardUrl(): string {

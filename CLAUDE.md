@@ -229,6 +229,7 @@ Anonymous usage telemetry is collected to understand how the MCP server is used.
 - **Installation ID**: Random UUID stored in `~/.rn-debugger-telemetry.json`
 - **Batching**: Events are batched (10 events or 30-second intervals) before sending
 - **Data Collected**: Tool invocations (name, success/failure, duration), session starts, platform, server version
+- **Metering vs analytics split**: the counted usage signal (free-tier cap) is POSTed to `execbro.com/api/usage/report` (relayed server-side to the Analytics Engine ingest), so blocking metering also blocks license validation. Analytics events still go directly to the Cloudflare Worker. Usage verdicts returned by `/api/license/validate` are Ed25519-signed; the client verifies signatures before trusting the offline cache (`src/core/signedVerdict.ts`, `src/core/usageCache.ts`).
 
 ### Configuration
 
