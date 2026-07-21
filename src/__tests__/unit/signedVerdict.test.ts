@@ -38,6 +38,24 @@ describe("canonicalVerdictPayload", () => {
             '["inst-0001","2026-07",100,600,true,true,"2026-08-01T00:00:00.000Z","2026-07-24T12:00:00.000Z"]',
         );
     });
+
+    it("matches the pinned cross-repo canonical literal on the null path (limit/resetsAt null)", () => {
+        // PINNED: the web repo pins this exact literal in verdict-signing.test.ts.
+        // Locks byte-parity for the unlimited-plan / no-reset-date case, where
+        // `limit` and `resetsAt` serialize as JSON null rather than a value.
+        expect(
+            canonicalVerdictPayload({
+                installationId: "i",
+                monthKey: "2026-07",
+                used: 0,
+                limit: null,
+                canUse: true,
+                capActive: true,
+                resetsAt: null,
+                verdictFreshUntil: "2026-07-24T12:00:00.000Z",
+            }),
+        ).toBe('["i","2026-07",0,null,true,true,null,"2026-07-24T12:00:00.000Z"]');
+    });
 });
 
 describe("verifyVerdictSig", () => {
