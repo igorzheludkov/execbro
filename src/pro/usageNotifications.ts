@@ -2,11 +2,17 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { pushLogBox } from "../core/logbox.js";
 import { CONFIG_DIR } from "../core/paths.js";
-import type { UsageInfo } from "../core/license.js";
+import { getPricingInfo, formatPlanPrice, type UsageInfo } from "../core/license.js";
 import { API_BASE_URL } from "../core/config.js";
 
 const NOTIFY_FILE = join(CONFIG_DIR, "usage-notify.json");
 const UPGRADE_URL = `${API_BASE_URL}/upgrade`;
+
+// Matches the fallback in ../pro/usageGate.ts — keep both in sync.
+function proPrice(): string {
+    const pricing = getPricingInfo();
+    return pricing?.pro ? formatPlanPrice(pricing.pro) : "$8.99/mo";
+}
 
 interface NotifyState {
     monthKey?: string;
@@ -51,10 +57,11 @@ export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string)
         }
         if (state.lastThreshold === threshold || (state.lastThreshold === 100 && threshold === 80)) return;
 
+        const askAgent = `Ask your AI assistant: "Check my ExecBro license status and help me link my account and upgrade to Pro."`;
         const msg =
             threshold === 100
-                ? `ExecBro: free monthly limit reached (${usage.used}/${usage.limit}). Unlimited at ${UPGRADE_URL}`
-                : `ExecBro: ${usage.used}/${usage.limit} free calls used this month. Unlimited at ${UPGRADE_URL}`;
+                ? `ExecBro: free monthly limit reached (${usage.used}/${usage.limit}). Unlimited at ${UPGRADE_URL} — ${askAgent}`
+                : `ExecBro: ${usage.used}/${usage.limit} free calls used this month. Unlimited at ${UPGRADE_URL} — ${askAgent}`;
         // Persist the dedup state BEFORE awaiting the push so the check-and-set window is
         // synchronous. This closes a TOCTOU race where two concurrent tool calls both read
         // stale state and both fire. Trade-off: if pushLogBox later fails, we do not retry
@@ -78,7 +85,10 @@ export async function maybeNotifyDeferral(usage: UsageInfo | null, device?: stri
         const date = enforcementDate.toLocaleDateString("en-GB", { day: "2-digit", month: "long" });
         const msg =
             `ExecBro becomes metered on ${date}: 600 free tool calls per month, ` +
-            `unlimited with Pro ($9/mo) at ${UPGRADE_URL}. Nothing changes until then.`;
+            `unlimited with Pro (${proPrice()}) at ${UPGRADE_URL}. As a thank-you to existing users, ` +
+            `you already have a free month before the cap applies — nothing changes until ${date}. ` +
+            `Ask your AI assistant: "Check my ExecBro license status and help me link my account before the free cap starts." ` +
+            `Questions or feedback? Email zigor535@gmail.com.`;
         // Persist BEFORE awaiting the push (see maybeNotifyUsage) to close the same TOCTOU race.
         state.deferralNotifiedFor = usage.enforcementStartsAt;
         write(state);
