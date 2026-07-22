@@ -3,6 +3,7 @@ import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
 import { iconLabel } from "../core/iconSemantics.js";
+import { recordScreenMetrics } from "../core/projectMemory.js";
 import {
     iosScreenshot,
     androidScreenshot,
@@ -231,6 +232,17 @@ export function registerScreenshotTools(server: McpServer): void {
                 } else {
                     infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
                 }
+                if (resolved.udid) {
+                    recordScreenMetrics(resolved.udid, {
+                        rawWidth: pixelWidth,
+                        rawHeight: pixelHeight,
+                        deliveredWidth,
+                        deliveredHeight,
+                        downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
+                        scale: result.scaleFactor,
+                        capturedAt: Date.now(),
+                    });
+                }
                 // Echo the simulator actually captured so a wrong-device grab is
                 // detectable at a glance (esp. with multiple sims booted).
                 if (targetUdid) {
@@ -397,7 +409,19 @@ export function registerScreenshotTools(server: McpServer): void {
                 let infoText = result.scaleFactor && result.scaleFactor > 1
                     ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${androidDeliveredW}x${androidDeliveredH} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`
                     : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
-    
+
+                if (resolved.serial) {
+                    recordScreenMetrics(resolved.serial, {
+                        rawWidth: pixelWidth,
+                        rawHeight: pixelHeight,
+                        deliveredWidth: androidDeliveredW,
+                        deliveredHeight: androidDeliveredH,
+                        downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
+                        scale: result.scaleFactor,
+                        capturedAt: Date.now(),
+                    });
+                }
+
                 // Get status bar height for coordinate guidance
                 let statusBarPixels = 63; // Default fallback
                 let statusBarDp = 24;
