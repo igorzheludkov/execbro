@@ -115,3 +115,12 @@ export function getProducerVersion(): string {
         return "unknown";
     }
 }
+
+/** realpath(cwd) for display in meta.json, falling back to the raw value. */
+export function realpathOrRaw(cwd: string): string {
+    try {
+        return realpathSync(cwd);
+    } catch {
+        return cwd;
+    }
+}

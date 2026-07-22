@@ -10,6 +10,7 @@ const LOCAL_URL = "http://localhost:3000";
 
 interface Config {
     apiUrl?: string;
+    projectMemory?: { enabled?: boolean };
 }
 
 function loadConfig(): Config {
@@ -37,3 +38,8 @@ export const API_BASE_URL: string =
 // Write-only server API key shared by license validation and metering reports.
 // Safe to embed in client code (grants no read access).
 export const ACCOUNTS_API_KEY = "fb4b5d8f410ff8d0dfe3ade01adc0b2444479ac9380b3f256554dd9d7044f5d2";
+
+/** Local project-memory store is on unless config.json sets it to exactly false. */
+export function isProjectMemoryEnabled(): boolean {
+    return config.projectMemory?.enabled !== false;
+}
