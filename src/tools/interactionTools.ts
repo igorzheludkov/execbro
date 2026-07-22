@@ -450,6 +450,7 @@ export function registerInteractionTools(server: McpServer): void {
                 driverMessage: driverResult.result,
                 ...(verification && { verification }),
                 ...(warning && { warning }),
+                deviceNote: resolved.note,
             };
 
             const content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [

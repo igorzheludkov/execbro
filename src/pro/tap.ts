@@ -242,6 +242,7 @@ export interface TapResult {
     screenshot?: TapScreenshot;
     verification?: TapVerification;
     warning?: string;
+    deviceNote?: string;
     // Failure-artifact signals (populated by captureFailureArtifact when outcome warrants).
     // Forwarded to telemetry blobs 16-20 by the index.ts wrapper.
     artifactKey?: string;
@@ -530,6 +531,7 @@ export function formatTapSuccess(data: {
     convertedTo?: { x: number; y: number; unit: string };
     platform?: string;
     device?: string;
+    deviceNote?: string;
     screenshot?: TapScreenshot;
     verification?: TapVerification;
 }): TapResult {
@@ -1781,6 +1783,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             error: formatResolverError(resolved.error)
         };
     }
+    const deviceNote = resolved.note;
     const platform: "ios" | "android" = resolved.target.platform;
     let targetUdid: string | undefined = resolved.target.iosUdid;
 
@@ -2056,6 +2059,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 convertedTo: result.convertedTo,
                 platform,
                 device: deviceName,
+                deviceNote,
                 screenshot,
                 verification
             });
@@ -2184,6 +2188,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     convertedTo: coords,
                     platform,
                     device: deviceName,
+                    deviceNote,
                     screenshot,
                     verification
                 });
