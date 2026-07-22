@@ -354,4 +354,40 @@ describe("resolveDeviceTarget", () => {
         expect(r.ok).toBe(false);
         if (!r.ok) expect(r.error.code).toBe("MULTIPLE_DEVICES_MATCH");
     });
+
+    it("never throws when a matched remembered device has a non-numeric lastUsedAt (regression)", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ios: { available: true, simulators: [{ udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" }] },
+            android: { available: true, emulators: [{ serial: "emulator-5554", name: "Pixel", state: "running" }], physical: [] },
+            summary: { booted: 1, total: 2 },
+        });
+        listDevicesMock.mockReturnValue([
+            { identifier: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", platform: "ios", lastUsedAt: undefined as any },
+        ]);
+        let r: Awaited<ReturnType<typeof resolveDeviceTarget>> | undefined;
+        await expect((async () => { r = await resolveDeviceTarget(); })()).resolves.not.toThrow();
+        expect(r?.ok).toBe(true);
+        if (r?.ok) {
+            expect(r.target.iosUdid).toBe("AAAAAAAA-0000-0000-0000-000000000001");
+            expect(r.note).toContain("last used unknown");
+        }
+    });
+
+    it("skips a disconnected most-recent remembered device and falls through to the next connected one (spec §7.3)", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ios: { available: true, simulators: [{ udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" }] },
+            android: { available: true, emulators: [{ serial: "emulator-5554", name: "Pixel", state: "running" }], physical: [] },
+            summary: { booted: 1, total: 2 },
+        });
+        listDevicesMock.mockReturnValue([
+            { identifier: "DISCONNECTED-UDID", name: "Gone", platform: "ios", lastUsedAt: 9000 },
+            { identifier: "emulator-5554", name: "Pixel", platform: "android", lastUsedAt: 1000 },
+        ]);
+        const r = await resolveDeviceTarget();
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+            expect(r.target.platform).toBe("android");
+            expect(r.target.androidSerial).toBe("emulator-5554");
+        }
+    });
 });

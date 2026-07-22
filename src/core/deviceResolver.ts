@@ -291,23 +291,30 @@ async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult>
             ...onlinePhys.map((p) => ({ name: p.model, platform: "android" as const, identifier: p.serial }))
         ];
 
-        const remembered = listDevices();
-        for (const dev of remembered) {
-            const match = candidates.find((c) => c.identifier === dev.identifier);
-            if (match) {
-                const day = new Date(dev.lastUsedAt).toISOString().slice(0, 10);
-                return {
-                    ok: true,
-                    note: `defaulted to ${match.name} (${match.identifier}) — last used ${day}; pass device= to override.`,
-                    target: {
-                        platform: match.platform,
-                        iosUdid: match.platform === "ios" ? match.identifier : undefined,
-                        androidSerial: match.platform === "android" ? match.identifier : undefined,
-                        deviceName: match.name,
-                        source: "default",
-                    },
-                };
+        try {
+            const remembered = listDevices();
+            for (const dev of remembered) {
+                const match = candidates.find((c) => c.identifier === dev.identifier);
+                if (match) {
+                    const day = Number.isFinite(dev.lastUsedAt)
+                        ? new Date(dev.lastUsedAt).toISOString().slice(0, 10)
+                        : "unknown";
+                    return {
+                        ok: true,
+                        note: `defaulted to ${match.name} (${match.identifier}) — last used ${day}; pass device= to override.`,
+                        target: {
+                            platform: match.platform,
+                            iosUdid: match.platform === "ios" ? match.identifier : undefined,
+                            androidSerial: match.platform === "android" ? match.identifier : undefined,
+                            deviceName: match.name,
+                            source: "default",
+                        },
+                    };
+                }
             }
+        } catch {
+            // Project-memory lookup must never break device resolution; fall
+            // through to the existing MULTIPLE_DEVICES_MATCH error below.
         }
 
         return err(
