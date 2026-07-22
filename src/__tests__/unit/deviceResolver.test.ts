@@ -31,6 +31,14 @@ jest.unstable_mockModule("../../core/deviceDiscovery.js", () => ({
     resetDeviceDiscoveryCache: jest.fn()
 }));
 
+const recordDeviceMock = jest.fn();
+const listDevicesMock = jest.fn<() => Array<{ identifier: string; name: string; platform: "ios" | "android"; lastUsedAt: number }>>();
+jest.unstable_mockModule("../../core/projectMemory.js", () => ({
+    recordDevice: recordDeviceMock,
+    listDevices: listDevicesMock,
+    recordScreenMetrics: jest.fn(),
+}));
+
 const { resolveDeviceTarget } = await import("../../core/deviceResolver.js");
 
 function emptyDiscovery() {
@@ -47,6 +55,9 @@ describe("resolveDeviceTarget", () => {
         listAllDevicesMock.mockReset();
         getConnectedAppsMock.mockReturnValue([]);
         listAllDevicesMock.mockResolvedValue(emptyDiscovery());
+        recordDeviceMock.mockReset();
+        listDevicesMock.mockReset();
+        listDevicesMock.mockReturnValue([]);
     });
 
     it("resolves an iOS simulator UDID directly to a booted iOS target", async () => {
@@ -297,5 +308,50 @@ describe("resolveDeviceTarget", () => {
         if (!r.ok) {
             expect(r.error.code).toBe("DEVICE_NOT_FOUND");
         }
+    });
+
+    it("records the device on a successful UDID resolution", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ios: { available: true, simulators: [{ udid: "ABCDEF12-3456-7890-ABCD-EF1234567890", name: "iPhone Air", state: "booted" }] },
+            android: { available: true, emulators: [], physical: [] },
+            summary: { booted: 1, total: 1 },
+        });
+        const r = await resolveDeviceTarget("ABCDEF12-3456-7890-ABCD-EF1234567890");
+        expect(r.ok).toBe(true);
+        expect(recordDeviceMock).toHaveBeenCalledWith(expect.objectContaining({
+            identifier: "ABCDEF12-3456-7890-ABCD-EF1234567890", platform: "ios", name: "iPhone Air",
+        }));
+    });
+
+    it("auto-defaults to the most-recent still-connected device on no-hint ambiguity", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ios: { available: true, simulators: [{ udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" }] },
+            android: { available: true, emulators: [{ serial: "emulator-5554", name: "Pixel", state: "running" }], physical: [] },
+            summary: { booted: 1, total: 2 },
+        });
+        listDevicesMock.mockReturnValue([
+            { identifier: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", platform: "ios", lastUsedAt: 5000 },
+            { identifier: "emulator-5554", name: "Pixel", platform: "android", lastUsedAt: 1000 },
+        ]);
+        const r = await resolveDeviceTarget();
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+            expect(r.target.iosUdid).toBe("AAAAAAAA-0000-0000-0000-000000000001");
+            expect(r.note).toContain("pass device=");
+        }
+    });
+
+    it("still errors on no-hint ambiguity when no remembered device is connected", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ios: { available: true, simulators: [{ udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" }] },
+            android: { available: true, emulators: [{ serial: "emulator-5554", name: "Pixel", state: "running" }], physical: [] },
+            summary: { booted: 1, total: 2 },
+        });
+        listDevicesMock.mockReturnValue([
+            { identifier: "OLD-DISCONNECTED-UDID", name: "Gone", platform: "ios", lastUsedAt: 9000 },
+        ]);
+        const r = await resolveDeviceTarget();
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error.code).toBe("MULTIPLE_DEVICES_MATCH");
     });
 });

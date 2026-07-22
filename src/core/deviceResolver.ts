@@ -1,5 +1,6 @@
 import { getConnectedApps } from "./connection.js";
 import { listAllDevices } from "./deviceDiscovery.js";
+import { listDevices, recordDevice } from "./projectMemory.js";
 
 export type DeviceTargetSource =
     | "registry"
@@ -30,7 +31,7 @@ export interface DeviceResolverError {
 }
 
 export type ResolveResult =
-    | { ok: true; target: DeviceTarget }
+    | { ok: true; target: DeviceTarget; note?: string }
     | { ok: false; error: DeviceResolverError };
 
 const UDID_REGEX = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
@@ -82,7 +83,7 @@ export function formatResolverError(error: DeviceResolverError): string {
  *   4. Substring match against booted iOS sims and online Android devices.
  *   5. No `device` argument → pick the single running device, or error.
  */
-export async function resolveDeviceTarget(device?: string): Promise<ResolveResult> {
+async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult> {
     const trimmed = device?.trim();
 
     // Step 1: UDID match.
@@ -289,6 +290,26 @@ export async function resolveDeviceTarget(device?: string): Promise<ResolveResul
             ...runningEmus.map((e) => ({ name: e.name, platform: "android" as const, identifier: e.serial ?? e.name })),
             ...onlinePhys.map((p) => ({ name: p.model, platform: "android" as const, identifier: p.serial }))
         ];
+
+        const remembered = listDevices();
+        for (const dev of remembered) {
+            const match = candidates.find((c) => c.identifier === dev.identifier);
+            if (match) {
+                const day = new Date(dev.lastUsedAt).toISOString().slice(0, 10);
+                return {
+                    ok: true,
+                    note: `defaulted to ${match.name} (${match.identifier}) — last used ${day}; pass device= to override.`,
+                    target: {
+                        platform: match.platform,
+                        iosUdid: match.platform === "ios" ? match.identifier : undefined,
+                        androidSerial: match.platform === "android" ? match.identifier : undefined,
+                        deviceName: match.name,
+                        source: "default",
+                    },
+                };
+            }
+        }
+
         return err(
             "MULTIPLE_DEVICES_MATCH",
             "Multiple devices available. Specify device='...'. Call list_devices to enumerate.",
@@ -311,4 +332,34 @@ export async function resolveDeviceTarget(device?: string): Promise<ResolveResul
     }
     const p = onlinePhys[0];
     return ok({ platform: "android", androidSerial: p.serial, deviceName: p.model, source: "default" });
+}
+
+/**
+ * Public resolver: delegates to the inner resolution, then records the resolved
+ * device to project memory (best-effort, never throws). The inner function also
+ * consults project memory to auto-default on no-hint ambiguity (see Step 5).
+ */
+export async function resolveDeviceTarget(device?: string): Promise<ResolveResult> {
+    const result = await resolveDeviceTargetInner(device);
+    if (result.ok) {
+        try {
+            const t = result.target;
+            const identifier = t.iosUdid ?? t.androidSerial ?? t.deviceName;
+            let appId: string | undefined;
+            try {
+                appId = getConnectedApps().find(
+                    (e) =>
+                        e.app.simulatorUdid === identifier ||
+                        e.app.adbSerial === identifier ||
+                        e.app.deviceInfo.deviceName === t.deviceName,
+                )?.app.deviceInfo.appId;
+            } catch {
+                // registry lookup is best-effort
+            }
+            recordDevice({ identifier, name: t.deviceName, platform: t.platform, appId });
+        } catch {
+            // recording must never affect resolution
+        }
+    }
+    return result;
 }
