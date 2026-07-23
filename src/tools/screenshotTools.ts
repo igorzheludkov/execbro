@@ -239,7 +239,9 @@ export function registerScreenshotTools(server: McpServer): void {
                         deliveredWidth,
                         deliveredHeight,
                         downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
-                        scale: result.scaleFactor,
+                        pointWidth,
+                        pointHeight,
+                        scale: scaleFactor,
                         capturedAt: Date.now(),
                     });
                 }
@@ -411,13 +413,15 @@ export function registerScreenshotTools(server: McpServer): void {
                     : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
 
                 if (resolved.serial) {
+                    // Android device scale/points (dp) require the density fetched
+                    // below; omit them here rather than store the API downscale as
+                    // `scale`. raw/delivered/downscale are correct and sufficient.
                     recordScreenMetrics(resolved.serial, {
                         rawWidth: pixelWidth,
                         rawHeight: pixelHeight,
                         deliveredWidth: androidDeliveredW,
                         deliveredHeight: androidDeliveredH,
                         downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
-                        scale: result.scaleFactor,
                         capturedAt: Date.now(),
                     });
                 }
