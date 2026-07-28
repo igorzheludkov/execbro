@@ -1,66 +1,67 @@
 {
-  "name": "execbro",
-  "version": "1.10.22",
-  "description": "ExecBro — MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
-  "type": "module",
-  "main": "build/index.js",
-  "bin": {
-    "execbro": "./build/index.js"
-  },
-  "scripts": {
-    "build": "tsc && chmod 755 build/index.js",
-    "inject-token": "node scripts/inject-build-token.mjs",
-    "start": "node build/index.js",
-    "dev": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js'",
-    "dev:mcp": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js --http'",
-    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
-    "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/unit'",
-    "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
-    "test:tap": "node --experimental-vm-modules node_modules/.bin/jest --testPathPatterns='tap-strategies' --no-coverage --testTimeout=30000"
-  },
-  "keywords": [
-    "mcp",
-    "react-native",
-    "metro",
-    "debugging",
-    "ai",
-    "claude",
-    "expo"
-  ],
-  "author": "Ihor Zheludkov <500griven@gmail.com>",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/igorzheludkov/execbro.git"
-  },
-  "homepage": "https://github.com/igorzheludkov/execbro#readme",
-  "bugs": {
-    "url": "https://github.com/igorzheludkov/execbro/issues"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "files": [
-    "build"
-  ],
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.1",
-    "fast-xml-parser": "^5.3.3",
-    "node-easyocr": "^1.0.9",
-    "pixelmatch": "^7.1.0",
-    "posthog-node": "^5.28.11",
-    "sharp": "^0.34.5",
-    "tonl": "^2.5.2",
-    "ws": "^8.18.3",
-    "zod": "^3.25.76"
-  },
-  "devDependencies": {
-    "@types/jest": "^30.0.0",
-    "@types/node": "^25.0.3",
-    "@types/ws": "^8.18.1",
-    "jest": "^30.2.0",
-    "nodemon": "^3.1.11",
-    "ts-jest": "^29.4.6",
-    "typescript": "^5.9.3"
-  }
+    "name": "execbro",
+    "version": "1.10.22",
+    "description": "ExecBro — MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
+    "type": "module",
+    "main": "build/index.js",
+    "bin": {
+        "execbro": "./build/index.js"
+    },
+    "scripts": {
+        "build": "tsc && chmod 755 build/index.js",
+        "inject-token": "node scripts/inject-build-token.mjs",
+        "start": "node build/index.js",
+        "dev": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js'",
+        "dev:mcp": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js --http'",
+        "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+        "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/unit'",
+        "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
+        "test:tap": "node --experimental-vm-modules node_modules/.bin/jest --testPathPatterns='tap-strategies' --no-coverage --testTimeout=30000",
+        "tools:json": "npm run build && node scripts/generate-tools-json.mjs"
+    },
+    "keywords": [
+        "mcp",
+        "react-native",
+        "metro",
+        "debugging",
+        "ai",
+        "claude",
+        "expo"
+    ],
+    "author": "Ihor Zheludkov <500griven@gmail.com>",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/igorzheludkov/execbro.git"
+    },
+    "homepage": "https://github.com/igorzheludkov/execbro#readme",
+    "bugs": {
+        "url": "https://github.com/igorzheludkov/execbro/issues"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "files": [
+        "build"
+    ],
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.25.1",
+        "fast-xml-parser": "^5.3.3",
+        "node-easyocr": "^1.0.9",
+        "pixelmatch": "^7.1.0",
+        "posthog-node": "^5.28.11",
+        "sharp": "^0.34.5",
+        "tonl": "^2.5.2",
+        "ws": "^8.18.3",
+        "zod": "^3.25.76"
+    },
+    "devDependencies": {
+        "@types/jest": "^30.0.0",
+        "@types/node": "^25.0.3",
+        "@types/ws": "^8.18.1",
+        "jest": "^30.2.0",
+        "nodemon": "^3.1.11",
+        "ts-jest": "^29.4.6",
+        "typescript": "^5.9.3"
+    }
 }
