@@ -8,7 +8,6 @@ import {
     getTotalLogCount,
     getConnectedAppByDevice,
     getFirstConnectedApp,
-    formatLogsAsTonl,
     checkAndEnsureConnection,
     metroMissingHintIfAbsent,
     logBuffers,
@@ -80,11 +79,6 @@ export function registerLogTools(server: McpServer): void {
                     .describe(
                         "Disable all truncation and return full messages. Tip: Use with lower maxLogs (e.g., 10) to avoid token overload when inspecting large objects."
                     ),
-                format: z
-                    .enum(["text", "tonl"])
-                    .optional()
-                    .default("tonl")
-                    .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format, ~30-50% smaller)"),
                 summary: z
                     .boolean()
                     .optional()
@@ -95,7 +89,7 @@ export function registerLogTools(server: McpServer): void {
                 device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
             }
         },
-        async ({ maxLogs, level, startFromText, maxMessageLength, verbose, format, summary, device }) => {
+        async ({ maxLogs, level, startFromText, maxMessageLength, verbose, summary, device }) => {
             // Check if SDK is installed — prefer SDK data for richer logs.
             // `device` must be threaded through: without it the SDK bridge reads
             // whichever app happens to be first, so a multi-device session
@@ -124,17 +118,6 @@ export function registerLogTools(server: McpServer): void {
                 const sdkResult = await querySDKConsole({ count: maxLogs, level, text: startFromText }, device);
                 if (sdkResult.success && sdkResult.data.length > 0) {
                     const entries = sdkResult.data;
-                    if (format === "tonl") {
-                        const tonlLines = entries.map((e) => {
-                            const time = new Date(e.timestamp).toLocaleTimeString();
-                            let msg = e.message;
-                            if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
-                                msg = msg.slice(0, maxMessageLength) + "...";
-                            }
-                            return `${time} [${e.level}] ${msg}`;
-                        });
-                        return { _emptyResult: false, content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${tonlLines.join("\n")}` }] };
-                    }
                     const lines = entries.map((e) => {
                         const time = new Date(e.timestamp).toLocaleTimeString();
                         let msg = e.message;
@@ -261,21 +244,6 @@ export function registerLogTools(server: McpServer): void {
     
             const startNote = startFromText ? ` (starting from "${startFromText}")` : "";
     
-            // Use TONL format if requested
-            if (format === "tonl") {
-                const tonlOutput = formatLogsAsTonl(logs, { maxMessageLength: verbose ? 0 : maxMessageLength });
-                return {
-                    _emptyResult: bufferEmpty,
-                    ...(emptyReason && { _emptyReason: emptyReason }),
-                    content: [
-                        {
-                            type: "text",
-                            text: `React Native Console Logs (${count} entries)${startNote}:\n\n${tonlOutput}${gapWarning}${connectionWarning}`
-                        }
-                    ]
-                };
-            }
-
             return {
                 _emptyResult: bufferEmpty,
                 ...(emptyReason && { _emptyReason: emptyReason }),
@@ -319,15 +287,10 @@ export function registerLogTools(server: McpServer): void {
                     .default(500)
                     .describe("Max characters per message (default: 500, set to 0 for unlimited)"),
                 verbose: z.boolean().optional().default(false).describe("Disable all truncation and return full messages"),
-                format: z
-                    .enum(["text", "tonl"])
-                    .optional()
-                    .default("tonl")
-                    .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)"),
                 device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
             }
         },
-        async ({ text, maxResults, maxMessageLength, verbose, format, device }) => {
+        async ({ text, maxResults, maxMessageLength, verbose, device }) => {
             // Check if SDK is installed — prefer SDK data. See get_logs: the
             // device must be threaded through, and an empty SDK result falls
             // through to the CDP buffer instead of short-circuiting.
@@ -337,17 +300,6 @@ export function registerLogTools(server: McpServer): void {
                 const sdkResult = await querySDKConsole({ count: maxResults, text }, device);
                 if (sdkResult.success && sdkResult.data.length > 0) {
                     const entries = sdkResult.data;
-                    if (format === "tonl") {
-                        const tonlLines = entries.map((e) => {
-                            const time = new Date(e.timestamp).toLocaleTimeString();
-                            let msg = e.message;
-                            if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
-                                msg = msg.slice(0, maxMessageLength) + "...";
-                            }
-                            return `${time} [${e.level}] ${msg}`;
-                        });
-                        return { content: [{ type: "text" as const, text: `Search results for "${text}" (${entries.length} matches, SDK):\n\n${tonlLines.join("\n")}` }] };
-                    }
                     const lines = entries.map((e) => {
                         const time = new Date(e.timestamp).toLocaleTimeString();
                         let msg = e.message;
@@ -373,19 +325,6 @@ export function registerLogTools(server: McpServer): void {
                 connectionWarning = !passive.connected
                     ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
                     : "";
-            }
-    
-            // Use TONL format if requested
-            if (format === "tonl") {
-                const tonlOutput = formatLogsAsTonl(logs, { maxMessageLength: verbose ? 0 : maxMessageLength });
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Search results for "${text}" (${count} matches):\n\n${tonlOutput}${connectionWarning}`
-                        }
-                    ]
-                };
             }
     
             return {

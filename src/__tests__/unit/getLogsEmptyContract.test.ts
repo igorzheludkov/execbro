@@ -1,11 +1,9 @@
 // Guards the get_logs empty-result contract at the source level.
 //
 // The original bug was not bad logic — it was a return path that forgot to
-// report. `get_logs` has six of them (SDK summary, SDK tonl, SDK text, buffer
-// summary, recovered-retry, and the two final formats), and three of them
-// silently omitted `_emptyReason`, which left 62% of empty invocations
-// unattributed in telemetry. A unit test of the diagnosis logic cannot catch
-// that; only checking every exit can.
+// report. Every `get_logs` exit must set `_emptyResult`. Removing the TONL
+// format halved the exits (each format branch was a duplicated return);
+// this test pins the remaining count so a new silent path is noticed.
 
 import { describe, it, expect } from "@jest/globals";
 import { readFileSync } from "node:fs";
@@ -63,9 +61,8 @@ describe("get_logs empty-result contract", () => {
     const returns = toolResponseReturns(getLogsHandlerSource());
 
     it("finds every tool response return path", () => {
-        // SDK summary, SDK tonl, SDK text, buffer summary, recovered retry,
-        // final tonl, final text.
-        expect(returns.length).toBe(7);
+        // SDK summary, SDK entries, buffer summary, recovered retry, final.
+        expect(returns.length).toBe(5);
     });
 
     it("reports _emptyResult on every return path", () => {
