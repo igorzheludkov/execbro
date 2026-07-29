@@ -1,5 +1,13 @@
 import { LogEntry, LogLevel } from "./types.js";
 
+// Process-global so ids never collide across per-device buffers.
+let nextSeq = 1;
+
+/** Test-only: reset the sequence so assertions are not order-dependent. */
+export function __resetLogSeq(): void {
+    nextSeq = 1;
+}
+
 // Circular buffer for storing logs
 export class LogBuffer {
     private logs: LogEntry[] = [];
@@ -9,8 +17,9 @@ export class LogBuffer {
         this.maxSize = maxSize;
     }
 
-    add(entry: LogEntry): void {
-        this.logs.push(entry);
+    add(entry: Omit<LogEntry, "seq"> & { seq?: number }): void {
+        const stamped: LogEntry = { ...entry, seq: entry.seq ?? nextSeq++ };
+        this.logs.push(stamped);
         if (this.logs.length > this.maxSize) {
             this.logs.shift();
         }

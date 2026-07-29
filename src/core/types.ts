@@ -3,9 +3,13 @@ import WebSocket from "ws";
 // Log entry interface
 export interface LogEntry {
     timestamp: Date;
-    level: "log" | "warn" | "error" | "info" | "debug";
+    level: "log" | "warn" | "error" | "info" | "debug" | "fatal";
     message: string;
     args?: unknown[];
+    // Process-global monotonic sequence, assigned by LogBuffer.add(). Stable
+    // for the lifetime of the server, which is what lets a JS log event carry
+    // an addressable id (`j12`) rather than a position in the last response.
+    seq: number;
 }
 
 // Device info from /json endpoint
@@ -137,7 +141,10 @@ export interface ExecutionResult {
 }
 
 // Log level type
-export type LogLevel = "all" | "log" | "warn" | "error" | "info" | "debug";
+// Filter sentinel "all" is included here because get_logs uses this type for
+// its `level` param. Severity ordering lives in EventLevel (logEvents.ts),
+// which excludes "all" — ranking a sentinel is meaningless.
+export type LogLevel = "all" | "log" | "warn" | "error" | "info" | "debug" | "fatal";
 
 // Network request entry
 export interface NetworkRequest {

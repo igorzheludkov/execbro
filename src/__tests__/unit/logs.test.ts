@@ -2,7 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { LogBuffer, mapConsoleType } from "../../core/logs.js";
 import { LogEntry } from "../../core/types.js";
 
-function makeLog(message: string, level: LogEntry["level"] = "log"): LogEntry {
+function makeLog(message: string, level: LogEntry["level"] = "log"): Omit<LogEntry, "seq"> {
     return { timestamp: new Date(), level, message };
 }
 
@@ -99,4 +99,30 @@ describe("mapConsoleType", () => {
     it("maps info to info", () => expect(mapConsoleType("info")).toBe("info"));
     it("maps debug to debug", () => expect(mapConsoleType("debug")).toBe("debug"));
     it("maps unknown to log", () => expect(mapConsoleType("trace")).toBe("log"));
+});
+
+describe("LogBuffer seq assignment", () => {
+    it("assigns a monotonic seq to every entry", () => {
+        const buffer = new LogBuffer(10);
+        buffer.add(makeLog("first"));
+        buffer.add(makeLog("second"));
+        const [a, b] = buffer.getAll();
+        expect(typeof a.seq).toBe("number");
+        expect(b.seq).toBeGreaterThan(a.seq);
+    });
+
+    it("keeps seq unique across separate buffers", () => {
+        // Two devices, two buffers, one id space — ids must never collide.
+        const one = new LogBuffer(10);
+        const two = new LogBuffer(10);
+        one.add(makeLog("device-a"));
+        two.add(makeLog("device-b"));
+        expect(one.getAll()[0].seq).not.toBe(two.getAll()[0].seq);
+    });
+
+    it("accepts the fatal level", () => {
+        const buffer = new LogBuffer(10);
+        buffer.add(makeLog("native crash", "fatal"));
+        expect(buffer.getAll()[0].level).toBe("fatal");
+    });
 });
