@@ -10,6 +10,7 @@ import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
+import { startSelectionPoller } from "./selectionPoller.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -1138,6 +1139,10 @@ export async function connectToDevice(
             connectionLocks.delete(appKey);
             connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
             markConnectionEstablished();
+
+            // Watch RN's Element Inspector for selections made outside an agent
+            // request. Idempotent, and a no-op when EXECBRO_DISABLE_SELECTION_POLL=1.
+            startSelectionPoller(device.deviceName);
 
             // Initialize or update connection state
             // Note: We do NOT reset reconnectionAttempts here - that happens
