@@ -25,4 +25,11 @@ describe("isRelevant", () => {
     it("opens the floodgates at minLevel debug", () => {
         expect(isRelevant({ level: "debug", kind: "message" }, { minLevel: "debug" })).toBe(true);
     });
+
+    it("does not exempt other kinds from the floor", () => {
+        // ALWAYS is the only thing separating "exempt" from "filtered", so pin
+        // the kinds that must NOT be exempt.
+        expect(isRelevant({ level: "debug", kind: "exception" }, { minLevel: "warn" })).toBe(false);
+        expect(isRelevant({ level: "debug", kind: "lifecycle" }, { minLevel: "warn" })).toBe(false);
+    });
 });

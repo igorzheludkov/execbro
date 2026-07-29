@@ -1,7 +1,13 @@
-import { LEVEL_RANK, type DraftEvent, type EventLevel } from "./logEvents.js";
+import { LEVEL_RANK, type DraftEvent, type EventKind, type EventLevel } from "./logEvents.js";
 
-/** Kinds that are always worth a row, whatever their level. */
-const ALWAYS: ReadonlySet<string> = new Set(["crash", "anr"]);
+/**
+ * Kinds that are always worth a row, whatever their level.
+ *
+ * Typed by EventKind, not string: a typo here would silently disable the
+ * exemption that guarantees a severity floor can never filter out a crash,
+ * so it must fail the build rather than fail quietly.
+ */
+const ALWAYS: ReadonlySet<EventKind> = new Set<EventKind>(["crash", "anr"]);
 
 /**
  * Gate 2: is this event worth a row?
