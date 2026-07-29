@@ -115,7 +115,8 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_connection_status`: Check connection health — uptime, recent disconnects/reconnects, and connection gaps
 
 **Logs & Network:**
-- `get_logs` / `search_logs` / `clear_logs`: Log management with level filtering, text search, summary mode, and `device` targeting
+- `get_logs` / `search_logs` / `clear_logs`: Log management with level filtering, text search, summary mode, and `device` targeting. Use `source="native"` for device-level logs (Android logcat / iOS os_log) filtered to your app — surfaces crashes, ANRs and OOM kills that never reach the JS console. Native results are event-grouped (a backtrace is one row); expand with `get_log_details(id)`.
+- `get_log_details`: Full payload for one log event — complete backtrace, stack trace, or oversized message. Ids come from `get_logs`.
 - `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking with URL/method/status filtering
 
 **App State & Execution:**

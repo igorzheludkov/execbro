@@ -207,6 +207,30 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 - search_logs: text search across all captured logs
 - clear_logs: reset the log buffer
 
+## NATIVE LOGS (crashes the JS console cannot see)
+
+get_logs(source="native") reads Android logcat / iOS os_log, filtered to your
+app, and returns one row per EVENT rather than per line — a 60-line backtrace
+collapses to a single row.
+
+  get_logs(source="native")            recent native events (>= warn)
+  get_logs(source="native", kind="crash")   crashes and nothing else
+  get_log_details(id="n7")             the full backtrace for one event
+  get_logs(source="all")               native + JS merged
+
+WHEN NATIVE BEATS JS: if the app dies before JS runs — a missing .so, a JNI
+abort, a Java exception in MainApplication — CDP never connects and get_logs()
+returns nothing. The crash is in the native log the whole time. You do not
+normally need to ask: when the JS buffer is empty and the app is disconnected,
+get_logs() consults native crash events automatically.
+
+COST: native reads shell out to the device (~1-1.5s per device), so source="js"
+stays the default. minLevel defaults to "warn"; crashes and ANRs are returned
+regardless of it.
+
+LIMITS: iOS Simulator and Android emulator/device only (physical iOS devices
+are not supported). Event ids are valid for the current server session.
+
 ## Tips
 - Always start with summary=true to avoid token overload
 - Use verbose=true with low maxLogs for full error details
