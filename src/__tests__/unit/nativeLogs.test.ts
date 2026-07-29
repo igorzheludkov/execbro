@@ -22,6 +22,15 @@ jest.unstable_mockModule("../../core/deviceDiscovery.js", () => ({
     listAllDevices: listAllDevicesMock,
 }));
 
+const execAsyncMock = jest.fn<(cmd: string) => Promise<{ stdout: string; stderr: string }>>();
+jest.unstable_mockModule("../../core/exec.js", () => ({
+    execAsync: execAsyncMock,
+    // logSourceAndroid.js / logSourceIos.js import this too — unused by these
+    // tests (fetchForTarget is never exercised here) but must exist so the
+    // module graph resolves.
+    withCancelableTimeout: jest.fn(),
+}));
+
 const { runNativePipeline, identityFromMemory, resolveLogTargets } = await import("../../core/nativeLogs.js");
 const { __resetNativeLogBuffers } = await import("../../core/logEvents.js");
 
@@ -153,6 +162,7 @@ describe("resolveLogTargets", () => {
         recordDeviceMock.mockReset();
         listDevicesMock.mockReset();
         listDevicesMock.mockReturnValue([]);
+        execAsyncMock.mockReset();
     });
 
     it("records live identity under the device key so it survives a later crash", async () => {
@@ -190,5 +200,72 @@ describe("resolveLogTargets", () => {
             platform: "android",
             appId: "com.example.appa",
         });
+    });
+
+    it("matches an Android app with a null adbSerial via the model prefix", async () => {
+        // ConnectedApp.adbSerial is frequently null (only set when
+        // getAdbIdForAvd happens to match at connect time), so the
+        // serial-keyed lookup in `connected` misses this app entirely. The
+        // model-prefix fallback is what recovers live identity here.
+        const app = {
+            deviceInfo: {
+                deviceName: "sdk_gphone16k_arm64 - 16 - API 36",
+                appId: "com.rndebuggertestapp",
+            },
+            platform: "android",
+            adbSerial: null,
+        } as unknown as ConnectedApp;
+        connectedAppsMock.set("some-registry-key", app);
+
+        execAsyncMock.mockResolvedValue({ stdout: "sdk_gphone16k_arm64\n", stderr: "" });
+
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            android: {
+                available: true,
+                emulators: [{ name: "Pixel_9_-_16kb", serial: "emulator-5554", state: "running" }],
+                physical: [],
+            },
+        });
+
+        const targets = await resolveLogTargets();
+
+        expect(execAsyncMock).toHaveBeenCalledWith("adb -s emulator-5554 shell getprop ro.product.model");
+        expect(targets).toHaveLength(1);
+        expect(targets[0].identitySource).toBe("live");
+        expect(targets[0].identity).toEqual({
+            deviceKey: "emulator-5554",
+            platform: "android",
+            appId: "com.rndebuggertestapp",
+        });
+    });
+
+    it("yields no live identity when the model does not match any connected app", async () => {
+        const app = {
+            deviceInfo: {
+                deviceName: "some_other_device - 14 - API 34",
+                appId: "com.someother.app",
+            },
+            platform: "android",
+            adbSerial: null,
+        } as unknown as ConnectedApp;
+        connectedAppsMock.set("some-registry-key", app);
+
+        execAsyncMock.mockResolvedValue({ stdout: "sdk_gphone16k_arm64\n", stderr: "" });
+
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            android: {
+                available: true,
+                emulators: [{ name: "Pixel_9_-_16kb", serial: "emulator-5554", state: "running" }],
+                physical: [],
+            },
+        });
+
+        const targets = await resolveLogTargets();
+
+        expect(targets).toHaveLength(1);
+        expect(targets[0].identitySource).not.toBe("live");
+        expect(targets[0].identity).toBeUndefined();
     });
 });

@@ -1,6 +1,7 @@
 import { connectedApps } from "./state.js";
 import { listDevices, recordDevice } from "./projectMemory.js";
 import { listAllDevices } from "./deviceDiscovery.js";
+import { execAsync } from "./exec.js";
 import {
     getNativeLogBuffer,
     type AppIdentity,
@@ -23,9 +24,18 @@ export function deviceKeyOf(app: ConnectedApp): string | undefined {
 /**
  * Build identity for a connected app. iOS bundle ids and Android package names
  * differ for the same product, so this is always per-device and never global.
+ *
+ * `deviceKeyOverride` covers apps found via `matchAndroidAppBySerial`: their
+ * OWN `adbSerial` is exactly the null value that made the direct lookup miss
+ * in the first place, so `deviceKeyOf(app)` would still fail here — the
+ * caller passes the discovered device's serial instead, which is what the
+ * native buffer is actually keyed by.
  */
-export function identityFromApp(app: ConnectedApp): AppIdentity | undefined {
-    const deviceKey = deviceKeyOf(app);
+export function identityFromApp(
+    app: ConnectedApp,
+    deviceKeyOverride?: string
+): AppIdentity | undefined {
+    const deviceKey = deviceKeyOverride ?? deviceKeyOf(app);
     if (!deviceKey || !app.deviceInfo.appId) return undefined;
     return { deviceKey, platform: app.platform, appId: app.deviceInfo.appId };
 }
@@ -97,6 +107,37 @@ export interface LogTarget {
 }
 
 /**
+ * Find the ConnectedApp for a discovered Android device.
+ *
+ * ConnectedApp.adbSerial is frequently null — types.ts documents it as only
+ * populated when getAdbIdForAvd happens to match at connect time — so keying
+ * on it alone means Android never gets live identity, and every Android read
+ * silently degrades to crash-buffer-only. The three Android names (adb serial,
+ * AVD name, RN/Metro deviceName) do not join, and resolveDeviceTarget cannot
+ * bridge them either.
+ *
+ * Metro labels Android targets `${MODEL} - ${RELEASE} - API ${SDK}`, so
+ * ro.product.model is a deterministic prefix of the RN deviceName. Verified
+ * live: model "sdk_gphone16k_arm64" vs "sdk_gphone16k_arm64 - 16 - API 36".
+ */
+async function matchAndroidAppBySerial(
+    serial: string,
+    apps: ConnectedApp[]
+): Promise<ConnectedApp | undefined> {
+    const candidates = apps.filter((a) => a.platform === "android");
+    if (candidates.length === 0) return undefined;
+    try {
+        const { stdout } = await execAsync(`adb -s ${serial} shell getprop ro.product.model`);
+        const model = stdout.trim();
+        if (!model) return undefined;
+        return candidates.find((a) => (a.deviceInfo.deviceName ?? "").startsWith(model));
+    } catch {
+        // Best-effort: fall through to memory / crash-only as before.
+        return undefined;
+    }
+}
+
+/**
  * Every device we could read logs from — NOT just connected ones.
  *
  * A crashed app has no CDP connection, so connectedApps is empty exactly when
@@ -130,7 +171,17 @@ export async function resolveLogTargets(device?: string): Promise<LogTarget[]> {
 
     const targets: LogTarget[] = [];
     for (const row of rows) {
-        const app = connected.get(row.deviceKey);
+        let app = connected.get(row.deviceKey);
+        // adbSerial is frequently null (see matchAndroidAppBySerial), so the
+        // serial-keyed lookup above routinely misses even a live app. Fall
+        // back to the deterministic model-prefix match before giving up —
+        // note the matched app's OWN adbSerial is still null, so its identity
+        // must be keyed by row.deviceKey, not recomputed from the app itself.
+        let matchedByModel = false;
+        if (!app && row.platform === "android") {
+            app = await matchAndroidAppBySerial(row.deviceKey, [...connectedApps.values()]);
+            matchedByModel = app !== undefined;
+        }
         const deviceName = app?.deviceInfo.deviceName || row.name || row.deviceKey;
 
         if (device) {
@@ -139,7 +190,9 @@ export async function resolveLogTargets(device?: string): Promise<LogTarget[]> {
         }
 
         // Chain: live connection -> remembered -> none (crash-buffer-only).
-        const live = app ? identityFromApp(app) : undefined;
+        const live = app
+            ? identityFromApp(app, matchedByModel ? row.deviceKey : undefined)
+            : undefined;
         if (live) {
             // Persist identity under the SAME key the native buffer uses (udid /
             // adb serial). projectMemory is otherwise keyed by whatever
