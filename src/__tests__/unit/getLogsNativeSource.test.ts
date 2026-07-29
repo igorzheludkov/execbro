@@ -2,9 +2,10 @@
 // escalation path is about WHEN a subprocess runs, which a pure unit test of
 // the handler cannot observe without a device.
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { __escalationCooldownTestHooks } from "../../tools/logTools.js";
 
 const SOURCE = readFileSync(join(process.cwd(), "src/tools/logTools.ts"), "utf8");
 
@@ -71,5 +72,29 @@ describe("get_logs native source", () => {
     it("flags an unparseable since instead of silently using the default window", () => {
         expect(src).toMatch(/parseSince/);
         expect(SOURCE).toMatch(/not recognized/);
+    });
+});
+
+describe("escalation cooldown — per-device keying", () => {
+    beforeEach(() => {
+        __escalationCooldownTestHooks.reset();
+    });
+
+    it("does not let one device's empty escalation suppress another's", () => {
+        // A process-wide cooldown would hide a real crash on device B behind an
+        // unrelated quiet period on device A.
+        __escalationCooldownTestHooks.recordMiss("iPhone A");
+        expect(__escalationCooldownTestHooks.isEscalationCoolingDown("iPhone A")).toBe(true);
+        expect(__escalationCooldownTestHooks.isEscalationCoolingDown("iPhone B")).toBe(false);
+    });
+
+    it("treats the undefined (all-devices) device as its own key", () => {
+        __escalationCooldownTestHooks.recordMiss(undefined);
+        expect(__escalationCooldownTestHooks.isEscalationCoolingDown(undefined)).toBe(true);
+        expect(__escalationCooldownTestHooks.isEscalationCoolingDown("iPhone A")).toBe(false);
+
+        __escalationCooldownTestHooks.reset();
+        __escalationCooldownTestHooks.recordMiss("iPhone A");
+        expect(__escalationCooldownTestHooks.isEscalationCoolingDown(undefined)).toBe(false);
     });
 });

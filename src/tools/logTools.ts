@@ -80,20 +80,49 @@ function shouldEscalateToNative(bufferEmpty: boolean, connected: boolean): boole
 const ESCALATION_COOLDOWN_MS = 30_000;
 
 /**
+ * Negative-result cooldown for the empty-and-disconnected escalation, keyed by
+ * the `device` argument that produced the miss.
+ *
  * A miss (buffer empty, disconnected, no crash found) still costs a
  * subprocess per device. Without a cooldown, every get_logs call made while
  * the app stays crashed-and-disconnected would re-pay that cost forever. 30s
  * is short enough that a real crash occurring during the cooldown is still
  * caught by the very next get_logs call once it expires, and long enough to
- * stop a tight investigation loop from thrashing the device. Reset to
- * `undefined` whenever an escalation DOES find a crash, so a genuine crash is
- * never suppressed by a stale cooldown from an earlier, unrelated miss.
+ * stop a tight investigation loop from thrashing the device.
+ *
+ * Keying matters: a miss for device="A" says nothing about device B, and a
+ * process-wide latch would let one device's quiet period suppress another
+ * device's real crash. An undefined device queries every device at once, so
+ * caching that miss under a single key is correct.
+ *
+ * Cleared for a key whenever its escalation DOES find crashes, so a genuine
+ * crash is never suppressed by a stale miss.
  */
-let lastEmptyEscalationAt: number | undefined;
+const lastEmptyEscalationAt = new Map<string, number>();
 
-function isEscalationCoolingDown(): boolean {
-    return lastEmptyEscalationAt !== undefined && Date.now() - lastEmptyEscalationAt < ESCALATION_COOLDOWN_MS;
+function escalationKey(device?: string): string {
+    return device ?? "*";
 }
+
+function isEscalationCoolingDown(device?: string): boolean {
+    const at = lastEmptyEscalationAt.get(escalationKey(device));
+    return at !== undefined && Date.now() - at < ESCALATION_COOLDOWN_MS;
+}
+
+/**
+ * Test-only. Exercises the per-device cooldown map directly, so the
+ * per-device keying can be pinned without standing up a full get_logs
+ * invocation (device connection, CDP session, etc).
+ */
+export const __escalationCooldownTestHooks = {
+    isEscalationCoolingDown,
+    recordMiss: (device?: string): void => {
+        lastEmptyEscalationAt.set(escalationKey(device), Date.now());
+    },
+    reset: (): void => {
+        lastEmptyEscalationAt.clear();
+    },
+};
 
 export function registerLogTools(server: McpServer): void {
     // Tool: Get console logs
@@ -327,14 +356,17 @@ export function registerLogTools(server: McpServer): void {
                     }
                 }
 
-                if (shouldEscalateToNative(bufferEmpty, getPassiveConnectionStatus().connected) && !isEscalationCoolingDown()) {
+                if (shouldEscalateToNative(bufferEmpty, getPassiveConnectionStatus().connected) && !isEscalationCoolingDown(device)) {
+                    // Safe to reuse a fetch taken at a higher minLevel: isRelevant
+                    // exempts crash/anr from the floor entirely, so they are present
+                    // regardless of what the caller asked for.
                     // Reuse the native fetch already paid for by source==="all"
                     // instead of running the subprocess a second time.
                     const events = nativeEventsForEscalation
                         ?? (await collectNativeEvents({ device, minLevel: "warn" })).events;
                     const crashes = events.filter((e) => e.kind === "crash" || e.kind === "anr");
                     if (crashes.length > 0) {
-                        lastEmptyEscalationAt = undefined;
+                        lastEmptyEscalationAt.delete(escalationKey(device));
                         return {
                             _emptyResult: false,
                             _emptyReason: "native_crash_found",
@@ -346,7 +378,7 @@ export function registerLogTools(server: McpServer): void {
                             }]
                         };
                     }
-                    lastEmptyEscalationAt = Date.now();
+                    lastEmptyEscalationAt.set(escalationKey(device), Date.now());
                 }
 
                 // Diagnostic metadata for empty results (local dev dashboard only —
