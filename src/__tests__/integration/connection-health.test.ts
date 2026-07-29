@@ -3,7 +3,15 @@ import { connectToDevice } from "../../core/connection.js";
 import { checkAndEnsureConnection, getPassiveConnectionStatus } from "../../core/connection.js";
 import { connectedApps, pendingExecutions, updateLastCDPMessageTime, clearAllCDPMessageTimes } from "../../core/state.js";
 import { DeviceInfo } from "../../core/types.js";
+import { scanMetroPorts } from "../../core/metro.js";
 import { FakeCDPServer } from "../helpers/fake-cdp-server.js";
+
+// checkAndEnsureConnection() scans the real Metro ports, so the "nothing is
+// available" case only holds when the machine running the suite genuinely has
+// no Metro up. Developers usually do (port 8081), so probe the same ports the
+// code under test scans and skip rather than fail on a false negative.
+const metroPortsInUse = await scanMetroPorts();
+const itWithoutMetro = metroPortsInUse.length > 0 ? it.skip : it;
 
 describe("Connection health (integration)", () => {
     let server: FakeCDPServer;
@@ -141,7 +149,7 @@ describe("Connection health (integration)", () => {
     });
 
     describe("checkAndEnsureConnection", () => {
-        it("returns failure when no Metro server is available", async () => {
+        itWithoutMetro("returns failure when no Metro server is available", async () => {
             const result = await checkAndEnsureConnection();
             expect(result.connected).toBe(false);
             expect(result.wasReconnected).toBe(false);
