@@ -27,6 +27,9 @@ import {
     clearSDKConsole,
     getSDKConsoleStats,
 } from "../core/sdkBridge.js";
+import { findNativeEvent, getNativeLogBuffer, nativeLogBuffers } from "../core/logEvents.js";
+import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
+import { collectNativeEvents } from "../core/nativeLogs.js";
 
 // Binds the live connection/pipeline probes for `diagnoseEmptyLogs`. Kept here
 // so the diagnosis logic itself stays free of module-level state and testable.
@@ -385,6 +388,43 @@ export function registerLogTools(server: McpServer): void {
             }
     
             return { content: [{ type: "text", text: `Cleared ${total} log entries from all devices.` }] };
+        }
+    );
+
+    // Tool: Get full payload for one log event
+    registerToolWithTelemetry(
+        server,
+        "get_log_details",
+        {
+            description: "Get the full payload of a single log event — complete stack trace, backtrace, or oversized message.\n" +
+                "PURPOSE: Expand one row from get_logs into its full text. A crash row collapses a 60-line backtrace; this returns all of it.\n" +
+                "WHEN TO USE: After get_logs shows an event you need to read in full (a crash, an exception, a large payload).\n" +
+                "WORKFLOW: get_logs -> copy the id (e.g. \"n7\") -> get_log_details(id=\"n7\").\n" +
+                "LIMITATIONS: Ids are valid for the current server session. Reads the buffer — it does not re-query the device.\n" +
+                "GOOD: get_log_details({ id: \"n7\" })\n" +
+                "BAD: Guessing ids — always take them from get_logs.\n" +
+                "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full console-debugging playbook.",
+            inputSchema: {
+                id: z.string().describe("Event id from get_logs (e.g. \"n7\")"),
+                maxLength: z.coerce
+                    .number()
+                    .optional()
+                    .default(4000)
+                    .describe("Max characters of payload (default: 4000, 0 for unlimited)"),
+                verbose: z.boolean().optional().default(false).describe("Disable truncation entirely")
+            }
+        },
+        async ({ id, maxLength, verbose }) => {
+            const event = findNativeEvent(id);
+            if (!event) {
+                throw new UserInputError(
+                    `No log event with id "${id}". Ids come from get_logs and are valid for this server session; ` +
+                    `call get_logs(source="native") again to refresh them.`
+                );
+            }
+            return {
+                content: [{ type: "text" as const, text: formatEventDetails(event, { maxLength, verbose }) }]
+            };
         }
     );
 
