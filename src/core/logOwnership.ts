@@ -1,0 +1,56 @@
+import type { AppIdentity, RawLogLine } from "./logEvents.js";
+
+export type OwnReason = "declared" | "pid" | "verdict";
+export type OwnershipVerdict = { owned: true; reason: OwnReason } | { owned: false };
+
+/**
+ * Tags whose lines are VERDICTS ABOUT an app rather than output FROM it.
+ *
+ * This allowlist is a hard gate, not a hint. Two measured traps make a bare
+ * "message contains the package name" rule wrong:
+ *   - MMKV / nativeloader embed the package as a filesystem path
+ *   - ActivityThread announces package changes from OTHER apps' pids
+ * Neither tag is listed, so the name check never runs for them.
+ */
+export const ANDROID_VERDICT_TAGS: ReadonlySet<string> = new Set([
+    "ActivityManager",
+    "ActivityTaskManager",
+    "AndroidRuntime",
+    "DEBUG",
+    "lowmemorykiller",
+    "PackageManager",
+    "InputDispatcher",
+]);
+
+/** iOS equivalents: process termination and launch failure reporters. */
+export const IOS_VERDICT_SUBSYSTEMS: ReadonlySet<string> = new Set([
+    "com.apple.runningboard",
+    "com.apple.FrontBoard",
+]);
+
+function isVerdictSource(line: RawLogLine, platform: AppIdentity["platform"]): boolean {
+    if (platform === "android") return ANDROID_VERDICT_TAGS.has(line.tag);
+    // iOS tags are "subsystem:category" — match on the subsystem half.
+    const subsystem = line.tag.split(":")[0];
+    return IOS_VERDICT_SUBSYSTEMS.has(subsystem);
+}
+
+/**
+ * Decide whether a line belongs to the app under test. First match wins.
+ *
+ * Rule order matters: `declared` precedes `pid` because a tombstone is written
+ * by tombstoned's pid while naming the dead app as its subject, so pid
+ * matching would miss every crash — the exact case this feature exists for.
+ */
+export function isOwned(line: RawLogLine, identity: AppIdentity): OwnershipVerdict {
+    if (line.subject && line.subject === identity.appId) {
+        return { owned: true, reason: "declared" };
+    }
+    if (identity.pid !== undefined && line.pid === identity.pid) {
+        return { owned: true, reason: "pid" };
+    }
+    if (isVerdictSource(line, identity.platform) && line.message.includes(identity.appId)) {
+        return { owned: true, reason: "verdict" };
+    }
+    return { owned: false };
+}
