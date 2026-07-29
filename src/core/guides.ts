@@ -228,8 +228,9 @@ COST: native reads shell out to the device (~1-1.5s per device), so source="js"
 stays the default. minLevel defaults to "warn"; crashes and ANRs are returned
 regardless of it.
 
-LIMITS: iOS Simulator and Android emulator/device only (physical iOS devices
-are not supported). Event ids are valid for the current server session.
+LIMITS: iOS Simulator and Android emulator/device only (physical iOS devices are not
+supported). Event ids stay valid until that device's buffer rolls over or clear_logs
+runs — if get_log_details reports an unknown id, call get_logs again to refresh them.
 
 ## Tips
 - Always start with summary=true to avoid token overload
