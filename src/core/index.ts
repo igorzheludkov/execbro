@@ -160,6 +160,10 @@ export {
   isInspectorActive,
   getInspectorSelection,
   getInspectorSelectionAtPoint,
+  getSelectionHistory,
+  harvestStacksAtPoint,
+  harvestStacksAtFrame,
+  enrichWithSource,
 } from "./executor.js";
 
 // Android (ADB)
@@ -264,6 +268,16 @@ export {
   getBundleErrors,
   getBundleStatusWithErrors,
 } from "./bundle.js";
+
+// Element Inspector selection capture
+export {
+  startSelectionPoller,
+  stopSelectionPoller,
+  stopAllSelectionPollers,
+  isSelectionPollerRunning,
+} from "./selectionPoller.js";
+export { SelectionBuffer, selectionBuffer } from "./selectionBuffer.js";
+export type { SelectionEntry, SelectionFrame, ComponentStack } from "./selectionBuffer.js";
 
 // License & Usage
 export {

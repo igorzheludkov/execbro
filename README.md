@@ -34,6 +34,7 @@ Linking your installation here is also **required to unlock [ExecBro Pro](#prici
 - **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
 - **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals. Wire stores and other app internals straight into the agent with the optional [SDK](#install-the-sdk-recommended) for direct, reliable state access
 - **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
+- **Tap-to-Source** - Point at any element with RN's Element Inspector and get back the absolute source file and line where it is rendered, resolved from the React fiber's `_debugStack` via Metro symbolication. Works on React 19, where `_debugSource` no longer exists. Selections are buffered in the background, so taps you make during a manual inspector session are captured without asking the agent first
 
 ### Device Control
 
@@ -57,7 +58,7 @@ Linking your installation here is also **required to unlock [ExecBro Pro](#prici
 - **Auto-Discovery** - Scans Metro on ports 8081, 8082, 19000-19002 automatically
 - **Multi-Device Support** - Connects to all Bridgeless targets simultaneously, with per-device log and network buffers
 - **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
-- **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests
+- **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests, 100 inspector selections
 - **Platform Support** - Expo SDK 54+ (Bridgeless) and React Native 0.70+ (Hermes)
 
 ## Setup

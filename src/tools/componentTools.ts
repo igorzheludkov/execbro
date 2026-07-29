@@ -14,6 +14,10 @@ import {
     toggleElementInspector,
     getInspectorSelection,
     getInspectorSelectionAtPoint,
+    getSelectionHistory,
+    harvestStacksAtPoint,
+    harvestStacksAtFrame,
+    enrichWithSource,
     inspectAtPoint,
     measureComponent,
     iosScreenshot,
@@ -49,14 +53,15 @@ export function registerComponentTools(server: McpServer): void {
         "get_screen_layout",
         {
             description:
-                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are in **points** (iOS) or **dp** (Android) — NOT screenshot pixels. Use tap(text=...) or tap(testID=...) to interact with discovered components. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
+                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are in **points** (iOS) or **dp** (Android) — NOT screenshot pixels. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
                 primaryInteractionBanner() + "\n" +
                 "PURPOSE: Quickest textual map of what is actually on screen right now — component names, positions, and text — so you can plan taps and inspections without guessing.\n" +
                 "WHEN TO USE: First step whenever the user asks \"what's on screen\", \"why is X covering Y\", or before tapping a visually ambiguous element.\n" +
                 "WORKFLOW: get_screen_layout -> find_components(pattern=\"...\") or inspect_component(componentName=\"...\") -> tap(testID=...) -> get_screen_layout again to confirm.\n" +
-                "LIMITATIONS: Coordinates are points/dp, not screenshot pixels — pass them to tap() which handles conversion, do not multiply by devicePixelRatio yourself.\n" +
+                "LIMITATIONS: pass coordinates straight to tap(), which handles conversion — never multiply by devicePixelRatio yourself.\n" +
                 "GOOD: get_screen_layout({ extended: true })\n" +
                 "BAD: get_screen_layout({ summary: true }) when you actually need to pick a specific element — summary hides the tree.\n" +
+                "SOURCE: file:line for an element? get_inspector_selection(x, y).\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"layout\") for the full layout-check playbook.",
             inputSchema: {
                 extended: z
@@ -346,6 +351,7 @@ export function registerComponentTools(server: McpServer): void {
                 "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
                 "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection. Coordinates in points (iOS) / dp (Android); text frames are container-level (climb to nearest measurable host).\n" +
+                "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call get_inspector_selection(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
@@ -553,6 +559,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: Matches the React display name only; minified builds may return opaque names. Large result sets — use maxResults or a tighter pattern.\n" +
                 "GOOD: find_components({ pattern: \"Button\" }); find_components({ pattern: \"Screen$\" })\n" +
                 "BAD: find_components({ pattern: \".*\" }) — floods the response; narrow the regex.\n" +
+                "SOURCE: searching by name to find a file? If you can point at it on screen, get_inspector_selection(x, y) returns the file and line directly.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
             inputSchema: {
                 pattern: z
@@ -686,7 +693,9 @@ export function registerComponentTools(server: McpServer): void {
                 "PURPOSE: Identity + styling — \"what is this and how is it styled?\" The primary tool for visual/style debugging at a coordinate.\n" +
                 "WHEN TO USE: You see a visual issue at a pixel and want the component name AND its style values (e.g. \"why is borderRadius 14 instead of 16?\").\n" +
                 "WORKFLOW: screenshot → note suspect pixel → get_inspector_selection(x, y) → edit returned style values.\n" +
-                "LIMITATIONS: Requires RN dev mode. Brief overlay flicker (~600ms). Source paths are null on React 19 (where _debugSource was dropped); name + style is always returned.\n" +
+                "LIMITATIONS: Requires RN dev mode. Brief overlay flicker (~600ms). Source needs Metro reachable; otherwise `sourceUnavailable` is set and name + style still return.\n" +
+                "SOURCE: Returns `source: {file, line, column}` where the component is rendered, plus `ancestors[]` — open it directly instead of hunting for it.\n" +
+                "HISTORY: history=true returns recent buffered selections, including manual inspector taps.\n" +
                 "VS inspect_at_point: this returns RICH STYLE per ancestor but only ONE frame. inspect_at_point returns FRAME PER ANCESTOR + PROPS but no rich style merging.\n" +
                 "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
             inputSchema: {
@@ -698,10 +707,24 @@ export function registerComponentTools(server: McpServer): void {
                     .number()
                     .optional()
                     .describe("Y coordinate (in points). If provided with x, auto-taps at this location."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                source: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe("Resolve the component's source file and line via Metro symbolication. Default true. Set false to skip if you only need name and style."),
+                history: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe("Return recent buffered selections (newest first) instead of the current one. Captures taps made while RN's Element Inspector was on, including ones the agent never requested."),
+                limit: z
+                    .number()
+                    .optional()
+                    .describe("Max entries to return when history=true. Default 10.")
             }
         },
-        async ({ x, y, device }) => {
+        async ({ x, y, device, source = true, history = false, limit }) => {
             if (!hasMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_inspector_selection");
                 return {
@@ -709,7 +732,19 @@ export function registerComponentTools(server: McpServer): void {
                     isError: true
                 };
             }
-    
+
+            if (history) {
+                const entries = await getSelectionHistory({ device, limit });
+                return {
+                    content: [{
+                        type: "text",
+                        text: entries.length === 0
+                            ? "No buffered selections. Toggle RN's Element Inspector on and tap an element."
+                            : JSON.stringify(entries, null, 2)
+                    }]
+                };
+            }
+
             // Coordinate path: use fiber-based hit testing (works on Bridgeless / new arch
             // where RN's built-in inspector cannot populate hierarchy via UIManager.findSubviewIn).
             // Avoids toggling the on-device overlay so screenshots stay clean.
@@ -740,6 +775,34 @@ export function registerComponentTools(server: McpServer): void {
                 if (parsed.frame) {
                     const f = parsed.frame;
                     output += `Frame: (${f.left?.toFixed(1)}, ${f.top?.toFixed(1)}) ${f.width?.toFixed?.(1) ?? f.width}x${f.height?.toFixed?.(1) ?? f.height}\n`;
+                }
+
+                // Source resolution: harvest _debugStack at the selection, then
+                // symbolicate host-side. Failure only adds a reason — never drops
+                // the identity/style payload the caller already has.
+                if (source) {
+                    const stacks =
+                        x !== undefined && y !== undefined
+                            ? await harvestStacksAtPoint(x, y, device)
+                            : await harvestStacksAtFrame(parsed.frame, device);
+                    const enriched = await enrichWithSource({}, stacks);
+                    const loc = enriched.source as
+                        | { file: string; line: number; column: number }
+                        | undefined;
+                    if (loc) {
+                        output += `Source: ${loc.file}:${loc.line}:${loc.column}\n`;
+                        const ancestors = enriched.ancestors as
+                            | Array<{ component: string; file: string; line: number }>
+                            | undefined;
+                        if (ancestors && ancestors.length > 1) {
+                            output += `Source ancestors:\n`;
+                            for (const a of ancestors) {
+                                output += `  - ${a.component}  ${a.file}:${a.line}\n`;
+                            }
+                        }
+                    } else {
+                        output += `Source: unavailable (${enriched.sourceUnavailable})\n`;
+                    }
                 }
                 if (parsed.style) {
                     output += `Style: ${JSON.stringify(parsed.style, null, 2)}\n`;
@@ -780,6 +843,7 @@ export function registerComponentTools(server: McpServer): void {
                 "WORKFLOW: screenshot → suspect pixel → divide by pixel ratio → inspect_at_point(x, y).\n" +
                 "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is shown for reference only (no rich merging); for style debugging use get_inspector_selection.\n" +
                 "VS get_inspector_selection: this returns FRAME PER ANCESTOR + PROPS, no flicker. Inspector returns RICH STYLE per ancestor but only one frame and briefly toggles the overlay.\n" +
+                "SOURCE: also returns `source: {file, line, column}` for the component at the point (set source=false to skip in tight loops).\n" +
                 "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
             inputSchema: {
                 x: z
@@ -802,10 +866,15 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe("Include position/dimensions (frame) in the output (default: true)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                source: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe("Resolve the component's source file and line via Metro symbolication. Default true. Set false to skip in tight loops.")
             }
         },
-        async ({ x, y, includeProps, includeFrame, device }) => {
+        async ({ x, y, includeProps, includeFrame, device, source = true }) => {
             const result = await inspectAtPoint(x, y, { includeProps, includeFrame, device });
     
             if (!result.success) {
@@ -841,12 +910,23 @@ export function registerComponentTools(server: McpServer): void {
             } catch {
                 // If parsing fails, just return the raw result
             }
-    
+
+            // Source resolution reuses the same hit-test point, so no extra
+            // coordinate translation is needed. Failure only adds a reason line.
+            let sourceLine = "";
+            if (source) {
+                const enriched = await enrichWithSource({}, await harvestStacksAtPoint(x, y, device));
+                const loc = enriched.source as { file: string; line: number; column: number } | undefined;
+                sourceLine = loc
+                    ? `\n\nSource: ${loc.file}:${loc.line}:${loc.column}`
+                    : `\n\nSource: unavailable (${enriched.sourceUnavailable})`;
+            }
+
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Element at (${x}, ${y}):\n\n${result.result}`
+                        text: `Element at (${x}, ${y}):\n\n${result.result}${sourceLine}`
                     }
                 ]
             };

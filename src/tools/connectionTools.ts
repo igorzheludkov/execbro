@@ -23,6 +23,7 @@ import {
     purgeStaleConnectionsForPorts,
     connectMetroBuildEvents,
     disconnectMetroBuildEvents,
+    stopAllSelectionPollers,
     reloadApp,
     connectedApps,
     isUiDriverAvailable,
@@ -692,6 +693,9 @@ export function registerConnectionTools(server: McpServer): void {
     
             // Disconnect Metro build events WebSocket
             disconnectMetroBuildEvents();
+
+            // Stop watching RN's Element Inspector on every device
+            stopAllSelectionPollers();
     
             // Clear connection state (but NOT log/network buffers)
             clearAllConnectionState();
