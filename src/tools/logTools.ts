@@ -27,8 +27,8 @@ import {
     clearSDKConsole,
     getSDKConsoleStats,
 } from "../core/sdkBridge.js";
-import { findLogEvent, getNativeLogBuffer, nativeLogBuffers } from "../core/logEvents.js";
-import "../core/jsLogEvents.js";
+import { findLogEvent, nativeLogBuffers } from "../core/logEvents.js";
+import { jsEventsFromEntries } from "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
 import { collectNativeEvents } from "../core/nativeLogs.js";
 
@@ -42,6 +42,29 @@ function logDiagnosisDeps(device?: string) {
     };
 }
 
+/** Parse "5m" / "90s" / an ISO timestamp into an absolute Date. */
+function parseSince(since: string | undefined): Date | undefined {
+    if (!since) return undefined;
+    const rel = since.match(/^(\d+)([smh])$/);
+    if (rel) {
+        const mult = { s: 1000, m: 60_000, h: 3_600_000 }[rel[2] as "s" | "m" | "h"];
+        return new Date(Date.now() - Number(rel[1]) * mult);
+    }
+    const parsed = new Date(since);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+/**
+ * Native acquisition costs a ~1-1.5s subprocess per device, so it must never
+ * run on the hot path. It earns its cost in exactly one situation: the JS
+ * buffer is empty AND the app is not connected — which is what a native crash
+ * looks like from here. Mirrors get_bundle_errors' screenshot fallback, which
+ * likewise fires only when the cheap path has demonstrably failed.
+ */
+function shouldEscalateToNative(bufferEmpty: boolean, connected: boolean): boolean {
+    return bufferEmpty && !connected;
+}
+
 export function registerLogTools(server: McpServer): void {
     // Tool: Get console logs
     registerToolWithTelemetry(
@@ -50,7 +73,7 @@ export function registerLogTools(server: McpServer): void {
         {
             description:
                 "Retrieve console logs from connected React Native app. Tip: Use summary=true first for a quick overview (counts by level + last 5 messages), then fetch specific logs as needed.\n" +
-                "PURPOSE: Pull captured console output (log/warn/error/info/debug) from the in-memory buffer for the connected app.\n" +
+                "PURPOSE: Pull captured console output (log/warn/error/info/debug) from the in-memory buffer, and optionally native device logs (crashes, ANRs) via source=\"native\".\n" +
                 "WHEN TO USE: Start of any log-driven investigation, verifying a code change picked up via Fast Refresh, or confirming a reported error actually fires.\n" +
                 "WORKFLOW: scan_metro -> get_logs(summary=true) -> narrow with search_logs(text=\"...\") or get_logs(level=\"error\") -> clear_logs between reproductions.\n" +
                 "LIMITATIONS: Circular buffer (~500 entries). Only captures logs emitted after the app connected; pre-connect logs are lost.\n" +
@@ -90,16 +113,64 @@ export function registerLogTools(server: McpServer): void {
                     .describe(
                         "Return summary statistics instead of full logs (count by level + last 5 messages). Use for quick overview."
                     ),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices."),
+                source: z
+                    .enum(["js", "native", "all"])
+                    .optional()
+                    .default("js")
+                    .describe(
+                        "Which log stream to read. 'js' (default) = console output over CDP, instant. " +
+                        "'native' = device logs (Android logcat / iOS os_log) filtered to this app — surfaces crashes, ANRs and OOM kills that never reach JS; costs ~1-1.5s per device. " +
+                        "'all' = both, merged. When the JS buffer is empty and the app is disconnected, native crash events are consulted automatically."
+                    ),
+                kind: z
+                    .enum(["crash", "anr", "exception", "lifecycle", "message"])
+                    .optional()
+                    .describe("Filter native/merged events by kind. Omit for all kinds."),
+                minLevel: z
+                    .enum(["debug", "info", "warn", "error", "fatal"])
+                    .optional()
+                    .default("warn")
+                    .describe(
+                        "Relevance floor for native events (default: warn). Crashes and ANRs are always returned regardless. Lower to 'debug' to see native library loading."
+                    ),
+                since: z
+                    .string()
+                    .optional()
+                    .describe("Native acquisition window — ISO timestamp or a duration like \"5m\". Widens the device query; already-seen events are still deduped.")
             }
         },
-        async ({ maxLogs, level, startFromText, maxMessageLength, verbose, summary, device }) => {
+        async ({ maxLogs, level, startFromText, maxMessageLength, verbose, summary, device, source, kind, minLevel, since }) => {
             // Check if SDK is installed — prefer SDK data for richer logs.
             // `device` must be threaded through: without it the SDK bridge reads
             // whichever app happens to be first, so a multi-device session
             // silently answers with the wrong device's buffer.
             const sdkAvailable = await isSDKInstalled(device);
-    
+
+            // Prepended to the final JS-rendered text when source==="all".
+            let nativePrefix = "";
+
+            // Explicit native / merged read — the caller asked for the cost.
+            if (source === "native" || source === "all") {
+                const nativeOpts = { device, minLevel, since: parseSince(since) };
+                const { events, notes } = await collectNativeEvents(nativeOpts);
+                const filtered = kind ? events.filter((e) => e.kind === kind) : events;
+                const showDevice = nativeLogBuffers.size > 1;
+                const noteText = notes.length > 0 ? `\n\n${notes.join("\n")}` : "";
+                if (source === "native") {
+                    return {
+                        _emptyResult: filtered.length === 0,
+                        content: [{
+                            type: "text" as const,
+                            text: `Native Log Events (${filtered.length}):\n\n${formatEventList(filtered, { showDevice })}${noteText}\n\nUse get_log_details("<id>") for a full backtrace.`
+                        }]
+                    };
+                }
+                // source === "all": fall through so JS output is appended below,
+                // carrying the native block with it.
+                nativePrefix = `Native Log Events (${filtered.length}):\n\n${formatEventList(filtered, { showDevice })}${noteText}\n\n`;
+            }
+
             if (sdkAvailable) {
                 if (summary) {
                     const sdkStats = await getSDKConsoleStats(device);
@@ -211,6 +282,24 @@ export function registerLogTools(server: McpServer): void {
                     }
                 }
 
+                if (shouldEscalateToNative(bufferEmpty, getPassiveConnectionStatus().connected)) {
+                    const crashOpts = { device, minLevel: "warn" as const };
+                    const { events } = await collectNativeEvents(crashOpts);
+                    const crashes = events.filter((e) => e.kind === "crash" || e.kind === "anr");
+                    if (crashes.length > 0) {
+                        return {
+                            _emptyResult: false,
+                            _emptyReason: "native_crash_found",
+                            content: [{
+                                type: "text" as const,
+                                text: `React Native Console Logs (0 entries) — app is not connected.\n\n` +
+                                    `Native crash found:\n${formatEventList(crashes, { showDevice: nativeLogBuffers.size > 1 })}\n\n` +
+                                    `Use get_log_details("${crashes[0].id}") for the full backtrace.`
+                            }]
+                        };
+                    }
+                }
+
                 // Diagnostic metadata for empty results (local dev dashboard only —
                 // responsePreview is never sent to the remote telemetry backend).
                 const diagParts = [
@@ -247,14 +336,18 @@ export function registerLogTools(server: McpServer): void {
             }
     
             const startNote = startFromText ? ` (starting from "${startFromText}")` : "";
-    
+
+            const jsEvents = jsEventsFromEntries(logs, device ?? "all devices");
+            const jsFiltered = kind ? jsEvents.filter((e) => e.kind === kind) : jsEvents;
+            const jsRendered = formatEventList(jsFiltered, { showDevice: logBuffers.size > 1 });
+
             return {
                 _emptyResult: bufferEmpty,
                 ...(emptyReason && { _emptyReason: emptyReason }),
                 content: [
                     {
                         type: "text",
-                        text: `React Native Console Logs (${count} entries)${startNote}:\n\n${formatted}${gapWarning}${connectionWarning}`
+                        text: `${nativePrefix}React Native Console Logs (${jsFiltered.length} entries)${startNote}:\n\n${jsRendered}${gapWarning}${connectionWarning}`
                     }
                 ]
             };
@@ -387,7 +480,13 @@ export function registerLogTools(server: McpServer): void {
                     total += sdkResult.count;
                 }
             }
-    
+
+            // Native buffers keep their watermark so cleared events are not
+            // re-ingested on the next fetch.
+            for (const buffer of nativeLogBuffers.values()) {
+                total += buffer.clear();
+            }
+
             return { content: [{ type: "text", text: `Cleared ${total} log entries from all devices.` }] };
         }
     );
@@ -401,7 +500,7 @@ export function registerLogTools(server: McpServer): void {
                 "PURPOSE: Expand one row from get_logs into its full text. A crash row collapses a 60-line backtrace; this returns all of it.\n" +
                 "WHEN TO USE: After get_logs shows an event you need to read in full (a crash, an exception, a large payload).\n" +
                 "WORKFLOW: get_logs -> copy the id (e.g. \"n7\") -> get_log_details(id=\"n7\").\n" +
-                "LIMITATIONS: Ids are valid for the current server session. Reads the buffer — it does not re-query the device.\n" +
+                "LIMITATIONS: Ids are valid until that device's buffer rolls over or clear_logs runs, not for the whole server session — call get_logs again to get fresh ones. Reads the buffer — it does not re-query the device.\n" +
                 "GOOD: get_log_details({ id: \"n7\" })\n" +
                 "BAD: Guessing ids — always take them from get_logs.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full console-debugging playbook.",
@@ -420,7 +519,7 @@ export function registerLogTools(server: McpServer): void {
             if (!event) {
                 throw new UserInputError(
                     `No log event with id "${id}". Ids come from get_logs — "n7" for native events, "j12" for console entries — ` +
-                    `and are valid for this server session. Call get_logs again to refresh them.`
+                    `and are valid until that device's buffer rolls over or clear_logs runs. Call get_logs again to refresh them.`
                 );
             }
             return {

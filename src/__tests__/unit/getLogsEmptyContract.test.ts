@@ -61,8 +61,9 @@ describe("get_logs empty-result contract", () => {
     const returns = toolResponseReturns(getLogsHandlerSource());
 
     it("finds every tool response return path", () => {
-        // SDK summary, SDK entries, buffer summary, recovered retry, final.
-        expect(returns.length).toBe(5);
+        // SDK summary, SDK entries, buffer summary, recovered retry,
+        // native-only, native-crash escalation, final.
+        expect(returns.length).toBe(7);
     });
 
     it("reports _emptyResult on every return path", () => {
