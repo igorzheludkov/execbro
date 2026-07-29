@@ -27,7 +27,7 @@ import {
     clearSDKConsole,
     getSDKConsoleStats,
 } from "../core/sdkBridge.js";
-import { findLogEvent, nativeLogBuffers } from "../core/logEvents.js";
+import { findLogEvent, nativeLogBuffers, type LogEvent } from "../core/logEvents.js";
 import { jsEventsFromEntries } from "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
 import { collectNativeEvents } from "../core/nativeLogs.js";
@@ -42,16 +42,28 @@ function logDiagnosisDeps(device?: string) {
     };
 }
 
-/** Parse "5m" / "90s" / an ISO timestamp into an absolute Date. */
-function parseSince(since: string | undefined): Date | undefined {
-    if (!since) return undefined;
+/**
+ * Parse "5m" / "90s" / an ISO timestamp into an absolute Date.
+ *
+ * Distinguishes "not provided" from "provided but unparseable" — the latter
+ * silently falling back to the default watermark would look, from the
+ * caller's side, like their filter was honored when it was actually ignored.
+ */
+function parseSince(since: string | undefined): { date: Date | undefined; note?: string } {
+    if (!since) return { date: undefined };
     const rel = since.match(/^(\d+)([smh])$/);
     if (rel) {
         const mult = { s: 1000, m: 60_000, h: 3_600_000 }[rel[2] as "s" | "m" | "h"];
-        return new Date(Date.now() - Number(rel[1]) * mult);
+        return { date: new Date(Date.now() - Number(rel[1]) * mult) };
     }
     const parsed = new Date(since);
-    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+    if (Number.isNaN(parsed.getTime())) {
+        return {
+            date: undefined,
+            note: `[NOTE] since="${since}" was not recognized (use an ISO timestamp or a duration like "5m"/"90s"/"2h") — showing the default window instead.`,
+        };
+    }
+    return { date: parsed };
 }
 
 /**
@@ -63,6 +75,24 @@ function parseSince(since: string | undefined): Date | undefined {
  */
 function shouldEscalateToNative(bufferEmpty: boolean, connected: boolean): boolean {
     return bufferEmpty && !connected;
+}
+
+const ESCALATION_COOLDOWN_MS = 30_000;
+
+/**
+ * A miss (buffer empty, disconnected, no crash found) still costs a
+ * subprocess per device. Without a cooldown, every get_logs call made while
+ * the app stays crashed-and-disconnected would re-pay that cost forever. 30s
+ * is short enough that a real crash occurring during the cooldown is still
+ * caught by the very next get_logs call once it expires, and long enough to
+ * stop a tight investigation loop from thrashing the device. Reset to
+ * `undefined` whenever an escalation DOES find a crash, so a genuine crash is
+ * never suppressed by a stale cooldown from an earlier, unrelated miss.
+ */
+let lastEmptyEscalationAt: number | undefined;
+
+function isEscalationCoolingDown(): boolean {
+    return lastEmptyEscalationAt !== undefined && Date.now() - lastEmptyEscalationAt < ESCALATION_COOLDOWN_MS;
 }
 
 export function registerLogTools(server: McpServer): void {
@@ -147,28 +177,43 @@ export function registerLogTools(server: McpServer): void {
             // silently answers with the wrong device's buffer.
             const sdkAvailable = await isSDKInstalled(device);
 
-            // Prepended to the final JS-rendered text when source==="all".
+            // Prepended to every return's text below when source==="all".
             let nativePrefix = "";
+            // Set when source==="native"/"all" already paid for a native fetch
+            // this call, so the empty+disconnected escalation below can reuse
+            // it instead of paying twice.
+            let nativeEventsForEscalation: LogEvent[] | undefined;
 
             // Explicit native / merged read — the caller asked for the cost.
             if (source === "native" || source === "all") {
-                const nativeOpts = { device, minLevel, since: parseSince(since) };
+                const sinceParsed = parseSince(since);
+                const nativeOpts = { device, minLevel, since: sinceParsed.date };
                 const { events, notes } = await collectNativeEvents(nativeOpts);
+                nativeEventsForEscalation = events;
                 const filtered = kind ? events.filter((e) => e.kind === kind) : events;
                 const showDevice = nativeLogBuffers.size > 1;
                 const noteText = notes.length > 0 ? `\n\n${notes.join("\n")}` : "";
+                const sinceNote = sinceParsed.note ? `\n\n${sinceParsed.note}` : "";
+                const rendered = formatEventList(filtered, { showDevice, maxLength: maxMessageLength, verbose });
                 if (source === "native") {
+                    // Emptiness is judged on the UNFILTERED events: a `kind`
+                    // filter matching nothing is a filter outcome, not a
+                    // capture failure — mirrors the js-buffer `filtered_out`
+                    // handling below.
+                    const nativeEmpty = events.length === 0;
+                    const nativeEmptyReason = !nativeEmpty && filtered.length === 0 ? "filtered_out" : undefined;
                     return {
-                        _emptyResult: filtered.length === 0,
+                        _emptyResult: nativeEmpty,
+                        ...(nativeEmptyReason && { _emptyReason: nativeEmptyReason }),
                         content: [{
                             type: "text" as const,
-                            text: `Native Log Events (${filtered.length}):\n\n${formatEventList(filtered, { showDevice })}${noteText}\n\nUse get_log_details("<id>") for a full backtrace.`
+                            text: `Native Log Events (${filtered.length}):\n\n${rendered}${noteText}${sinceNote}\n\nUse get_log_details("<id>") for a full backtrace.`
                         }]
                     };
                 }
                 // source === "all": fall through so JS output is appended below,
                 // carrying the native block with it.
-                nativePrefix = `Native Log Events (${filtered.length}):\n\n${formatEventList(filtered, { showDevice })}${noteText}\n\n`;
+                nativePrefix = `Native Log Events (${filtered.length}):\n\n${rendered}${noteText}${sinceNote}\n\n`;
             }
 
             if (sdkAvailable) {
@@ -186,7 +231,7 @@ export function registerLogTools(server: McpServer): void {
                         }
                         // Served real SDK data — not empty, regardless of what the
                         // (separate) CDP buffer happens to hold.
-                        return { _emptyResult: false, content: [{ type: "text" as const, text: `Log Summary (SDK):\n\n${lines.join("\n")}` }] };
+                        return { _emptyResult: false, content: [{ type: "text" as const, text: `${nativePrefix}Log Summary (SDK):\n\n${lines.join("\n")}` }] };
                     }
                 }
     
@@ -201,7 +246,7 @@ export function registerLogTools(server: McpServer): void {
                         }
                         return `[${time}] [${e.level.toUpperCase()}] ${msg}`;
                     });
-                    return { _emptyResult: false, content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
+                    return { _emptyResult: false, content: [{ type: "text" as const, text: `${nativePrefix}Console Logs (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
                 }
             }
     
@@ -226,7 +271,7 @@ export function registerLogTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `Log Summary:\n\n${summaryText}${connectionWarning}`
+                            text: `${nativePrefix}Log Summary:\n\n${summaryText}${connectionWarning}`
                         }
                     ]
                 };
@@ -235,7 +280,7 @@ export function registerLogTools(server: McpServer): void {
             // Resolved once: for the all-devices case this copies every buffered
             // entry into a merged buffer, so it is not free to call repeatedly.
             const logBuffer = resolveLogBuffer(device);
-            const { logs, count, formatted } = getLogs(logBuffer, {
+            const { logs, count } = getLogs(logBuffer, {
                 maxLogs,
                 level,
                 startFromText,
@@ -276,28 +321,32 @@ export function registerLogTools(server: McpServer): void {
                             _emptyReason: "pipeline_recovered",
                             content: [{
                                 type: "text",
-                                text: `React Native Console Logs (${retryResult.count} entries):\n\n${retryResult.formatted}${connectionWarning}`
+                                text: `${nativePrefix}React Native Console Logs (${retryResult.count} entries):\n\n${retryResult.formatted}${connectionWarning}`
                             }]
                         };
                     }
                 }
 
-                if (shouldEscalateToNative(bufferEmpty, getPassiveConnectionStatus().connected)) {
-                    const crashOpts = { device, minLevel: "warn" as const };
-                    const { events } = await collectNativeEvents(crashOpts);
+                if (shouldEscalateToNative(bufferEmpty, getPassiveConnectionStatus().connected) && !isEscalationCoolingDown()) {
+                    // Reuse the native fetch already paid for by source==="all"
+                    // instead of running the subprocess a second time.
+                    const events = nativeEventsForEscalation
+                        ?? (await collectNativeEvents({ device, minLevel: "warn" })).events;
                     const crashes = events.filter((e) => e.kind === "crash" || e.kind === "anr");
                     if (crashes.length > 0) {
+                        lastEmptyEscalationAt = undefined;
                         return {
                             _emptyResult: false,
                             _emptyReason: "native_crash_found",
                             content: [{
                                 type: "text" as const,
-                                text: `React Native Console Logs (0 entries) — app is not connected.\n\n` +
-                                    `Native crash found:\n${formatEventList(crashes, { showDevice: nativeLogBuffers.size > 1 })}\n\n` +
+                                text: `${nativePrefix}React Native Console Logs (0 entries) — app is not connected.\n\n` +
+                                    `Native crash found:\n${formatEventList(crashes, { showDevice: nativeLogBuffers.size > 1, maxLength: maxMessageLength, verbose })}\n\n` +
                                     `Use get_log_details("${crashes[0].id}") for the full backtrace.`
                             }]
                         };
                     }
+                    lastEmptyEscalationAt = Date.now();
                 }
 
                 // Diagnostic metadata for empty results (local dev dashboard only —
@@ -339,7 +388,7 @@ export function registerLogTools(server: McpServer): void {
 
             const jsEvents = jsEventsFromEntries(logs, device ?? "all devices");
             const jsFiltered = kind ? jsEvents.filter((e) => e.kind === kind) : jsEvents;
-            const jsRendered = formatEventList(jsFiltered, { showDevice: logBuffers.size > 1 });
+            const jsRendered = formatEventList(jsFiltered, { showDevice: logBuffers.size > 1, maxLength: maxMessageLength, verbose });
 
             return {
                 _emptyResult: bufferEmpty,

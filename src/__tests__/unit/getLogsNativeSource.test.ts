@@ -38,4 +38,38 @@ describe("get_logs native source", () => {
         // Every call site must be inside a guard.
         expect(src).not.toMatch(/^\s*const .* = await collectNativeEvents\(\{[\s\S]*?\}\);\s*$/m);
     });
+
+    it("computes the native block before every early return that must carry it", () => {
+        // source==="all" must be able to prepend nativePrefix to the SDK
+        // summary/entries and buffer-summary returns, so the native fetch has
+        // to run before those branches, not after.
+        const nativeBlockAt = src.indexOf('source === "native" || source === "all"');
+        const sdkSummaryAt = src.indexOf("Log Summary (SDK)");
+        const bufferSummaryAt = src.indexOf("Log Summary:");
+        expect(nativeBlockAt).toBeGreaterThan(-1);
+        expect(nativeBlockAt).toBeLessThan(sdkSummaryAt);
+        expect(nativeBlockAt).toBeLessThan(bufferSummaryAt);
+    });
+
+    it("prepends nativePrefix on every return path, not just the final one", () => {
+        // Regression guard for the source:"all" double-pay bug: computing the
+        // native block and then dropping it on every early return.
+        const prefixSites = src.match(/\$\{nativePrefix\}/g) ?? [];
+        // SDK summary, SDK entries, buffer summary, pipeline-recovered,
+        // escalation, final.
+        expect(prefixSites.length).toBeGreaterThanOrEqual(6);
+    });
+
+    it("reuses the native fetch already paid for instead of re-running it in the escalation guard", () => {
+        expect(src).toContain("nativeEventsForEscalation");
+    });
+
+    it("bounds repeated empty-and-disconnected escalation with a cooldown", () => {
+        expect(src).toContain("isEscalationCoolingDown");
+    });
+
+    it("flags an unparseable since instead of silently using the default window", () => {
+        expect(src).toMatch(/parseSince/);
+        expect(SOURCE).toMatch(/not recognized/);
+    });
 });

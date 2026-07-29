@@ -14,16 +14,43 @@ function frameHint(event: LogEvent): string {
     return ` (${event.lineCount} lines)`;
 }
 
-export function formatEventRow(event: LogEvent, opts: { showDevice: boolean }): string {
+export interface RowOptions {
+    showDevice: boolean;
+    /** Truncation budget for message-kind rows. 0 or verbose disables it. */
+    maxLength?: number;
+    verbose?: boolean;
+}
+
+/**
+ * A message event carries no summary worth substituting for its content — it
+ * IS the content. Truncating it to a title would silently break get_logs'
+ * documented verbose / maxMessageLength contract, which promises full
+ * messages on request.
+ */
+function messageBody(event: LogEvent, opts: RowOptions): string {
+    const body = event.lines.map((l) => l.raw).join("\n");
+    const budget = opts.maxLength ?? 500;
+    return opts.verbose || budget <= 0 || body.length <= budget
+        ? body
+        : `${body.slice(0, budget)}... [truncated: ${body.length} chars]`;
+}
+
+export function formatEventRow(event: LogEvent, opts: RowOptions): string {
     const time = event.ts.toLocaleTimeString();
     const cols = [`[${event.id}]`, time, event.level.toUpperCase()];
     if (opts.showDevice) cols.push(event.deviceName);
     if (event.owner) cols.push(event.owner);
-    cols.push(event.title + frameHint(event) + sizeHint(event.byteSize));
+    // Compactness matters for crashes/ANRs/exceptions — they keep the
+    // one-line title, and get_log_details exists to expand them. Fidelity
+    // matters for plain messages, which have no separate summary.
+    const text = event.kind === "message"
+        ? messageBody(event, opts)
+        : event.title + frameHint(event) + sizeHint(event.byteSize);
+    cols.push(text);
     return cols.join("  ");
 }
 
-export function formatEventList(events: LogEvent[], opts: { showDevice: boolean }): string {
+export function formatEventList(events: LogEvent[], opts: RowOptions): string {
     if (events.length === 0) return "No log events.";
     return events.map((e) => formatEventRow(e, opts)).join("\n");
 }
