@@ -40,14 +40,34 @@ function continues(kind: EventKind, open: RawLogLine, line: RawLogLine): boolean
     return false;
 }
 
+/**
+ * Frame #00 of every abort is libc.so (abort+…) — the mechanism, not the
+ * cause — with the ART/libbase abort helpers stacked above it. Naming those
+ * gives every SIGABRT on every device an identical, useless title, so skip
+ * them and report the first frame belonging to real code. Falls back to the
+ * first library seen if the whole backtrace is runtime machinery.
+ */
+const ABORT_MACHINERY = /^(libc|libc\+\+|libart|libbase|liblog|libutils|libcutils|libbacktrace|libunwindstack)\.so$/;
+
+function culpritLibrary(lines: RawLogLine[]): string | undefined {
+    let fallback: string | undefined;
+    for (const line of lines) {
+        const m = line.message.match(/\/([\w.\-+]+\.so)\s*\(/);
+        if (!m) continue;
+        if (!fallback) fallback = m[1];
+        if (!ABORT_MACHINERY.test(m[1])) return m[1];
+    }
+    return fallback;
+}
+
 function titleFor(kind: EventKind, lines: RawLogLine[]): string {
     const text = lines.map((l) => l.message).join("\n");
     if (kind === "crash") {
         const signal = text.match(/signal\s+\d+\s+\(([A-Z]+)\)/);
-        const so = text.match(/\/([\w.\-+]+\.so)\s*\(/);
         if (signal) {
             const frames = lines.filter((l) => /^\s*#\d+\s+pc\s/.test(l.message)).length;
-            const where = so ? ` in ${so[1]}` : "";
+            const so = culpritLibrary(lines);
+            const where = so ? ` in ${so}` : "";
             return `${signal[1]}${where}${frames ? ` (${frames} frames)` : ""}`;
         }
         const java = text.match(/^([\w.$]+(?:Exception|Error))(?::\s*(.*))?$/m);

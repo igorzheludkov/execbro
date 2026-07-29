@@ -86,4 +86,30 @@ describe("groupIntoEvents", () => {
         const events = groupIntoEvents([line({ message: "hello", raw: "0123456789" })], CTX);
         expect(events[0].byteSize).toBe(10);
     });
+
+    it("names the culprit library, not the abort machinery", () => {
+        // Frame #00 of every abort is libc.so; the cause is deeper.
+        const lines = [
+            line({ level: "fatal", message: "Cmdline: com.rndebuggertestapp", subject: "com.rndebuggertestapp" }),
+            line({ level: "fatal", message: "signal 6 (SIGABRT), code -1" }),
+            line({ level: "fatal", message: "      #00 pc 707b0  /apex/com.android.runtime/lib64/bionic/libc.so (abort+156)" }),
+            line({ level: "fatal", message: "      #01 pc 8fdfc4 /apex/com.android.art/lib64/libart.so (art::Runtime::Abort+1008)" }),
+            line({ level: "fatal", message: "      #02 pc 1654c  /apex/com.android.art/lib64/libbase.so (android::base::SetAborter+80)" }),
+            line({ level: "fatal", message: "      #03 pc d06d0c /apex/com.android.bt/lib64/libhermes.so (facebook::hermes::crash+836)" }),
+        ];
+        const [event] = groupIntoEvents(lines, CTX);
+        expect(event.title).toContain("libhermes.so");
+        expect(event.title).not.toContain("libc.so");
+        expect(event.title).toContain("4 frames");
+    });
+
+    it("falls back to the first library when the whole backtrace is runtime machinery", () => {
+        const lines = [
+            line({ level: "fatal", message: "Cmdline: com.rndebuggertestapp", subject: "com.rndebuggertestapp" }),
+            line({ level: "fatal", message: "signal 6 (SIGABRT), code -1" }),
+            line({ level: "fatal", message: "      #00 pc 707b0 /apex/com.android.runtime/lib64/bionic/libc.so (abort+156)" }),
+        ];
+        const [event] = groupIntoEvents(lines, CTX);
+        expect(event.title).toContain("libc.so");
+    });
 });
