@@ -69,8 +69,10 @@ describe("buildDebugStackHarvestExpression", () => {
         expect(expr).toMatch(/typeof\s+\w+(\.\w+)*\s*===\s*['"]string['"]/);
     });
 
-    it("defaults the ancestor cap to 8 and honours an override", () => {
-        expect(buildDebugStackHarvestExpression(1, 2)).toContain("8");
+    it("defaults the ancestor cap to 30 and honours an override", () => {
+        // Real trees bury user components deep behind library wrappers — a tapped
+        // SearchBar measured 12 ancestors above the hit fiber, HomeScreen 22.
+        expect(buildDebugStackHarvestExpression(1, 2)).toContain("maxAncestors = 30");
         expect(buildDebugStackHarvestExpression(1, 2, 3)).toContain("maxAncestors = 3");
     });
 

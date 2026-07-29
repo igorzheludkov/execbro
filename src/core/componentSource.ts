@@ -115,11 +115,18 @@ export function buildSelectionProbeExpression(): string {
  *
  * Prefers _debugSource when present (React < 19, already source coordinates);
  * otherwise emits the raw _debugStack string for host-side symbolication.
+ *
+ * The cap is deliberately generous. Real trees bury the nearest user component
+ * deep behind library wrappers - measured on a production app, a tapped SearchBar
+ * sat 12 ancestors above the hit fiber (SVG icon, Pressable and View wrappers in
+ * between) and HomeScreen sat at 22. Collapsed library frames are dropped
+ * host-side, so a larger walk improves recall without bloating the output; the
+ * extra frames cost nothing beyond one batched, cached symbolicate request.
  */
 export function buildDebugStackHarvestExpression(
     x: number,
     y: number,
-    maxAncestors: number = 8
+    maxAncestors: number = 30
 ): string {
     return `
         new Promise(function(resolve) {

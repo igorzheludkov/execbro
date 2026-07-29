@@ -160,6 +160,10 @@ export {
   isInspectorActive,
   getInspectorSelection,
   getInspectorSelectionAtPoint,
+  getSelectionHistory,
+  harvestStacksAtPoint,
+  harvestStacksAtFrame,
+  enrichWithSource,
 } from "./executor.js";
 
 // Android (ADB)

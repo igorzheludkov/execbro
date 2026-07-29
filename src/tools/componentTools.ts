@@ -14,6 +14,10 @@ import {
     toggleElementInspector,
     getInspectorSelection,
     getInspectorSelectionAtPoint,
+    getSelectionHistory,
+    harvestStacksAtPoint,
+    harvestStacksAtFrame,
+    enrichWithSource,
     inspectAtPoint,
     measureComponent,
     iosScreenshot,
@@ -686,7 +690,9 @@ export function registerComponentTools(server: McpServer): void {
                 "PURPOSE: Identity + styling — \"what is this and how is it styled?\" The primary tool for visual/style debugging at a coordinate.\n" +
                 "WHEN TO USE: You see a visual issue at a pixel and want the component name AND its style values (e.g. \"why is borderRadius 14 instead of 16?\").\n" +
                 "WORKFLOW: screenshot → note suspect pixel → get_inspector_selection(x, y) → edit returned style values.\n" +
-                "LIMITATIONS: Requires RN dev mode. Brief overlay flicker (~600ms). Source paths are null on React 19 (where _debugSource was dropped); name + style is always returned.\n" +
+                "LIMITATIONS: Requires RN dev mode. Brief overlay flicker (~600ms). Source needs Metro reachable; otherwise `sourceUnavailable` is set and name + style still return.\n" +
+                "SOURCE: Returns `source: {file, line, column}` where the component is rendered, plus `ancestors[]` — open it directly instead of hunting for it.\n" +
+                "HISTORY: history=true returns recent buffered selections, including manual inspector taps.\n" +
                 "VS inspect_at_point: this returns RICH STYLE per ancestor but only ONE frame. inspect_at_point returns FRAME PER ANCESTOR + PROPS but no rich style merging.\n" +
                 "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
             inputSchema: {
@@ -698,10 +704,24 @@ export function registerComponentTools(server: McpServer): void {
                     .number()
                     .optional()
                     .describe("Y coordinate (in points). If provided with x, auto-taps at this location."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                source: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe("Resolve the component's source file and line via Metro symbolication. Default true. Set false to skip if you only need name and style."),
+                history: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe("Return recent buffered selections (newest first) instead of the current one. Captures taps made while RN's Element Inspector was on, including ones the agent never requested."),
+                limit: z
+                    .number()
+                    .optional()
+                    .describe("Max entries to return when history=true. Default 10.")
             }
         },
-        async ({ x, y, device }) => {
+        async ({ x, y, device, source = true, history = false, limit }) => {
             if (!hasMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_inspector_selection");
                 return {
@@ -709,7 +729,19 @@ export function registerComponentTools(server: McpServer): void {
                     isError: true
                 };
             }
-    
+
+            if (history) {
+                const entries = await getSelectionHistory({ device, limit });
+                return {
+                    content: [{
+                        type: "text",
+                        text: entries.length === 0
+                            ? "No buffered selections. Toggle RN's Element Inspector on and tap an element."
+                            : JSON.stringify(entries, null, 2)
+                    }]
+                };
+            }
+
             // Coordinate path: use fiber-based hit testing (works on Bridgeless / new arch
             // where RN's built-in inspector cannot populate hierarchy via UIManager.findSubviewIn).
             // Avoids toggling the on-device overlay so screenshots stay clean.
@@ -740,6 +772,34 @@ export function registerComponentTools(server: McpServer): void {
                 if (parsed.frame) {
                     const f = parsed.frame;
                     output += `Frame: (${f.left?.toFixed(1)}, ${f.top?.toFixed(1)}) ${f.width?.toFixed?.(1) ?? f.width}x${f.height?.toFixed?.(1) ?? f.height}\n`;
+                }
+
+                // Source resolution: harvest _debugStack at the selection, then
+                // symbolicate host-side. Failure only adds a reason — never drops
+                // the identity/style payload the caller already has.
+                if (source) {
+                    const stacks =
+                        x !== undefined && y !== undefined
+                            ? await harvestStacksAtPoint(x, y, device)
+                            : await harvestStacksAtFrame(parsed.frame, device);
+                    const enriched = await enrichWithSource({}, stacks);
+                    const loc = enriched.source as
+                        | { file: string; line: number; column: number }
+                        | undefined;
+                    if (loc) {
+                        output += `Source: ${loc.file}:${loc.line}:${loc.column}\n`;
+                        const ancestors = enriched.ancestors as
+                            | Array<{ component: string; file: string; line: number }>
+                            | undefined;
+                        if (ancestors && ancestors.length > 1) {
+                            output += `Source ancestors:\n`;
+                            for (const a of ancestors) {
+                                output += `  - ${a.component}  ${a.file}:${a.line}\n`;
+                            }
+                        }
+                    } else {
+                        output += `Source: unavailable (${enriched.sourceUnavailable})\n`;
+                    }
                 }
                 if (parsed.style) {
                     output += `Style: ${JSON.stringify(parsed.style, null, 2)}\n`;
@@ -802,10 +862,15 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe("Include position/dimensions (frame) in the output (default: true)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                source: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe("Resolve the component's source file and line via Metro symbolication. Default true. Set false to skip in tight loops.")
             }
         },
-        async ({ x, y, includeProps, includeFrame, device }) => {
+        async ({ x, y, includeProps, includeFrame, device, source = true }) => {
             const result = await inspectAtPoint(x, y, { includeProps, includeFrame, device });
     
             if (!result.success) {
@@ -841,12 +906,23 @@ export function registerComponentTools(server: McpServer): void {
             } catch {
                 // If parsing fails, just return the raw result
             }
-    
+
+            // Source resolution reuses the same hit-test point, so no extra
+            // coordinate translation is needed. Failure only adds a reason line.
+            let sourceLine = "";
+            if (source) {
+                const enriched = await enrichWithSource({}, await harvestStacksAtPoint(x, y, device));
+                const loc = enriched.source as { file: string; line: number; column: number } | undefined;
+                sourceLine = loc
+                    ? `\n\nSource: ${loc.file}:${loc.line}:${loc.column}`
+                    : `\n\nSource: unavailable (${enriched.sourceUnavailable})`;
+            }
+
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Element at (${x}, ${y}):\n\n${result.result}`
+                        text: `Element at (${x}, ${y}):\n\n${result.result}${sourceLine}`
                     }
                 ]
             };

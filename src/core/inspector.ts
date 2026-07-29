@@ -1,5 +1,8 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp } from "./jsExecute.js";
+import { resolveStacksToSource, buildDebugStackHarvestExpression } from "./componentSource.js";
+import type { RawComponentStack } from "./componentSource.js";
+import { selectionBuffer } from "./selectionBuffer.js";
 
 // ============================================================================
 // Coordinate-Based Element Inspection (via DevTools Inspector API)
@@ -625,4 +628,88 @@ export async function inspectAtPoint(
     // 5000ms timeout >> the inner 300ms cap; leaves headroom for slow Fabric
     // measure paths without letting a hung Hermes runtime stall the tool.
     return executeInApp(expression, true, { timeoutMs: 5000, originatingToolName: "inspect_at_point" }, device);
+}
+
+/**
+ * Harvests raw _debugStack strings for whatever sits at (x, y). Returns an
+ * empty list rather than throwing, so callers can always fall back to the
+ * unenriched payload.
+ */
+export async function harvestStacksAtPoint(
+    x: number,
+    y: number,
+    device?: string
+): Promise<RawComponentStack[]> {
+    try {
+        const res = await executeInApp(
+            buildDebugStackHarvestExpression(x, y),
+            true,
+            { timeoutMs: 5000, originatingToolName: "get_inspector_selection" },
+            device
+        );
+        if (!res.success || !res.result) return [];
+        const parsed = JSON.parse(res.result) as { stacks?: RawComponentStack[] };
+        return parsed.stacks ?? [];
+    } catch {
+        return [];
+    }
+}
+
+/** Same, but derives the point from an inspected element's frame. */
+export async function harvestStacksAtFrame(
+    frame: { left?: number; top?: number; width?: number; height?: number } | null | undefined,
+    device?: string
+): Promise<RawComponentStack[]> {
+    if (
+        !frame ||
+        frame.left === undefined ||
+        frame.top === undefined ||
+        frame.width === undefined ||
+        frame.height === undefined
+    ) {
+        return [];
+    }
+    return harvestStacksAtPoint(frame.left + frame.width / 2, frame.top + frame.height / 2, device);
+}
+
+/**
+ * Attaches source location to an inspector payload. Never throws and never
+ * removes existing fields - a failure adds only a `sourceUnavailable` reason.
+ */
+export async function enrichWithSource(
+    payload: Record<string, unknown>,
+    stacks: RawComponentStack[]
+): Promise<Record<string, unknown>> {
+    try {
+        const resolved = await resolveStacksToSource(stacks);
+        if (resolved.source) {
+            return { ...payload, source: resolved.source, ancestors: resolved.ancestors };
+        }
+        return { ...payload, sourceUnavailable: resolved.sourceUnavailable ?? "unknown" };
+    } catch {
+        return { ...payload, sourceUnavailable: "resolution-failed" };
+    }
+}
+
+/** Buffered selections, newest first, each with source resolved lazily on read. */
+export async function getSelectionHistory(options: {
+    device?: string;
+    limit?: number;
+}): Promise<Record<string, unknown>[]> {
+    const entries = selectionBuffer.list({ device: options.device, limit: options.limit ?? 10 });
+    return Promise.all(
+        entries.map(async (entry) =>
+            enrichWithSource(
+                {
+                    element: entry.element,
+                    path: entry.path,
+                    frame: entry.frame,
+                    style: entry.style,
+                    device: entry.device,
+                    timestamp: entry.timestamp,
+                },
+                entry.stacks
+            )
+        )
+    );
 }
