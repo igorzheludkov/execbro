@@ -13,7 +13,7 @@ Tools for understanding the structure and layout of your React Native screens. U
 | `find_components`          | Search for components by name pattern across the entire tree                         |
 | `inspect_component`        | Deep dive into a specific component's props, state, and hooks                        |
 | `inspect_at_point`         | Per-ancestor frames + props at (x, y) — pure JS, no overlay flicker                   |
-| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y) — briefly toggles RN inspector          |
+| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y), plus source file and line              |
 | `toggle_element_inspector` | Manually toggle RN's Element Inspector overlay (rarely needed)                       |
 | `get_images`               | Access the shared image buffer (screenshots from all tools, tap verification frames) |
 
@@ -105,6 +105,41 @@ Coordinates are in points/dp. Works on Paper, Fabric, and Bridgeless / new arch 
 - **Without coordinates:** returns the current selection from a manually-driven overlay
 
 **Best for:** visual/styling debugging ("why is borderRadius 14 instead of 16?", "what padding does this card have?"). Use `inspect_at_point` if you need per-ancestor frames or non-style props.
+
+### Source resolution
+
+The response includes the absolute path and line where the component is rendered:
+
+```json
+{
+  "element": "RCTText",
+  "path": "App > HomeScreen > SearchView > TrendingTopics > Text > RCTText",
+  "source": { "file": "/Users/you/app/src/screens/HomeScreen/SearchView/TrendingTopics/TrendingTopics.tsx", "line": 20, "column": 7 },
+  "ancestors": [
+    { "component": "TrendingTopics", "file": "/Users/you/app/src/screens/HomeScreen/SearchView/SearchView.tsx", "line": 115 },
+    { "component": "SearchView",     "file": "/Users/you/app/src/screens/HomeScreen/HomeScreen.tsx",            "line": 175 }
+  ]
+}
+```
+
+Resolved from the fiber's `_debugStack` via Metro's `/symbolicate` endpoint, so it works on React 19
+where `_debugSource` was removed. Frames inside `node_modules` are filtered out, so you land on your own
+code rather than a library wrapper. If Metro is unreachable the response carries `sourceUnavailable`
+instead, and identity plus style are still returned.
+
+Set `source=false` to skip resolution when you only need identity and style.
+
+### Selection history
+
+While RN's Element Inspector is on, a background poller records each selection into a 100-entry circular
+buffer — including taps you make yourself without asking the agent.
+
+```
+get_inspector_selection with history=true
+```
+
+Entries come back newest first (`limit` defaults to 10), each with source resolved on read. Set
+`EXECBRO_DISABLE_SELECTION_POLL=1` to turn the poller off.
 
 ## inspect_at_point vs get_inspector_selection — at a glance
 

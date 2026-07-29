@@ -350,6 +350,7 @@ export function registerComponentTools(server: McpServer): void {
                 "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
                 "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection. Coordinates in points (iOS) / dp (Android); text frames are container-level (climb to nearest measurable host).\n" +
+                "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call get_inspector_selection(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
@@ -557,6 +558,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: Matches the React display name only; minified builds may return opaque names. Large result sets — use maxResults or a tighter pattern.\n" +
                 "GOOD: find_components({ pattern: \"Button\" }); find_components({ pattern: \"Screen$\" })\n" +
                 "BAD: find_components({ pattern: \".*\" }) — floods the response; narrow the regex.\n" +
+                "SOURCE: searching by name to find a file? If you can point at it on screen, get_inspector_selection(x, y) returns the file and line directly.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
             inputSchema: {
                 pattern: z
@@ -840,6 +842,7 @@ export function registerComponentTools(server: McpServer): void {
                 "WORKFLOW: screenshot → suspect pixel → divide by pixel ratio → inspect_at_point(x, y).\n" +
                 "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is shown for reference only (no rich merging); for style debugging use get_inspector_selection.\n" +
                 "VS get_inspector_selection: this returns FRAME PER ANCESTOR + PROPS, no flicker. Inspector returns RICH STYLE per ancestor but only one frame and briefly toggles the overlay.\n" +
+                "SOURCE: also returns `source: {file, line, column}` for the component at the point (set source=false to skip in tight loops).\n" +
                 "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
             inputSchema: {
                 x: z

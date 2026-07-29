@@ -63,7 +63,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `find_components`          | Find components by name pattern. Use `includeLayout=true` for styles                                            |
 | `inspect_component`        | Inspect a component's props, state (hooks), and children                                                        |
 | `inspect_at_point`         | Per-ancestor frames + props at (x, y) — pure JS, no overlay flicker. Best for layout/handler debugging          |
-| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y) — briefly toggles RN inspector. Best for visual/styling debugging  |
+| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y), plus `source: {file, line, column}` for the owning code. `history=true` returns recent buffered selections |
 | `toggle_element_inspector` | Manually toggle RN's Element Inspector overlay — rarely needed; `get_inspector_selection` auto-toggles          |
 | `get_images`               | Access shared image buffer (screenshots, tap verification frames)                                               |
 

@@ -68,7 +68,7 @@ Both answer "what is at (x, y)?" but surface different supplementary data. Pick 
 | "Why is the borderRadius wrong?" / "What's the padding here?" | get_inspector_selection — RICH STYLE per ancestor |
 | "Why is this hit area so small?" / "Where exactly is each ancestor?" | inspect_at_point — FRAME PER ANCESTOR |
 | "What handler is wired to this Pressable?" / "What testID does it have?" | inspect_at_point — full PROPS (including [Function] handlers) |
-| "Which file owns this component?" | get_inspector_selection (source paths pre-wired; null on React 19 today) |
+| "Which file owns this component?" | get_inspector_selection — returns source {file, line, column} plus ancestors |
 | "I need to call this multiple times rapidly" or "before/after a transition" | inspect_at_point — pure JS, no overlay flicker |
 
 ### get_inspector_selection(x, y)

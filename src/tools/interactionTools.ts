@@ -40,6 +40,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
                 "GOOD: tap({ testID: \"login-btn\" }); tap({ text: \"Submit\" }); tap({ x: 300, y: 600 }); tap({ x: 300, y: 600, native: true, device: \"emulator-5554\" })\n" +
                 "BAD: tap({ text: \"\" }) or tap({ x: 0, y: 0 }) — missing a target. tap({ text: \"Submit\" }) without first screenshotting an ambiguous screen.\n" +
+                "SOURCE: need the file:line that renders an element? get_inspector_selection(x, y).\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
             inputSchema: {
                 text: z

@@ -99,6 +99,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `LogBuffer`: Circular buffer (500 entries) storing captured logs with level filtering and text search
 - `NetworkBuffer`: Circular buffer (200 entries) storing captured network requests with filtering by method, URL, and status
 - `ImageBuffer`: Circular buffer (50 entries) storing screenshots from all image-producing tools (ios/android/ocr screenshots, tap verification frames). Supports grouping for burst frame sets.
+- `SelectionBuffer`: Circular buffer (100 entries) storing Element Inspector selections per device — element, owner path, frame, style, and the raw `_debugStack` needed to resolve source. Filled by a background poller so taps made during a manual inspector session are captured without the agent asking. Read via `get_inspector_selection(history=true)`. Disable the poller with `EXECBRO_DISABLE_SELECTION_POLL=1`.
 - `connectedApps`: Map tracking active WebSocket connections to devices
 - `pendingExecutions`: Map for tracking async `Runtime.evaluate` responses with timeout handling
 - MCP tools registered via `server.registerTool()` from `@modelcontextprotocol/sdk`
@@ -143,7 +144,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `find_components`: Fast regex search across the fiber tree by component name pattern. Returns all matching instances with path and depth. Use after `get_screen_layout` to locate specific components
 - `inspect_component`: Deep dive into a specific component's props, state (hooks), and optionally children tree. Use after finding a component name via `get_screen_layout` or `find_components`
 - `get_component_tree`: Full React fiber tree including all providers, navigation wrappers, and internal components. Use when you need to understand the complete React architecture, not just what's visible. Use `structureOnly=true` for compact names-only output
-- `get_inspector_selection`: Identity + RICH STYLE per ancestor at screen coordinates. Invokes RN's Element Inspector programmatically (briefly toggles overlay on, captures, hides it). Returns merged style for each ancestor (paddingHorizontal, borderRadius, fontFamily, etc.) — same data the on-device overlay shows. Best for visual/styling debugging.
+- `get_inspector_selection`: Identity + RICH STYLE per ancestor at screen coordinates. Invokes RN's Element Inspector programmatically (briefly toggles overlay on, captures, hides it). Returns merged style for each ancestor (paddingHorizontal, borderRadius, fontFamily, etc.) — same data the on-device overlay shows. Best for visual/styling debugging. Also returns `source: {file, line, column}` — the absolute path and line where the component is rendered — plus `ancestors[]`, resolved from the fiber's `_debugStack` via Metro symbolication (works on React 19, where `_debugSource` no longer exists). Pass `history=true` for recent buffered selections.
 - `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in dp) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
 - `toggle_element_inspector`: Toggle RN's Element Inspector overlay manually (rarely needed — `get_inspector_selection` toggles on→off automatically around its capture).
 
@@ -209,7 +210,7 @@ When debugging React Native apps through this MCP server:
     - `find_components` → fast regex search by component name across the entire fiber tree
     - `inspect_component` → deep dive into props, hooks, and state of a specific component
     - `get_component_tree` → full React fiber tree including internals, providers, hidden components
-    - `get_inspector_selection` → identity + rich per-ancestor style at coordinates (briefly toggles RN inspector overlay)
+    - `get_inspector_selection` → identity + rich per-ancestor style at coordinates (briefly toggles RN inspector overlay) — also the only tool that returns the source file and line, so prefer it when the goal is to edit the component rather than just identify it
     - `inspect_at_point` → per-ancestor frames + props at coordinates (no overlay, fast — preferred for tight loops)
 - **Multi-Device Debugging**: When multiple devices are connected:
     1. Use `get_apps` to see all connected devices and their names

@@ -102,7 +102,8 @@ For layout debugging:
 - Both `inspect_at_point` and `get_inspector_selection` work on Paper, Fabric, and Bridgeless / new arch.
 - `inspect_at_point` returns frame per ancestor + props (handlers, refs, custom props). Pure JS — no overlay toggle, no visual side effect, fastest. Style is shown as a flat reference (no rich merging).
 - `get_inspector_selection` returns RN's curated hierarchy with merged style per ancestor (padding, margin, border, layout) — same rich data as the on-device overlay. Briefly toggles the inspector overlay on→off (~600ms total).
-- Source file paths in `get_inspector_selection` are pre-wired but currently null on React 19 (where `_debugSource` was dropped); identity + style are always returned.
+- `get_inspector_selection` returns `source: {file, line, column}` — the absolute path and line where the component is rendered — plus `ancestors[]`. Resolved from the fiber's `_debugStack` via Metro symbolication, so it works on React 19 where `_debugSource` was dropped. `node_modules` frames are filtered out, so you land on your own code. If Metro is unreachable the response carries `sourceUnavailable` and identity + style are still returned.
+- Pass `history=true` to read recent selections from the buffer, including taps made while you drove RN's Element Inspector manually.
 - Layout data can be large for complex screens - use `find_components` with `includeLayout=true` for targeted queries
 - Use `device` param on any tool to target a specific device when multiple are connected (case-insensitive substring match, e.g. `device="iPhone"`)
 - **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.

@@ -50,7 +50,7 @@ Based on what's running, capture screenshots:
 If a screenshot reveals a layout issue and you need precise measurements:
 - Pick by question:
   - **Layout/measurement question** ("why is this clipped?", "what's the actual size?", "what handler fires here?") → `mcp__execbro__inspect_at_point(x, y)`. Returns FRAME PER ANCESTOR plus PROPS (handlers, refs, testID). Pure JS hit test — no overlay flicker, fast.
-  - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__execbro__get_inspector_selection(x, y)`. Returns RN's curated hierarchy with merged style per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.). Briefly toggles RN's Element Inspector on→off around the capture.
+  - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__execbro__get_inspector_selection(x, y)`. Returns RN's curated hierarchy with merged style per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.). Briefly toggles RN's Element Inspector on→off around the capture. Also returns `source: {file, line, column}` so you can open the owning file directly rather than searching for the component.
 - Both tools work on Bridgeless / new arch and on Paper/Fabric.
 
 ### 5. Optional: Compare with Design
