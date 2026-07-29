@@ -109,6 +109,17 @@ export class NativeLogBuffer {
     private lastTs: Date | undefined;
     private maxSize: number;
 
+    /**
+     * How many fingerprints to retain relative to stored events.
+     *
+     * `seen` does NOT need to cover all history: the watermark already stops
+     * `logcat -T` from returning anything older than the last fetch, so the
+     * only thing `seen` must absorb is the inclusive-boundary overlap — a
+     * handful of events. Retaining several times maxSize is far more than
+     * that window needs while keeping memory bounded in a long-lived server.
+     */
+    private static readonly SEEN_RETENTION_MULTIPLE = 4;
+
     constructor(maxSize: number = 200) {
         this.maxSize = maxSize;
     }
@@ -125,6 +136,16 @@ export class NativeLogBuffer {
             if (!this.lastTs || d.ts > this.lastTs) this.lastTs = d.ts;
         }
         while (this.events.length > this.maxSize) this.events.shift();
+
+        // Set iteration is insertion-ordered, so this drops the oldest
+        // fingerprints first.
+        const seenCap = this.maxSize * NativeLogBuffer.SEEN_RETENTION_MULTIPLE;
+        while (this.seen.size > seenCap) {
+            const oldest = this.seen.values().next().value;
+            if (oldest === undefined) break;
+            this.seen.delete(oldest);
+        }
+
         return added;
     }
 
@@ -134,6 +155,11 @@ export class NativeLogBuffer {
 
     get(id: string): LogEvent | undefined {
         return this.events.find((e) => e.id === id);
+    }
+
+    /** Retained fingerprint count. Exposed for tests that assert bounded growth. */
+    get seenSize(): number {
+        return this.seen.size;
     }
 
     /**

@@ -129,4 +129,14 @@ describe("NativeLogBuffer", () => {
         expect(findNativeEvent(ea.id)?.deviceKey).toBe("emulator-5554");
         expect(findNativeEvent(eb.id)?.deviceKey).toBe("F93612A3-0042-4BDC-855F-8CAB1BDD76C6");
     });
+
+    it("bounds the fingerprint set instead of growing forever", () => {
+        const buf = new NativeLogBuffer(5);
+        for (let i = 0; i < 200; i++) {
+            buf.ingest([draft({ lines: [line({ pid: i, message: `crash-${i}` })] })]);
+        }
+        expect(buf.size).toBe(5);
+        // 5 events * 4 retention = 20 fingerprints retained, not 200.
+        expect(buf.seenSize).toBeLessThanOrEqual(20);
+    });
 });
