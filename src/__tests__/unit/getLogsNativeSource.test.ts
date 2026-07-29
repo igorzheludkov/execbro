@@ -5,7 +5,8 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { __escalationCooldownTestHooks } from "../../tools/logTools.js";
+import { __escalationCooldownTestHooks, capEventsForDisplay } from "../../tools/logTools.js";
+import type { LogEvent } from "../../core/logEvents.js";
 
 const SOURCE = readFileSync(join(process.cwd(), "src/tools/logTools.ts"), "utf8");
 
@@ -72,6 +73,66 @@ describe("get_logs native source", () => {
     it("flags an unparseable since instead of silently using the default window", () => {
         expect(src).toMatch(/parseSince/);
         expect(SOURCE).toMatch(/not recognized/);
+    });
+
+    it("bounds the native/merged event list to maxLogs", () => {
+        // Live verification returned 420 events / 87k characters for a
+        // maxLogs:12 call — the native branch filtered by kind but never
+        // capped. `capped`/`cappedNote` are computed once via
+        // capEventsForDisplay and shared by both the native-only return and
+        // the source:"all" nativePrefix assignment.
+        expect(src).toContain("capEventsForDisplay(filtered, maxLogs)");
+        const cappedUses = src.match(/\bcapped\b/g) ?? [];
+        // At least: the destructure, and one use in each of the two renders.
+        expect(cappedUses.length).toBeGreaterThanOrEqual(3);
+    });
+});
+
+function nativeEvent(id: string, tsMs: number): LogEvent {
+    return {
+        id,
+        source: "native",
+        deviceKey: "emulator-5554",
+        deviceName: "Pixel",
+        ts: new Date(tsMs),
+        level: "warn",
+        kind: "message",
+        title: `event ${id}`,
+        lineCount: 1,
+        byteSize: 20,
+        fingerprint: id,
+        lines: [{ ts: new Date(tsMs), level: "warn", pid: 0, tag: "t", message: id, raw: id }],
+    };
+}
+
+describe("capEventsForDisplay", () => {
+    it("returns everything, uncapped, when under the limit", () => {
+        const events = [nativeEvent("a", 1), nativeEvent("b", 2)];
+        const { capped, note } = capEventsForDisplay(events, 50);
+        expect(capped).toEqual(events);
+        expect(note).toBe("");
+    });
+
+    it("caps to maxLogs and keeps the newest events", () => {
+        const events = Array.from({ length: 20 }, (_, i) => nativeEvent(`e${i}`, i));
+        const { capped } = capEventsForDisplay(events, 12);
+        expect(capped).toHaveLength(12);
+        // Newest = highest timestamp = last 12 of the (ascending) input.
+        expect(capped.map((e) => e.id)).toEqual(events.slice(-12).map((e) => e.id));
+    });
+
+    it("mentions the omitted count and how to see more", () => {
+        const events = Array.from({ length: 20 }, (_, i) => nativeEvent(`e${i}`, i));
+        const { note } = capEventsForDisplay(events, 12);
+        expect(note).toContain("8 older events not shown");
+        expect(note).toMatch(/maxLogs/);
+    });
+
+    it("treats maxLogs:0 as unlimited, matching the rest of get_logs", () => {
+        const events = Array.from({ length: 5 }, (_, i) => nativeEvent(`e${i}`, i));
+        const { capped, note } = capEventsForDisplay(events, 0);
+        expect(capped).toHaveLength(5);
+        expect(note).toBe("");
     });
 });
 

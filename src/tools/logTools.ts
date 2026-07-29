@@ -67,6 +67,26 @@ function parseSince(since: string | undefined): { date: Date | undefined; note?:
 }
 
 /**
+ * Bound the events shown on the native/merged path to `maxLogs`, applied
+ * AFTER kind-filtering and keeping the newest — when investigating a crash
+ * the latest one is the subject. Never truncates silently: an agent that
+ * cannot see the list was capped will assume it has the full picture and
+ * reason from a partial one. Exported (not a `__`-prefixed test hook) because
+ * it is a genuinely reusable, side-effect-free piece of the response shape.
+ */
+export function capEventsForDisplay(
+    events: LogEvent[],
+    maxLogs: number
+): { capped: LogEvent[]; note: string } {
+    const capped = maxLogs > 0 && events.length > maxLogs ? events.slice(-maxLogs) : events;
+    const omitted = events.length - capped.length;
+    const note = omitted > 0
+        ? `\n\n[${omitted} older event${omitted === 1 ? "" : "s"} not shown — raise maxLogs or narrow with kind/minLevel/since]`
+        : "";
+    return { capped, note };
+}
+
+/**
  * Native acquisition costs a ~1-1.5s subprocess per device, so it must never
  * run on the hot path. It earns its cost in exactly one situation: the JS
  * buffer is empty AND the app is not connected — which is what a native crash
@@ -220,15 +240,18 @@ export function registerLogTools(server: McpServer): void {
                 const { events, notes } = await collectNativeEvents(nativeOpts);
                 nativeEventsForEscalation = events;
                 const filtered = kind ? events.filter((e) => e.kind === kind) : events;
+                const { capped, note: cappedNote } = capEventsForDisplay(filtered, maxLogs);
                 const showDevice = nativeLogBuffers.size > 1;
                 const noteText = notes.length > 0 ? `\n\n${notes.join("\n")}` : "";
                 const sinceNote = sinceParsed.note ? `\n\n${sinceParsed.note}` : "";
-                const rendered = formatEventList(filtered, { showDevice, maxLength: maxMessageLength, verbose });
+                const rendered = formatEventList(capped, { showDevice, maxLength: maxMessageLength, verbose });
                 if (source === "native") {
                     // Emptiness is judged on the UNFILTERED events: a `kind`
                     // filter matching nothing is a filter outcome, not a
                     // capture failure — mirrors the js-buffer `filtered_out`
-                    // handling below.
+                    // handling below. Capping is a display bound, not a
+                    // capture/filter outcome, so it plays no part in either
+                    // signal.
                     const nativeEmpty = events.length === 0;
                     const nativeEmptyReason = !nativeEmpty && filtered.length === 0 ? "filtered_out" : undefined;
                     return {
@@ -236,13 +259,13 @@ export function registerLogTools(server: McpServer): void {
                         ...(nativeEmptyReason && { _emptyReason: nativeEmptyReason }),
                         content: [{
                             type: "text" as const,
-                            text: `Native Log Events (${filtered.length}):\n\n${rendered}${noteText}${sinceNote}\n\nUse get_log_details("<id>") for a full backtrace.`
+                            text: `Native Log Events (${capped.length}):\n\n${rendered}${cappedNote}${noteText}${sinceNote}\n\nUse get_log_details("<id>") for a full backtrace.`
                         }]
                     };
                 }
                 // source === "all": fall through so JS output is appended below,
                 // carrying the native block with it.
-                nativePrefix = `Native Log Events (${filtered.length}):\n\n${rendered}${noteText}${sinceNote}\n\n`;
+                nativePrefix = `Native Log Events (${capped.length}):\n\n${rendered}${cappedNote}${noteText}${sinceNote}\n\n`;
             }
 
             if (sdkAvailable) {

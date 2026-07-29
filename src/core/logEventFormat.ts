@@ -59,7 +59,7 @@ export function formatEventDetails(
     event: LogEvent,
     opts: { maxLength: number; verbose: boolean }
 ): string {
-    const header = [
+    const headerLines: Array<string | undefined> = [
         `=== ${event.id} — ${event.kind.toUpperCase()} ===`,
         `Device: ${event.deviceName} (${event.deviceKey})`,
         `Time: ${event.ts.toISOString()}`,
@@ -67,11 +67,21 @@ export function formatEventDetails(
         event.owner ? `Owner: ${event.owner}` : undefined,
         `Lines: ${event.lineCount}`,
         "",
-    ].filter(Boolean).join("\n");
+    ];
+    // filter(Boolean) would also drop the trailing "" blank-line separator —
+    // it's falsy, same as an absent optional field — running the header
+    // straight into the payload. Only drop lines that are genuinely absent.
+    //
+    // Array#join only inserts its separator BETWEEN elements, so a single
+    // trailing "" contributes one "\n" (ending the last real line), not a
+    // blank row — join(["Lines: 39", ""], "\n") is "Lines: 39\n", not
+    // "Lines: 39\n\n". The explicit "\n" below supplies the second newline
+    // that actually produces the blank line before the payload.
+    const header = headerLines.filter((line) => line !== undefined).join("\n");
 
     const body = event.lines.map((l) => l.raw).join("\n");
     if (opts.verbose || opts.maxLength <= 0 || body.length <= opts.maxLength) {
-        return header + body;
+        return header + "\n" + body;
     }
-    return `${header}${body.slice(0, opts.maxLength)}\n... [truncated: ${body.length} chars — pass verbose=true for the full payload]`;
+    return `${header}\n${body.slice(0, opts.maxLength)}\n... [truncated: ${body.length} chars — pass verbose=true for the full payload]`;
 }

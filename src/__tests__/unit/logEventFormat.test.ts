@@ -117,4 +117,16 @@ describe("formatEventDetails", () => {
         expect(out).toContain("truncated");
         expect(out).not.toContain("frame 16");
     });
+
+    it("separates the header from the payload with a blank line", () => {
+        // Regression test: filter(Boolean) used to drop the header's trailing
+        // "" separator (falsy, indistinguishable from an absent optional
+        // field), running "Lines: N" straight into the first payload line.
+        const out = formatEventDetails(EVENT, { maxLength: 0, verbose: true });
+        const headerEnd = out.indexOf("Lines: 17");
+        expect(headerEnd).toBeGreaterThan(-1);
+        const afterHeader = out.slice(headerEnd);
+        // "Lines: 17" then a blank line then the first payload row.
+        expect(afterHeader.startsWith("Lines: 17\n\nF DEBUG : frame 0")).toBe(true);
+    });
 });
