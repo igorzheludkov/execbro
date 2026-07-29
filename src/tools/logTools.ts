@@ -27,10 +27,10 @@ import {
     clearSDKConsole,
     getSDKConsoleStats,
 } from "../core/sdkBridge.js";
-import { findLogEvent, nativeLogBuffers, type LogEvent } from "../core/logEvents.js";
+import { findLogEvent, nativeLogBuffers, getNativeLogBuffer, type LogEvent } from "../core/logEvents.js";
 import { jsEventsFromEntries } from "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
-import { collectNativeEvents } from "../core/nativeLogs.js";
+import { collectNativeEvents, deviceKeyOf } from "../core/nativeLogs.js";
 
 // Binds the live connection/pipeline probes for `diagnoseEmptyLogs`. Kept here
 // so the diagnosis logic itself stays free of module-level state and testable.
@@ -367,13 +367,20 @@ export function registerLogTools(server: McpServer): void {
                         maxLogs, level, startFromText, maxMessageLength, verbose
                     });
                     if (retryResult.count > 0) {
+                        // Route through the same event pipeline as the final JS
+                        // return below — retryResult.formatted is legacy text with
+                        // no [jN] ids, which would leave get_log_details unusable
+                        // for whatever this call surfaces.
+                        const retryEvents = jsEventsFromEntries(retryResult.logs, device ?? "all devices");
+                        const retryFiltered = kind ? retryEvents.filter((e) => e.kind === kind) : retryEvents;
+                        const retryRendered = formatEventList(retryFiltered, { showDevice: logBuffers.size > 1, maxLength: maxMessageLength, verbose });
                         // Return the recovered logs instead of empty
                         return {
                             _emptyResult: false,
                             _emptyReason: "pipeline_recovered",
                             content: [{
                                 type: "text",
-                                text: `${nativePrefix}React Native Console Logs (${retryResult.count} entries):\n\n${retryResult.formatted}${connectionWarning}`
+                                text: `${nativePrefix}React Native Console Logs (${retryFiltered.length} entries):\n\n${retryRendered}${connectionWarning}`
                             }]
                         };
                     }
@@ -567,6 +574,16 @@ export function registerLogTools(server: McpServer): void {
                 if (await isSDKInstalled(device)) {
                     const sdkResult = await clearSDKConsole(device);
                     if (sdkResult.success && sdkResult.count) count += sdkResult.count;
+                }
+                // Clear that device's native buffer too, otherwise a targeted
+                // clear leaves native (logcat/os_log) events behind and
+                // get_logs(source="native") still shows pre-repro entries. The
+                // native buffer deliberately keeps its watermark on clear (see
+                // the all-devices branch below) so cleared events are not
+                // re-ingested on the next fetch.
+                const deviceKey = deviceKeyOf(app);
+                if (deviceKey) {
+                    count += getNativeLogBuffer(deviceKey).clear();
                 }
                 return { content: [{ type: "text", text: `Cleared ${count} log entries from ${deviceName}.` }] };
             }

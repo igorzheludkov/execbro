@@ -47,7 +47,14 @@ export function formatEventRow(event: LogEvent, opts: RowOptions): string {
     // Compactness matters for crashes/ANRs/exceptions — they keep the
     // one-line title, and get_log_details exists to expand them. Fidelity
     // matters for plain messages, which have no separate summary.
-    const text = event.kind === "message"
+    //
+    // Under verbose, a JS event must render its real payload: `exception`
+    // events carry the stack an agent asked for, and titleFor() would drop it.
+    // Native crash rows stay compact even here — get_log_details is their
+    // documented expansion path, and one verbose call should not dump every
+    // backtrace on the device.
+    const rendersBody = event.kind === "message" || (opts.verbose === true && event.source === "js");
+    const text = rendersBody
         ? messageBody(event, opts)
         : event.title + frameHint(event) + sizeHint(event.byteSize);
     cols.push(text);

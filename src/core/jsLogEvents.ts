@@ -57,8 +57,9 @@ export function jsEventsFromEntries(entries: LogEntry[], deviceName: string): Lo
 
 /** Scan every device buffer for the entry whose seq matches the id. */
 export function findJsEvent(id: string): LogEvent | undefined {
-    const seq = Number(id.slice(1));
-    if (!Number.isFinite(seq)) return undefined;
+    const digits = id.slice(1);
+    if (!/^\d+$/.test(digits)) return undefined;
+    const seq = Number(digits);
     for (const [deviceName, buffer] of logBuffers.entries()) {
         const hit = buffer.getAll().find((e) => e.seq === seq);
         if (hit) return jsEventsFromEntries([hit], deviceName)[0];

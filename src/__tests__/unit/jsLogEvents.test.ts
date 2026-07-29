@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { jsEventsFromEntries } from "../../core/jsLogEvents.js";
+import { jsEventsFromEntries, findJsEvent } from "../../core/jsLogEvents.js";
 import type { LogEntry } from "../../core/types.js";
 
 function entry(over: Partial<LogEntry>): LogEntry {
@@ -49,5 +49,18 @@ describe("jsEventsFromEntries", () => {
         const [event] = jsEventsFromEntries([entry({ message: big })], "iPhone Air");
         expect(event.title.length).toBeLessThan(200);
         expect(event.lines[0].raw).toHaveLength(5000);
+    });
+});
+
+describe("findJsEvent", () => {
+    it("returns undefined for a bare 'j' id instead of resolving to seq 0", () => {
+        // Number("") === 0, which passes Number.isFinite and used to search
+        // for seq === 0 — harmless only because nextSeq starts at 1, so this
+        // was a latent bug masked by an unrelated detail.
+        expect(findJsEvent("j")).toBeUndefined();
+    });
+
+    it("still returns undefined for a non-numeric id", () => {
+        expect(findJsEvent("jabc")).toBeUndefined();
     });
 });

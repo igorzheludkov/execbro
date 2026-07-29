@@ -132,6 +132,54 @@ describe("formatEventRow — message events", () => {
     });
 });
 
+describe("formatEventRow — JS exception events", () => {
+    // Regression test: `verbose` promises full messages (schema text, design
+    // spec, guides.ts), but exception-kind rows used to always render
+    // titleFor() — first line only, stack discarded — because the row
+    // renderer only special-cased kind === "message".
+    const JS_EXCEPTION: LogEvent = {
+        ...EVENT,
+        source: "js",
+        kind: "exception",
+        title: "TypeError: undefined is not an object  (2 frames)",
+        lineCount: 1,
+        lines: [{
+            ts: EVENT.ts,
+            level: "error",
+            pid: 0,
+            tag: "console",
+            message: [
+                "TypeError: undefined is not an object (evaluating 'user.name')",
+                "    at HomeScreen (app/index.tsx:24:11)",
+                "    at renderWithHooks (react-dom.js:1234:5)",
+            ].join("\n"),
+            raw: "irrelevant-for-row-rendering",
+        }],
+    };
+
+    it("renders the full stack when verbose", () => {
+        const row = formatEventRow(JS_EXCEPTION, { showDevice: false, verbose: true });
+        expect(row).toContain("at HomeScreen (app/index.tsx:24:11)");
+        expect(row).toContain("at renderWithHooks (react-dom.js:1234:5)");
+    });
+
+    it("stays a single-line title when not verbose", () => {
+        const row = formatEventRow(JS_EXCEPTION, { showDevice: false, verbose: false });
+        expect(row.split("\n")).toHaveLength(1);
+        expect(row).not.toContain("at HomeScreen");
+    });
+});
+
+describe("formatEventRow — native crash under verbose stays compact", () => {
+    it("does not expand a native crash even when verbose is requested", () => {
+        // EVENT is source: "native", kind: "crash". get_log_details is the
+        // documented expansion path for native rows; verbose must not bypass it.
+        const row = formatEventRow(EVENT, { showDevice: false, verbose: true });
+        expect(row.split("\n")).toHaveLength(1);
+        expect(row).not.toContain("frame 0");
+    });
+});
+
 describe("formatEventDetails", () => {
     it("includes a header and every raw line", () => {
         const out = formatEventDetails(EVENT, { maxLength: 0, verbose: true });

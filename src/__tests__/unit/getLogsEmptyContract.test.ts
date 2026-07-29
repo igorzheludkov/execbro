@@ -101,4 +101,20 @@ describe("get_logs empty-result contract", () => {
     it("does not emit the ambiguous legacy no_logs label", () => {
         expect(getLogsBodySource()).not.toMatch(/"no_logs"/);
     });
+
+    it("routes the pipeline-recovered path through the event pipeline, not legacy formatLogs text", () => {
+        // Regression guard: retryResult.formatted is legacy text with no
+        // [jN] ids, which left get_log_details unusable for whatever this
+        // path surfaced. The recovered branch must build events the same
+        // way the final JS return does.
+        const handler = getLogsBodySource();
+        const recoveredAt = handler.indexOf("diagnosis.recovered");
+        expect(recoveredAt).toBeGreaterThan(-1);
+        const nextReturnEnd = handler.indexOf("_emptyReason: \"pipeline_recovered\"");
+        expect(nextReturnEnd).toBeGreaterThan(recoveredAt);
+        const recoveredBlock = handler.slice(recoveredAt, nextReturnEnd + 200);
+        expect(recoveredBlock).toContain("jsEventsFromEntries(retryResult.logs");
+        expect(recoveredBlock).toContain("formatEventList(");
+        expect(recoveredBlock).not.toContain("${retryResult.formatted}");
+    });
 });
