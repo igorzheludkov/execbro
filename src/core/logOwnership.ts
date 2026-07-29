@@ -36,6 +36,27 @@ function isVerdictSource(line: RawLogLine, platform: AppIdentity["platform"]): b
 }
 
 /**
+ * Does the message name this package as a whole identifier?
+ *
+ * A bare `includes` would attribute `ANR in com.acme.app.dev` to
+ * `com.acme.app`. Debug and release variants differing only by a Gradle
+ * applicationIdSuffix are routinely installed side by side, so the shorter
+ * id being a prefix of the longer one is the normal case, not an edge case.
+ */
+function namesPackage(message: string, appId: string): boolean {
+    const boundary = /[A-Za-z0-9_.]/;
+    let from = 0;
+    for (;;) {
+        const at = message.indexOf(appId, from);
+        if (at === -1) return false;
+        const before = at === 0 ? "" : message[at - 1];
+        const after = message[at + appId.length] ?? "";
+        if (!boundary.test(before) && !boundary.test(after)) return true;
+        from = at + 1;
+    }
+}
+
+/**
  * Decide whether a line belongs to the app under test. First match wins.
  *
  * Rule order matters: `declared` precedes `pid` because a tombstone is written
@@ -49,7 +70,7 @@ export function isOwned(line: RawLogLine, identity: AppIdentity): OwnershipVerdi
     if (identity.pid !== undefined && line.pid === identity.pid) {
         return { owned: true, reason: "pid" };
     }
-    if (isVerdictSource(line, identity.platform) && line.message.includes(identity.appId)) {
+    if (isVerdictSource(line, identity.platform) && namesPackage(line.message, identity.appId)) {
         return { owned: true, reason: "verdict" };
     }
     return { owned: false };

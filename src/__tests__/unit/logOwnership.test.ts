@@ -83,4 +83,32 @@ describe("isOwned", () => {
             message: "ANR in com.google.android.apps.messaging",
         }), APP)).toEqual({ owned: false });
     });
+
+    it("rejects a sibling package that merely EXTENDS the app id", () => {
+        // Debug/release variants differing by applicationIdSuffix are normal.
+        expect(isOwned(line({
+            pid: 660,
+            tag: "ActivityManager",
+            level: "error",
+            message: "ANR in com.rndebuggertestapp.debug",
+        }), APP)).toEqual({ owned: false });
+    });
+
+    it("rejects a parent package when the app id is the longer one", () => {
+        expect(isOwned(line({
+            pid: 660,
+            tag: "ActivityManager",
+            level: "error",
+            message: "ANR in com.rndebuggertestapp",
+        }), { ...APP, appId: "com.rndebuggertestapp.debug" })).toEqual({ owned: false });
+    });
+
+    it("still owns an exact package match at end of message", () => {
+        expect(isOwned(line({
+            pid: 660,
+            tag: "ActivityManager",
+            level: "error",
+            message: "ANR in com.rndebuggertestapp",
+        }), APP)).toEqual({ owned: true, reason: "verdict" });
+    });
 });
