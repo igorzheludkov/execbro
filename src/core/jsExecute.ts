@@ -7,6 +7,7 @@ import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts
 import type { DeviceInfo } from "./types.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 import { trackAutoReconnect } from "./telemetry.js";
+import { probeCdpAlive } from "./probe.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
@@ -349,7 +350,98 @@ export function clampTimeoutMs(input: number): { value: number; clampedFrom?: nu
 // Transport-vs-logical error classification (used by auto-reconnect path)
 // ============================================================================
 
-export type TransportPattern = "no_apps" | "ws_closed" | "target_closed";
+export type TransportPattern = "no_apps" | "ws_closed" | "target_closed" | "stale_target";
+
+// How long to wait for the disambiguating probe on a ws=OPEN timeout. Matches
+// PROBE_TIMEOUT_MS in connection.ts, which uses the same probe to reject stale
+// CDP targets at connect time.
+const STALE_TARGET_PROBE_TIMEOUT_MS = 1_500;
+
+/**
+ * True for the one ambiguous failure shape: our own timer fired while the
+ * socket was still OPEN.
+ *
+ * Everything else is already decided. ws=CLOSED is transport (handled in
+ * classifyTransportError); a CDP-sourced error carries its own signal. This
+ * case alone can be either a genuinely slow expression or a stale CDP target
+ * that silently swallows evaluates while the device socket keeps ponging — and
+ * only a probe can tell them apart.
+ */
+export function isEvalTimeoutOnLiveSocket(
+    message: string,
+    source: "cdp" | "server-timer" | "logical",
+): boolean {
+    if (source !== "server-timer") return false;
+    return /ws=OPEN/i.test(message);
+}
+
+export type ProbeTargetApp = { ws: WebSocket; port: number; deviceInfo: { id?: string } };
+
+/**
+ * Is our CDP page still listed by Metro?
+ *
+ * This is the signal that a JS-level probe cannot provide: it goes over Metro's
+ * HTTP /json, so a blocked JavaScript thread has no effect on the answer.
+ *
+ * Conservative on purpose — an empty list (Metro unreachable, momentary blip)
+ * or a missing id counts as "still there". A false "gone" costs a reconnect and
+ * a retry that RE-RUNS the caller's expression, which must never happen on a
+ * guess.
+ */
+export async function isTargetStillAdvertised(
+    app: { port: number; deviceInfo: { id?: string } },
+    fetchTargets: (port: number) => Promise<DeviceInfo[]> = fetchDevices,
+): Promise<boolean> {
+    const id = app.deviceInfo?.id;
+    if (!id) return true;
+    const targets = await fetchTargets(app.port);
+    if (targets.length === 0) return true;
+    return targets.some((t) => t.id === id);
+}
+
+/**
+ * classifyTransportError plus disambiguation for the one ambiguous shape: our
+ * timer fired while the socket was still OPEN.
+ *
+ * The transport was alive (the 1s ping/pong keepalive would have killed a dead
+ * socket within ~2s), so this is one of three things:
+ *
+ *   1. a genuinely slow ASYNC expression  -> probe answers        -> logical
+ *   2. a genuinely slow SYNC expression   -> probe silent, but the
+ *      (busy loop, big serialize)            page is still listed -> logical
+ *   3. a stale CDP target (app reloaded   -> probe silent AND the
+ *      via shake / Metro 'r')                page is gone         -> transport
+ *
+ * Both signals are required for case 3. The probe alone cannot separate 2 from
+ * 3 — it is itself a Runtime.evaluate, so a blocked JS thread silences it
+ * exactly like a dead context. Verified on-device: a 15s busy loop silenced the
+ * probe and was misread as stale, triggering a reconnect that re-ran the
+ * expression. Metro's target list is independent of the JS thread and settles it.
+ *
+ * `probe` and `targetStillAdvertised` are injectable so the decision is
+ * testable without a socket or a Metro server.
+ */
+export async function classifyWithLivenessProbe(
+    message: string,
+    source: "cdp" | "server-timer" | "logical",
+    app: ProbeTargetApp | null,
+    probe: (ws: WebSocket, timeoutMs: number) => Promise<boolean> = probeCdpAlive,
+    targetStillAdvertised: (app: ProbeTargetApp) => Promise<boolean> = isTargetStillAdvertised,
+): Promise<TransportClassification> {
+    const base = classifyTransportError(message, source);
+    if (base.kind === "transport") return base;
+    if (!isEvalTimeoutOnLiveSocket(message, source)) return base;
+    if (!app) return base;
+
+    const alive = await probe(app.ws, STALE_TARGET_PROBE_TIMEOUT_MS);
+    if (alive) return base;
+
+    // Probe silent. Only a target that Metro no longer lists is truly stale;
+    // otherwise the JS thread is just busy and retrying would re-run the call.
+    if (await targetStillAdvertised(app)) return base;
+
+    return { kind: "transport", pattern: "stale_target" };
+}
 
 export type TransportClassification =
     | { kind: "transport"; pattern: TransportPattern }
@@ -825,7 +917,17 @@ export async function executeInApp(
         ? "server-timer"
         : "cdp";
 
-    const classification = classifyTransportError(first.error ?? "", source);
+    // getConnectedAppByDevice throws when an explicit device name matches
+    // nothing; that failure is already reported via `first`, so fall back to
+    // "nothing to probe" rather than replacing the original error.
+    let probeApp: ProbeTargetApp | null = null;
+    try {
+        probeApp = getConnectedAppByDevice(device);
+    } catch {
+        probeApp = null;
+    }
+
+    const classification = await classifyWithLivenessProbe(first.error ?? "", source, probeApp);
 
     if (classification.kind !== "transport") {
         trackAutoReconnect("not_needed", toolName);

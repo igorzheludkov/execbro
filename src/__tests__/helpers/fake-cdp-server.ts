@@ -34,6 +34,7 @@ export class FakeCDPServer {
     private server: WebSocketServer | null = null;
     private connections: WebSocket[] = [];
     private evaluateHandler: ResponseHandler | null = null;
+    private autoAnswerProbe = true;
     private _receivedMessages: Array<{ id: number; method: string; params: Record<string, unknown> }> = [];
     port = 0;
 
@@ -65,9 +66,12 @@ export class FakeCDPServer {
             return;
         }
 
-        // Always answer the liveness probe correctly so connectToDevice can proceed.
+        // Answer the liveness probe correctly so connectToDevice can proceed.
         // The probe sends `1+1` with returnByValue; treat any such request as live.
-        if (msg.method === "Runtime.evaluate") {
+        // Tests that need to simulate a stale target (socket alive, JS context
+        // gone) turn this off via setAutoAnswerProbe(false) and let their own
+        // evaluate handler decide.
+        if (msg.method === "Runtime.evaluate" && this.autoAnswerProbe) {
             const expr = (msg.params?.expression as string | undefined) ?? "";
             if (expr === "1+1") {
                 ws.send(JSON.stringify({
@@ -133,6 +137,15 @@ export class FakeCDPServer {
     respondWithTimeout(): void {
         // Set a handler that returns null — handleMessage skips sending
         this.onEvaluate(() => null);
+    }
+
+    /**
+     * Control the built-in `1+1` liveness answer. Turn off to simulate a stale
+     * CDP target: the socket stays open and keeps ponging, but no evaluate —
+     * probe included — ever comes back.
+     */
+    setAutoAnswerProbe(enabled: boolean): void {
+        this.autoAnswerProbe = enabled;
     }
 
     /** Drop every live device socket without shutting the server down. */
