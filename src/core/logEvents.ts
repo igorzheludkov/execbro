@@ -90,5 +90,9 @@ export function fingerprintEvent(lines: RawLogLine[], deviceKey: string): string
         head.tag,
         head.message,
     ];
-    return createHash("sha1").update(parts.join("|")).digest("hex");
+    // JSON.stringify, not join("|"): log messages and tags are free-form and
+    // routinely contain the separator, which would let two different field
+    // splits hash identically and silently collapse two distinct events into
+    // one during dedupe.
+    return createHash("sha1").update(JSON.stringify(parts)).digest("hex");
 }

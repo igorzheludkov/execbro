@@ -35,6 +35,17 @@ describe("fingerprintEvent", () => {
         const withTail = [line(), line({ message: "  #00 pc 707b0 libc.so" })];
         expect(fingerprintEvent(withTail, "d")).toBe(fingerprintEvent([line()], "d"));
     });
+
+    it("handles an empty line list without throwing", () => {
+        expect(() => fingerprintEvent([], "emulator-5554")).not.toThrow();
+    });
+
+    it("cannot be forged by a separator inside a field", () => {
+        // A raw join("|") would make these two collide.
+        const a = fingerprintEvent([line({ tag: "Foo|bar", message: "x" })], "d");
+        const b = fingerprintEvent([line({ tag: "Foo", message: "bar|x" })], "d");
+        expect(a).not.toBe(b);
+    });
 });
 
 describe("LEVEL_RANK", () => {
