@@ -85,13 +85,18 @@ export function registerLogTools(server: McpServer): void {
             }
         },
         async ({ maxLogs, level, startFromText, maxMessageLength, verbose, format, summary, device }) => {
-            // Check if SDK is installed — prefer SDK data for richer logs
-            const sdkAvailable = await isSDKInstalled();
+            // Check if SDK is installed — prefer SDK data for richer logs.
+            // `device` must be threaded through: without it the SDK bridge reads
+            // whichever app happens to be first, so a multi-device session
+            // silently answers with the wrong device's buffer.
+            const sdkAvailable = await isSDKInstalled(device);
     
             if (sdkAvailable) {
                 if (summary) {
-                    const sdkStats = await getSDKConsoleStats();
-                    if (sdkStats.success) {
+                    const sdkStats = await getSDKConsoleStats(device);
+                    // An empty SDK buffer is not an answer — fall through to the
+                    // CDP buffer below rather than reporting zero logs.
+                    if (sdkStats.success && sdkStats.data.total > 0) {
                         const s = sdkStats.data;
                         const lines: string[] = [];
                         lines.push(`Total logs: ${s.total}`);
@@ -103,12 +108,9 @@ export function registerLogTools(server: McpServer): void {
                     }
                 }
     
-                const sdkResult = await querySDKConsole({ count: maxLogs, level, text: startFromText });
-                if (sdkResult.success) {
+                const sdkResult = await querySDKConsole({ count: maxLogs, level, text: startFromText }, device);
+                if (sdkResult.success && sdkResult.data.length > 0) {
                     const entries = sdkResult.data;
-                    if (entries.length === 0) {
-                        return { content: [{ type: "text" as const, text: "No console logs captured yet." }] };
-                    }
                     if (format === "tonl") {
                         const tonlLines = entries.map((e) => {
                             const time = new Date(e.timestamp).toLocaleTimeString();
@@ -318,16 +320,15 @@ export function registerLogTools(server: McpServer): void {
             }
         },
         async ({ text, maxResults, maxMessageLength, verbose, format, device }) => {
-            // Check if SDK is installed — prefer SDK data
-            const sdkAvailable = await isSDKInstalled();
+            // Check if SDK is installed — prefer SDK data. See get_logs: the
+            // device must be threaded through, and an empty SDK result falls
+            // through to the CDP buffer instead of short-circuiting.
+            const sdkAvailable = await isSDKInstalled(device);
     
             if (sdkAvailable) {
-                const sdkResult = await querySDKConsole({ count: maxResults, text });
-                if (sdkResult.success) {
+                const sdkResult = await querySDKConsole({ count: maxResults, text }, device);
+                if (sdkResult.success && sdkResult.data.length > 0) {
                     const entries = sdkResult.data;
-                    if (entries.length === 0) {
-                        return { content: [{ type: "text" as const, text: `No logs matching "${text}" found.` }] };
-                    }
                     if (format === "tonl") {
                         const tonlLines = entries.map((e) => {
                             const time = new Date(e.timestamp).toLocaleTimeString();
@@ -411,7 +412,14 @@ export function registerLogTools(server: McpServer): void {
                 const app = getConnectedAppByDevice(device);
                 if (!app) throw new UserInputError(`No connected device matches "${device}"`);
                 const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
-                const count = getLogBuffer(deviceName).clear();
+                let count = getLogBuffer(deviceName).clear();
+                // Clear that device's in-app SDK buffer too, otherwise a targeted
+                // clear leaves the SDK entries behind and the next get_logs still
+                // returns them.
+                if (await isSDKInstalled(device)) {
+                    const sdkResult = await clearSDKConsole(device);
+                    if (sdkResult.success && sdkResult.count) count += sdkResult.count;
+                }
                 return { content: [{ type: "text", text: `Cleared ${count} log entries from ${deviceName}.` }] };
             }
             // Clear all

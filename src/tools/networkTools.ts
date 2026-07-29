@@ -59,12 +59,13 @@ export function registerNetworkTools(server: McpServer): void {
         },
         async ({ maxRequests, method, urlPattern, status, format, summary, device }) => {
             // Check if SDK is installed — prefer SDK data over CDP/interceptor buffer
-            const sdkAvailable = await isSDKInstalled();
+            const sdkAvailable = await isSDKInstalled(device);
     
             if (sdkAvailable) {
                 if (summary) {
-                    const sdkStats = await getSDKNetworkStats();
-                    if (sdkStats.success) {
+                    const sdkStats = await getSDKNetworkStats(device);
+                    // An empty SDK buffer is not an answer — fall through to CDP.
+                    if (sdkStats.success && sdkStats.data.total > 0) {
                         const s = sdkStats.data;
                         const lines: string[] = [];
                         lines.push(`Total requests: ${s.total}`);
@@ -87,12 +88,9 @@ export function registerNetworkTools(server: McpServer): void {
                     }
                 }
     
-                const sdkResult = await querySDKNetwork({ count: maxRequests, method, urlPattern, status });
-                if (sdkResult.success) {
+                const sdkResult = await querySDKNetwork({ count: maxRequests, method, urlPattern, status }, device);
+                if (sdkResult.success && sdkResult.data.length > 0) {
                     const entries = sdkResult.data;
-                    if (entries.length === 0) {
-                        return { content: [{ type: "text" as const, text: "No network requests captured yet." }] };
-                    }
                     const lines = entries.map((r) => {
                         const time = new Date(r.timestamp).toLocaleTimeString();
                         const st = r.status ?? "pending";
@@ -218,15 +216,12 @@ export function registerNetworkTools(server: McpServer): void {
         },
         async ({ urlPattern, maxResults, format, device }) => {
             // Check if SDK is installed — prefer SDK data
-            const sdkAvailable = await isSDKInstalled();
+            const sdkAvailable = await isSDKInstalled(device);
     
             if (sdkAvailable) {
-                const sdkResult = await querySDKNetwork({ count: maxResults, urlPattern });
-                if (sdkResult.success) {
+                const sdkResult = await querySDKNetwork({ count: maxResults, urlPattern }, device);
+                if (sdkResult.success && sdkResult.data.length > 0) {
                     const entries = sdkResult.data;
-                    if (entries.length === 0) {
-                        return { content: [{ type: "text" as const, text: `No network requests matching "${urlPattern}" found.` }] };
-                    }
                     const lines = entries.map((r) => {
                         const time = new Date(r.timestamp).toLocaleTimeString();
                         const st = r.status ?? "pending";
@@ -315,9 +310,9 @@ export function registerNetworkTools(server: McpServer): void {
             // routing partway through. Try SDK first (richer data), but ALWAYS
             // fall back to the CDP buffer on a miss — CDP records carry numeric
             // ids the SDK store doesn't know about, and vice versa.
-            const sdkAvailable = await isSDKInstalled();
+            const sdkAvailable = await isSDKInstalled(device);
             if (sdkAvailable) {
-                const sdkResult = await getSDKNetworkEntry(requestId);
+                const sdkResult = await getSDKNetworkEntry(requestId, device);
                 if (sdkResult.success && sdkResult.data) {
                     const r = sdkResult.data;
                     const lines: string[] = [];
@@ -423,10 +418,10 @@ export function registerNetworkTools(server: McpServer): void {
         },
         async ({ device }) => {
             // Check if SDK is installed — prefer SDK data
-            const sdkAvailable = await isSDKInstalled();
+            const sdkAvailable = await isSDKInstalled(device);
     
             if (sdkAvailable) {
-                const sdkStats = await getSDKNetworkStats();
+                const sdkStats = await getSDKNetworkStats(device);
                 if (sdkStats.success) {
                     const s = sdkStats.data;
                     const lines: string[] = [];
@@ -509,9 +504,9 @@ export function registerNetworkTools(server: McpServer): void {
             }
     
             // Also clear SDK buffer if available
-            const sdkAvailable = await isSDKInstalled();
+            const sdkAvailable = await isSDKInstalled(device);
             if (sdkAvailable) {
-                const sdkResult = await clearSDKNetwork();
+                const sdkResult = await clearSDKNetwork(device);
                 if (sdkResult.success && sdkResult.count) {
                     totalCleared += sdkResult.count;
                 }

@@ -31,23 +31,25 @@ type SDKResult<T> = { success: true; data: T } | { success: false; error: string
 
 // ── Detection ──
 
-export async function isSDKInstalled(): Promise<boolean> {
+export async function isSDKInstalled(device?: string): Promise<boolean> {
     if (connectedApps.size === 0) return false;
     const result = await executeInApp(
         'typeof (globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__)?.getNetworkEntries === "function"',
         false,
-        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
+        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" },
+        device
     );
     return result.success && result.result === "true";
 }
 
 // ── Raw readers ──
 
-async function readRawNetwork(): Promise<SDKResult<SDKNetworkEntry[]>> {
+async function readRawNetwork(device?: string): Promise<SDKResult<SDKNetworkEntry[]>> {
     const result = await executeInApp(
         "JSON.stringify((globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).getNetworkEntries())",
         false,
-        { timeoutMs: 5000, originatingToolName: "_sdk_bridge" }
+        { timeoutMs: 5000, originatingToolName: "_sdk_bridge" },
+        device
     );
     if (!result.success) return { success: false, error: result.error || "executeInApp failed" };
     try {
@@ -57,11 +59,12 @@ async function readRawNetwork(): Promise<SDKResult<SDKNetworkEntry[]>> {
     }
 }
 
-async function readRawConsole(): Promise<SDKResult<SDKConsoleEntry[]>> {
+async function readRawConsole(device?: string): Promise<SDKResult<SDKConsoleEntry[]>> {
     const result = await executeInApp(
         "JSON.stringify((globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).getConsoleEntries())",
         false,
-        { timeoutMs: 5000, originatingToolName: "_sdk_bridge" }
+        { timeoutMs: 5000, originatingToolName: "_sdk_bridge" },
+        device
     );
     if (!result.success) return { success: false, error: result.error || "executeInApp failed" };
     try {
@@ -78,8 +81,8 @@ export async function querySDKNetwork(options: {
     method?: string;
     urlPattern?: string;
     status?: number;
-} = {}): Promise<SDKResult<SDKNetworkEntry[]>> {
-    const raw = await readRawNetwork();
+} = {}, device?: string): Promise<SDKResult<SDKNetworkEntry[]>> {
+    const raw = await readRawNetwork(device);
     if (!raw.success) return raw;
 
     let entries = raw.data;
@@ -106,15 +109,15 @@ export async function querySDKNetwork(options: {
     return { success: true, data: entries };
 }
 
-export async function getSDKNetworkEntry(id: string): Promise<SDKResult<SDKNetworkEntry | null>> {
-    const raw = await readRawNetwork();
+export async function getSDKNetworkEntry(id: string, device?: string): Promise<SDKResult<SDKNetworkEntry | null>> {
+    const raw = await readRawNetwork(device);
     if (!raw.success) return raw as SDKResult<SDKNetworkEntry | null>;
 
     const entry = raw.data.find(e => e.id === id) ?? null;
     return { success: true, data: entry };
 }
 
-export async function getSDKNetworkStats(): Promise<SDKResult<{
+export async function getSDKNetworkStats(device?: string): Promise<SDKResult<{
     total: number;
     completed: number;
     errors: number;
@@ -123,7 +126,7 @@ export async function getSDKNetworkStats(): Promise<SDKResult<{
     byStatus: Record<string, number>;
     byDomain: Record<string, number>;
 }>> {
-    const raw = await readRawNetwork();
+    const raw = await readRawNetwork(device);
     if (!raw.success) return raw as any;
 
     const all = raw.data;
@@ -173,8 +176,8 @@ export async function querySDKConsole(options: {
     count?: number;
     level?: string;
     text?: string;
-} = {}): Promise<SDKResult<SDKConsoleEntry[]>> {
-    const raw = await readRawConsole();
+} = {}, device?: string): Promise<SDKResult<SDKConsoleEntry[]>> {
+    const raw = await readRawConsole(device);
     if (!raw.success) return raw;
 
     let entries = raw.data;
@@ -197,11 +200,11 @@ export async function querySDKConsole(options: {
     return { success: true, data: entries };
 }
 
-export async function getSDKConsoleStats(): Promise<SDKResult<{
+export async function getSDKConsoleStats(device?: string): Promise<SDKResult<{
     total: number;
     byLevel: Record<string, number>;
 }>> {
-    const raw = await readRawConsole();
+    const raw = await readRawConsole(device);
     if (!raw.success) return raw as any;
 
     const byLevel: Record<string, number> = {};
@@ -214,22 +217,24 @@ export async function getSDKConsoleStats(): Promise<SDKResult<{
 
 // ── Mutations ──
 
-export async function clearSDKNetwork(): Promise<{ success: boolean; count?: number; error?: string }> {
+export async function clearSDKNetwork(device?: string): Promise<{ success: boolean; count?: number; error?: string }> {
     const result = await executeInApp(
         "(globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).clearNetwork()",
         false,
-        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
+        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" },
+        device
     );
     if (!result.success) return { success: false, error: result.error };
     const count = parseInt(result.result || "0", 10);
     return { success: true, count: isNaN(count) ? 0 : count };
 }
 
-export async function clearSDKConsole(): Promise<{ success: boolean; count?: number; error?: string }> {
+export async function clearSDKConsole(device?: string): Promise<{ success: boolean; count?: number; error?: string }> {
     const result = await executeInApp(
         "(globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__).clearConsole()",
         false,
-        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" }
+        { timeoutMs: 3000, originatingToolName: "_sdk_bridge" },
+        device
     );
     if (!result.success) return { success: false, error: result.error };
     const count = parseInt(result.result || "0", 10);

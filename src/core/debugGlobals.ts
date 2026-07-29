@@ -362,7 +362,9 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
                 const deadline = Date.now() + SDK_READY_TIMEOUT_MS;
                 sdkReady = false;
                 while (Date.now() < deadline) {
-                    if (await isSDKInstalled()) {
+                    // Poll the reloaded device specifically — an unqualified
+                    // probe can answer from a different connected app.
+                    if (await isSDKInstalled(device)) {
                         sdkReady = true;
                         break;
                     }
