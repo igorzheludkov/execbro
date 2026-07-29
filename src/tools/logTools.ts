@@ -27,7 +27,8 @@ import {
     clearSDKConsole,
     getSDKConsoleStats,
 } from "../core/sdkBridge.js";
-import { findNativeEvent, getNativeLogBuffer, nativeLogBuffers } from "../core/logEvents.js";
+import { findLogEvent, getNativeLogBuffer, nativeLogBuffers } from "../core/logEvents.js";
+import "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
 import { collectNativeEvents } from "../core/nativeLogs.js";
 
@@ -415,11 +416,11 @@ export function registerLogTools(server: McpServer): void {
             }
         },
         async ({ id, maxLength, verbose }) => {
-            const event = findNativeEvent(id);
+            const event = findLogEvent(id);
             if (!event) {
                 throw new UserInputError(
-                    `No log event with id "${id}". Ids come from get_logs and are valid for this server session; ` +
-                    `call get_logs(source="native") again to refresh them.`
+                    `No log event with id "${id}". Ids come from get_logs — "n7" for native events, "j12" for console entries — ` +
+                    `and are valid for this server session. Call get_logs again to refresh them.`
                 );
             }
             return {

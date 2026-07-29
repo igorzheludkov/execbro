@@ -207,3 +207,22 @@ export function __resetNativeLogBuffers(): void {
     nativeLogBuffers.clear();
     nextNativeId = 1;
 }
+
+/**
+ * Resolve any event id, native or JS. The prefix selects the space: `n` is a
+ * buffered native event, `j` is derived on demand from a console entry's seq.
+ * Registered lazily so logEvents.ts does not import the JS side (which imports
+ * back for its types).
+ */
+type JsResolver = (id: string) => LogEvent | undefined;
+let jsResolver: JsResolver | undefined;
+
+export function registerJsEventResolver(fn: JsResolver): void {
+    jsResolver = fn;
+}
+
+export function findLogEvent(id: string): LogEvent | undefined {
+    if (id.startsWith("n")) return findNativeEvent(id);
+    if (id.startsWith("j")) return jsResolver?.(id);
+    return undefined;
+}
