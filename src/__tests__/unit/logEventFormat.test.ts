@@ -67,15 +67,19 @@ describe("formatEventRow", () => {
 });
 
 describe("formatEventRow — message events", () => {
+    // For these tests message === raw, as it is for a JS console entry
+    // (jsEventsFromEntries sets both to the same string) — they exercise
+    // verbose/truncation behavior, not the raw-vs-message distinction, which
+    // has its own describe block below.
     const MESSAGE_EVENT: LogEvent = {
         ...EVENT,
         kind: "message",
         title: "line one of the message",
         lineCount: 3,
         lines: [
-            { ts: EVENT.ts, level: "error", pid: 0, tag: "console", message: "line one", raw: "line one of the message" },
-            { ts: EVENT.ts, level: "error", pid: 0, tag: "console", message: "line two", raw: "line two, much longer content" },
-            { ts: EVENT.ts, level: "error", pid: 0, tag: "console", message: "line three", raw: "line three, the end" },
+            { ts: EVENT.ts, level: "error", pid: 0, tag: "console", message: "line one of the message", raw: "line one of the message" },
+            { ts: EVENT.ts, level: "error", pid: 0, tag: "console", message: "line two, much longer content", raw: "line two, much longer content" },
+            { ts: EVENT.ts, level: "error", pid: 0, tag: "console", message: "line three, the end", raw: "line three, the end" },
         ],
     };
 
@@ -100,6 +104,31 @@ describe("formatEventRow — message events", () => {
         };
         const row = formatEventRow(longEvent, { showDevice: false });
         expect(row).toContain("truncated: 600 chars");
+    });
+
+    it("renders the parsed message, not the raw logcat line, for a native message event", () => {
+        // Live bug: a native message row showed the full logcat line
+        // (epoch/pid/tid/priority/tag) *in addition to* the row's own id/
+        // time/level/device columns, duplicating that metadata. The row
+        // must use `message`; `raw` belongs only in the detail view.
+        const nativeMessage: LogEvent = {
+            ...EVENT,
+            kind: "message",
+            title: "ReconnectingWebSocket: connection error",
+            lineCount: 1,
+            lines: [{
+                ts: EVENT.ts,
+                level: "error",
+                pid: 23380,
+                tag: "unknown",
+                message: "ReconnectingWebSocket: connection error",
+                raw: "1785365084.082 23325 23380 E unknown:ReconnectingWebSocket: connection error",
+            }],
+        };
+        const row = formatEventRow(nativeMessage, { showDevice: false });
+        expect(row).toContain("ReconnectingWebSocket: connection error");
+        expect(row).not.toContain("1785365084.082");
+        expect(row).not.toContain("23380");
     });
 });
 
@@ -128,5 +157,26 @@ describe("formatEventDetails", () => {
         const afterHeader = out.slice(headerEnd);
         // "Lines: 17" then a blank line then the first payload row.
         expect(afterHeader.startsWith("Lines: 17\n\nF DEBUG : frame 0")).toBe(true);
+    });
+
+    it("shows the full raw logcat line, unlike the row's parsed message", () => {
+        // formatEventRow strips the logcat prefix for compactness (see the
+        // "renders the parsed message..." test above); the detail view is
+        // where byte-fidelity is the point, so it must keep using `raw`.
+        const nativeMessage: LogEvent = {
+            ...EVENT,
+            kind: "message",
+            lineCount: 1,
+            lines: [{
+                ts: EVENT.ts,
+                level: "error",
+                pid: 23380,
+                tag: "unknown",
+                message: "ReconnectingWebSocket: connection error",
+                raw: "1785365084.082 23325 23380 E unknown:ReconnectingWebSocket: connection error",
+            }],
+        };
+        const out = formatEventDetails(nativeMessage, { maxLength: 0, verbose: true });
+        expect(out).toContain("1785365084.082 23325 23380 E unknown:ReconnectingWebSocket: connection error");
     });
 });

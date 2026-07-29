@@ -28,6 +28,16 @@ export const IOS_VERDICT_SUBSYSTEMS: ReadonlySet<string> = new Set([
     "com.apple.FrontBoard",
 ]);
 
+/**
+ * Tags whose output is already carried by another source.
+ *
+ * React Native mirrors console.* into logcat under `ReactNativeJS`. Those lines
+ * are in the CDP console buffer too, so owning them here would double-report
+ * under source:"all" and bury crashes under ordinary app logging in
+ * source:"native". Keeping the two sources disjoint is what makes merging safe.
+ */
+const MIRRORED_TAGS: ReadonlySet<string> = new Set(["ReactNativeJS"]);
+
 function isVerdictSource(line: RawLogLine, platform: AppIdentity["platform"]): boolean {
     if (platform === "android") return ANDROID_VERDICT_TAGS.has(line.tag);
     // iOS tags are "subsystem:category" — match on the subsystem half.
@@ -64,6 +74,7 @@ function namesPackage(message: string, appId: string): boolean {
  * matching would miss every crash — the exact case this feature exists for.
  */
 export function isOwned(line: RawLogLine, identity: AppIdentity): OwnershipVerdict {
+    if (MIRRORED_TAGS.has(line.tag)) return { owned: false };
     if (line.subject && line.subject === identity.appId) {
         return { owned: true, reason: "declared" };
     }

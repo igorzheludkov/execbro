@@ -28,7 +28,11 @@ export interface RowOptions {
  * messages on request.
  */
 function messageBody(event: LogEvent, opts: RowOptions): string {
-    const body = event.lines.map((l) => l.raw).join("\n");
+    // `message`, not `raw`: raw carries the logcat epoch/pid/tid/priority/tag
+    // prefix, all of which the row already renders as its own columns. `raw`
+    // belongs in the detail view (formatEventDetails), where byte-fidelity is
+    // the point.
+    const body = event.lines.map((l) => l.message).join("\n");
     const budget = opts.maxLength ?? 500;
     return opts.verbose || budget <= 0 || body.length <= budget
         ? body

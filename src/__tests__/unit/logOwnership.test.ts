@@ -111,4 +111,23 @@ describe("isOwned", () => {
             message: "ANR in com.rndebuggertestapp",
         }), APP)).toEqual({ owned: true, reason: "verdict" });
     });
+
+    it("rejects a ReactNativeJS line from the app's own LIVE PID", () => {
+        // React Native mirrors console.* into logcat under this tag. It is
+        // already in the CDP console buffer, so owning it here would
+        // double-report under source:"all" — the pid match alone (rule 2)
+        // would otherwise happily claim it.
+        expect(isOwned(line({
+            pid: 23325,
+            tag: "ReactNativeJS",
+            message: "[TapTargetsScreen] Tapped: submit-btn",
+        }), APP)).toEqual({ owned: false });
+    });
+
+    it("still owns a non-mirrored tag from that same live pid", () => {
+        // Confirms the denylist targets the TAG, not the pid generally —
+        // ordinary native output from the same process is unaffected.
+        expect(isOwned(line({ pid: 23325, tag: "ReactNative" }), APP))
+            .toEqual({ owned: true, reason: "pid" });
+    });
 });
