@@ -15,6 +15,19 @@ const MESSAGE_TYPE: Record<string, EventLevel> = {
 const IOS_SUBJECT_RE = /\b([a-z0-9]+(?:\.[A-Za-z0-9-]+){2,})\b/;
 
 /**
+ * `log show --start` parses a bare timestamp as DEVICE-LOCAL time, and rejects
+ * an explicit UTC offset (verified against a live simulator). Emitting UTC
+ * would therefore shift the window by the host's offset: over-fetching hours
+ * of logs east of UTC, and silently MISSING events — crashes included — west
+ * of it. The simulator shares the host clock, so local components are correct.
+ */
+function localStamp(d: Date): string {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+        `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/**
  * Build the `log show` invocation.
  *
  * The predicate does the filtering inside the OS: a 30-minute app-scoped read
@@ -39,8 +52,7 @@ export function buildLogShowCommand(opts: {
 
     const parts = [`xcrun simctl spawn ${opts.udid} log show --style ndjson`];
     if (opts.sinceTs) {
-        const stamp = opts.sinceTs.toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
-        parts.push(`--start '${stamp}'`);
+        parts.push(`--start '${localStamp(opts.sinceTs)}'`);
     } else {
         parts.push("--last 30m");
     }

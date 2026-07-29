@@ -17,6 +17,15 @@ describe("buildLogShowCommand", () => {
         const cmd = buildLogShowCommand({ udid: UDID, processName: "RnDebuggerTestApp" });
         expect(cmd).toContain(`process == "RnDebuggerTestApp"`);
     });
+
+    it("emits --start in device-local time, not UTC", () => {
+        // log show parses a bare --start as LOCAL and rejects an explicit
+        // offset, so a UTC stamp shifts the window by the host's offset —
+        // over-fetching east of UTC, silently missing crashes west of it.
+        const when = new Date(2026, 6, 29, 22, 15, 30);
+        expect(buildLogShowCommand({ udid: "U", sinceTs: when }))
+            .toContain("--start '2026-07-29 22:15:30'");
+    });
 });
 
 describe("parseLogShowNdjson", () => {
