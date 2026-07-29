@@ -1,0 +1,208 @@
+import { connectedApps } from "./state.js";
+import { listDevices } from "./projectMemory.js";
+import { listAllDevices } from "./deviceDiscovery.js";
+import {
+    getNativeLogBuffer,
+    type AppIdentity,
+    type LogEvent,
+    type EventLevel,
+    type RawLogLine,
+} from "./logEvents.js";
+import { isOwned } from "./logOwnership.js";
+import { groupIntoEvents } from "./logGrouping.js";
+import { isRelevant } from "./logRelevance.js";
+import { fetchAndroidLines, resolveAndroidPid } from "./logSourceAndroid.js";
+import { fetchIosLines, resolveIosProcessName } from "./logSourceIos.js";
+import type { ConnectedApp } from "./types.js";
+
+/** simulatorUdid ?? adbSerial. Never deviceName — two sims can share a name. */
+export function deviceKeyOf(app: ConnectedApp): string | undefined {
+    return app.simulatorUdid ?? app.adbSerial;
+}
+
+/**
+ * Build identity for a connected app. iOS bundle ids and Android package names
+ * differ for the same product, so this is always per-device and never global.
+ */
+export function identityFromApp(app: ConnectedApp): AppIdentity | undefined {
+    const deviceKey = deviceKeyOf(app);
+    if (!deviceKey || !app.deviceInfo.appId) return undefined;
+    return { deviceKey, platform: app.platform, appId: app.deviceInfo.appId };
+}
+
+/**
+ * Last-known identity for a device that is no longer connected — the crash
+ * case, where there is no ConnectedApp to read appId from.
+ */
+export function identityFromMemory(
+    deviceKey: string,
+    platform: "ios" | "android"
+): AppIdentity | undefined {
+    const remembered = listDevices().find((d) => d.identifier === deviceKey);
+    if (!remembered?.appId) return undefined;
+    return { deviceKey, platform, appId: remembered.appId };
+}
+
+/**
+ * ownership -> grouping -> relevance -> ingest.
+ *
+ * Relevance runs after grouping because it tests `kind`, which the grouper
+ * assigns; a floor applied to raw lines would shred backtrace continuations.
+ */
+export function runNativePipeline(
+    lines: RawLogLine[],
+    identity: AppIdentity,
+    deviceName: string,
+    opts: { minLevel: EventLevel }
+): { events: LogEvent[] } {
+    const owned = lines.filter((l) => isOwned(l, identity).owned);
+    const drafts = groupIntoEvents(owned, {
+        deviceKey: identity.deviceKey,
+        deviceName,
+        source: "native",
+    });
+    const relevant = drafts.filter((d) => isRelevant(d, { minLevel: opts.minLevel }));
+    return { events: getNativeLogBuffer(identity.deviceKey).ingest(relevant) };
+}
+
+export interface LogTarget {
+    /** simulatorUdid (iOS) | adb serial (Android). The buffer key. */
+    deviceKey: string;
+    deviceName: string;
+    platform: "ios" | "android";
+    /** Android only — what `adb -s` accepts. */
+    adbSerial?: string;
+    /** Absent when the app has never connected on this device. */
+    identity?: AppIdentity;
+}
+
+/**
+ * Every device we could read logs from — NOT just connected ones.
+ *
+ * A crashed app has no CDP connection, so connectedApps is empty exactly when
+ * this feature is most needed. Discovery is the source of truth for "which
+ * devices exist"; connectedApps and projectMemory only enrich them with
+ * identity. Shutdown simulators and stopped emulators are excluded — there is
+ * no log stream to read.
+ */
+export async function resolveLogTargets(device?: string): Promise<LogTarget[]> {
+    const connected = new Map<string, ConnectedApp>();
+    for (const app of connectedApps.values()) {
+        const key = deviceKeyOf(app);
+        if (key) connected.set(key, app);
+    }
+
+    const discovered = await listAllDevices();
+    const rows: Array<{ deviceKey: string; name: string; platform: "ios" | "android"; adbSerial?: string }> = [];
+
+    for (const sim of discovered.ios.simulators) {
+        if (sim.state !== "booted") continue;
+        rows.push({ deviceKey: sim.udid, name: sim.name, platform: "ios" });
+    }
+    for (const emu of discovered.android.emulators) {
+        if (emu.state !== "running" || !emu.serial) continue;
+        rows.push({ deviceKey: emu.serial, name: emu.name, platform: "android", adbSerial: emu.serial });
+    }
+    for (const phys of discovered.android.physical) {
+        if (phys.state !== "device") continue;
+        rows.push({ deviceKey: phys.serial, name: phys.model, platform: "android", adbSerial: phys.serial });
+    }
+
+    const targets: LogTarget[] = [];
+    for (const row of rows) {
+        const app = connected.get(row.deviceKey);
+        const deviceName = app?.deviceInfo.deviceName || row.name || row.deviceKey;
+
+        if (device) {
+            const hay = `${deviceName} ${row.deviceKey}`.toLowerCase();
+            if (!hay.includes(device.toLowerCase())) continue;
+        }
+
+        targets.push({
+            deviceKey: row.deviceKey,
+            deviceName,
+            platform: row.platform,
+            adbSerial: row.adbSerial ?? app?.adbSerial,
+            // Chain: live connection -> remembered -> none (crash-buffer-only).
+            identity: (app ? identityFromApp(app) : undefined)
+                ?? identityFromMemory(row.deviceKey, row.platform),
+        });
+    }
+    return targets;
+}
+
+async function fetchForTarget(
+    target: LogTarget,
+    opts: { minLevel: EventLevel; since?: Date }
+): Promise<{ events: LogEvent[]; note?: string }> {
+    const buffer = getNativeLogBuffer(target.deviceKey);
+    const sinceTs = opts.since ?? buffer.watermark;
+
+    try {
+        if (!target.identity) {
+            // Crash-buffer-only: no identity, so no ownership filtering is
+            // possible. That buffer is tiny and near-100% signal, and each
+            // event names its own owner, so this stays useful.
+            const lines = target.platform === "android"
+                ? await fetchAndroidLines({ serial: target.adbSerial, sinceTs, crashOnly: true })
+                : await fetchIosLines({ udid: target.deviceKey, sinceTs, minMessageType: "fault" });
+            const drafts = groupIntoEvents(lines, {
+                deviceKey: target.deviceKey,
+                deviceName: target.deviceName,
+                source: "native",
+            }).filter((d) => d.kind === "crash" || d.kind === "anr");
+            return {
+                events: buffer.ingest(drafts),
+                note: `${target.deviceName}: no app identity known — showing crashes only`,
+            };
+        }
+
+        const identity = { ...target.identity };
+        let lines: RawLogLine[];
+        if (target.platform === "android") {
+            // Re-resolved every call: the pid changes on every app restart,
+            // and is absent entirely after a crash.
+            identity.pid = await resolveAndroidPid(identity.appId, target.adbSerial);
+            lines = await fetchAndroidLines({ serial: target.adbSerial, sinceTs });
+        } else {
+            const processName = await resolveIosProcessName(target.deviceKey, identity.appId);
+            lines = await fetchIosLines({ udid: target.deviceKey, processName, sinceTs });
+        }
+        return runNativePipeline(lines, identity, target.deviceName, { minLevel: opts.minLevel });
+    } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return { events: [], note: `${target.deviceName}: unavailable (${reason})` };
+    }
+}
+
+/**
+ * Fan out across every device in parallel. A device that fails degrades to a
+ * note; the others still answer.
+ */
+export async function collectNativeEvents(opts: {
+    device?: string;
+    minLevel: EventLevel;
+    since?: Date;
+}): Promise<{ events: LogEvent[]; notes: string[] }> {
+    const targets = await resolveLogTargets(opts.device);
+    if (targets.length === 0) {
+        return { events: [], notes: ["No iOS simulators or Android devices found."] };
+    }
+
+    const settled = await Promise.allSettled(targets.map((t) => fetchForTarget(t, opts)));
+
+    const events: LogEvent[] = [];
+    const notes: string[] = [];
+    for (const result of settled) {
+        if (result.status === "fulfilled") {
+            events.push(...result.value.events);
+            if (result.value.note) notes.push(result.value.note);
+        } else {
+            notes.push(`device unavailable: ${String(result.reason)}`);
+        }
+    }
+    // Exact within a device, approximate across devices — emulator clocks
+    // measured 4s of skew from the host, which we cannot correct for.
+    events.sort((a, b) => a.ts.getTime() - b.ts.getTime());
+    return { events, notes };
+}
