@@ -111,6 +111,13 @@ export interface ExceptionDetails {
 export interface PendingExecution {
     resolve: (result: ExecutionResult) => void;
     timeoutId: NodeJS.Timeout;
+    /**
+     * The socket this call went out on. Lets a close handler fail exactly the
+     * calls that died with that socket instead of leaving them parked until
+     * their own timeout fires. Optional: callers that manage their own short
+     * timeout (e.g. the 2s health check) may omit it.
+     */
+    ws?: unknown;
 }
 
 // Result of code execution

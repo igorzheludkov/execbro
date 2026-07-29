@@ -76,6 +76,27 @@ export function getTargetPlatform(): string | undefined {
 // Pending code executions (for executeInApp)
 export const pendingExecutions: Map<number, PendingExecution> = new Map();
 
+/**
+ * Fail every pending execution that was sent on `ws`, resolving each with
+ * `error` and clearing its timeout. Returns how many were failed.
+ *
+ * Called when a socket closes. Without this, an in-flight CDP call whose socket
+ * dies sits until its own timeoutMs expires and then reports a generic
+ * "Expression took too long" — which classifies as a logical timeout, so
+ * auto-reconnect never runs. Failing it here surfaces the real transport cause.
+ */
+export function failPendingExecutionsForSocket(ws: unknown, error: string): number {
+    let failed = 0;
+    for (const [messageId, pending] of pendingExecutions) {
+        if (!pending.ws || pending.ws !== ws) continue;
+        clearTimeout(pending.timeoutId);
+        pendingExecutions.delete(messageId);
+        pending.resolve({ success: false, error });
+        failed++;
+    }
+    return failed;
+}
+
 // CDP message ID counter
 let _messageId = 1;
 

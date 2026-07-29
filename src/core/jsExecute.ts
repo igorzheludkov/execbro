@@ -20,6 +20,11 @@ export interface ExpressionValidation {
     valid: boolean;
     expression: string;
     error?: string;
+    /**
+     * Set when the pre-flight rewrote the caller's source rather than rejecting
+     * it. Surfaced to the caller so an agent can see its input was transformed.
+     */
+    rewritten?: "iife-wrap";
 }
 
 /**
@@ -118,8 +123,14 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
             expression: escaped,
             error:
                 "require() is not available in Hermes Runtime.evaluate. " +
-                "Modules cannot be imported at runtime. Only pre-existing global variables are accessible. " +
-                "Use list_debug_globals to discover available globals, or add `globalThis.__MY_VAR__ = myModule;` in your app code."
+                "Modules cannot be imported at runtime. " +
+                "In a Metro dev build you can reach already-loaded modules through Metro's registry: " +
+                "`(function(){ var hit=null; __r.getModules().forEach(function(m,id){ " +
+                "if(!hit && m.verboseName && m.verboseName.indexOf('react-native/index.js') !== -1) hit=id; }); " +
+                "return __r(hit).Dimensions.get('window'); })()` " +
+                "(swap the verboseName match for the module you want). " +
+                "Otherwise use list_debug_globals to discover exposed globals, or add " +
+                "`globalThis.__MY_VAR__ = myModule;` in your app code."
         };
     }
 
@@ -127,14 +138,27 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
     // a single expression — `console.log('x'); 1+1` raises `')' expected at end
     // of parenthesized expression`. Internal callers wrap in (function(){...})()
     // so any `;` they use is at brace depth 1 and won't be flagged.
-    if (hasTopLevelStatementSeparator(trimmed)) {
+    // executeWithManualAwait emits `var __v=(<expr>);`, so a depth-0 `;` breaks
+    // compilation. Rewrite into the IIFE ourselves instead of making the caller
+    // do it — this was the single largest execute_in_app failure class
+    // (125 events / 42 installations over 30d).
+    const wrapped = wrapMultiStatementInIife(trimmed);
+    if (wrapped) {
+        return { valid: true, expression: wrapped, rewritten: "iife-wrap" };
+    }
+
+    // More than one statement, but the last one can't yield a value — we can't
+    // synthesize a sensible `return`, so explain rather than guess.
+    if (splitTopLevelStatements(trimmed).length > 1) {
         return {
             valid: false,
             expression: escaped,
             error:
                 "Multi-statement expressions are not supported by Hermes Runtime.evaluate " +
-                "(compiles input as a single expression). " +
-                "Wrap the body in an IIFE: `(function(){ stmt1; stmt2; return result; })()`."
+                "(compiles input as a single expression), and the final statement does not " +
+                "produce a value to return. " +
+                "Wrap the body in an IIFE with an explicit result: " +
+                "`(function(){ stmt1; stmt2; return result; })()`."
         };
     }
 
@@ -148,20 +172,19 @@ function isIdentChar(c: string | undefined): boolean {
     return c !== undefined && /[A-Za-z0-9_$]/.test(c);
 }
 
-// Detect top-level `await`, `async function`, `async (...) => ...`, or
-// `(async ...)` IIFE forms in `src`. Walks char-by-char tracking string,
+// Detect a bare top-level `await` in `src`. Walks char-by-char tracking string,
 // template, comment, and bracket depth so we don't false-positive on
 // substrings inside strings, identifiers like `awaiting`, etc.
+//
+// NOTE: `async function`/`async () => {}`/`(async () => {})()` are deliberately
+// NOT flagged. Hermes compiles them (they are expressions), the manual-await
+// wrapper in executeWithManualAwait resolves the Promise they return, and
+// telemetry showed this pre-flight rejecting ~20 legitimate calls/30d across 10
+// installations. Verified on-device (iOS 26 sim, Hermes): an async arrow with an
+// internal `await` evaluates correctly. Only a bare top-level `await` is a real
+// syntax error, because the wrapper emits `var __v=(<expr>);` — a non-async
+// context.
 function looksLikeTopLevelAwait(src: string): boolean {
-    // Cheap prefix checks for async-function / async-arrow / async-IIFE forms.
-    // Whitespace-tolerant on `async <keyword>` / `async (`.
-    const asyncPrefix = /^async\s*(?:function\b|\()/;
-    if (asyncPrefix.test(src)) return true;
-    // `(async () => ...)()` or `(async(...)...)` — match `(async` followed by
-    // a non-identifier char (so `(asyncFoo` doesn't trigger).
-    const parenAsync = /^\(\s*async(?:\s|\()/;
-    if (parenAsync.test(src)) return true;
-
     // Depth-tracked scan for a standalone `await` token at depth 0.
     let i = 0;
     let parens = 0;
@@ -213,10 +236,43 @@ function looksLikeTopLevelAwait(src: string): boolean {
     return false;
 }
 
-// Walk `src` tracking string/template/comment and bracket depth. Returns true
-// iff a `;` appears at depth 0 with non-whitespace following it (i.e. it
-// separates two top-level statements rather than terminating a single one).
-function hasTopLevelStatementSeparator(src: string): boolean {
+// Statement forms that cannot be the final segment of an auto-wrapped IIFE,
+// because prefixing them with `return` is either a syntax error or drops the
+// value the caller wanted back. `return` itself is handled separately.
+const NON_VALUE_STATEMENT_START =
+    /^(?:if|for|while|do|switch|try|catch|finally|throw|var|let|const|function|class|debugger|break|continue|with|else)\b|^\{/;
+
+/**
+ * Rewrite a multi-statement source into the IIFE that Hermes can compile,
+ * returning `null` when the rewrite would not be safe.
+ *
+ * `stmt1; stmt2; value` becomes `(function(){ stmt1; stmt2; return value; })()`.
+ * Bails out when the final segment cannot yield a value, so those callers still
+ * get the explanatory error rather than a silently broken transform.
+ */
+export function wrapMultiStatementInIife(src: string): string | null {
+    const segments = splitTopLevelStatements(src);
+    if (segments.length <= 1) return null;
+
+    const last = segments[segments.length - 1];
+    if (NON_VALUE_STATEMENT_START.test(last)) return null;
+
+    const head = segments.slice(0, -1);
+    const body = last.startsWith("return") && !isIdentChar(last[6]) ? last : `return ${last}`;
+    return `(function(){ ${[...head, body].join("; ")}; })()`;
+}
+
+// Walk `src` tracking string/template/comment and bracket depth, splitting on
+// `;` at depth 0. Returns the trimmed top-level statements; a trailing `;` that
+// merely terminates the final statement produces no extra segment.
+export function splitTopLevelStatements(src: string): string[] {
+    const segments: string[] = [];
+    let segmentStart = 0;
+    const push = (end: number) => {
+        const seg = src.slice(segmentStart, end).trim();
+        if (seg.length > 0) segments.push(seg);
+    };
+
     let i = 0;
     let parens = 0;
     let braces = 0;
@@ -226,13 +282,13 @@ function hasTopLevelStatementSeparator(src: string): boolean {
         const next = src[i + 1];
         if (ch === "/" && next === "/") {
             const nl = src.indexOf("\n", i + 2);
-            if (nl === -1) return false;
+            if (nl === -1) break;
             i = nl + 1;
             continue;
         }
         if (ch === "/" && next === "*") {
             const end = src.indexOf("*/", i + 2);
-            if (end === -1) return false;
+            if (end === -1) break;
             i = end + 2;
             continue;
         }
@@ -253,12 +309,13 @@ function hasTopLevelStatementSeparator(src: string): boolean {
         else if (ch === "[") brackets++;
         else if (ch === "]") brackets--;
         else if (ch === ";" && parens === 0 && braces === 0 && brackets === 0) {
-            const rest = src.slice(i + 1).trim();
-            if (rest.length > 0) return true;
+            push(i);
+            segmentStart = i + 1;
         }
         i++;
     }
-    return false;
+    push(src.length);
+    return segments;
 }
 
 // ============================================================================
@@ -292,7 +349,7 @@ export function clampTimeoutMs(input: number): { value: number; clampedFrom?: nu
 // Transport-vs-logical error classification (used by auto-reconnect path)
 // ============================================================================
 
-export type TransportPattern = "no_apps" | "ws_closed" | "target_closed" | "cdp_eval_too_long";
+export type TransportPattern = "no_apps" | "ws_closed" | "target_closed";
 
 export type TransportClassification =
     | { kind: "transport"; pattern: TransportPattern }
@@ -311,6 +368,17 @@ export function classifyTransportError(
 ): TransportClassification {
     if (!message) return { kind: "logical" };
 
+    // A server-timer expiry is normally logical ("this expression is slow").
+    // But the timer snapshots ws state into the message, and a CLOSED socket
+    // means the call never had a live transport to answer it — that is a
+    // transport failure no matter which timer noticed. Checked before the
+    // server-timer bail-out, which otherwise swallowed it.
+    //
+    // Primarily a backstop: failPendingExecutionsForSocket now fails in-flight
+    // calls at close time, so most of these surface as "WebSocket connection is
+    // not open" instead. This covers the race where our timer fires first.
+    if (/ws=CLOSED/i.test(message)) return { kind: "transport", pattern: "ws_closed" };
+
     if (source === "server-timer") return { kind: "logical" };
 
     if (/No apps connected/i.test(message)) return { kind: "transport", pattern: "no_apps" };
@@ -328,10 +396,14 @@ export function classifyTransportError(
         return { kind: "transport", pattern: "target_closed" };
     }
 
-    if (source === "cdp" && /Expression took too long to evaluate/i.test(message)) {
-        return { kind: "transport", pattern: "cdp_eval_too_long" };
-    }
-
+    // NOTE: there used to be a `cdp_eval_too_long` branch here for a CDP-side
+    // "Expression took too long to evaluate". It was unreachable: the only
+    // producer of that phrase is our own timer in executeCDP, whose message
+    // always starts with "Timeout: Expression took too long" and is therefore
+    // tagged `server-timer` and handled above. Telemetry agrees — 367 such
+    // events over 90 days, none of them lacking our "Connection state:" block.
+    // Retrying is also wrong here: the 1s ping/pong keepalive terminates dead
+    // sockets within ~2s, so a still-OPEN socket had a live transport all along.
     return { kind: "logical" };
 }
 
@@ -435,6 +507,15 @@ function executeCDP(
     const currentMessageId = getNextMessageId();
     const wrappedExpression = `${GLOBAL_POLYFILL} ${cleanedExpression}`;
 
+    // Every send funnels through here, including executeWithManualAwait's poll
+    // loop — which re-enters between sleeps and so can start on a socket that
+    // died since the previous send. ws.send() on a CLOSED socket does not
+    // throw; it simply never gets a reply, so without this the call burns its
+    // full timeout and then reports a misleading "took too long".
+    if (app.ws.readyState !== WebSocket.OPEN) {
+        return Promise.resolve({ success: false, error: "WebSocket connection is not open." });
+    }
+
     return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
             pendingExecutions.delete(currentMessageId);
@@ -468,7 +549,9 @@ function executeCDP(
             resolve({ success: false, error: errorMessage });
         }, TIMEOUT_MS);
 
-        pendingExecutions.set(currentMessageId, { resolve, timeoutId });
+        // Tag with the socket so a close event can fail this call immediately
+        // rather than letting it sit until TIMEOUT_MS.
+        pendingExecutions.set(currentMessageId, { resolve, timeoutId, ws: app.ws });
 
         try {
             app.ws.send(

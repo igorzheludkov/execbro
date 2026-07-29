@@ -12,21 +12,21 @@ export function registerExecutionTools(server: McpServer): void {
         {
             description:
                 "Execute JavaScript code in the connected React Native app and return the result. Use this for inspecting app state, calling methods on exposed global objects, or running diagnostic code. Hermes compatible: 'global' is automatically polyfilled to 'globalThis', so both global.__REDUX_STORE__ and globalThis.__REDUX_STORE__ work.\n\n" +
-                "RECOMMENDED WORKFLOW: 1) list_debug_globals to discover available objects, 2) inspect_global to see properties/methods, 3) execute_in_app to call specific methods or read values.\n\n" +
+                "RECOMMENDED WORKFLOW: 1) list_debug_globals to discover available objects, 2) inspect_global to see properties/methods, 3) execute_in_app to call methods or read values.\n\n" +
                 "LIMITATIONS (Hermes engine):\n" +
                 "- NO require() or import — only pre-existing globals are available\n" +
-                "- NO async/await syntax. Use `.then()` chains: `Promise.resolve().then(v => ...)`. The expression's final value is awaited automatically when awaitPromise:true.\n" +
-                "- Non-ASCII characters in string literals (emoji, Arabic, CJK) are auto-escaped server-side. Write them as-is; the wire stays ASCII.\n" +
-                "- Keep expressions simple and synchronous when possible\n\n" +
+                "- Async works via an async IIFE: `(async () => { const r = await foo(); return r; })()`; the Promise is resolved for you when awaitPromise:true. Only a BARE top-level `await foo()` is rejected.\n" +
+                "- Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. If that can't yield a value (`if`/`for`/declaration), write the IIFE yourself with an explicit `return`.\n" +
+                "- Non-ASCII in string literals (emoji, Arabic, CJK) is auto-escaped server-side. Write it as-is.\n\n" +
                 "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
-                "BAD examples: `async () => { await fetch(...) }`, `require('react-native')`\n" +
-                "NEW: pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n" +
+                "BAD examples: `await fetch(...)` (bare top-level await), `require('react-native')`\n" +
+                "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
             inputSchema: {
                 expression: z
                     .string()
                     .describe(
-                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no async/await (use .then() instead), no unbalanced quotes. Use globals discovered via list_debug_globals — in particular `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry."
+                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no bare top-level `await` (use an async IIFE: `(async () => { ... })()`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
                     ),
                 awaitPromise: z.coerce
                     .boolean()

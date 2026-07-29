@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
-import { connectedApps, pendingExecutions, getNextMessageId, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
+import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
@@ -1057,6 +1057,15 @@ export async function connectToDevice(
                 if (pingInterval) {
                     clearInterval(pingInterval);
                     pingInterval = null;
+                }
+
+                // Fail anything still in flight on this socket. Otherwise each
+                // call parks until its own timeoutMs and then reports a generic
+                // "Expression took too long", which classifies as logical and
+                // never triggers auto-reconnect.
+                const failedCount = failPendingExecutionsForSocket(ws, "WebSocket connection is not open.");
+                if (failedCount > 0) {
+                    console.error(`[execbro] Failed ${failedCount} in-flight call(s) on closed socket for ${device.title}`);
                 }
 
                 // Release connection lock if still held

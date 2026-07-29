@@ -135,6 +135,13 @@ export class FakeCDPServer {
         this.onEvaluate(() => null);
     }
 
+    /** Drop every live device socket without shutting the server down. */
+    closeAllConnections(): void {
+        for (const ws of [...this.connections]) {
+            ws.close();
+        }
+    }
+
     /** Get all received messages */
     get receivedMessages() {
         return this._receivedMessages;

@@ -71,16 +71,26 @@ describe("validateAndPreprocessExpression", () => {
         expect(result.error).toContain("empty");
     });
 
-    it("rejects top-level async function", () => {
+    // Hermes compiles async arrows/functions fine — they are expressions, and the
+    // manual-await wrapper resolves the Promise they return. Verified on-device
+    // (iOS 26 sim, Hermes): `(async () => { const r = await Promise.resolve(41);
+    // return r + 1; })()` evaluates to 42. Only a BARE top-level `await` is a
+    // genuine syntax error, because the wrapper emits `var __v=(<expr>);`.
+    it("accepts an async arrow expression", () => {
         const result = validateAndPreprocessExpression("async () => { await fetch() }");
-        expect(result.valid).toBe(false);
-        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
+        expect(result.valid).toBe(true);
     });
 
-    it("rejects async IIFE", () => {
+    it("accepts async IIFE", () => {
         const result = validateAndPreprocessExpression("(async () => { await fetch() })()");
+        expect(result.valid).toBe(true);
+    });
+
+    it("points require() callers at Metro's __r registry", () => {
+        const result = validateAndPreprocessExpression("require('react-native').Dimensions.get('window')");
         expect(result.valid).toBe(false);
-        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
+        expect(result.error).toContain("require()");
+        expect(result.error).toContain("__r");
     });
 
     it("strips comments and validates remaining expression", () => {
@@ -89,17 +99,47 @@ describe("validateAndPreprocessExpression", () => {
         expect(result.expression).toBe("__DEV__");
     });
 
-    it("rejects multi-statement expression", () => {
+    // The manual-await path emits `var __v=(<expr>);`, so a top-level `;` really
+    // does break compilation. Rather than reject, rewrite into the IIFE the old
+    // error message used to ask the caller to write by hand.
+    it("auto-wraps a multi-statement expression into an IIFE", () => {
         const result = validateAndPreprocessExpression("var x = 1; x");
+        expect(result.valid).toBe(true);
+        expect(result.expression).toBe("(function(){ var x = 1; return x; })()");
+        expect(result.rewritten).toBe("iife-wrap");
+    });
+
+    it("auto-wraps multi-statement with console.log, returning the final value", () => {
+        const result = validateAndPreprocessExpression("console.log('[TEST] hello'); 1+1");
+        expect(result.valid).toBe(true);
+        expect(result.expression).toBe("(function(){ console.log('[TEST] hello'); return 1+1; })()");
+    });
+
+    it("auto-wraps the real-world globalThis assignment pattern", () => {
+        const result = validateAndPreprocessExpression("globalThis.__perfRow=0; globalThis.__perfMount=0; 'ok'");
+        expect(result.valid).toBe(true);
+        expect(result.expression).toBe(
+            "(function(){ globalThis.__perfRow=0; globalThis.__perfMount=0; return 'ok'; })()"
+        );
+    });
+
+    it("does not auto-wrap when the final statement cannot yield a value", () => {
+        const result = validateAndPreprocessExpression("var x = 1; if (x) { x++ }");
         expect(result.valid).toBe(false);
         expect(result.error).toContain("Multi-statement");
         expect(result.error).toContain("IIFE");
     });
 
-    it("rejects multi-statement with console.log", () => {
-        const result = validateAndPreprocessExpression("console.log('[TEST] hello'); 1+1");
+    it("does not auto-wrap when the final statement is a declaration", () => {
+        const result = validateAndPreprocessExpression("var x = 1; var y = 2");
         expect(result.valid).toBe(false);
         expect(result.error).toContain("Multi-statement");
+    });
+
+    it("preserves an explicit trailing return when auto-wrapping", () => {
+        const result = validateAndPreprocessExpression("var x = 1; return x");
+        expect(result.valid).toBe(true);
+        expect(result.expression).toBe("(function(){ var x = 1; return x; })()");
     });
 
     it("accepts trailing semicolon on a single statement", () => {
@@ -134,14 +174,18 @@ describe("validateAndPreprocessExpression", () => {
         expect(result.error).toMatch(/Promise\.resolve\(\)\.then/);
     });
 
-    it("rejects async function declarations with the same targeted error", () => {
+    it("accepts async function expressions", () => {
         const result = validateAndPreprocessExpression("async function x() { return 1 }");
-        expect(result.valid).toBe(false);
-        expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
+        expect(result.valid).toBe(true);
     });
 
-    it("rejects async arrow IIFE with the same targeted error", () => {
+    it("accepts a concise async arrow IIFE", () => {
         const result = validateAndPreprocessExpression("(async () => 1)()");
+        expect(result.valid).toBe(true);
+    });
+
+    it("still rejects a bare top-level await inside an async IIFE's caller position", () => {
+        const result = validateAndPreprocessExpression("await (async () => 1)()");
         expect(result.valid).toBe(false);
         expect(result.error).toMatch(/top-level await is not supported in Hermes/i);
     });
