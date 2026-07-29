@@ -36,9 +36,18 @@ export function identityFromApp(app: ConnectedApp): AppIdentity | undefined {
  */
 export function identityFromMemory(
     deviceKey: string,
-    platform: "ios" | "android"
+    platform: "ios" | "android",
+    deviceName?: string
 ): AppIdentity | undefined {
-    const remembered = listDevices().find((d) => d.identifier === deviceKey);
+    const devices = listDevices();
+    // projectMemory records a device under whichever identifier the resolving
+    // caller used — the adb serial on some paths, the RN deviceName on others —
+    // so one physical device can hold two entries with only one carrying the
+    // appId. Both keys must be tried, and a matching row with no appId must not
+    // shadow one that has it, or this fallback never fires on Android.
+    const remembered =
+        devices.find((d) => d.identifier === deviceKey && d.appId) ??
+        (deviceName ? devices.find((d) => d.identifier === deviceName && d.appId) : undefined);
     if (!remembered?.appId) return undefined;
     return { deviceKey, platform, appId: remembered.appId };
 }
@@ -74,6 +83,8 @@ export interface LogTarget {
     adbSerial?: string;
     /** Absent when the app has never connected on this device. */
     identity?: AppIdentity;
+    /** Where `identity` came from — memory-sourced ids can be stale. */
+    identitySource?: "live" | "memory";
 }
 
 /**
@@ -118,14 +129,19 @@ export async function resolveLogTargets(device?: string): Promise<LogTarget[]> {
             if (!hay.includes(device.toLowerCase())) continue;
         }
 
+        // Chain: live connection -> remembered -> none (crash-buffer-only).
+        const live = app ? identityFromApp(app) : undefined;
+        const remembered = live
+            ? undefined
+            : identityFromMemory(row.deviceKey, row.platform, row.name);
+
         targets.push({
             deviceKey: row.deviceKey,
             deviceName,
             platform: row.platform,
             adbSerial: row.adbSerial ?? app?.adbSerial,
-            // Chain: live connection -> remembered -> none (crash-buffer-only).
-            identity: (app ? identityFromApp(app) : undefined)
-                ?? identityFromMemory(row.deviceKey, row.platform),
+            identity: live ?? remembered,
+            identitySource: live ? "live" : remembered ? "memory" : undefined,
         });
     }
     return targets;
@@ -168,7 +184,13 @@ async function fetchForTarget(
             const processName = await resolveIosProcessName(target.deviceKey, identity.appId);
             lines = await fetchIosLines({ udid: target.deviceKey, processName, sinceTs });
         }
-        return runNativePipeline(lines, identity, target.deviceName, { minLevel: opts.minLevel });
+        const result = runNativePipeline(lines, identity, target.deviceName, { minLevel: opts.minLevel });
+        return target.identitySource === "memory"
+            ? {
+                ...result,
+                note: `${target.deviceName}: app identity "${identity.appId}" came from project memory (app not currently connected) — if this is stale, events will be filtered out`,
+            }
+            : result;
     } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         return { events: [], note: `${target.deviceName}: unavailable (${reason})` };
