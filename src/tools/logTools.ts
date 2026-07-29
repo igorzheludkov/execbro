@@ -312,7 +312,7 @@ export function registerLogTools(server: McpServer): void {
                 }
             }
     
-            const { logs, count, formatted } = searchLogs(resolveLogBuffer(device), text, { maxResults, maxMessageLength, verbose });
+            const { count, formatted } = searchLogs(resolveLogBuffer(device), text, { maxResults, maxMessageLength, verbose });
     
             // Check connection health
             let connectionWarning = "";

@@ -20,16 +20,16 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `get_apps`              | List connected apps. Run `scan_metro` first if none connected                                                                |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects                                                               |
 | `ensure_connection`     | Verify/establish connection with health checks                                                                               |
-| `get_logs`              | Retrieve console logs (filtering, truncation, summary, TONL format)                                                          |
-| `search_logs`           | Search logs for specific text (truncation, TONL format)                                                                      |
+| `get_logs`              | Retrieve console logs (filtering, truncation, summary)                                                                       |
+| `search_logs`           | Search logs for specific text (truncation)                                                                                   |
 | `clear_logs`            | Clear the log buffer                                                                                                         |
 
 ## Network Tracking
 
 | Tool                   | Description                                                   |
 | ---------------------- | ------------------------------------------------------------- |
-| `get_network_requests` | Retrieve network requests (filtering, summary, TONL format)   |
-| `search_network`       | Search requests by URL pattern (TONL format)                  |
+| `get_network_requests` | Retrieve network requests (filtering, summary)                |
+| `search_network`       | Search requests by URL pattern                                |
 | `get_request_details`  | Get full details of a request (headers, body with truncation) |
 | `get_network_stats`    | Get statistics: counts by method, status code, domain         |
 | `clear_network`        | Clear the network request buffer                              |

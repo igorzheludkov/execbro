@@ -26,7 +26,7 @@ Start with a lightweight structure view:
 - Use `mcp__execbro__get_component_tree` with `focusedOnly=true` and `structureOnly=true`
 - This gives a compact view (~1-2KB) of just the active screen, skipping navigation wrappers
 - Use `hideInternals=true` (default) to filter out RN internal components (RCTView, RNS*, Animated)
-- Output format defaults to `tonl` (compact, ~40% smaller than JSON); use `format="json"` if you need structured data
+- Output format defaults to `compact` (~5-6x smaller than JSON); use `format="json"` if you need structured data
 
 ### 3. Drill Down into Specific Components
 

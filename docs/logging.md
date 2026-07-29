@@ -24,7 +24,6 @@ get_logs with level="error" maxLogs=20
 | `startFromText` | string | - | Start from the last log containing this text |
 | `maxMessageLength` | number | 500 | Max chars per message (0 = unlimited) |
 | `verbose` | boolean | false | Disable all truncation, return full messages |
-| `format` | string | "text" | Output format: `text` or `tonl` (30-50% smaller) |
 | `summary` | boolean | false | Return counts + last 5 messages only |
 
 ## Recommended Usage Patterns
@@ -41,9 +40,6 @@ get_logs with startFromText="Running app" maxLogs=100
 
 # Full messages for debugging specific issues
 get_logs with maxLogs=10 verbose=true
-
-# Token-efficient format for large outputs
-get_logs with format="tonl" maxLogs=100
 
 # Compact overview with shorter messages
 get_logs with maxMessageLength=200 maxLogs=50
@@ -135,20 +131,3 @@ get_logs with maxLogs=10 verbose=true
 # Unlimited
 get_logs with maxMessageLength=0
 ```
-
-### TONL Format
-
-Use TONL (Token-Optimized Notation Language) for ~30-50% smaller output:
-
-```
-get_logs with format="tonl"
-```
-
-Output:
-
-```
-[Format: TONL - compact token-optimized format. Fields in header, values in rows.]
-{logs:[{time:"14:32:45",level:"LOG",msg:"App started"},{time:"14:32:46",level:"WARN",msg:"Slow query"}]}
-```
-
-TONL is also available for `search_logs`, `get_network_requests`, and `search_network`.

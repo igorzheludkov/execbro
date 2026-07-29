@@ -78,6 +78,5 @@ When you need fresh logs after a specific action:
 - Requires the ExecBro MCP server to be running and connected to the app
 - Use `summary=true` first to avoid token overload from large log volumes
 - For large objects in logs, use `verbose=true` with low `maxLogs` to see full content
-- Output defaults to `tonl` format (compact, ~30-50% smaller); use `format="text"` for plain text
 - Use `device` param to target a specific device when multiple are connected (e.g., `device="iPhone"`). Omitting merges logs from all devices
 - **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.

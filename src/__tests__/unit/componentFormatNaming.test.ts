@@ -9,15 +9,18 @@ import { join } from "node:path";
 import { execSync } from "node:child_process";
 
 describe("component formatter naming", () => {
-    it("no production source file mentions tonl", () => {
+    it("no production source, docs, or skill file mentions tonl", () => {
         // Case-SENSITIVE on purpose. A case-insensitive match also hits
         // unrelated identifiers that merely contain the letters t-o-n-l --
         // e.g. isEvalTimeoutOnLiveSocket ("tOnL") -- and would force renaming
         // code that has nothing to do with this format.
         // __tests__ is excluded because this very file contains the string
         // in its own pattern and comments, which would be self-defeating.
+        // Scope covers src/, skills/, docs/, and README.md -- the original
+        // src/-only scope is why the doc/skill references to the removed
+        // "tonl" log/network format survived the earlier commits unnoticed.
         const hits = execSync(
-            "grep -rlE 'tonl|Tonl|TONL' src/ --exclude-dir=__tests__ || true",
+            "grep -rlE 'tonl|Tonl|TONL' src/ skills/ docs/ README.md --exclude-dir=__tests__ || true",
             { cwd: process.cwd(), encoding: "utf8" }
         ).trim();
         expect(hits).toBe("");

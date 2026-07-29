@@ -156,7 +156,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | [Setup](docs/setup.md)                                     | Per-client MCP config (Claude, Codex, Cursor, VS Code, …), Android & iOS setup  |
 | [SDK Setup](docs/sdk.md)                                   | Install & `init()` the in-app SDK to wire stores + network layer into the agent |
-| [Console Logging](docs/logging.md)                         | `get_logs` parameters, filtering, summary mode, TONL format, token optimization |
+| [Console Logging](docs/logging.md)                         | `get_logs` parameters, filtering, summary mode, token optimization              |
 | [Network Tracking](docs/network.md)                        | SDK setup for full capture, filtering, request details, statistics              |
 | [App Inspection](docs/app-inspection.md)                   | Debug globals (Apollo, Redux, Expo Router), `execute_in_app`, limitations       |
 | [Layout & Component Inspection](docs/layout-inspection.md) | `get_screen_layout`, component tree, `inspect_at_point`, `find_components`      |

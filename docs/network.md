@@ -99,14 +99,6 @@ get_network_requests with summary=true
 
 This returns the same output as `get_network_stats` - counts by method, status, and domain.
 
-## TONL Format
-
-Use TONL for ~30-50% smaller output:
-
-```
-get_network_requests with format="tonl"
-```
-
 ## View Statistics
 
 ```
