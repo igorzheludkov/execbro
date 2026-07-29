@@ -96,3 +96,88 @@ export function fingerprintEvent(lines: RawLogLine[], deviceKey: string): string
     // one during dedupe.
     return createHash("sha1").update(JSON.stringify(parts)).digest("hex");
 }
+
+// Process-global so an id identifies exactly one event across every device,
+// and get_log_details needs no device argument. Deliberately NOT the
+// per-device numbering that resolveNetworkBuffer had to retrofit with a
+// "@deviceName" suffix after ids collided.
+let nextNativeId = 1;
+
+export class NativeLogBuffer {
+    private events: LogEvent[] = [];
+    private seen = new Set<string>();
+    private lastTs: Date | undefined;
+    private maxSize: number;
+
+    constructor(maxSize: number = 200) {
+        this.maxSize = maxSize;
+    }
+
+    /** Append unseen drafts, assigning ids. Returns only what was new. */
+    ingest(drafts: DraftEvent[]): LogEvent[] {
+        const added: LogEvent[] = [];
+        for (const d of drafts) {
+            if (this.seen.has(d.fingerprint)) continue;
+            this.seen.add(d.fingerprint);
+            const event: LogEvent = { ...d, id: `n${nextNativeId++}` };
+            this.events.push(event);
+            added.push(event);
+            if (!this.lastTs || d.ts > this.lastTs) this.lastTs = d.ts;
+        }
+        while (this.events.length > this.maxSize) this.events.shift();
+        return added;
+    }
+
+    list(): LogEvent[] {
+        return [...this.events];
+    }
+
+    get(id: string): LogEvent | undefined {
+        return this.events.find((e) => e.id === id);
+    }
+
+    /**
+     * Clears stored events but NOT the seen-set or watermark — otherwise the
+     * next fetch re-ingests everything the caller just cleared.
+     */
+    clear(): number {
+        const count = this.events.length;
+        this.events = [];
+        return count;
+    }
+
+    /** Newest ingested device timestamp. Drives `logcat -T` / `log show --start`. */
+    get watermark(): Date | undefined {
+        return this.lastTs;
+    }
+
+    get size(): number {
+        return this.events.length;
+    }
+}
+
+export const nativeLogBuffers = new Map<string, NativeLogBuffer>();
+
+export function getNativeLogBuffer(deviceKey: string): NativeLogBuffer {
+    let buffer = nativeLogBuffers.get(deviceKey);
+    if (!buffer) {
+        buffer = new NativeLogBuffer(200);
+        nativeLogBuffers.set(deviceKey, buffer);
+    }
+    return buffer;
+}
+
+/** Resolve an event id across every device buffer. */
+export function findNativeEvent(id: string): LogEvent | undefined {
+    for (const buffer of nativeLogBuffers.values()) {
+        const hit = buffer.get(id);
+        if (hit) return hit;
+    }
+    return undefined;
+}
+
+/** Test-only. */
+export function __resetNativeLogBuffers(): void {
+    nativeLogBuffers.clear();
+    nextNativeId = 1;
+}
