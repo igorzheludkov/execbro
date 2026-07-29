@@ -114,12 +114,22 @@ export function registerToolWithTelemetry(
             if (result?._errorContext) {
                 errorContext = result._errorContext;
             }
-            // Check for empty result (only on success, only if detector provided)
-            if (success && emptyResultDetector) {
-                try {
-                    emptyResult = emptyResultDetector(result);
-                } catch {
-                    // Detector failure should never affect tool execution
+            // Check for empty result (only on success). A tool that reports
+            // `_emptyResult` wins over the detector: the detector can only see
+            // global state, while the handler knows what it actually returned
+            // to the caller. Mixing the two produced both false empties (SDK
+            // path served logs while the CDP buffer was empty) and false
+            // non-empties (device/level filter matched nothing while another
+            // buffer held logs), which made the empty rate unreadable.
+            if (success) {
+                if (typeof result?._emptyResult === "boolean") {
+                    emptyResult = result._emptyResult;
+                } else if (emptyResultDetector) {
+                    try {
+                        emptyResult = emptyResultDetector(result);
+                    } catch {
+                        // Detector failure should never affect tool execution
+                    }
                 }
             }
             // Extract meaningfulness data if provided (tap tool verification)

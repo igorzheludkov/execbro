@@ -18,7 +18,25 @@ import {
 } from "../core/index.js";
 import { resolveNetworkBuffer } from "../core/toolHelpers.js";
 import { UserInputError } from "../core/errors.js";
+import { diagnoseEmptyResult, type EmptyDiagnosisLabels } from "../core/logDiagnosis.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork } from "../core/sdkBridge.js";
+
+// Network capture has no end-to-end probe equivalent to verifyLogPipeline, so
+// the "connected but nothing captured" verdict is always unverified: a silently
+// dead interceptor is indistinguishable from an idle app. Labelled honestly
+// rather than reported as a clean "no requests". Options for an actual probe
+// are drafted in docs/devtools-core/specs/2026-07-29-network-capture-verification-design.md
+const NETWORK_EMPTY_LABELS: EmptyDiagnosisLabels = {
+    verified: "no_requests_verified",
+    unverified: "no_requests_unverified"
+};
+
+function networkDiagnosisDeps(device?: string) {
+    return {
+        checkConnection: () => checkAndEnsureConnection(device),
+        labels: NETWORK_EMPTY_LABELS
+    };
+}
 
 export function registerNetworkTools(server: McpServer): void {
     // Tool: Get network requests
@@ -84,7 +102,9 @@ export function registerNetworkTools(server: McpServer): void {
                             lines.push("\nBy Domain:");
                             for (const [d, c] of Object.entries(s.byDomain).sort((a: any, b: any) => b[1] - a[1]).slice(0, 10)) lines.push(`  ${d}: ${c}`);
                         }
-                        return { content: [{ type: "text" as const, text: `Network Summary (SDK):\n\n${lines.join("\n")}` }] };
+                        // Served real SDK data — not empty, regardless of what the
+                        // (separate) CDP/interceptor buffer happens to hold.
+                        return { _emptyResult: false, content: [{ type: "text" as const, text: `Network Summary (SDK):\n\n${lines.join("\n")}` }] };
                     }
                 }
     
@@ -97,24 +117,32 @@ export function registerNetworkTools(server: McpServer): void {
                         const dur = r.duration != null ? `${r.duration}ms` : "-";
                         return `[${r.id}] ${time} ${r.method} ${st} ${dur} ${r.url}`;
                     });
-                    return { content: [{ type: "text" as const, text: `Network Requests (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
+                    return { _emptyResult: false, content: [{ type: "text" as const, text: `Network Requests (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
                 }
             }
     
             // Fallback: read from in-process buffer (CDP/interceptor)
             // Return summary if requested
             if (summary) {
-                const stats = getNetworkStats(resolveNetworkBuffer(device));
+                const buffer = resolveNetworkBuffer(device);
+                const stats = getNetworkStats(buffer);
+                // Judge emptiness by the buffer this summary was built from, not
+                // the global count across every device.
+                const summaryEmpty = buffer.size === 0;
                 let connectionWarning = "";
-                if (resolveNetworkBuffer(device).size === 0) {
-                    const connStatus = await checkAndEnsureConnection(device);
-                    connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
+                let emptyReason: string | undefined;
+                if (summaryEmpty) {
+                    const diagnosis = await diagnoseEmptyResult(networkDiagnosisDeps(device));
+                    connectionWarning = diagnosis.warning;
+                    emptyReason = diagnosis.reason;
                     if (!sdkAvailable) {
                         connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
                     }
                     connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
                 }
                 return {
+                    _emptyResult: summaryEmpty,
+                    ...(emptyReason && { _emptyReason: emptyReason }),
                     content: [
                         {
                             type: "text",
@@ -124,22 +152,40 @@ export function registerNetworkTools(server: McpServer): void {
                 };
             }
     
-            const { requests, count, formatted } = getNetworkRequests(resolveNetworkBuffer(device), {
+            // Resolved once: for the all-devices case this copies every buffered
+            // entry into a merged buffer, so it is not free to call repeatedly.
+            const networkBuffer = resolveNetworkBuffer(device);
+            const { requests, count, formatted } = getNetworkRequests(networkBuffer, {
                 maxRequests,
                 method,
                 urlPattern,
                 status
             });
     
+            // `_emptyResult` measures CAPTURE reliability, not whether this
+            // particular call returned rows — see the 2026-03-19 empty-result
+            // spec. Filters matching nothing is a natural outcome, reported via
+            // `_emptyReason` without setting the empty flag.
+            const bufferEmpty = networkBuffer.size === 0;
+
             // Check connection health
             let connectionWarning = "";
+            let emptyReason: string | undefined;
             if (count === 0) {
-                const connStatus = await checkAndEnsureConnection(device);
-                connectionWarning = connStatus.message ? `\n\n${connStatus.message}` : "";
-                if (!sdkAvailable) {
-                    connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
+                // Capture is demonstrably working if the buffer holds anything —
+                // the method/url/status filters simply matched none of it. Report
+                // that directly instead of probing the connection and blaming it.
+                if (!bufferEmpty) {
+                    emptyReason = "filtered_out";
+                } else {
+                    const diagnosis = await diagnoseEmptyResult(networkDiagnosisDeps(device));
+                    connectionWarning = diagnosis.warning;
+                    emptyReason = diagnosis.reason;
+                    if (!sdkAvailable) {
+                        connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
+                    }
+                    connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
                 }
-                connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
             } else {
                 const passive = getPassiveConnectionStatus();
                 connectionWarning = !passive.connected
@@ -168,6 +214,8 @@ export function registerNetworkTools(server: McpServer): void {
             if (format === "tonl") {
                 const tonlOutput = formatNetworkAsTonl(requests);
                 return {
+                    _emptyResult: bufferEmpty,
+                    ...(emptyReason && { _emptyReason: emptyReason }),
                     content: [
                         {
                             type: "text",
@@ -178,6 +226,8 @@ export function registerNetworkTools(server: McpServer): void {
             }
     
             return {
+                _emptyResult: bufferEmpty,
+                ...(emptyReason && { _emptyReason: emptyReason }),
                 content: [
                     {
                         type: "text",
@@ -186,7 +236,9 @@ export function registerNetworkTools(server: McpServer): void {
                 ]
             };
         },
-        // Empty result detector: buffer has no entries at all
+        // Fallback only — every return path above sets `_emptyResult` explicitly,
+        // which takes precedence. Retained so a future path that forgets to set it
+        // still reports something rather than nothing.
         () => { let total = 0; for (const b of networkBuffers.values()) total += b.size; return total === 0; }
     );
     

@@ -20,6 +20,7 @@ import {
     getLogBuffer,
 } from "../core/index.js";
 import { resolveLogBuffer } from "../core/toolHelpers.js";
+import { diagnoseEmptyLogs, type LogDiagnosis } from "../core/logDiagnosis.js";
 import { UserInputError } from "../core/errors.js";
 import {
     isSDKInstalled,
@@ -27,6 +28,16 @@ import {
     clearSDKConsole,
     getSDKConsoleStats,
 } from "../core/sdkBridge.js";
+
+// Binds the live connection/pipeline probes for `diagnoseEmptyLogs`. Kept here
+// so the diagnosis logic itself stays free of module-level state and testable.
+function logDiagnosisDeps(device?: string) {
+    return {
+        checkConnection: () => checkAndEnsureConnection(device),
+        resolveApp: () => (device ? getConnectedAppByDevice(device) : getFirstConnectedApp()),
+        verifyPipeline: verifyLogPipeline,
+    };
+}
 
 export function registerLogTools(server: McpServer): void {
     // Tool: Get console logs
@@ -104,7 +115,9 @@ export function registerLogTools(server: McpServer): void {
                             lines.push("\nBy Level:");
                             for (const [lvl, cnt] of Object.entries(s.byLevel)) lines.push(`  ${lvl}: ${cnt}`);
                         }
-                        return { content: [{ type: "text" as const, text: `Log Summary (SDK):\n\n${lines.join("\n")}` }] };
+                        // Served real SDK data — not empty, regardless of what the
+                        // (separate) CDP buffer happens to hold.
+                        return { _emptyResult: false, content: [{ type: "text" as const, text: `Log Summary (SDK):\n\n${lines.join("\n")}` }] };
                     }
                 }
     
@@ -120,7 +133,7 @@ export function registerLogTools(server: McpServer): void {
                             }
                             return `${time} [${e.level}] ${msg}`;
                         });
-                        return { content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${tonlLines.join("\n")}` }] };
+                        return { _emptyResult: false, content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${tonlLines.join("\n")}` }] };
                     }
                     const lines = entries.map((e) => {
                         const time = new Date(e.timestamp).toLocaleTimeString();
@@ -130,31 +143,28 @@ export function registerLogTools(server: McpServer): void {
                         }
                         return `[${time}] [${e.level.toUpperCase()}] ${msg}`;
                     });
-                    return { content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
+                    return { _emptyResult: false, content: [{ type: "text" as const, text: `Console Logs (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
                 }
             }
     
             // Return summary if requested
             if (summary) {
-                const summaryText = getLogSummary(resolveLogBuffer(device), { lastN: 5, maxMessageLength: 100 });
+                const buffer = resolveLogBuffer(device);
+                const summaryText = getLogSummary(buffer, { lastN: 5, maxMessageLength: 100 });
+                // Judge emptiness by the buffer this summary was actually built
+                // from, not the global count across every device.
+                const summaryEmpty = buffer.size === 0;
                 let connectionWarning = "";
-                if (getTotalLogCount() === 0) {
-                    const status = await checkAndEnsureConnection(device);
-                    connectionWarning = status.message ? `\n\n${status.message}` : "";
-    
-                    if (status.connected) {
-                        const targetApp = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
-                        if (targetApp) {
-                            const pipeline = await verifyLogPipeline(targetApp);
-                            if (pipeline.message) {
-                                connectionWarning += `\n\n${pipeline.message}`;
-                            }
-                        }
-                    }
-    
+                let emptyReason: string | undefined;
+                if (summaryEmpty) {
+                    const diagnosis = await diagnoseEmptyLogs(logDiagnosisDeps(device));
+                    connectionWarning = diagnosis.warning;
+                    emptyReason = diagnosis.reason;
                     connectionWarning += await metroMissingHintIfAbsent("get_logs");
                 }
                 return {
+                    _emptyResult: summaryEmpty,
+                    ...(emptyReason && { _emptyReason: emptyReason }),
                     content: [
                         {
                             type: "text",
@@ -164,72 +174,66 @@ export function registerLogTools(server: McpServer): void {
                 };
             }
     
-            const { logs, count, formatted } = getLogs(resolveLogBuffer(device), {
+            // Resolved once: for the all-devices case this copies every buffered
+            // entry into a merged buffer, so it is not free to call repeatedly.
+            const logBuffer = resolveLogBuffer(device);
+            const { logs, count, formatted } = getLogs(logBuffer, {
                 maxLogs,
                 level,
                 startFromText,
                 maxMessageLength,
                 verbose
             });
-    
+
+            // `_emptyResult` measures CAPTURE reliability, not whether this
+            // particular call returned rows — see the 2026-03-19 empty-result
+            // spec. A filter that matches nothing is a natural outcome, so it is
+            // reported via `_emptyReason` (`filtered_out`) without setting the
+            // empty flag. Keeps the empty rate comparable across time.
+            const bufferEmpty = logBuffer.size === 0;
+
             // Check connection health
             let connectionWarning = "";
             let emptyReason: string | undefined;
-            if (count === 0) {
-                const status = await checkAndEnsureConnection(device);
-                connectionWarning = status.message ? `\n\n${status.message}` : "";
-    
-                // Track empty reason for telemetry
-                emptyReason = "no_logs";
-                if (!status.connected) {
-                    emptyReason = "disconnected";
-                } else if (status.wasReconnected) {
-                    emptyReason = "post_reconnect";
-                }
-    
-                // End-to-end log pipeline verification (with automatic recovery)
-                if (status.connected) {
-                    const targetApp = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
-                    if (targetApp) {
-                        const pipeline = await verifyLogPipeline(targetApp);
-                        if (pipeline.message) {
-                            connectionWarning += `\n\n${pipeline.message}`;
-                        }
-                        if (!pipeline.ok) {
-                            emptyReason = "pipeline_failed";
-                        } else if (pipeline.recovered) {
-                            emptyReason = "pipeline_recovered";
-                        }
-                        // If pipeline recovered, re-read the buffer — new logs may have arrived
-                        if (pipeline.recovered && pipeline.ok) {
-                            const retryResult = getLogs(resolveLogBuffer(device), {
-                                maxLogs, level, startFromText, maxMessageLength, verbose
-                            });
-                            if (retryResult.count > 0) {
-                                // Return the recovered logs instead of empty
-                                return {
-                                    _emptyReason: "pipeline_recovered",
-                                    content: [{
-                                        type: "text",
-                                        text: `React Native Console Logs (${retryResult.count} entries):\n\n${retryResult.formatted}${connectionWarning}`
-                                    }]
-                                };
-                            }
-                        }
+            if (count === 0 && !bufferEmpty) {
+                // Capture is demonstrably working — the level/startFromText filter
+                // simply matched nothing. Report that instead of probing the
+                // connection and blaming it for a filter miss.
+                emptyReason = "filtered_out";
+                connectionWarning = "";
+            } else if (bufferEmpty) {
+                const diagnosis: LogDiagnosis = await diagnoseEmptyLogs(logDiagnosisDeps(device));
+                connectionWarning = diagnosis.warning;
+                emptyReason = diagnosis.reason;
+
+                // If the pipeline recovered, re-read the buffer — new logs may have arrived
+                if (diagnosis.recovered) {
+                    const retryResult = getLogs(resolveLogBuffer(device), {
+                        maxLogs, level, startFromText, maxMessageLength, verbose
+                    });
+                    if (retryResult.count > 0) {
+                        // Return the recovered logs instead of empty
+                        return {
+                            _emptyResult: false,
+                            _emptyReason: "pipeline_recovered",
+                            content: [{
+                                type: "text",
+                                text: `React Native Console Logs (${retryResult.count} entries):\n\n${retryResult.formatted}${connectionWarning}`
+                            }]
+                        };
                     }
                 }
-    
-                // Add diagnostic metadata for empty results (captured by telemetry via responsePreview)
-                if (count === 0) {
-                    const diagParts = [
-                        `empty_reason=${status?.wasReconnected ? "post_reconnect" : "no_logs"}`,
-                        `connection=${getPassiveConnectionStatus().reason}`,
-                        `device_count=${connectedApps.size}`,
-                        `buffer_sizes=${JSON.stringify(Object.fromEntries([...logBuffers.entries()].map(([k, v]) => [k, v.size])))}`,
-                    ];
-                    connectionWarning += `\n\n[DIAG] ${diagParts.join(", ")}`;
-                }
-    
+
+                // Diagnostic metadata for empty results (local dev dashboard only —
+                // responsePreview is never sent to the remote telemetry backend).
+                const diagParts = [
+                    `empty_reason=${emptyReason}`,
+                    `connection=${getPassiveConnectionStatus().reason}`,
+                    `device_count=${connectedApps.size}`,
+                    `buffer_sizes=${JSON.stringify(Object.fromEntries([...logBuffers.entries()].map(([k, v]) => [k, v.size])))}`,
+                ];
+                connectionWarning += `\n\n[DIAG] ${diagParts.join(", ")}`;
+
                 connectionWarning += await metroMissingHintIfAbsent("get_logs");
             } else {
                 const passive = getPassiveConnectionStatus();
@@ -261,6 +265,7 @@ export function registerLogTools(server: McpServer): void {
             if (format === "tonl") {
                 const tonlOutput = formatLogsAsTonl(logs, { maxMessageLength: verbose ? 0 : maxMessageLength });
                 return {
+                    _emptyResult: bufferEmpty,
                     ...(emptyReason && { _emptyReason: emptyReason }),
                     content: [
                         {
@@ -270,8 +275,9 @@ export function registerLogTools(server: McpServer): void {
                     ]
                 };
             }
-    
+
             return {
+                _emptyResult: bufferEmpty,
                 ...(emptyReason && { _emptyReason: emptyReason }),
                 content: [
                     {
@@ -281,7 +287,9 @@ export function registerLogTools(server: McpServer): void {
                 ]
             };
         },
-        // Empty result detector: buffer has no entries at all
+        // Fallback only — every return path above sets `_emptyResult` explicitly,
+        // which takes precedence. Retained so a future path that forgets to set it
+        // still reports something rather than nothing.
         () => getTotalLogCount() === 0
     );
     

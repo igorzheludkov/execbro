@@ -77,7 +77,7 @@ interface TelemetryEvent {
     changeRate?: number; // tap verification: percentage of pixels changed (0-1)
     tapStrategy?: string; // tap: winning strategy (fiber, ocr, accessibility, coordinate, etc.)
     iosDriver?: string; // tap: which iOS UI driver was used (idb, axe)
-    emptyReason?: string; // get_logs: why the result was empty (no_logs, post_reconnect, pipeline_recovered, pipeline_failed, disconnected)
+    emptyReason?: string; // get_logs: why the result was empty — see EmptyLogReason in core/logDiagnosis.ts
     artifactKey?: string; // tap: R2 key prefix `<YYYY-MM-DD>/<uuid>` for the failure artifact bundle
     ocrClosestMatch?: string; // tap: OCR's closest fuzzy hit `"text"@score`
     fiberPressableCount?: string; // tap: count of visible pressables fiber found
