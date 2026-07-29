@@ -13,7 +13,7 @@ interface ComponentTreeNode {
     layout?: Record<string, unknown>;
 }
 
-function formatTreeToTonl(node: ComponentTreeNode, indent = 0): string {
+function formatTreeCompact(node: ComponentTreeNode, indent = 0): string {
     const prefix = "  ".repeat(indent);
     let result = `${prefix}${node.component}`;
 
@@ -38,7 +38,7 @@ function formatTreeToTonl(node: ComponentTreeNode, indent = 0): string {
     // Recurse children
     if (node.children && node.children.length > 0) {
         for (const child of node.children) {
-            result += formatTreeToTonl(child, indent + 1);
+            result += formatTreeCompact(child, indent + 1);
         }
     }
 
@@ -65,7 +65,7 @@ export async function getComponentTree(
         includeProps?: boolean;
         includeStyles?: boolean;
         hideInternals?: boolean;
-        format?: "json" | "tonl";
+        format?: "json" | "compact";
         structureOnly?: boolean;
         focusedOnly?: boolean;
         device?: string;
@@ -76,14 +76,14 @@ export async function getComponentTree(
         includeProps = false,
         includeStyles = false,
         hideInternals = true,
-        format = "tonl",
+        format = "compact",
         structureOnly = false,
         focusedOnly = false,
         device,
         timeoutMs
     } = options;
     // Use lower default depth for structureOnly to keep output compact (~2-5KB)
-    // Full mode uses higher depth since TONL format handles it better
+    // Full mode uses higher depth since compact format handles it better
     // focusedOnly mode uses moderate depth since we're already filtering to active screen
     const maxDepth = options.maxDepth ?? 5000;
 
@@ -313,10 +313,10 @@ export async function getComponentTree(
                     const structure = formatTreeStructureOnly(parsed.tree);
                     return { success: true, result: prefix + structure };
                 }
-                // TONL format: compact with props/layout
-                if (format === "tonl") {
-                    const tonl = formatTreeToTonl(parsed.tree);
-                    return { success: true, result: prefix + tonl };
+                // Compact format: indented tree with props/layout
+                if (format === "compact") {
+                    const compact = formatTreeCompact(parsed.tree);
+                    return { success: true, result: prefix + compact };
                 }
             }
         } catch {

@@ -7,7 +7,7 @@ export interface ComponentSummary {
     count: number;
 }
 
-export function formatSummaryToTonl(components: ComponentSummary[], total: number): string {
+export function formatSummaryCompact(components: ComponentSummary[], total: number): string {
     const lines: string[] = [`#summary total=${total}`];
     for (const c of components) {
         lines.push(`${c.component}:${c.count}`);
@@ -828,8 +828,8 @@ export async function getScreenLayout(
             const parsed = JSON.parse(result.result);
             if (parsed.components) {
                 // Summary mode
-                const tonl = formatSummaryToTonl(parsed.components, parsed.totalElements);
-                return { success: true, result: tonl };
+                const compact = formatSummaryCompact(parsed.components, parsed.totalElements);
+                return { success: true, result: compact };
             } else if (parsed.elements) {
                 if (raw) {
                     return {

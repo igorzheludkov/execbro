@@ -168,11 +168,11 @@ export function registerComponentTools(server: McpServer): void {
                         "Hide internal RN components (RCTView, RNS*, Animated, etc.) for cleaner output (default: true)"
                     ),
                 format: z
-                    .enum(["json", "tonl"])
+                    .enum(["json", "compact"])
                     .optional()
-                    .default("tonl")
+                    .default("compact")
                     .describe(
-                        "Output format: 'json' or 'tonl' (default, compact indented tree). Ignored if structureOnly=true."
+                        "Output format: 'json' or 'compact' (default, indented tree — roughly 6x smaller than json). Ignored if structureOnly=true."
                     ),
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
                 timeoutMs: z.coerce
@@ -585,10 +585,10 @@ export function registerComponentTools(server: McpServer): void {
                     .default(false)
                     .describe("Skip components inside hidden/inactive navigation scenes (unfocused Drawer/Tab destinations, inactive screens). Default false = search the entire fiber tree."),
                 format: z
-                    .enum(["json", "tonl"])
+                    .enum(["json", "compact"])
                     .optional()
-                    .default("tonl")
-                    .describe("Output format: 'json' or 'tonl' (default, pipe-delimited rows, ~40% smaller)"),
+                    .default("compact")
+                    .describe("Output format: 'json' or 'compact' (default, pipe-delimited rows — roughly 4.5x smaller than json)"),
                 device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
                 timeoutMs: z.coerce
                     .number()

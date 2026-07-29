@@ -1,6 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
-import { formatSummaryToTonl } from "./screenLayout.js";
+import { formatSummaryCompact } from "./screenLayout.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 
 // ============================================================================
@@ -16,7 +16,7 @@ interface FoundComponent {
     layout?: Record<string, unknown>;
 }
 
-function formatFoundComponentsToTonl(components: FoundComponent[]): string {
+function formatFoundComponentsCompact(components: FoundComponent[]): string {
     const lines: string[] = ["#found{component,path,depth,key,layout}"];
     for (const c of components) {
         const layout = c.layout
@@ -486,13 +486,13 @@ export async function findComponents(
         includeLayout?: boolean;
         shortPath?: boolean;
         summary?: boolean;
-        format?: "json" | "tonl";
+        format?: "json" | "compact";
         device?: string;
         timeoutMs?: number;
         visibleOnly?: boolean;
     } = {}
 ): Promise<ExecutionResult> {
-    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "tonl", device, timeoutMs, visibleOnly = false } = options;
+    const { maxResults = 20, includeLayout = false, shortPath = true, summary = false, format = "compact", device, timeoutMs, visibleOnly = false } = options;
     const escapedPattern = pattern.replace(/'/g, "\\'").replace(/\\/g, "\\\\");
 
     const expression = `
@@ -630,16 +630,16 @@ export async function findComponents(
 
     const result = await executeInApp(expression, false, { timeoutMs: timeoutMs ?? 5000, originatingToolName: "find_components" }, device);
 
-    if (format === "tonl" && result.success && result.result) {
+    if (format === "compact" && result.success && result.result) {
         try {
             const parsed = JSON.parse(result.result);
             if (parsed.components) {
                 if (parsed.totalMatches !== undefined) {
-                    const tonl = formatSummaryToTonl(parsed.components, parsed.totalMatches);
-                    return { success: true, result: `pattern: ${parsed.pattern}\n${tonl}` };
+                    const compact = formatSummaryCompact(parsed.components, parsed.totalMatches);
+                    return { success: true, result: `pattern: ${parsed.pattern}\n${compact}` };
                 } else {
-                    const tonl = formatFoundComponentsToTonl(parsed.components);
-                    return { success: true, result: `pattern: ${parsed.pattern}\nfound: ${parsed.found}\n${tonl}` };
+                    const compact = formatFoundComponentsCompact(parsed.components);
+                    return { success: true, result: `pattern: ${parsed.pattern}\nfound: ${parsed.found}\n${compact}` };
                 }
             }
         } catch {
