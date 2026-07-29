@@ -1,5 +1,5 @@
 import { connectedApps } from "./state.js";
-import { listDevices } from "./projectMemory.js";
+import { listDevices, recordDevice } from "./projectMemory.js";
 import { listAllDevices } from "./deviceDiscovery.js";
 import {
     getNativeLogBuffer,
@@ -33,6 +33,15 @@ export function identityFromApp(app: ConnectedApp): AppIdentity | undefined {
 /**
  * Last-known identity for a device that is no longer connected — the crash
  * case, where there is no ConnectedApp to read appId from.
+ *
+ * Residual limitation: this can only find an appId that was previously
+ * recorded under `deviceKey` or `deviceName`. `resolveLogTargets` writes the
+ * live identity under `deviceKey` (the udid / adb serial) via `recordDevice`
+ * while the app is connected, which is what makes this succeed after a
+ * crash — but if the app has never been connected on this device in this
+ * project, there is nothing to find. That is a designed degradation, not a
+ * bug: the device still runs in crash-buffer-only mode, and crashes still
+ * surface with their declared owner.
  */
 export function identityFromMemory(
     deviceKey: string,
@@ -131,6 +140,20 @@ export async function resolveLogTargets(device?: string): Promise<LogTarget[]> {
 
         // Chain: live connection -> remembered -> none (crash-buffer-only).
         const live = app ? identityFromApp(app) : undefined;
+        if (live) {
+            // Persist identity under the SAME key the native buffer uses (udid /
+            // adb serial). projectMemory is otherwise keyed by whatever
+            // identifier the resolving caller happened to use — on Android the
+            // appId-bearing row is keyed by the RN deviceName, which nothing
+            // links back to the serial. Recording it here while the app is alive
+            // is what lets identity survive the crash we later want to explain.
+            recordDevice({
+                identifier: row.deviceKey,
+                name: deviceName,
+                platform: row.platform,
+                appId: live.appId,
+            });
+        }
         const remembered = live
             ? undefined
             : identityFromMemory(row.deviceKey, row.platform, row.name);

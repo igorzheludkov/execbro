@@ -1,16 +1,37 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import type { AppIdentity, RawLogLine } from "../../core/logEvents.js";
-import type { DeviceMemoryEntry } from "../../core/projectMemory.js";
+import type { DeviceMemoryEntry, RecordDeviceInput } from "../../core/projectMemory.js";
+import type { ConnectedApp } from "../../core/types.js";
+import type { ListAllDevicesResult } from "../../core/deviceDiscovery.js";
 
 const listDevicesMock = jest.fn<() => DeviceMemoryEntry[]>();
+const recordDeviceMock = jest.fn<(input: RecordDeviceInput) => void>();
 jest.unstable_mockModule("../../core/projectMemory.js", () => ({
     listDevices: listDevicesMock,
-    recordDevice: jest.fn(),
+    recordDevice: recordDeviceMock,
     recordScreenMetrics: jest.fn(),
 }));
 
-const { runNativePipeline, identityFromMemory } = await import("../../core/nativeLogs.js");
+const connectedAppsMock = new Map<string, ConnectedApp>();
+jest.unstable_mockModule("../../core/state.js", () => ({
+    connectedApps: connectedAppsMock,
+}));
+
+const listAllDevicesMock = jest.fn<() => Promise<ListAllDevicesResult>>();
+jest.unstable_mockModule("../../core/deviceDiscovery.js", () => ({
+    listAllDevices: listAllDevicesMock,
+}));
+
+const { runNativePipeline, identityFromMemory, resolveLogTargets } = await import("../../core/nativeLogs.js");
 const { __resetNativeLogBuffers } = await import("../../core/logEvents.js");
+
+function emptyDiscovery(): ListAllDevicesResult {
+    return {
+        ios: { available: true, simulators: [] },
+        android: { available: true, emulators: [], physical: [] },
+        summary: { booted: 0, total: 0 },
+    };
+}
 
 const APP: AppIdentity = {
     deviceKey: "emulator-5554",
@@ -122,5 +143,52 @@ describe("identityFromMemory", () => {
         ]);
 
         expect(identityFromMemory("emulator-5554", "android")).toBeUndefined();
+    });
+});
+
+describe("resolveLogTargets", () => {
+    beforeEach(() => {
+        connectedAppsMock.clear();
+        listAllDevicesMock.mockReset();
+        recordDeviceMock.mockReset();
+        listDevicesMock.mockReset();
+        listDevicesMock.mockReturnValue([]);
+    });
+
+    it("records live identity under the device key so it survives a later crash", async () => {
+        // projectMemory's appId row is keyed by the RN deviceName on Android,
+        // which nothing links back to the adb serial — so identity must be
+        // written under the buffer key (the serial) while the app is still
+        // alive, or the post-crash lookup in identityFromMemory has nothing
+        // to find.
+        const app = {
+            deviceInfo: {
+                deviceName: "sdk_gphone16k_arm64 - 16 - API 36",
+                appId: "com.example.appa",
+            },
+            platform: "android",
+            adbSerial: "emulator-5554",
+        } as unknown as ConnectedApp;
+        connectedAppsMock.set("emulator-5554", app);
+
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            android: {
+                available: true,
+                // Discovery's own name for the row is the AVD name — a third,
+                // unrelated value that also cannot bridge serial -> RN name.
+                emulators: [{ name: "Pixel_9_-_16kb", serial: "emulator-5554", state: "running" }],
+                physical: [],
+            },
+        });
+
+        await resolveLogTargets();
+
+        expect(recordDeviceMock).toHaveBeenCalledWith({
+            identifier: "emulator-5554",
+            name: "sdk_gphone16k_arm64 - 16 - API 36",
+            platform: "android",
+            appId: "com.example.appa",
+        });
     });
 });
