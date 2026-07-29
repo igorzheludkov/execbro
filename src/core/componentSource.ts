@@ -1,4 +1,6 @@
 import type { ComponentStack, SelectionFrame } from "./selectionBuffer.js";
+import { parseStackString, symbolicateFrames } from "./symbolicate.js";
+import type { StackFrame } from "./symbolicate.js";
 
 export interface ProbeResult {
     active: boolean;
@@ -222,4 +224,99 @@ export function buildDebugStackHarvestExpression(
             setTimeout(collect, 300);
         })
     `;
+}
+
+export interface RawComponentStack {
+    component: string;
+    stack: string;
+    /** Present only on React < 19, where _debugSource still exists. */
+    file?: string;
+    lineNumber?: number;
+    column?: number;
+}
+
+export interface SourceLocation {
+    file: string;
+    line: number;
+    column: number;
+}
+
+export interface ResolvedAncestor {
+    component: string;
+    file: string;
+    line: number;
+}
+
+export interface ResolvedSource {
+    source: SourceLocation | null;
+    ancestors: ResolvedAncestor[];
+    sourceUnavailable?: string;
+}
+
+/**
+ * Frame index 1 of a parsed _debugStack is the component's render site - the
+ * JSX call site in its parent, which is the line a developer edits. Index 0 is
+ * the Error construction inside React's jsx runtime.
+ */
+const RENDER_SITE_FRAME_INDEX = 1;
+
+export async function resolveStacksToSource(stacks: RawComponentStack[]): Promise<ResolvedSource> {
+    if (stacks.length === 0) {
+        return { source: null, ancestors: [], sourceUnavailable: "no-debug-stack" };
+    }
+
+    // React < 19 path: _debugSource already carries source coordinates.
+    const direct: ResolvedAncestor[] = [];
+    const needsSymbolication: Array<{ component: string; frame: StackFrame }> = [];
+
+    for (const entry of stacks) {
+        if (entry.file && entry.lineNumber !== undefined) {
+            direct.push({ component: entry.component, file: entry.file, line: entry.lineNumber });
+            continue;
+        }
+        const frames = parseStackString(entry.stack, RENDER_SITE_FRAME_INDEX + 1);
+        const renderSite = frames[RENDER_SITE_FRAME_INDEX];
+        if (renderSite) {
+            needsSymbolication.push({ component: entry.component, frame: renderSite });
+        }
+    }
+
+    if (needsSymbolication.length === 0) {
+        if (direct.length === 0) {
+            return { source: null, ancestors: [], sourceUnavailable: "no-debug-stack" };
+        }
+        const first = direct[0];
+        const firstEntry = stacks.find((s) => s.component === first.component);
+        return {
+            source: { file: first.file, line: first.line, column: firstEntry?.column ?? 0 },
+            ancestors: direct,
+        };
+    }
+
+    const resolved = await symbolicateFrames(needsSymbolication.map((n) => n.frame));
+    if (resolved === null) {
+        return { source: null, ancestors: [], sourceUnavailable: "symbolicate-unreachable" };
+    }
+
+    const ancestors: ResolvedAncestor[] = [...direct];
+    let best: SourceLocation | null = null;
+
+    resolved.forEach((frame, i) => {
+        const component = needsSymbolication[i]?.component;
+        if (!component || frame.collapse) return;
+        ancestors.push({ component, file: frame.file, line: frame.lineNumber });
+        if (!best) {
+            best = { file: frame.file, line: frame.lineNumber, column: frame.column };
+        }
+    });
+
+    if (!best && direct.length > 0) {
+        best = { file: direct[0].file, line: direct[0].line, column: 0 };
+    }
+
+    if (!best) {
+        return { source: null, ancestors: [], sourceUnavailable: "library-only" };
+    }
+
+    return { source: best, ancestors };
 }
