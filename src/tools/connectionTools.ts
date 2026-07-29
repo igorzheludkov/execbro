@@ -725,15 +725,15 @@ export function registerConnectionTools(server: McpServer): void {
                 "PURPOSE: Force a full JS bundle reload when Fast Refresh isn't enough — clears in-memory state and re-runs the bundle from scratch.\n" +
                 "WHEN TO USE (only these cases): (1) native code, app.json, Info.plist, Podfile, or a native module changed; (2) Fast Refresh visibly failed (red-screen or stale render confirmed via screenshot after a few seconds); (3) the app is in a broken state; (4) you need to reset app state completely; (5) the user explicitly asks.\n" +
                 "AVOID: reloading reflexively after JS/TS/TSX/style edits — Fast Refresh applies those in 1-2s. A reload discards navigation stack, context, hooks state, BLE/WebSocket connections, paired devices, and auth sessions, which can force re-pairing or re-login and break your verification loop.\n" +
-                "WORKFLOW: screenshot → wait 2s for Fast Refresh → if still stale, reload_app. Will auto-connect to Metro if no connection exists. After reload, wait a few seconds before running other tools.\n" +
+                "WORKFLOW: screenshot → wait 2s for Fast Refresh → if still stale, reload_app. Auto-connects to Metro if no connection exists (with or without a device argument) — no need to call scan_metro first. After reload, wait a few seconds before running other tools.\n" +
                 "SEE ALSO: get_refresh_status (did Fast Refresh accept?), get_bundle_status (did Metro compile?).",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe("Target device name, substring match against the name shown by get_apps (a simulator UDID or adb serial also works). OMIT THIS unless several devices are connected — passing a name copied from list_ios_simulators / adb devices that isn't attached to Metro is the most common cause of failure.")
             }
         },
         async ({ device }) => {
             const result = await reloadApp(device);
-    
+
             if (!result.success) {
                 return {
                     content: [
@@ -742,7 +742,11 @@ export function registerConnectionTools(server: McpServer): void {
                             text: `Error: ${result.error}`
                         }
                     ],
-                    isError: true
+                    isError: true,
+                    // Low-cardinality tag for telemetry clustering — the message
+                    // alone can't distinguish "no Metro" from "Metro up, connect
+                    // failed" from "device name mismatch" without regexes.
+                    ...(result.errorContext && { _errorContext: result.errorContext })
                 };
             }
     

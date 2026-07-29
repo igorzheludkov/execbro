@@ -174,6 +174,11 @@ export function registerToolWithTelemetry(
         } catch (error) {
             success = false;
             errorMessage = error instanceof Error ? error.message : String(error);
+            // Thrown validation errors can carry a triage tag; without this the
+            // error-context column is empty for every throwing tool path.
+            if (error instanceof UserInputError && error.context) {
+                errorContext = error.context;
+            }
             // H2 (Step 9): UserInputError marks agent-input mistakes (unknown
             // device, missing predicate, ambiguous match). They flow through
             // telemetry's trackToolInvocation in the finally block; we just

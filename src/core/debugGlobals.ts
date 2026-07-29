@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import type { ExecutionResult } from "./types.js";
 import type { DeviceInfo } from "./types.js";
 import { connectedApps, getNextMessageId } from "./state.js";
-import { getConnectedAppByDevice, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
+import { resolveConnectedAppByDevice, describeDeviceResolution, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
 import { fetchDevices, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 import { executeInApp, delay } from "./jsExecute.js";
@@ -195,63 +195,126 @@ export async function inspectGlobal(objectName: string, device?: string): Promis
     return executeInApp(expression, false, { originatingToolName: "inspect_global" }, device);
 }
 
+// Metro's /json/list can lag a freshly launched app; how long to wait before
+// the single auto-connect retry inside reloadApp.
+const AUTO_CONNECT_RETRY_DELAY_MS = 1200;
+
 // Reload the React Native app using __ReactRefresh
 // Note: Page.reload CDP method may work on Bridgeless targets (via HostAgent) — not yet tested
 // Uses fire-and-forget: sends the reload command without waiting for a response,
 // since the JS context is destroyed during reload and would always timeout.
-export async function reloadApp(device?: string): Promise<ExecutionResult> {
-    // Get current connection info before reload
-    let app = getConnectedAppByDevice(device);
+// One auto-connect sweep over every Metro port: mirrors scan_metro's flow
+// (clearReconnectionSuppression + filterDebuggableDevices + purge +
+// connectToDevice per device) — earlier attempts that used ensureConnection
+// here raced with WS close events on first connect and reported
+// "Connection succeeded but app is not available". scan_metro's pattern
+// is the empirically-stable path.
+//
+// Returns the per-device connect failures so the caller can report *why*
+// nothing attached instead of the opaque "could not connect to any device"
+// (which accounted for ~a third of reload_app failures with zero diagnostics).
+async function autoConnectSweep(ports: number[]): Promise<string[]> {
+    clearReconnectionSuppression();
 
-    // Auto-connect if no connection exists. Mirrors scan_metro's flow
-    // (clearReconnectionSuppression + filterDebuggableDevices + purge +
-    // connectToDevice per device) — earlier attempts that used ensureConnection
-    // here raced with WS close events on first connect and reported
-    // "Connection succeeded but app is not available". scan_metro's pattern
-    // is the empirically-stable path.
-    if (!app) {
+    const portDevices = new Map<number, DeviceInfo[]>();
+    for (const port of ports) {
+        const devices = await fetchDevices(port);
+        const debuggable = filterDebuggableDevices(devices);
+        if (debuggable.length > 0) {
+            portDevices.set(port, debuggable);
+        }
+    }
+
+    purgeStaleConnectionsForPorts(portDevices);
+
+    if (portDevices.size === 0) {
+        return [`Metro is running on port(s) ${ports.join(", ")} but reports no debuggable targets (is the app running and in the foreground?)`];
+    }
+
+    const failures: string[] = [];
+    for (const [port, devices] of portDevices) {
+        for (const dev of devices) {
+            try {
+                await connectToDevice(dev, port);
+            } catch (error) {
+                const reason = error instanceof Error ? error.message : String(error);
+                console.error(`[execbro] Auto-connect failed for ${dev.title} on port ${port}: ${reason}`);
+                failures.push(`${dev.deviceName || dev.title} (port ${port}): ${reason}`);
+            }
+        }
+    }
+    return failures;
+}
+
+export async function reloadApp(device?: string): Promise<ExecutionResult> {
+    // Get current connection info before reload. Resolve non-throwing: a miss
+    // is recoverable here (we auto-connect and re-resolve below), and the old
+    // throwing resolve meant a supplied `device` skipped auto-connect entirely.
+    let resolution = resolveConnectedAppByDevice(device);
+
+    if (resolution.kind === "ambiguous") {
+        // Rescanning cannot disambiguate — the agent must pick.
+        return {
+            success: false,
+            error: describeDeviceResolution(resolution),
+            errorContext: "ambiguous_device"
+        };
+    }
+
+    if (resolution.kind === "none") {
         console.error("[execbro] No connection for reload, attempting auto-connect...");
 
         const ports = await scanMetroPorts();
         if (ports.length === 0) {
             return {
                 success: false,
-                error: "No apps connected and no Metro server found. Make sure Metro bundler is running (npm start or expo start), then try again."
+                error: "No apps connected and no Metro server found. Make sure Metro bundler is running (npm start or expo start), then try again.",
+                errorContext: "no_metro"
             };
         }
 
-        clearReconnectionSuppression();
+        let failures = await autoConnectSweep(ports);
+        resolution = resolveConnectedAppByDevice(device);
 
-        const portDevices = new Map<number, DeviceInfo[]>();
-        for (const port of ports) {
-            const devices = await fetchDevices(port);
-            const debuggable = filterDebuggableDevices(devices);
-            if (debuggable.length > 0) {
-                portDevices.set(port, debuggable);
-            }
+        // Metro's /json/list lags a freshly launched or freshly reloaded app by
+        // a second or so, so a single sweep can legitimately see nothing. One
+        // bounded retry converts those into successes instead of telling the
+        // agent to go run scan_metro by hand.
+        if (resolution.kind !== "ok") {
+            await delay(AUTO_CONNECT_RETRY_DELAY_MS);
+            failures = await autoConnectSweep(ports);
+            resolution = resolveConnectedAppByDevice(device);
         }
 
-        purgeStaleConnectionsForPorts(portDevices);
-
-        for (const [port, devices] of portDevices) {
-            for (const dev of devices) {
-                try {
-                    await connectToDevice(dev, port);
-                } catch (error) {
-                    console.error(`[execbro] Auto-connect failed for ${dev.title} on port ${port}: ${error}`);
-                }
-            }
-        }
-
-        app = getConnectedAppByDevice(device);
-        if (!app) {
+        if (resolution.kind === "ambiguous") {
             return {
                 success: false,
-                error: "No apps connected. Found Metro server but could not connect to any device. Make sure the React Native app is running."
+                error: describeDeviceResolution(resolution),
+                errorContext: "ambiguous_device"
+            };
+        }
+
+        if (resolution.kind === "none") {
+            // Device argument that matched nothing gets the resolver's message
+            // (it names the platform mismatch, which is the common case);
+            // otherwise report why the connect attempts failed.
+            const detail = failures.length > 0
+                ? ` Connect attempts failed: ${failures.join("; ").substring(0, 300)}`
+                : "";
+            const base = device
+                ? describeDeviceResolution(resolution)
+                : "No apps connected. Found Metro server but could not connect to any device. Make sure the React Native app is running.";
+            return {
+                success: false,
+                error: `${base}${detail}`,
+                errorContext: device
+                    ? (resolution.connected.length > 0 ? "device_mismatch_after_rescan" : "connect_failed_with_device")
+                    : "connect_failed"
             };
         }
     }
 
+    const app = resolution.app;
     const port = app.port;
     // If the in-app SDK was the network/console source before the reload, the
     // new JS context must re-run init() before get_network_requests can read

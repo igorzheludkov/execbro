@@ -125,6 +125,10 @@ export interface ExecutionResult {
     success: boolean;
     result?: string;
     error?: string;
+    // Short, low-cardinality failure tag (e.g. "no_metro", "connect_failed").
+    // Tools forward it as `_errorContext` so telemetry can cluster failures
+    // without regex-matching the human-facing message.
+    errorContext?: string;
     _meta?: {
         reconnected?: boolean;
         transportError?: string;

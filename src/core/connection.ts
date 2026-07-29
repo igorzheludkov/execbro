@@ -1464,29 +1464,103 @@ function normalizeDeviceId(value: string | null | undefined): string {
     return value.toLowerCase().replace(/[\s_\-]+/g, "");
 }
 
-export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
-    if (!device) {
-        return getFirstConnectedApp();
+/**
+ * Outcome of matching a caller-supplied `device` string against the currently
+ * connected apps. Split out of getConnectedAppByDevice so callers that can
+ * *recover* from a miss (reload_app auto-connects, then re-resolves) can
+ * inspect the failure instead of catching a thrown UserInputError — a throw
+ * on the first resolve is what made reload_app skip its own auto-connect path
+ * whenever a device argument was supplied.
+ */
+export type DeviceResolution =
+    | { kind: "ok"; app: ConnectedApp }
+    | { kind: "ambiguous"; device: string; matches: ConnectedApp[] }
+    | { kind: "none"; device?: string; connected: ConnectedApp[] };
+
+/** Guess which platform a caller-supplied device string refers to. */
+function guessRequestedPlatform(device: string): "ios" | "android" | null {
+    const lower = device.toLowerCase();
+    // Simulator UDIDs are uppercase UUIDs; adb serials are not.
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(lower)) return "ios";
+    if (/iphone|ipad|ipod|\bios\b|simulator/.test(lower)) return "ios";
+    if (/emulator-|sdk_gphone|pixel|galaxy|nexus|\bsm-|moto|xiaomi|redmi|oneplus|android|api \d+/.test(lower)) return "android";
+    return null;
+}
+
+function deviceLabel(app: ConnectedApp): string {
+    return app.deviceInfo.deviceName || app.deviceInfo.title || "";
+}
+
+/**
+ * Human-facing explanation for a `kind: "none"` / `kind: "ambiguous"` resolution.
+ * Kept next to the matcher so the message always reflects the matching rules.
+ */
+export function describeDeviceResolution(resolution: DeviceResolution): string {
+    if (resolution.kind === "ok") return "";
+
+    if (resolution.kind === "ambiguous") {
+        const names = resolution.matches.map(deviceLabel).join(", ");
+        return `Multiple devices match "${resolution.device}": ${names}. Be more specific (use the full device name for an exact match).`;
     }
 
-    const lowerDevice = device.toLowerCase();
-    const normDevice = normalizeDeviceId(device);
-    const matches: ConnectedApp[] = [];
-    const allOpenNames: string[] = [];
+    const { device, connected } = resolution;
+    if (!device) {
+        return "No apps connected. Run scan_metro to discover and connect to Metro servers.";
+    }
+    if (connected.length === 0) {
+        return `No connected device matches "${device}". No devices are currently connected — run scan_metro to discover and connect to Metro servers.`;
+    }
 
+    const quoted = connected.map(a => `"${deviceLabel(a)}"`).join(", ");
+    // Cross-platform mismatch is the dominant shape of this failure: the agent
+    // passes a name from list_ios_simulators / adb devices while only the other
+    // platform is attached to Metro. Saying so beats "retry with one of these".
+    const requested = guessRequestedPlatform(device);
+    const attachedPlatforms = new Set(connected.map(a => a.platform));
+    if (requested && !attachedPlatforms.has(requested)) {
+        const other = requested === "ios" ? "Android" : "iOS";
+        const launchHint = requested === "ios"
+            ? "ios_launch_app (boot the simulator first if needed)"
+            : "android_launch_app";
+        return [
+            `No connected device matches "${device}". Only ${other} device(s) are attached to Metro: ${quoted}.`,
+            `The ${requested === "ios" ? "iOS" : "Android"} app is not connected — start it with ${launchHint}, then run scan_metro.`,
+            `Or omit the device argument / use get_apps to target an already-connected device.`
+        ].join(" ");
+    }
+    return `No connected device matches "${device}". Connected devices: ${quoted}. Retry with one of these names (substring match, case-insensitive), or run get_apps to list them.`;
+}
+
+/**
+ * Non-throwing device matcher. Prefer this in call sites that can retry
+ * (auto-connect, rescan); use getConnectedAppByDevice when a miss is terminal.
+ */
+export function resolveConnectedAppByDevice(device?: string): DeviceResolution {
+    const openApps: ConnectedApp[] = [];
     for (const [key, app] of connectedApps.entries()) {
         if (app.ws.readyState !== WebSocket.OPEN) {
             connectedApps.delete(key);
             continue;
         }
-        const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "";
-        allOpenNames.push(deviceName);
+        openApps.push(app);
+    }
+
+    if (!device) {
+        const app = getFirstConnectedApp();
+        return app ? { kind: "ok", app } : { kind: "none", connected: openApps };
+    }
+
+    const lowerDevice = device.toLowerCase();
+    const normDevice = normalizeDeviceId(device);
+    const matches: ConnectedApp[] = [];
+
+    for (const app of openApps) {
         // Match against deviceName + the underlying hardware identifiers, with
         // separator-insensitive normalization so "SM_A356N" finds
         // "SM-A356N - 15 - API 35" and "emulator-5554" finds the Android app
         // attached to that serial.
         const haystacks = [
-            normalizeDeviceId(deviceName),
+            normalizeDeviceId(deviceLabel(app)),
             normalizeDeviceId(app.simulatorUdid),
             normalizeDeviceId(app.adbSerial)
         ].filter((s) => s.length > 0);
@@ -1497,24 +1571,24 @@ export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
 
     // Prefer exact (case-insensitive) match when present — disambiguates
     // "iPhone 17 Pro" from "iPhone 17 Pro Max" when both are connected.
-    const exact = matches.find(a => {
-        const name = a.deviceInfo.deviceName || a.deviceInfo.title || "";
-        return name.toLowerCase() === lowerDevice;
-    });
-    if (exact) return exact;
+    const exact = matches.find(a => deviceLabel(a).toLowerCase() === lowerDevice);
+    if (exact) return { kind: "ok", app: exact };
 
-    if (matches.length === 1) {
-        return matches[0];
-    }
-    if (matches.length > 1) {
-        const names = matches.map(a => a.deviceInfo.deviceName || a.deviceInfo.title).join(", ");
-        throw new UserInputError(`Multiple devices match "${device}": ${names}. Be more specific (use the full device name for an exact match).`);
-    }
-    if (allOpenNames.length === 0) {
-        throw new UserInputError(`No connected device matches "${device}". No devices are currently connected — run scan_metro to discover and connect to Metro servers.`);
-    }
-    const quoted = allOpenNames.map(n => `"${n}"`).join(", ");
-    throw new UserInputError(`No connected device matches "${device}". Connected devices: ${quoted}. Retry with one of these names (substring match, case-insensitive).`);
+    if (matches.length === 1) return { kind: "ok", app: matches[0] };
+    if (matches.length > 1) return { kind: "ambiguous", device, matches };
+    return { kind: "none", device, connected: openApps };
+}
+
+export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
+    const resolution = resolveConnectedAppByDevice(device);
+    if (resolution.kind === "ok") return resolution.app;
+    // No device argument: a miss just means "nothing connected" — callers
+    // handle null themselves (historically getFirstConnectedApp's contract).
+    if (!device) return null;
+    const context = resolution.kind === "ambiguous"
+        ? "ambiguous_device"
+        : resolution.connected.length > 0 ? "device_mismatch" : "no_devices_connected";
+    throw new UserInputError(describeDeviceResolution(resolution), context);
 }
 
 // Check if any app is connected with an OPEN WebSocket

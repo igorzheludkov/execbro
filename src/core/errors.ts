@@ -9,8 +9,16 @@
  * the throw site and survives message reformatting / translation.
  */
 export class UserInputError extends Error {
-    constructor(message: string) {
+    /**
+     * Optional low-cardinality tag (e.g. "device_mismatch") forwarded to
+     * telemetry's error-context column. Lets the dashboard cluster validation
+     * failures by cause instead of regex-matching free-form messages.
+     */
+    readonly context?: string;
+
+    constructor(message: string, context?: string) {
         super(message);
         this.name = "UserInputError";
+        this.context = context;
     }
 }
