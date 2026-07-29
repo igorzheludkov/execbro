@@ -8,7 +8,6 @@ import {
     formatRequestDetails,
     getConnectedAppByDevice,
     networkBuffers,
-    formatNetworkAsTonl,
     metroMissingHintIfAbsent,
     checkAndEnsureConnection,
     getPassiveConnectionStatus,
@@ -62,11 +61,6 @@ export function registerNetworkTools(server: McpServer): void {
                 method: z.string().optional().describe("Filter by HTTP method (GET, POST, PUT, DELETE, etc.)"),
                 urlPattern: z.string().optional().describe("Filter by URL pattern (case-insensitive substring match)"),
                 status: z.number().optional().describe("Filter by HTTP status code (e.g., 200, 401, 500)"),
-                format: z
-                    .enum(["text", "tonl"])
-                    .optional()
-                    .default("tonl")
-                    .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format, ~30-50% smaller)"),
                 summary: z
                     .boolean()
                     .optional()
@@ -75,7 +69,7 @@ export function registerNetworkTools(server: McpServer): void {
                 device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
             }
         },
-        async ({ maxRequests, method, urlPattern, status, format, summary, device }) => {
+        async ({ maxRequests, method, urlPattern, status, summary, device }) => {
             // Check if SDK is installed — prefer SDK data over CDP/interceptor buffer
             const sdkAvailable = await isSDKInstalled(device);
     
@@ -155,7 +149,7 @@ export function registerNetworkTools(server: McpServer): void {
             // Resolved once: for the all-devices case this copies every buffered
             // entry into a merged buffer, so it is not free to call repeatedly.
             const networkBuffer = resolveNetworkBuffer(device);
-            const { requests, count, formatted } = getNetworkRequests(networkBuffer, {
+            const { count, formatted } = getNetworkRequests(networkBuffer, {
                 maxRequests,
                 method,
                 urlPattern,
@@ -210,21 +204,6 @@ export function registerNetworkTools(server: McpServer): void {
                 }
             }
     
-            // Use TONL format if requested
-            if (format === "tonl") {
-                const tonlOutput = formatNetworkAsTonl(requests);
-                return {
-                    _emptyResult: bufferEmpty,
-                    ...(emptyReason && { _emptyReason: emptyReason }),
-                    content: [
-                        {
-                            type: "text",
-                            text: `Network Requests (${count} entries):\n\n${tonlOutput}${gapWarning}${connectionWarning}`
-                        }
-                    ]
-                };
-            }
-    
             return {
                 _emptyResult: bufferEmpty,
                 ...(emptyReason && { _emptyReason: emptyReason }),
@@ -258,15 +237,10 @@ export function registerNetworkTools(server: McpServer): void {
             inputSchema: {
                 urlPattern: z.string().describe("URL pattern to search for"),
                 maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
-                format: z
-                    .enum(["text", "tonl"])
-                    .optional()
-                    .default("tonl")
-                    .describe("Output format: 'text' or 'tonl' (default, compact token-optimized format)"),
                 device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
             }
         },
-        async ({ urlPattern, maxResults, format, device }) => {
+        async ({ urlPattern, maxResults, device }) => {
             // Check if SDK is installed — prefer SDK data
             const sdkAvailable = await isSDKInstalled(device);
     
@@ -280,14 +254,11 @@ export function registerNetworkTools(server: McpServer): void {
                         const dur = r.duration != null ? `${r.duration}ms` : "-";
                         return `[${r.id}] ${time} ${r.method} ${st} ${dur} ${r.url}`;
                     });
-                    if (format === "tonl") {
-                        return { content: [{ type: "text" as const, text: `Network search results for "${urlPattern}" (${entries.length} matches, SDK):\n\n${lines.join("\n")}` }] };
-                    }
                     return { content: [{ type: "text" as const, text: `Network search results for "${urlPattern}" (${entries.length} matches, SDK):\n\n${lines.join("\n")}` }] };
                 }
             }
     
-            const { requests, count, formatted } = searchNetworkRequests(resolveNetworkBuffer(device), urlPattern, maxResults);
+            const { count, formatted } = searchNetworkRequests(resolveNetworkBuffer(device), urlPattern, maxResults);
     
             // Check connection health
             let connectionWarning = "";
@@ -300,19 +271,6 @@ export function registerNetworkTools(server: McpServer): void {
                 connectionWarning = !passive.connected
                     ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
                     : "";
-            }
-    
-            // Use TONL format if requested
-            if (format === "tonl") {
-                const tonlOutput = formatNetworkAsTonl(requests);
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Network search results for "${urlPattern}" (${count} matches):\n\n${tonlOutput}${connectionWarning}`
-                        }
-                    ]
-                };
             }
     
             return {

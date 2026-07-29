@@ -337,10 +337,6 @@ export {
   buildGitHubUrl,
 } from "./feedback.js";
 
-// Format utilities (TONL)
-export { formatLogsAsTonl, formatNetworkAsTonl } from "./format.js";
-export type { OutputFormat } from "./format.js";
-
 // Measure (component on-screen geometry)
 export { measureComponent } from "./measureComponentTools.js";
 export type { MeasureBounds, MeasureOutcome, MeasureToolResult } from "./measureComponentTools.js";
