@@ -72,5 +72,376 @@
         "toggle_element_inspector",
         "verify_flow",
         "wait_for_flowpoint"
-    ]
+    ],
+    "params": {
+        "activate_license": [
+            "token"
+        ],
+        "android_get_screen_size": [
+            "deviceId"
+        ],
+        "android_input_text": [
+            "device",
+            "deviceId",
+            "replace",
+            "text"
+        ],
+        "android_install_app": [
+            "apkPath",
+            "deviceId",
+            "grantPermissions",
+            "replace"
+        ],
+        "android_key_event": [
+            "deviceId",
+            "key"
+        ],
+        "android_launch_app": [
+            "activityName",
+            "deviceId",
+            "packageName"
+        ],
+        "android_list_packages": [
+            "deviceId",
+            "filter"
+        ],
+        "android_long_press": [
+            "deviceId",
+            "durationMs",
+            "x",
+            "y"
+        ],
+        "android_screenshot": [
+            "deviceId",
+            "outputPath"
+        ],
+        "clear_bundle_errors": [],
+        "clear_flowpoints": [
+            "device",
+            "name"
+        ],
+        "clear_focused_input": [
+            "device"
+        ],
+        "clear_logs": [
+            "device"
+        ],
+        "clear_network": [
+            "device"
+        ],
+        "connect_metro": [
+            "port"
+        ],
+        "delete_account": [
+            "confirm"
+        ],
+        "disconnect_metro": [
+            "device"
+        ],
+        "dismiss_keyboard": [
+            "device"
+        ],
+        "ensure_connection": [
+            "forceRefresh",
+            "healthCheck",
+            "port"
+        ],
+        "execute_in_app": [
+            "awaitPromise",
+            "device",
+            "expression",
+            "maxResultLength",
+            "timeoutMs",
+            "verbose"
+        ],
+        "find_components": [
+            "device",
+            "format",
+            "includeLayout",
+            "maxResults",
+            "pattern",
+            "shortPath",
+            "summary",
+            "timeoutMs",
+            "visibleOnly"
+        ],
+        "get_apps": [],
+        "get_bundle_errors": [
+            "deviceId",
+            "maxErrors",
+            "platform"
+        ],
+        "get_bundle_status": [],
+        "get_component_tree": [
+            "device",
+            "format",
+            "hideInternals",
+            "includeProps",
+            "includeStyles",
+            "maxDepth",
+            "structureOnly",
+            "timeoutMs"
+        ],
+        "get_connection_status": [
+            "eventAppKey",
+            "eventLimit",
+            "events"
+        ],
+        "get_flowpoints": [
+            "device",
+            "level",
+            "limit",
+            "metaIncludes",
+            "name",
+            "run",
+            "since",
+            "step"
+        ],
+        "get_images": [
+            "clear",
+            "frameIndex",
+            "groupId",
+            "id",
+            "last",
+            "list",
+            "source"
+        ],
+        "get_inspector_selection": [
+            "device",
+            "history",
+            "limit",
+            "source",
+            "x",
+            "y"
+        ],
+        "get_license_status": [],
+        "get_log_details": [
+            "id",
+            "maxLength",
+            "verbose"
+        ],
+        "get_logs": [
+            "device",
+            "kind",
+            "level",
+            "maxLogs",
+            "maxMessageLength",
+            "minLevel",
+            "since",
+            "source",
+            "startFromText",
+            "summary",
+            "verbose"
+        ],
+        "get_network_requests": [
+            "device",
+            "maxRequests",
+            "method",
+            "status",
+            "summary",
+            "urlPattern"
+        ],
+        "get_network_stats": [
+            "device"
+        ],
+        "get_pressable_elements": [
+            "device"
+        ],
+        "get_refresh_status": [
+            "device",
+            "since",
+            "sincePath"
+        ],
+        "get_request_details": [
+            "device",
+            "maxBodyLength",
+            "requestId",
+            "verbose"
+        ],
+        "get_screen_layout": [
+            "device",
+            "extended",
+            "summary",
+            "timeoutMs"
+        ],
+        "get_screen_state": [
+            "device",
+            "fullText",
+            "pressablesOnly"
+        ],
+        "get_usage_guide": [
+            "topic"
+        ],
+        "inspect_at_point": [
+            "device",
+            "includeFrame",
+            "includeProps",
+            "source",
+            "x",
+            "y"
+        ],
+        "inspect_component": [
+            "childrenDepth",
+            "componentName",
+            "device",
+            "includeChildren",
+            "includeState",
+            "includeStyle",
+            "index",
+            "shortPath",
+            "simplifyHooks",
+            "timeoutMs"
+        ],
+        "inspect_global": [
+            "device",
+            "objectName"
+        ],
+        "ios_boot_simulator": [
+            "udid"
+        ],
+        "ios_button": [
+            "button",
+            "duration",
+            "udid"
+        ],
+        "ios_input_text": [
+            "device",
+            "replace",
+            "text",
+            "udid"
+        ],
+        "ios_install_app": [
+            "appPath",
+            "udid"
+        ],
+        "ios_launch_app": [
+            "bundleId",
+            "udid"
+        ],
+        "ios_open_url": [
+            "udid",
+            "url"
+        ],
+        "ios_screenshot": [
+            "device",
+            "outputPath",
+            "udid"
+        ],
+        "ios_terminate_app": [
+            "bundleId",
+            "udid"
+        ],
+        "list_android_devices": [],
+        "list_debug_globals": [
+            "device"
+        ],
+        "list_devices": [
+            "refresh"
+        ],
+        "list_ios_simulators": [
+            "onlyBooted"
+        ],
+        "logbox": [
+            "action",
+            "device",
+            "expanded",
+            "level",
+            "message",
+            "patterns",
+            "subtitle",
+            "target"
+        ],
+        "measure": [
+            "componentName",
+            "device",
+            "index"
+        ],
+        "ocr_screenshot": [
+            "deviceId",
+            "platform"
+        ],
+        "redux_dispatch": [
+            "action",
+            "device",
+            "returnPath",
+            "storeIndex"
+        ],
+        "redux_get_state": [
+            "device",
+            "path",
+            "storeIndex"
+        ],
+        "reload_app": [
+            "device"
+        ],
+        "scan_metro": [
+            "endPort",
+            "startPort"
+        ],
+        "search_logs": [
+            "device",
+            "maxMessageLength",
+            "maxResults",
+            "text",
+            "verbose"
+        ],
+        "search_network": [
+            "device",
+            "maxResults",
+            "urlPattern"
+        ],
+        "send_feedback": [
+            "description",
+            "title",
+            "type",
+            "workflow_context"
+        ],
+        "swipe": [
+            "burst",
+            "delta",
+            "device",
+            "direction",
+            "distance",
+            "durationMs",
+            "endX",
+            "endY",
+            "screenshot",
+            "startX",
+            "startY",
+            "verify"
+        ],
+        "tap": [
+            "burst",
+            "component",
+            "device",
+            "index",
+            "maxTraversalDepth",
+            "native",
+            "screenshot",
+            "strategy",
+            "testID",
+            "text",
+            "verify",
+            "x",
+            "y"
+        ],
+        "toggle_element_inspector": [
+            "device"
+        ],
+        "verify_flow": [
+            "allowErrors",
+            "device",
+            "expect",
+            "name",
+            "run"
+        ],
+        "wait_for_flowpoint": [
+            "device",
+            "level",
+            "metaIncludes",
+            "name",
+            "step",
+            "timeoutMs"
+        ]
+    }
 }

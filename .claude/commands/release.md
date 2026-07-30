@@ -71,12 +71,19 @@ the one part that needs a step.
     - Commit in `../web` (its landing page prints the tool count, so the number
       users see moves with this commit).
 
-**Note on descriptions.** The catalogue's tool *names* are validated against
-`registry.json`, but its *descriptions* are hand-written and unvalidated. So a
-tool that gains or loses a **parameter** drifts silently — nothing fails. When a
-release changes a tool's parameters or behaviour, re-read that tool's catalogue
-entry by hand. (This is how four entries kept advertising a removed `format`
-parameter for months.)
+**When this release DELETES a parameter or a documented value**, add its name to
+the `RETIRED` list in `../web/__tests__/lib/tools/catalog.test.ts`. That list is
+the only guard against prose that names dead vocabulary without `=` syntax — the
+form "TONL format" took. It is deliberately hand-maintained: inferring it was
+tried and abandoned, because parameter names here are ordinary English (`native`,
+`events`, `component`, `platform`), so "this word is a parameter of some other
+tool" flagged 16 correct descriptions and caught nothing.
+
+Two guards run automatically and need no action:
+- `registry.json` now carries each tool's parameter names, so any `name=` in a
+  catalogue description must be a real parameter of that tool.
+- `tools.json` records parameters, and `toolsJson.test.ts` fails if they drift
+  from the live registry.
 
 ## Arguments
 

@@ -16,6 +16,7 @@ describe("tools.json", () => {
     const payload = JSON.parse(readFileSync(join(process.cwd(), "tools.json"), "utf8")) as {
         count: number;
         tools: string[];
+        params: Record<string, string[]>;
     };
 
     it("lists exactly the registered tools", () => {
@@ -24,6 +25,18 @@ describe("tools.json", () => {
 
     it("records a count matching its own list", () => {
         expect(payload.count).toBe(payload.tools.length);
+    });
+
+    it("records each tool's parameter names", () => {
+        // Consumers assert their prose does not reference a parameter that no
+        // longer exists. Tool add/remove was already guarded; PARAMETER changes
+        // drifted silently — four website entries advertised a removed `format`
+        // parameter for months with every test green.
+        const live: Record<string, string[]> = {};
+        for (const [name, entry] of toolRegistry.entries()) {
+            live[name] = Object.keys((entry.config as { inputSchema: object }).inputSchema).sort();
+        }
+        expect(payload.params).toEqual(live);
     });
 
     it("is not empty", () => {
