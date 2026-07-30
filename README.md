@@ -1,5 +1,7 @@
 # ExecBro
 
+[![MCP Registry](https://img.shields.io/badge/MCP_Registry-io.github.igorzheludkov%2Fexecbro-6E56CF)](https://registry.modelcontextprotocol.io/?search=io.github.igorzheludkov%2Fexecbro)
+
 **Give your AI assistant eyes and hands into your running React Native app.** Like Chrome DevTools — but for AI agents.
 
 Build, debug, and verify features end-to-end — without leaving the chat.
