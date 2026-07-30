@@ -1,0 +1,31 @@
+{
+    "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+    "name": "io.github.igorzheludkov/execbro",
+    "title": "ExecBro",
+    "description": "Gives AI agents eyes and hands into running React Native apps: logs, REPL, tap, screenshots",
+    "version": "1.11.1",
+    "websiteUrl": "https://execbro.com",
+    "repository": {
+        "url": "https://github.com/igorzheludkov/execbro",
+        "source": "github"
+    },
+    "packages": [
+        {
+            "registryType": "npm",
+            "identifier": "execbro",
+            "version": "1.11.1",
+            "runtimeHint": "npx",
+            "transport": {
+                "type": "stdio"
+            },
+            "environmentVariables": [
+                {
+                    "name": "EXECBRO_API_URL",
+                    "description": "Override the license/account API base URL. Defaults to the production endpoint.",
+                    "isRequired": false,
+                    "isSecret": false
+                }
+            ]
+        }
+    ]
+}
