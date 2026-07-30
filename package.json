@@ -1,7 +1,7 @@
 {
     "name": "execbro",
     "version": "1.10.25",
-    "description": "ExecBro — MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
+    "description": "ExecBro \u2014 MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
     "type": "module",
     "main": "build/index.js",
     "bin": {
@@ -17,7 +17,8 @@
         "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/unit'",
         "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
         "test:tap": "node --experimental-vm-modules node_modules/.bin/jest --testPathPatterns='tap-strategies' --no-coverage --testTimeout=30000",
-        "tools:json": "npm run build && node scripts/generate-tools-json.mjs"
+        "tools:json": "npm run build && node scripts/generate-tools-json.mjs",
+        "postbuild": "node scripts/generate-tools-json.mjs"
     },
     "keywords": [
         "mcp",
@@ -42,7 +43,8 @@
         "node": ">=18.0.0"
     },
     "files": [
-        "build"
+        "build",
+        "tools.json"
     ],
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.25.1",

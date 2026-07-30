@@ -48,6 +48,36 @@ When this skill is invoked, follow these steps:
 - Inform the user that the publish workflow has been triggered
 - Optionally wait and check the final status
 
+### 8. Sync the website's tool registry (only when the tool list changed)
+
+`tools.json` is regenerated automatically by `postbuild` and published with the
+package, so the released artifact is always correct without any action here.
+The **website** is a separate repo and cannot be updated by this build, so it is
+the one part that needs a step.
+
+- Check whether this release added or removed a tool:
+  `git diff <previous-tag>..HEAD -- tools.json`
+- If it is unchanged, skip the rest of this step — say so and stop.
+- If it changed, wait for the publish workflow to finish, then in `../web`:
+    - `npm run sync:tools` (pulls `tools.json` from the newly published package;
+      add `-- --local` only to preview against the sibling checkout before release)
+    - `npm test` — the catalogue test **will fail** until `src/lib/tools/catalog.ts`
+      describes each added tool and drops each removed one. That failure is the
+      guard, not an obstacle.
+    - Write the missing catalogue entries. These are read by humans on
+      `/readme/tools`, so describe what the tool is for in plain prose — do not
+      paste the agent-facing MCP description, which carries PURPOSE/WHEN TO USE
+      blocks that would bloat the page.
+    - Commit in `../web` (its landing page prints the tool count, so the number
+      users see moves with this commit).
+
+**Note on descriptions.** The catalogue's tool *names* are validated against
+`registry.json`, but its *descriptions* are hand-written and unvalidated. So a
+tool that gains or loses a **parameter** drifts silently — nothing fails. When a
+release changes a tool's parameters or behaviour, re-read that tool's catalogue
+entry by hand. (This is how four entries kept advertising a removed `format`
+parameter for months.)
+
 ## Arguments
 
 - `$ARGUMENTS` - Optional: version bump type (`patch`, `minor`, or `major`). Defaults to `patch`.
