@@ -33,22 +33,54 @@ When this skill is invoked, follow these steps:
 - Run `npm version <type>` where type is patch/minor/major
 - This automatically creates a commit and tag
 
-### 5. Push to Remote
+### 5. Sync `server.json` to the new version
+
+`server.json` is the MCP Registry manifest. Its `version` and
+`packages[0].version` must both equal the npm version — the registry rejects a
+mismatch, and `npm version` does not touch this file.
+
+- Edit `server.json`: set `version` and `packages[0].version` to the new version
+- Fold it into the version commit and move the tag onto the amended commit:
+  `git add server.json && git commit --amend --no-edit && git tag -f v<new-version> HEAD`
+- Run `mcp-publisher validate` — it must print `✅ server.json is valid`
+
+The amend is safe **only** because nothing has been pushed yet. If step 6 has
+already run, do not amend — make a follow-up commit and a new patch release
+instead.
+
+### 6. Push to Remote
 
 - Run `git push && git push --tags`
 
-### 6. Create GitHub Release
+### 7. Create GitHub Release
 
 - Run `gh release create v<new-version> --title "v<new-version>" --notes "<release-notes>"`
 - Use the composed release notes from step 3
 
-### 7. Monitor Publish
+### 8. Monitor Publish
 
 - Run `gh run list --limit 1` to show the triggered workflow
 - Inform the user that the publish workflow has been triggered
 - Optionally wait and check the final status
 
-### 8. Sync the website's tool registry (only when the tool list changed)
+### 9. Publish to the MCP Registry
+
+The registry proves ownership by downloading the **published** npm tarball and
+matching its `mcpName` against `server.json`'s `name`, so this step only works
+after step 8 has succeeded.
+
+- Confirm the tarball is live and marked:
+  `npm view execbro version mcpName` — version must be the new one, `mcpName`
+  must be `io.github.igorzheludkov/execbro`
+- Run `mcp-publisher publish` from the repo root
+- If it reports no valid token, `mcp-publisher login github` is required first.
+  That is an interactive GitHub device flow — ask the user to run it themselves
+  (`! mcp-publisher login github`) and authorize as **igorzheludkov**; the
+  registry only grants the `io.github.igorzheludkov/*` namespace to that identity
+- Verify:
+  `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.igorzheludkov/execbro"`
+
+### 10. Sync the website's tool registry (only when the tool list changed)
 
 `tools.json` is regenerated automatically by `postbuild` and published with the
 package, so the released artifact is always correct without any action here.
@@ -98,5 +130,6 @@ Two guards run automatically and need no action:
 ## Notes
 
 - Requires `gh` CLI to be installed and authenticated
+- Requires `mcp-publisher` (`brew install mcp-publisher`) for steps 5 and 9
 - Uncommitted changes are committed automatically as part of step 1 (no separate `/commit` needed)
 - The GitHub Actions workflow handles the actual npm publish
