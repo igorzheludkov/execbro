@@ -67,7 +67,21 @@ export function registerScreenshotTools(server: McpServer): void {
             // fell back to the raw arg (getActiveOrBootedSimulatorUdid) — on a
             // multi-sim setup that split the image and the tree across two sims.
             const targetUdid = resolved.udid ?? (await getActiveOrBootedSimulatorUdid());
-            const result = await iosScreenshot(outputPath, targetUdid ?? undefined);
+
+            // The framebuffer capture, the accessibility probe (screen size / safe
+            // area) and the fiber screen-state describe the same moment but do not
+            // depend on each other. Running them sequentially made the tool cost
+            // their sum (measured 369 + 189 + 372ms); started together it costs the
+            // slowest one. Each leg keeps its own failure handling, so a rejected
+            // probe degrades exactly as it did before.
+            const capturePromise = iosScreenshot(outputPath, targetUdid ?? undefined);
+            const describePromise = iosDescribeAll(targetUdid ?? undefined).catch(() => null);
+            const earlyTargetApp = targetUdid ? getConnectedAppBySimulatorUdid(targetUdid) : null;
+            const screenStatePromise = earlyTargetApp
+                ? getScreenState({ device: earlyTargetApp.deviceInfo.deviceName }).catch(() => null)
+                : Promise.resolve(null);
+
+            const result = await capturePromise;
     
             if (!result.success) {
                 return {
@@ -109,8 +123,8 @@ export function registerScreenshotTools(server: McpServer): void {
                 let scaleFactor = 3; // Default to 3x for modern iPhones
                 let safeAreaTop = 59; // Default safe area offset
                 try {
-                    const describeResult = await iosDescribeAll(targetUdid ?? undefined);
-                    if (describeResult.success && describeResult.elements && describeResult.elements.length > 0) {
+                    const describeResult = await describePromise;
+                    if (describeResult && describeResult.success && describeResult.elements && describeResult.elements.length > 0) {
                         // First element is typically the Application with full screen frame
                         const rootElement = describeResult.elements[0];
                         // Try parsed frame first, then parse AXFrame string
@@ -165,8 +179,8 @@ export function registerScreenshotTools(server: McpServer): void {
                 // pressables list (which degrades further to the iOS accessibility tree).
                 if (targetApp) {
                     try {
-                        const ssResult = await getScreenState({ device: targetDeviceName });
-                        if (ssResult.success && ssResult.screenState) {
+                        const ssResult = await screenStatePromise;
+                        if (ssResult && ssResult.success && ssResult.screenState) {
                             const screenshotScale = result.scaleFactor || 1;
                             const toPx = (v: number) => Math.round((v * scaleFactor) / screenshotScale);
                             pressablesText = formatScreenStateSummary(ssResult.screenState, (p) => {
@@ -368,7 +382,17 @@ export function registerScreenshotTools(server: McpServer): void {
         async ({ outputPath, deviceId }) => {
             const resolved = await resolveAndroidDeviceId(deviceId);
             if (!resolved.ok) return resolved.response;
-            const result = await androidScreenshot(outputPath, resolved.serial);
+            // Same parallelisation as iOS: the capture, the two adb metric probes
+            // and the fiber screen-state are independent legs of one snapshot.
+            const androidTargetApp = getConnectedAppByAndroidDeviceId(deviceId);
+            const capturePromise = androidScreenshot(outputPath, resolved.serial);
+            const statusBarPromise = androidGetStatusBarHeight(deviceId).catch(() => null);
+            const densityPromise = androidGetDensity(deviceId).catch(() => null);
+            const screenStatePromise = androidTargetApp
+                ? getScreenState({ device: androidTargetApp.deviceInfo.deviceName }).catch(() => null)
+                : Promise.resolve(null);
+
+            const result = await capturePromise;
     
             if (!result.success) {
                 return {
@@ -431,13 +455,13 @@ export function registerScreenshotTools(server: McpServer): void {
                 let statusBarDp = 24;
                 let densityDpi = 440; // Common default
                 try {
-                    const statusBarResult = await androidGetStatusBarHeight(deviceId);
-                    if (statusBarResult.success && statusBarResult.heightPixels) {
+                    const statusBarResult = await statusBarPromise;
+                    if (statusBarResult && statusBarResult.success && statusBarResult.heightPixels) {
                         statusBarPixels = statusBarResult.heightPixels;
                         statusBarDp = statusBarResult.heightDp || 24;
                     }
-                    const densityResult = await androidGetDensity(deviceId);
-                    if (densityResult.success && densityResult.density) {
+                    const densityResult = await densityPromise;
+                    if (densityResult && densityResult.success && densityResult.density) {
                         densityDpi = densityResult.density;
                     }
                 } catch {
@@ -466,8 +490,8 @@ export function registerScreenshotTools(server: McpServer): void {
                 // tap(text=)/tap(testID=) remain the precise options.
                 if (targetApp) {
                     try {
-                        const ssResult = await getScreenState({ device: targetDeviceName });
-                        if (ssResult.success && ssResult.screenState) {
+                        const ssResult = await screenStatePromise;
+                        if (ssResult && ssResult.success && ssResult.screenState) {
                             const screenshotScale = result.scaleFactor || 1;
                             const densityScale = densityDpi / 160;
                             const toPx = (v: number) => Math.round((v * densityScale) / screenshotScale);
