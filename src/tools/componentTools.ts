@@ -27,6 +27,7 @@ import {
 } from "../core/index.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
 import type { ExecutionResult } from "../core/types.js";
+import { DEVICE_ARG_DESC } from "./_deviceArg.js";
 
 function collectMetaNotes(r: ExecutionResult): string[] {
     const out: string[] = [];
@@ -54,8 +55,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: pass coordinates straight to tap(), which handles conversion — never multiply by devicePixelRatio yourself.\n" +
                 "GOOD: get_screen_layout({ extended: true })\n" +
                 "BAD: get_screen_layout({ summary: true }) when you actually need to pick a specific element — summary hides the tree.\n" +
-                "SOURCE: file:line for an element? inspect_at_point(x, y).\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"layout\") for the full layout-check playbook.",
+                "SOURCE: file:line for an element? inspect_at_point(x, y).\n",
             inputSchema: {
                 extended: z
                     .boolean()
@@ -67,7 +67,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Return only component counts by name instead of full tree (default: false)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -127,8 +127,7 @@ export function registerComponentTools(server: McpServer): void {
                 "WORKFLOW: get_component_tree() for overview -> find_components for targeted lookup -> inspect_component for props/state.\n" +
                 "LIMITATIONS: The detailed tree (structureOnly=false) is very large and routinely exceeds response-size limits on real apps — reach for inspect_component on a specific node instead. Ignores non-React native views. Minified builds return display names that may be opaque.\n" +
                 "GOOD: get_component_tree()\n" +
-                "BAD: get_component_tree({ structureOnly: false, includeProps: true, includeStyles: true }) on a large app — prefer inspect_component for specific nodes.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "BAD: get_component_tree({ structureOnly: false, includeProps: true, includeStyles: true }) on a large app — prefer inspect_component for specific nodes.\n",
             inputSchema: {
                 structureOnly: z
                     .boolean()
@@ -167,7 +166,7 @@ export function registerComponentTools(server: McpServer): void {
                     .describe(
                         "Output format: 'json' or 'compact' (default, indented tree — roughly 6x smaller than json). Ignored if structureOnly=true."
                     ),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -218,10 +217,9 @@ export function registerComponentTools(server: McpServer): void {
                 "WORKFLOW: ios_screenshot / android_screenshot -> get_pressable_elements -> tap(testID=\"...\") or tap(x, y) using the center coordinates.\n" +
                 "LIMITATIONS: Visible-only (off-screen pressables are excluded). Requires a live React connection. Coordinates are in screenshot pixels — the tap tool converts to points internally.\n" +
                 "GOOD: get_pressable_elements()\n" +
-                "BAD: Calling when tap(testID=\"...\") already works — testID matching is faster and more stable.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full interaction playbook.",
+                "BAD: Calling when tap(testID=\"...\") already works — testID matching is faster and more stable.\n",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ARG_DESC)
             }
         },
         async ({ device }) => {
@@ -347,7 +345,7 @@ export function registerComponentTools(server: McpServer): void {
                 "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call inspect_at_point(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false."),
                 fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false.")
             }
@@ -463,8 +461,7 @@ export function registerComponentTools(server: McpServer): void {
                 "WORKFLOW: get_screen_layout or find_components -> inspect_component(componentName=\"Foo\") -> tap or execute_in_app to change state -> inspect_component again.\n" +
                 "LIMITATIONS: Requires the component to be currently mounted in the fiber tree. Name matching is exact; use find_components for fuzzy/regex lookup.\n" +
                 "GOOD: inspect_component({ componentName: \"SneakerCard\", index: 0 })\n" +
-                "BAD: inspect_component({ componentName: \"Card\" }) when many Card instances exist — pass index or narrow via find_components.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "BAD: inspect_component({ componentName: \"Card\" }) when many Card instances exist — pass index or narrow via find_components.\n",
             inputSchema: {
                 componentName: z
                     .string()
@@ -500,7 +497,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe("Simplify hooks output by hiding effects and reducing depth (default: true)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -552,8 +549,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: Matches the React display name only; minified builds may return opaque names. Large result sets — use maxResults or a tighter pattern.\n" +
                 "GOOD: find_components({ pattern: \"Button\" }); find_components({ pattern: \"Screen$\" })\n" +
                 "BAD: find_components({ pattern: \".*\" }) — floods the response; narrow the regex.\n" +
-                "SOURCE: searching by name to find a file? If you can point at it on screen, inspect_at_point(x, y) returns the file and line directly.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "SOURCE: searching by name to find a file? If you can point at it on screen, inspect_at_point(x, y) returns the file and line directly.\n",
             inputSchema: {
                 pattern: z
                     .string()
@@ -582,7 +578,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default("compact")
                     .describe("Output format: 'json' or 'compact' (default, pipe-delimited rows — roughly 4.5x smaller than json)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -625,8 +621,7 @@ export function registerComponentTools(server: McpServer): void {
                 "WHEN TO USE: A button is clipped, hit area is wrong, animated frame is unexpected — or you need handler/ref/non-style props. Also preferred for tight loops (no overlay flicker).\n" +
                 "WORKFLOW: screenshot → suspect pixel → divide by pixel ratio → inspect_at_point(x, y).\n" +
                 "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is the node's own style object, not the merged cascade.\n" +
-                "SOURCE: also returns `source: {file, line, column}` for the component at the point, plus the owner chain as `Source ancestors` (set source=false to skip in tight loops).\n" +
-                "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
+                "SOURCE: also returns `source: {file, line, column}` for the component at the point, plus the owner chain as `Source ancestors` (set source=false to skip in tight loops).\n",
             inputSchema: {
                 x: z
                     .number()
@@ -648,7 +643,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe("Include position/dimensions (frame) in the output (default: true)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 source: z
                     .boolean()
                     .optional()
@@ -742,7 +737,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: Returns post-layout on-screen geometry only — for static style use find_components({ includeLayout: true }). For point-based lookup use inspect_at_point. Off-screen fibers may return zeros; that's the truth, not an error. Composites with multiple host descendants return the first host descendant's bounds.\n" +
                 "GOOD: measure({ componentName: \"SneakerCard\", index: 0 })\n" +
                 "BAD: measure({ componentName: \"View\" }) — too generic; narrow with find_components first.\n" +
-                "SEE ALSO: inspect_at_point for point-based variant; find_components({ includeLayout: true }) for static style; get_usage_guide(topic=\"inspect\") for the full playbook.",
+                "SEE ALSO: inspect_at_point for point-based variant; find_components({ includeLayout: true }) for static style.",
             inputSchema: {
                 componentName: z
                     .string()
@@ -755,7 +750,7 @@ export function registerComponentTools(server: McpServer): void {
                 device: z
                     .string()
                     .optional()
-                    .describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                    .describe(DEVICE_ARG_DESC)
             }
         },
         async ({ componentName, index, device }) => {

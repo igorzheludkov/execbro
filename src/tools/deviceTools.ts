@@ -16,7 +16,7 @@ import {
 import { platformUniqueBanner } from "../core/toolHelpers.js";
 import { listAllDevices } from "../core/deviceDiscovery.js";
 import { getConnectedApps } from "../core/connection.js";
-import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
+import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 
 export function registerDeviceTools(server: McpServer): void {
     // ============================================================================
@@ -130,8 +130,7 @@ export function registerDeviceTools(server: McpServer): void {
             description: "DEPRECATED: prefer list_devices, which returns Android emulators (running + stopped) + iOS simulators + physical devices in one call.\n" +
                 "List connected Android devices and emulators via ADB.\n" +
                 "PURPOSE: Discover which physical devices and emulators are visible to adb so you can pick a target UDID/serial.\n" +
-                "WHEN TO USE: Before android_install_app / android_launch_app, or when a tool reports \"no device\" and you need to confirm visibility.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "WHEN TO USE: Before android_install_app / android_launch_app, or when a tool reports \"no device\" and you need to confirm visibility.\n",
             inputSchema: {}
         },
         async () => {
@@ -157,14 +156,13 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Install an APK on an Android device/emulator" +
                 platformUniqueBanner("installing an Android APK") +
                 "\nPURPOSE: Push a built APK to a connected Android device or emulator via adb." +
-                "\nWHEN TO USE: After producing a fresh build, when switching app variants, or when preparing a clean test run." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "\nWHEN TO USE: After producing a fresh build, when switching app variants, or when preparing a clean test run.",
             inputSchema: {
                 apkPath: z.string().describe("Path to the APK file to install"),
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified."),
+                    .describe(ANDROID_ARG_DESC),
                 replace: z
                     .boolean()
                     .optional()
@@ -202,8 +200,7 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Launch an app on an Android device/emulator by package name" +
                 platformUniqueBanner("launching an Android app by package name") +
                 "\nPURPOSE: Start an installed Android app by its package (and optional activity) so the next tool calls hit a running process." +
-                "\nWHEN TO USE: After android_install_app, after a force-stop, or when the app isn't foregrounded before interaction." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "\nWHEN TO USE: After android_install_app, after a force-stop, or when the app isn't foregrounded before interaction.",
             inputSchema: {
                 packageName: z.string().describe("Package name of the app (e.g., com.example.myapp)"),
                 activityName: z
@@ -215,7 +212,7 @@ export function registerDeviceTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
+                    .describe(ANDROID_ARG_DESC)
             }
         },
         async ({ packageName, activityName, deviceId }) => {
@@ -243,13 +240,12 @@ export function registerDeviceTools(server: McpServer): void {
             description: "List installed packages on an Android device/emulator" +
                 platformUniqueBanner("listing installed Android packages") +
                 "\nPURPOSE: Enumerate package names visible to adb so you can confirm installation or pick the right target for android_launch_app." +
-                "\nWHEN TO USE: Before android_launch_app when you don't know the exact package name, or to verify an install succeeded." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "\nWHEN TO USE: Before android_launch_app when you don't know the exact package name, or to verify an install succeeded.",
             inputSchema: {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified."),
+                    .describe(ANDROID_ARG_DESC),
                 filter: z.string().optional().describe("Optional filter to search packages by name (case-insensitive)")
             }
         },
@@ -277,8 +273,7 @@ export function registerDeviceTools(server: McpServer): void {
             description: "DEPRECATED: prefer list_devices, which returns iOS simulators + Android emulators + physical devices in one call.\n" +
                 "List available iOS simulators.\n" +
                 "PURPOSE: Enumerate installed iOS simulators with their UDIDs and boot state so you can boot or install into the right one.\n" +
-                "WHEN TO USE: Before ios_boot_simulator / ios_install_app, or when you need a UDID for a specific device name.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "WHEN TO USE: Before ios_boot_simulator / ios_install_app, or when you need a UDID for a specific device name.\n",
             inputSchema: {
                 onlyBooted: z
                     .boolean()
@@ -308,11 +303,10 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Install an app bundle (.app) on an iOS simulator" +
                 platformUniqueBanner("installing an iOS .app/.ipa bundle") +
                 "\nPURPOSE: Deploy a built .app bundle onto a booted iOS simulator via simctl." +
-                "\nWHEN TO USE: After producing a fresh simulator build, when switching app variants, or when preparing a clean test run." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "\nWHEN TO USE: After producing a fresh simulator build, when switching app variants, or when preparing a clean test run.",
             inputSchema: {
                 appPath: z.string().describe("Path to the .app bundle to install"),
-                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe(IOS_ARG_DESC)
             }
         },
         async ({ appPath, udid }) => {
@@ -340,11 +334,10 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Launch an app on an iOS simulator by bundle ID" +
                 platformUniqueBanner("launching an iOS app by bundle ID") +
                 "\nPURPOSE: Start an installed iOS app by its bundle ID so the next tool calls hit a running process." +
-                "\nWHEN TO USE: After ios_install_app, after ios_terminate_app, or when the app isn't foregrounded before interaction." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "\nWHEN TO USE: After ios_install_app, after ios_terminate_app, or when the app isn't foregrounded before interaction.",
             inputSchema: {
                 bundleId: z.string().describe("Bundle ID of the app (e.g., com.example.myapp)"),
-                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe(IOS_ARG_DESC)
             }
         },
         async ({ bundleId, udid }) => {
@@ -375,11 +368,10 @@ export function registerDeviceTools(server: McpServer): void {
                 "WORKFLOW: ios_boot_simulator -> ios_launch_app (or have the app running) -> ios_open_url -> ios_screenshot / get_screen_layout to verify the target screen rendered.\n" +
                 "GOOD: ios_open_url(url=\"myapp://product/42\") to land directly on a product screen.\n" +
                 "BAD: ios_open_url(url=\"...\") used as a substitute for in-app navigation when the user would normally tap — prefer `tap` for normal interaction flows.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook." +
                 platformUniqueBanner("testing iOS deep links or universal links"),
             inputSchema: {
                 url: z.string().describe("URL to open (e.g., https://example.com or myapp://path)"),
-                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe(IOS_ARG_DESC)
             }
         },
         async ({ url, udid }) => {
@@ -407,11 +399,10 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Terminate a running app on an iOS simulator" +
                 platformUniqueBanner("force-terminating an iOS app") +
                 "\nPURPOSE: Force-kill an iOS app process so the next launch starts from a cold state." +
-                "\nWHEN TO USE: To reset app state fully (beyond what reload_app does), or before reinstalling a new build." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "\nWHEN TO USE: To reset app state fully (beyond what reload_app does), or before reinstalling a new build.",
             inputSchema: {
                 bundleId: z.string().describe("Bundle ID of the app to terminate"),
-                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe(IOS_ARG_DESC)
             }
         },
         async ({ bundleId, udid }) => {
@@ -439,7 +430,6 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Boot an iOS simulator by UDID.\n" +
                 "PURPOSE: Bring a specific simulator online so you can install/launch an app in it.\n" +
                 "WHEN TO USE: At session start when no simulator is running, or after switching between device models.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook." +
                 platformUniqueBanner("booting an iOS simulator") +
                 " Use list_ios_simulators to find available simulators.",
             inputSchema: {

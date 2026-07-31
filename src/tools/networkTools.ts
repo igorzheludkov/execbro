@@ -19,6 +19,7 @@ import { resolveNetworkBuffer } from "../core/toolHelpers.js";
 import { UserInputError } from "../core/errors.js";
 import { diagnoseEmptyResult, type EmptyDiagnosisLabels } from "../core/logDiagnosis.js";
 import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork } from "../core/sdkBridge.js";
+import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 
 // Network capture has no end-to-end probe equivalent to verifyLogPipeline, so
 // the "connected but nothing captured" verdict is always unverified: a silently
@@ -50,8 +51,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: scan_metro -> reproduce action -> get_network_requests({ summary: true }) -> get_network_requests({ status: 500 }) or search_network -> get_request_details(id).\n" +
                 "LIMITATIONS: Bridgeless targets without the SDK may miss pre-connect requests and response bodies — install execbro-sdk for full fidelity.\n" +
                 "GOOD: get_network_requests({ summary: true }) then get_network_requests({ urlPattern: \"/login\", status: 401 })\n" +
-                "BAD: get_network_requests({ maxRequests: 500 }) as the first call — start with summary=true.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: get_network_requests({ maxRequests: 500 }) as the first call — start with summary=true.\n",
             inputSchema: {
                 maxRequests: z
                     .number()
@@ -66,7 +66,7 @@ export function registerNetworkTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Return statistics only (count, methods, domains, status codes). Use for quick overview."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ maxRequests, method, urlPattern, status, summary, device }) => {
@@ -232,12 +232,11 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: search_network(urlPattern=\"/api/\") -> get_request_details(requestId=\"...\") for full headers/body.\n" +
                 "LIMITATIONS: Matches URL only; for method/status/body filtering use get_network_requests. Bodies are only present when the SDK is installed.\n" +
                 "GOOD: search_network({ urlPattern: \"/graphql\" })\n" +
-                "BAD: search_network({ urlPattern: \"\" }) — empty pattern matches everything; use get_network_requests instead.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: search_network({ urlPattern: \"\" }) — empty pattern matches everything; use get_network_requests instead.\n",
             inputSchema: {
                 urlPattern: z.string().describe("URL pattern to search for"),
                 maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ urlPattern, maxResults, device }) => {
@@ -296,8 +295,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: get_network_requests / search_network -> copy id -> get_request_details(requestId).\n" +
                 "LIMITATIONS: Bodies require the execbro-sdk in the app; on CDP-only targets response bodies are missing. Large bodies are truncated — raise maxBodyLength.\n" +
                 "GOOD: get_request_details({ requestId: \"42\", maxBodyLength: 4000 })\n" +
-                "BAD: Guessing requestIds — always get them from get_network_requests / search_network first.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: Guessing requestIds — always get them from get_network_requests / search_network first.\n",
             inputSchema: {
                 requestId: z.string().describe("The request ID to get details for"),
                 maxBodyLength: z.coerce
@@ -312,7 +310,7 @@ export function registerNetworkTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Disable body truncation. Tip: Use when you need to inspect full JSON payloads."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ requestId, maxBodyLength, verbose, device }) => {
@@ -420,10 +418,9 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: clear_network -> trigger action (tap, execute_in_app) -> get_network_requests / search_network.\n" +
                 "LIMITATIONS: Irreversible — cleared requests cannot be recovered. Also clears the SDK's in-app buffer when SDK is present.\n" +
                 "GOOD: clear_network() before a reproduction.\n" +
-                "BAD: Using clear_network as a workaround for stale connections — use scan_metro / ensure_connection instead.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: Using clear_network as a workaround for stale connections — use scan_metro / ensure_connection instead.\n",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit to clear all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ device }) => {

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
-import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
+import { resolveAndroidDeviceId, resolveIosUdid, DEVICE_ARG_DESC } from "./_deviceArg.js";
 import {
     getBundleStatusWithErrors,
     getBundleErrors,
@@ -40,8 +40,7 @@ export function registerBundleTools(server: McpServer): void {
                 "WORKFLOW: logbox(action=\"detect\") -> if present: logbox(action=\"dismiss\") to read + clear -> continue UI work. Use action=\"ignore\" with patterns to stop repeat noise.\n" +
                 "LIMITATIONS: Dev-only — no effect in production builds. \"push\" at level=\"warning\" won't show a banner unless LogBox is already open.\n" +
                 "GOOD: logbox({ action: \"dismiss\" }); logbox({ action: \"ignore\", patterns: [\"[APOLLO]\"] })\n" +
-                "BAD: Spamming logbox(action=\"push\") for every tool step — annoys the developer.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full logs playbook.",
+                "BAD: Spamming logbox(action=\"push\") for every tool step — annoys the developer.\n",
             inputSchema: {
                 action: z.enum(["dismiss", "push", "ignore", "detect"]).describe('Action to perform: "dismiss", "push", "ignore", or "detect"'),
                 message: z.string().optional().describe('Message to push into LogBox (required when action="push")'),
@@ -50,7 +49,7 @@ export function registerBundleTools(server: McpServer): void {
                 subtitle: z.string().optional().describe('Additional info shown in the call stack area when expanded=true (default: "MCP Server"). Use for context like "License Check", "Usage Limit", etc.'),
                 target: z.enum(["logbox", "metro"]).optional().describe('Where to push the message (default: "logbox"). "logbox" shows on device screen, "metro" outputs to Metro terminal via console.log'),
                 patterns: z.array(z.string()).optional().describe('Patterns to ignore (required when action="ignore"), e.g. ["[APOLLO]", "deprecated"]'),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ARG_DESC)
             }
         },
         async ({ action, message, level, expanded, subtitle, target, patterns, device }) => {
@@ -245,8 +244,7 @@ export function registerBundleTools(server: McpServer): void {
                 "WORKFLOW: get_bundle_status -> if errors present: get_bundle_errors for detail -> fix -> get_bundle_errors({ clear: true }).\n" +
                 "LIMITATIONS: Relies on Metro's WebSocket event stream; if Metro isn't running or the connection dropped, status may be stale.\n" +
                 "GOOD: get_bundle_status() at the start of a debug session.\n" +
-                "BAD: Polling every second — Metro events are push-based; just call once and act on the result.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"bundle\") for the full bundle-check playbook.",
+                "BAD: Polling every second — Metro events are push-based; just call once and act on the result.\n",
             inputSchema: {}
         },
         async () => {
@@ -279,8 +277,7 @@ export function registerBundleTools(server: McpServer): void {
                 "WORKFLOW: get_bundle_status -> get_bundle_errors -> fix source -> get_bundle_errors({ clear: true }) -> reload_app.\n" +
                 "LIMITATIONS: Captures errors Metro emits via its WebSocket; the screenshot+OCR fallback requires a booted simulator and the platform param.\n" +
                 "GOOD: get_bundle_errors({ platform: \"ios\" }); get_bundle_errors({ clear: true }) after fixing, so the next read reflects only new errors.\n" +
-                "BAD: Using get_bundle_errors to look for runtime TypeErrors — those live in get_logs, not the bundler.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"bundle\") for the full bundle-check playbook.",
+                "BAD: Using get_bundle_errors to look for runtime TypeErrors — those live in get_logs, not the bundler.\n",
             inputSchema: {
                 maxErrors: z.number().optional().default(10).describe("Maximum number of errors to return (default: 10)"),
                 clear: z

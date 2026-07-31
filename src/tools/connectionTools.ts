@@ -32,6 +32,7 @@ import {
     awaitAppDetection,
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
+import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 
 export function registerConnectionTools(server: McpServer): void {
     // Tool: Scan for Metro servers
@@ -45,8 +46,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "WHEN TO USE: At the start of any session, or after the user restarts Metro / boots a new simulator.\n" +
                 "WORKFLOW: scan_metro -> get_apps -> get_logs / ios_screenshot / tap.\n" +
                 "GOOD: scan_metro()\n" +
-                "BAD: scan_metro() called repeatedly in a loop — use ensure_connection to re-verify an existing connection.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "BAD: scan_metro() called repeatedly in a loop — use ensure_connection to re-verify an existing connection.\n",
             inputSchema: {
                 startPort: z.coerce.number().optional().default(8081).describe("Start port for scanning (default: 8081)"),
                 endPort: z.coerce.number().optional().default(19002).describe("End port for scanning (default: 19002)")
@@ -207,8 +207,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "WHEN TO USE: After a suspected disconnect (silent gaps, reload_app, app crash) or before long-running flows where a mid-flow drop would be costly. Cheaper than scan_metro when you already connected once this session.\n" +
                 "WORKFLOW: scan_metro (once) -> ensure_connection(healthCheck=true) -> resume tool calls. Use forceRefresh=true if the first probe still looks dead.\n" +
                 "GOOD: ensure_connection({ healthCheck: true })\n" +
-                "BAD: ensure_connection() before scan_metro has ever run — call scan_metro first.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "BAD: ensure_connection() before scan_metro has ever run — call scan_metro first.\n",
             inputSchema: {
                 port: z.coerce.number().optional().describe("Metro port (default: auto-detect)"),
                 healthCheck: z
@@ -296,8 +295,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "WORKFLOW: scan_metro -> get_apps -> get_logs / ios_screenshot / tap (with device=\"...\" if multiple).\n" +
                 "LIMITATIONS: Only lists devices the MCP has successfully connected to — stale targets don't appear here, use get_connection_status for health details.\n" +
                 "GOOD: get_apps()\n" +
-                "BAD: Calling get_apps in a tight loop — the list doesn't change without a scan_metro or disconnect_metro.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "BAD: Calling get_apps in a tight loop — the list doesn't change without a scan_metro or disconnect_metro.\n",
             inputSchema: {}
         },
         async () => {
@@ -406,8 +404,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "LIMITATIONS: Reports only MCP-side view; doesn't know why Metro dropped the socket (simulator sleep, app backgrounded, etc).\n" +
                 "GOOD: get_connection_status() after noticing stale data.\n" +
                 "BAD: Polling get_connection_status as a heartbeat — use ensure_connection(healthCheck=true) for a live probe.\n" +
-                "Pass events=true to include the recent connection event log (connect/close/reconnect lifecycle) — useful when a target drops mid-session and you need to see why reconnect didn't recover it.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "Pass events=true to include the recent connection event log (connect/close/reconnect lifecycle) — useful when a target drops mid-session and you need to see why reconnect didn't recover it.\n",
             inputSchema: {
                 events: z
                     .boolean()
@@ -620,10 +617,9 @@ export function registerConnectionTools(server: McpServer): void {
                 "WORKFLOW: disconnect_metro -> attach other debugger / restart app -> scan_metro to reconnect.\n" +
                 "LIMITATIONS: Suppresses auto-reconnect until scan_metro or connect_metro is called again; buffers persist but won't receive new events.\n" +
                 "GOOD: disconnect_metro(); disconnect_metro({ device: \"iPhone\" })\n" +
-                "BAD: Using disconnect_metro to clear logs — use clear_logs instead; disconnect breaks capture.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"setup\") for the full session-setup playbook.",
+                "BAD: Using disconnect_metro to clear logs — use clear_logs instead; disconnect breaks capture.\n",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match) to disconnect. Omit to disconnect all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ device }) => {

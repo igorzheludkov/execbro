@@ -3,6 +3,7 @@ import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { executeInApp, listDebugGlobals, inspectGlobal } from "../core/index.js";
 import { getRefreshStatus } from "../core/fastRefreshTools.js";
+import { DEVICE_ARG_DESC } from "./_deviceArg.js";
 
 export function registerExecutionTools(server: McpServer): void {
     // Tool: Execute JavaScript in app
@@ -20,8 +21,7 @@ export function registerExecutionTools(server: McpServer): void {
                 "- Non-ASCII in string literals (emoji, Arabic, CJK) is auto-escaped server-side. Write it as-is.\n\n" +
                 "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
                 "BAD examples: `await fetch(...)` (bare top-level await), `require('react-native')`\n" +
-                "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
+                "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n",
             inputSchema: {
                 expression: z
                     .string()
@@ -45,7 +45,7 @@ export function registerExecutionTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Disable result truncation. Tip: Be cautious - Redux stores or large state can return 10KB+."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -132,10 +132,9 @@ export function registerExecutionTools(server: McpServer): void {
                 "SDK INTEGRATION: When react-native-ai-devtools-sdk's init({ stores, navigation, custom }) was called, the response includes an sdk.paths array of dotted paths (e.g. __RN_AI_DEVTOOLS__.stores.redux). Pass them to inspect_global or execute_in_app.\n" +
                 "RN NAMESPACE: The rn field reports globalThis.__rn__ — a curated set of seven RN modules (I18nManager, PixelRatio, Platform, StyleSheet, AppRegistry, NativeModules, Dimensions) populated by SDK exposeRnGlobals() or the executor's fallback bootstrap. Use paths like __rn__.Platform.OS. rn=null → bootstrap not yet run; keys=[] → ran but no match.\n" +
                 "OUTPUT: { sdk: {...}|null, rn: {keys, hint}|null, categories: {...} }\n" +
-                "LIMITATIONS: Only sees variables explicitly assigned to a global. Module-scoped state is invisible — expose it first or use the SDK.\n" +
-                "SEE ALSO: get_usage_guide(topic=\"state\") for the full playbook.",
+                "LIMITATIONS: Only sees variables explicitly assigned to a global. Module-scoped state is invisible — expose it first or use the SDK.\n",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ARG_DESC)
             }
         },
         async ({ device }) => {
@@ -177,13 +176,12 @@ export function registerExecutionTools(server: McpServer): void {
                 "DOTTED PATHS: Pass dotted paths to drill into the SDK surface, e.g. inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\" }) or \"__RN_AI_DEVTOOLS__.custom.mmkv\". Only identifier paths are accepted — for arbitrary expressions, use execute_in_app.\n" +
                 "LIMITATIONS: Only reads one level deep; nested objects show as a 100-char JSON preview — re-inspect the child path. Returns an error object (not a throw) when the path doesn't resolve.\n" +
                 "GOOD: inspect_global({ objectName: \"__APOLLO_CLIENT__\" }) | inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\" })\n" +
-                "BAD: inspect_global({ objectName: \"store.getState()\" }) — call expressions aren't supported; use execute_in_app.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
+                "BAD: inspect_global({ objectName: \"store.getState()\" }) — call expressions aren't supported; use execute_in_app.\n",
             inputSchema: {
                 objectName: z
                     .string()
                     .describe("Identifier or dotted path of the global to inspect (e.g., '__APOLLO_CLIENT__', '__RN_AI_DEVTOOLS__.stores.redux', '__RN_AI_DEVTOOLS__.custom.mmkv')"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ARG_DESC)
             }
         },
         async ({ objectName, device }) => {
@@ -251,7 +249,7 @@ export function registerExecutionTools(server: McpServer): void {
                 device: z
                     .string()
                     .optional()
-                    .describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                    .describe(DEVICE_ARG_DESC)
             }
         },
         async ({ sincePath, since, device }) => {

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
-import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
+import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import { iconLabel } from "../core/iconSemantics.js";
 import { recordScreenMetrics } from "../core/projectMemory.js";
 import {
@@ -41,8 +41,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "LIMITATIONS: Requires a booted iOS simulator (simctl). For physical devices or system dialogs without RN, combine with tap(..., native=true).\n" +
                 "GOOD: ios_screenshot()\n" +
                 "BAD: ios_screenshot({ udid: \"guess\" }) with a made-up UDID — run list_ios_simulators first.\n" +
-                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y) — it returns the absolute file and line.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
+                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y) — it returns the absolute file and line.\n",
             inputSchema: {
                 outputPath: z
                     .string()
@@ -51,7 +50,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 udid: z
                     .string()
                     .optional()
-                    .describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified."),
+                    .describe(IOS_ARG_DESC),
                 device: z
                     .string()
                     .optional()
@@ -352,8 +351,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "LIMITATIONS: Requires adb in PATH and a running device/emulator. For non-RN surfaces (system dialogs, permission prompts), combine with tap(..., native=true).\n" +
                 "GOOD: android_screenshot()\n" +
                 "BAD: android_screenshot({ deviceId: \"guess\" }) with a made-up serial — run list_android_devices first.\n" +
-                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y).\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
+                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y).\n",
             inputSchema: {
                 outputPath: z
                     .string()
@@ -363,7 +361,7 @@ export function registerScreenshotTools(server: McpServer): void {
                     .string()
                     .optional()
                     .describe(
-                        "Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified."
+                        ANDROID_ARG_DESC
                     )
             }
         },
@@ -606,8 +604,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "WORKFLOW: tap(burst=true) -> note verification.burstGroupId -> get_images(groupId, frameIndex=N) to inspect individual frames.\n" +
                 "LIMITATIONS: Circular buffer (50 entries) — old images are evicted. Metadata is cheap; fetching image data is not — request specific ids, not bulk.\n" +
                 "GOOD: get_images({ list: true }); get_images({ groupId: \"burst-abc\", frameIndex: 2 })\n" +
-                "BAD: get_images() with no filter when buffer is full — floods context. Use list:true or last:N first.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full interaction playbook.",
+                "BAD: get_images() with no filter when buffer is full — floods context. Use list:true or last:N first.\n",
             inputSchema: {
                 list: z.boolean().optional().describe("List all entries and groups (metadata only, no image data)"),
                 id: z.string().optional().describe("Retrieve a specific image by ID (returns image data)"),
@@ -687,8 +684,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "LIMITATIONS: OCR accuracy degrades on very small or stylized text; icons with no label won't appear — use tap(component=...) instead.\n" +
                 "GOOD: ocr_screenshot({ platform: \"ios\" })\n" +
                 "BAD: ocr_screenshot used just to view the screen — plain ios_screenshot / android_screenshot is cheaper when you don't need OCR text.\n" +
-                "SOURCE: for RN screens, inspect_at_point(x, y) returns the file and line that render an element — no OCR needed.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
+                "SOURCE: for RN screens, inspect_at_point(x, y) returns the file and line that render an element — no OCR needed.\n",
             inputSchema: {
                 platform: z.enum(["ios", "android"]).describe("Platform to capture screenshot from"),
                 deviceId: z

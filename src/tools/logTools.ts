@@ -31,6 +31,7 @@ import { findLogEvent, nativeLogBuffers, getNativeLogBuffer, type LogEvent } fro
 import { jsEventsFromEntries } from "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
 import { collectNativeEvents, deviceKeyOf } from "../core/nativeLogs.js";
+import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 
 // Binds the live connection/pipeline probes for `diagnoseEmptyLogs`. Kept here
 // so the diagnosis logic itself stays free of module-level state and testable.
@@ -157,8 +158,7 @@ export function registerLogTools(server: McpServer): void {
                 "WORKFLOW: scan_metro -> get_logs(summary=true) -> narrow with search_logs(text=\"...\") or get_logs(level=\"error\") -> clear_logs between reproductions.\n" +
                 "LIMITATIONS: Circular buffer (~500 entries). Only captures logs emitted after the app connected; pre-connect logs are lost.\n" +
                 "GOOD: get_logs({ summary: true }) then get_logs({ level: \"error\", maxLogs: 20 })\n" +
-                "BAD: get_logs({ maxLogs: 500, verbose: true }) as a first call — floods context; start with summary=true.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full console-debugging playbook.",
+                "BAD: get_logs({ maxLogs: 500, verbose: true }) as a first call — floods context; start with summary=true.\n",
             inputSchema: {
                 maxLogs: z.coerce
                     .number()
@@ -192,7 +192,7 @@ export function registerLogTools(server: McpServer): void {
                     .describe(
                         "Return summary statistics instead of full logs (count by level + last 5 messages). Use for quick overview."
                     ),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ALL_DESC),
                 source: z
                     .enum(["js", "native", "all"])
                     .optional()
@@ -480,8 +480,7 @@ export function registerLogTools(server: McpServer): void {
                 "WORKFLOW: scan_metro -> search_logs(text=\"...\") -> if empty, get_logs to verify buffer populated.\n" +
                 "LIMITATIONS: Only matches text captured AFTER the app connected; won't find pre-connect logs.\n" +
                 "GOOD: search_logs({ text: \"TypeError\" })\n" +
-                "BAD: search_logs({ text: \"\" })  (use get_logs for a raw dump)\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full console-debugging playbook.",
+                "BAD: search_logs({ text: \"\" })  (use get_logs for a raw dump)\n",
             inputSchema: {
                 text: z.string().describe("Text to search for in log messages"),
                 maxResults: z.coerce
@@ -495,7 +494,7 @@ export function registerLogTools(server: McpServer): void {
                     .default(500)
                     .describe("Max characters per message (default: 500, set to 0 for unlimited)"),
                 verbose: z.boolean().optional().default(false).describe("Disable all truncation and return full messages"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ text, maxResults, maxMessageLength, verbose, device }) => {
@@ -556,10 +555,9 @@ export function registerLogTools(server: McpServer): void {
                 "WHEN TO USE: Before reproducing a bug so the resulting logs are isolated; between test iterations to avoid noise from earlier runs.\n" +
                 "WORKFLOW: clear_logs -> reproduce the issue (tap / navigate / reload_app) -> get_logs or search_logs.\n" +
                 "GOOD: clear_logs() right before tap(text=\"Submit\")\n" +
-                "BAD: clear_logs() AFTER the repro — you just deleted the evidence.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full console-debugging playbook.",
+                "BAD: clear_logs() AFTER the repro — you just deleted the evidence.\n",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit to clear all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ device }) => {
@@ -623,8 +621,7 @@ export function registerLogTools(server: McpServer): void {
                 "WORKFLOW: get_logs -> copy the id (e.g. \"n7\") -> get_log_details(id=\"n7\").\n" +
                 "LIMITATIONS: Ids are valid until that device's buffer rolls over or clear_logs runs, not for the whole server session — call get_logs again to get fresh ones. Reads the buffer — it does not re-query the device.\n" +
                 "GOOD: get_log_details({ id: \"n7\" })\n" +
-                "BAD: Guessing ids — always take them from get_logs.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"logs\") for the full console-debugging playbook.",
+                "BAD: Guessing ids — always take them from get_logs.\n",
             inputSchema: {
                 id: z.string().describe("Event id from get_logs (e.g. \"n7\")"),
                 maxLength: z.coerce
