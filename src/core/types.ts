@@ -10,6 +10,10 @@ export interface LogEntry {
     // for the lifetime of the server, which is what lets a JS log event carry
     // an addressable id (`j12`) rather than a position in the last response.
     seq: number;
+    // Per-device app-run counter, stamped by LogBuffer.add(). Bumps when a new
+    // JS runtime is detected (app restart / reload), which is what lets readers
+    // draw a restart boundary and keeps ids from colliding across runs.
+    epoch: number;
 }
 
 // Device info from /json endpoint
@@ -166,6 +170,11 @@ export interface NetworkRequest {
     };
     error?: string;
     completed: boolean;
+    // See LogEntry.epoch.
+    epoch: number;
+    // Response payload. Only populated by the SDK mirror — the CDP and JS
+    // interceptor paths do not capture response bodies.
+    responseBody?: string;
 }
 
 // Connection state tracking for auto-reconnection

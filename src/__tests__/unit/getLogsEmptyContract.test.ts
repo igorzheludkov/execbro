@@ -61,9 +61,10 @@ describe("get_logs empty-result contract", () => {
     const returns = toolResponseReturns(getLogsHandlerSource());
 
     it("finds every tool response return path", () => {
-        // SDK summary, SDK entries, buffer summary, recovered retry,
-        // native-only, native-crash escalation, final.
-        expect(returns.length).toBe(7);
+        // Buffer summary, recovered retry, native-only, native-crash
+        // escalation, final. The two SDK-first returns are gone: the SDK's
+        // entries are mirrored into the buffer, so there is one read path.
+        expect(returns.length).toBe(5);
     });
 
     it("reports _emptyResult on every return path", () => {

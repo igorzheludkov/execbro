@@ -8,6 +8,7 @@ function entry(over: Partial<LogEntry>): LogEntry {
         level: "log",
         message: "Cart updated",
         seq: 12,
+        epoch: 1,
         ...over,
     };
 }

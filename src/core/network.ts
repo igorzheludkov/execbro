@@ -1,32 +1,54 @@
 import { NetworkRequest } from "./types.js";
+import { getEpoch } from "./state.js";
 
 // Circular buffer for storing network requests
 export class NetworkBuffer {
     private requests: Map<string, NetworkRequest> = new Map();
     private order: string[] = [];
     private maxSize: number;
+    private deviceName?: string;
+    private dropped = 0;
 
-    constructor(maxSize: number = 500) {
+    /**
+     * @param deviceName Used to resolve the current epoch for get() lookups.
+     *   Omit for merged read buffers.
+     */
+    constructor(maxSize: number = 500, deviceName?: string) {
         this.maxSize = maxSize;
+        this.deviceName = deviceName;
     }
 
-    // Add or update a request
+    private key(epoch: number, requestId: string): string {
+        return `${epoch}:${requestId}`;
+    }
+
+    // Add or update a request. Keyed by epoch so a post-restart request that
+    // reuses an id does not clobber the pre-restart entry.
     set(requestId: string, request: NetworkRequest): void {
-        if (!this.requests.has(requestId)) {
-            this.order.push(requestId);
+        const k = this.key(request.epoch, requestId);
+        if (!this.requests.has(k)) {
+            this.order.push(k);
             if (this.order.length > this.maxSize) {
-                const oldestId = this.order.shift();
-                if (oldestId) {
-                    this.requests.delete(oldestId);
+                const oldestKey = this.order.shift();
+                if (oldestKey) {
+                    this.requests.delete(oldestKey);
+                    this.dropped++;
                 }
             }
         }
-        this.requests.set(requestId, request);
+        this.requests.set(k, request);
     }
 
-    // Get a request by ID
-    get(requestId: string): NetworkRequest | undefined {
-        return this.requests.get(requestId);
+    // Get a request by id. Prefers the current epoch, then scans older ones so
+    // get_request_details still resolves a pre-restart id.
+    get(requestId: string, epoch?: number): NetworkRequest | undefined {
+        const preferred = epoch ?? (this.deviceName ? getEpoch(this.deviceName) : 1);
+        const direct = this.requests.get(this.key(preferred, requestId));
+        if (direct) return direct;
+        for (const req of this.requests.values()) {
+            if (req.requestId === requestId) return req;
+        }
+        return undefined;
     }
 
     // Get all requests (optionally filtered)
@@ -36,13 +58,18 @@ export class NetworkBuffer {
         urlPattern?: string;
         status?: number;
         completedOnly?: boolean;
+        epoch?: number;
     } = {}): NetworkRequest[] {
-        const { count, method, urlPattern, status, completedOnly } = options;
+        const { count, method, urlPattern, status, completedOnly, epoch } = options;
 
         let results = Array.from(this.requests.values());
 
         // Sort by timestamp
         results.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+        if (epoch != null) {
+            results = results.filter((r) => r.epoch === epoch);
+        }
 
         if (method && method.trim()) {
             results = results.filter((r) => r.method.toUpperCase() === method.toUpperCase());
@@ -85,11 +112,17 @@ export class NetworkBuffer {
         const count = this.requests.size;
         this.requests.clear();
         this.order = [];
+        this.dropped = 0;
         return count;
     }
 
     get size(): number {
         return this.requests.size;
+    }
+
+    /** Entries evicted by the capacity cap since the last clear(). */
+    get droppedCount(): number {
+        return this.dropped;
     }
 }
 
@@ -176,6 +209,16 @@ export function formatRequestDetails(
         for (const [key, value] of Object.entries(request.responseHeaders)) {
             lines.push(`${key}: ${value}`);
         }
+    }
+
+    // Response body (SDK mirror only — CDP and the JS interceptor do not capture it)
+    if (request.responseBody) {
+        lines.push("\n--- Response Body ---");
+        let body = request.responseBody;
+        if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
+            body = body.slice(0, maxBodyLength) + `... [truncated: ${request.responseBody.length} chars]`;
+        }
+        lines.push(body);
     }
 
     return lines.join("\n");

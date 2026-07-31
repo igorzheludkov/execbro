@@ -2,7 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { LogBuffer, mapConsoleType } from "../../core/logs.js";
 import { LogEntry } from "../../core/types.js";
 
-function makeLog(message: string, level: LogEntry["level"] = "log"): Omit<LogEntry, "seq"> {
+function makeLog(message: string, level: LogEntry["level"] = "log"): Omit<LogEntry, "seq" | "epoch"> {
     return { timestamp: new Date(), level, message };
 }
 

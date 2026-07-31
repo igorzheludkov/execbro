@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { NetworkRequest } from "./types.js";
 import { NetworkBuffer } from "./network.js";
-import { getNextMessageId } from "./state.js";
+import { getNextMessageId, getEpoch } from "./state.js";
 
 /**
  * Returns a JS IIFE string that patches XMLHttpRequest and fetch
@@ -162,7 +162,8 @@ export function isInterceptorEvent(
  */
 export function applyInterceptedEvent(
     jsonStr: string,
-    networkBuffer: NetworkBuffer
+    networkBuffer: NetworkBuffer,
+    deviceName: string
 ): void {
     let event: Record<string, unknown>;
     try {
@@ -188,6 +189,7 @@ export function applyInterceptedEvent(
             url: String(event.url || ""),
             headers: {},
             completed: false,
+            epoch: getEpoch(deviceName),
         };
         networkBuffer.set(id, request);
     } else if (type === "response") {

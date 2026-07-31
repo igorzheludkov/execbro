@@ -222,6 +222,7 @@
         ],
         "get_logs": [
             "device",
+            "epoch",
             "kind",
             "level",
             "maxLogs",
@@ -235,6 +236,7 @@
         ],
         "get_network_requests": [
             "device",
+            "epoch",
             "maxRequests",
             "method",
             "status",

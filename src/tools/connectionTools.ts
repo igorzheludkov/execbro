@@ -24,6 +24,7 @@ import {
     connectMetroBuildEvents,
     disconnectMetroBuildEvents,
     stopAllSelectionPollers,
+    stopAllSdkMirrorPollers,
     reloadApp,
     connectedApps,
     isUiDriverAvailable,
@@ -696,6 +697,7 @@ export function registerConnectionTools(server: McpServer): void {
 
             // Stop watching RN's Element Inspector on every device
             stopAllSelectionPollers();
+            stopAllSdkMirrorPollers();
     
             // Clear connection state (but NOT log/network buffers)
             clearAllConnectionState();
