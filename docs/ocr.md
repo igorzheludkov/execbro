@@ -8,7 +8,7 @@ The `ocr_screenshot` tool extracts all visible text from a screenshot with tap-r
 
 | Approach | Pros | Cons |
 |----------|------|------|
-| Accessibility tree (`find_element`) | Fast, reliable, low token usage | Only finds elements with accessibility labels |
+| Fiber / accessibility tree (`tap`, `get_screen_layout`) | Fast, reliable, low token usage | Only finds elements the tree exposes (testID, text, labels) |
 | Screenshot + Vision | Visual layout understanding | High token usage, slow |
 | **OCR** | Works on ANY visible text, returns tap coordinates | Requires text to be visible, may miss small text |
 

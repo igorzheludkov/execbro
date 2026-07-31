@@ -27,7 +27,7 @@ tap with text="Menu" strategy="ocr"
 
 **Fallback chain:** fiber tree (direct `onPress`) → accessibility tree → OCR → error with suggestion.
 
-**Multi-device targeting:** when multiple simulators or devices are connected, pin the tap with `device` (substring match against the connected app's name, e.g. `device="iPhone SE"`) or `udid` (iOS simulator UDID from `list_devices`, takes precedence). This mirrors `get_screen_layout`/`ios_screenshot` so the layout, screenshot, and follow-up tap all land on the same device.
+**Multi-device targeting:** when multiple simulators or devices are connected, pin the tap with `device` — a single param accepting an iOS simulator UDID, an Android adb serial, a simulator/emulator name, or the connected app's name (substring match, e.g. `device="iPhone SE"`). This mirrors `device` on `get_screen_layout`/`swipe` so the layout, screenshot, and follow-up tap all land on the same device. Run `list_devices` to enumerate.
 
 On failure, the response includes an actionable `suggestion` telling the agent exactly what to try next.
 

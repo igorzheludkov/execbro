@@ -60,23 +60,23 @@ tap(component="MenuIcon")  # case-insensitive substring match
 
 **By pixel coordinates (from screenshot):**
 ```
-tap(x=300, y=600)          # auto-converts pixels to points on iOS
-tap(x=300, y=600, platform="android")  # explicit platform when both are connected
+tap(x=300, y=600)                      # auto-converts pixels to points on iOS
+tap(x=300, y=600, device="emulator-5554")  # pin the device when both platforms are connected
 ```
 
 **Native mode (no React Native connection needed):**
 ```
-tap(x=300, y=600, native=true)            # taps directly via ADB/simctl
-tap(x=300, y=600, native=true, platform="android")  # explicit platform
+tap(x=300, y=600, native=true)                          # taps directly via ADB/simctl
+tap(x=300, y=600, native=true, device="emulator-5554")  # pin the device
 ```
-Use `native=true` when tapping system dialogs, non-RN apps, or before establishing a React Native connection. Requires x/y coordinates. Platform is auto-detected if not specified.
+Use `native=true` when tapping system dialogs, non-RN apps, or before establishing a React Native connection. Requires x/y coordinates. The platform is inferred from the resolved device.
 
 **Pin to a specific device when multiple are connected:**
 ```
-tap(text="Submit", device="iPhone SE")        # substring match on connected RN app's deviceName
-tap(text="Submit", udid="ABC-123-...")        # iOS simulator UDID (from list_devices)
+tap(text="Submit", device="iPhone SE")        # simulator/emulator or RN app name (substring)
+tap(text="Submit", device="ABC-123-...")      # an iOS UDID or adb serial works too
 ```
-`device` mirrors the `device` parameter on `get_screen_layout`/`ios_screenshot`. `udid` mirrors `ios_screenshot`/`ios_swipe` and takes precedence over `device`/`platform`. `udid` is iOS-only — pairing it with `platform="android"` returns an error. Without these, `tap` follows the platform default, which can land on the wrong simulator when multiple are booted.
+`tap` takes a single `device` param — there is no separate `udid` or `platform` argument. It accepts an iOS simulator UDID, an Android adb serial (`emulator-5554`), a simulator/emulator name, or a connected RN app's deviceName, all by substring match, and mirrors `device` on `get_screen_layout`/`swipe`. Omit it when exactly one device is available; without it on a multi-device session the tap can land on the wrong simulator. Call `list_devices` to enumerate.
 
 **Force a specific strategy:**
 ```

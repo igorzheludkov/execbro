@@ -109,7 +109,7 @@ Returns metadata only by default. Use `id` or `groupId` + `frameIndex` to retrie
 
 1. `get_screen_layout` — see all visible components with positions
 2. `find_components(pattern="...")` — find specific components by name
-3. `inspect_component(name="...")` — get full props, state, hooks for a component
+3. `inspect_component(componentName="...")` — get full props, state, hooks for a component
 
 ### Identify a Component from a Screenshot
 
