@@ -1,5 +1,5 @@
 import { executeInApp } from "./executor.js";
-import { getLogBuffer, getNetworkBuffer, getEpoch, connectedApps } from "./state.js";
+import { getLogBuffer, getNetworkBuffer, getEpoch, bumpEpoch, connectedApps } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 
 export const ACTIVE_INTERVAL_MS = 3000;
@@ -8,6 +8,9 @@ export const IDLE_INTERVAL_MS = 10000;
 const timers = new Map<string, NodeJS.Timeout>();
 // Per device: epoch-scoped SDK ids already mirrored, so repeated polls are no-ops.
 const mirrored = new Map<string, Set<string>>();
+// Per device: the JS runtime nonce seen on the last successful poll. A change
+// means the app process was replaced.
+const lastRunId = new Map<string, string>();
 
 interface RawNetworkEntry {
     id: string;
@@ -51,15 +54,26 @@ export function __resetMirrorState(): void {
     for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
     mirrored.clear();
+    lastRunId.clear();
 }
 
-// Both SDK buffers in one round-trip. The accessor matches sdkBridge.ts so the
-// poller works against every published SDK version. Guarded so a missing SDK
-// yields empty arrays rather than a thrown TypeError.
+// Both SDK buffers in one round-trip, plus a per-runtime nonce. The accessor
+// matches sdkBridge.ts so the poller works against every published SDK version.
+// Guarded so a missing SDK yields empty arrays rather than a thrown TypeError.
+//
+// `runId` is lazily installed on globalThis and is how we detect an app
+// restart. Live verification on Android showed the CDP-level signals are not
+// enough: Metro's inspector proxy hands back the SAME target id after a
+// process kill (so connectToDevice reports "already connected" and never sees
+// a new id), and a killed runtime emits no Runtime.executionContextsCleared —
+// there is nothing left to emit it. A fresh JS runtime always has a fresh
+// globalThis, so a changed nonce is direct proof, independent of CDP.
 const READ_EXPRESSION = `JSON.stringify((function(){
+  var runId = globalThis.__EXECBRO_RUN_ID__ || (globalThis.__EXECBRO_RUN_ID__ = String(Math.random()).slice(2) + "-" + Date.now());
   var sdk = globalThis.__EXECBRO__ || globalThis.__RN_AI_DEVTOOLS__;
-  if (!sdk) return { network: [], console: [] };
+  if (!sdk) return { runId: runId, network: [], console: [] };
   return {
+    runId: runId,
     network: typeof sdk.getNetworkEntries === "function" ? sdk.getNetworkEntries() : [],
     console: typeof sdk.getConsoleEntries === "function" ? sdk.getConsoleEntries() : []
   };
@@ -78,7 +92,7 @@ const READ_EXPRESSION = `JSON.stringify((function(){
  * again as a distinct run rather than overwriting the previous one.
  */
 export async function mirrorOnce(device: string): Promise<{ logs: number; network: number }> {
-    let parsed: { network?: RawNetworkEntry[]; console?: RawConsoleEntry[] };
+    let parsed: { runId?: string; network?: RawNetworkEntry[]; console?: RawConsoleEntry[] };
     try {
         const raw = await executeInApp(
             READ_EXPRESSION,
@@ -95,6 +109,18 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
         parsed = JSON.parse(raw.result);
     } catch {
         return { logs: 0, network: 0 };
+    }
+
+    // A changed runtime nonce means the app process was replaced. Bump before
+    // stamping so the new run's entries land in their own epoch and cannot
+    // overwrite the previous run's (SDK ids restart their counter each run).
+    if (parsed.runId) {
+        const previous = lastRunId.get(device);
+        if (previous && previous !== parsed.runId) {
+            const next = bumpEpoch(device);
+            console.error(`[execbro] App restart detected on ${device} — now epoch ${next}`);
+        }
+        lastRunId.set(device, parsed.runId);
     }
 
     const epoch = getEpoch(device);

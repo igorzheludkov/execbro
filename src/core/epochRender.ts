@@ -1,4 +1,4 @@
-import { getEpoch } from "./state.js";
+import { resolveDeviceEpoch } from "./state.js";
 
 export type EpochParam = number | "current" | "all" | undefined;
 
@@ -37,6 +37,6 @@ export function evictionNotice(droppedCount: number, envVar: string): string {
  */
 export function resolveEpochFilter(epoch: EpochParam, device?: string): number | undefined {
     if (epoch === undefined || epoch === "all") return undefined;
-    if (epoch === "current") return getEpoch(device ?? "unknown");
+    if (epoch === "current") return resolveDeviceEpoch(device);
     return epoch;
 }

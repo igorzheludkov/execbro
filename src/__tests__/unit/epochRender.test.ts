@@ -1,5 +1,5 @@
 import { withRestartDividers, evictionNotice, resolveEpochFilter } from "../../core/epochRender.js";
-import { bumpEpoch, resetEpochs } from "../../core/state.js";
+import { bumpEpoch, resetEpochs, getLogBuffer, logBuffers, networkBuffers } from "../../core/state.js";
 
 describe("withRestartDividers", () => {
     it("inserts a divider where the epoch changes", () => {
@@ -35,7 +35,11 @@ describe("evictionNotice", () => {
 });
 
 describe("resolveEpochFilter", () => {
-    beforeEach(() => resetEpochs());
+    beforeEach(() => {
+        resetEpochs();
+        logBuffers.clear();
+        networkBuffers.clear();
+    });
 
     it("defaults to no filter", () => {
         expect(resolveEpochFilter(undefined, "dev")).toBeUndefined();
@@ -43,8 +47,25 @@ describe("resolveEpochFilter", () => {
     });
 
     it("resolves 'current' to the device's epoch", () => {
+        getLogBuffer("dev");
         bumpEpoch("dev");
         expect(resolveEpochFilter("current", "dev")).toBe(2);
+    });
+
+    it("resolves 'current' from a device SUBSTRING, not the raw argument", () => {
+        // The tool argument is a substring ("iPhone"); the buffer key is the
+        // full name. Looking the epoch up under the raw argument returns 1 and
+        // serves pre-restart data labelled as current.
+        getLogBuffer("iPhone 17 Pro");
+        bumpEpoch("iPhone 17 Pro");
+        expect(resolveEpochFilter("current", "iPhone")).toBe(2);
+    });
+
+    it("resolves 'current' to the newest run when no device is given", () => {
+        getLogBuffer("iPhone 17 Pro");
+        getLogBuffer("sdk_gphone64_arm64");
+        bumpEpoch("sdk_gphone64_arm64");
+        expect(resolveEpochFilter("current", undefined)).toBe(2);
     });
 
     it("passes a numeric epoch through", () => {

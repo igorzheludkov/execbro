@@ -26,6 +26,31 @@ export function resetEpochs(): void {
     _sessionEpochs.clear();
 }
 
+/**
+ * Resolve the "current run" epoch for a caller-supplied device argument.
+ *
+ * `device` is a user-facing substring (e.g. "iPhone"), not a buffer key
+ * (e.g. "iPhone 17 Pro"), so getEpoch() must not be called on it directly —
+ * that silently returns 1 and makes epoch:"current" serve pre-restart data
+ * labelled as current. Omitted device means a merged read across devices, so
+ * the newest run wins.
+ */
+export function resolveDeviceEpoch(device?: string): number {
+    const keys = new Set([...logBuffers.keys(), ...networkBuffers.keys()]);
+    if (device) {
+        const needle = device.toLowerCase();
+        for (const key of keys) {
+            if (key.toLowerCase().includes(needle)) return getEpoch(key);
+        }
+        return getEpoch(device);
+    }
+    let max = 1;
+    for (const key of keys) {
+        max = Math.max(max, getEpoch(key));
+    }
+    return max;
+}
+
 // Helper: get or create a log buffer for a device
 export function getLogBuffer(deviceName: string): LogBuffer {
     let buffer = logBuffers.get(deviceName);

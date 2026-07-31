@@ -4,12 +4,12 @@ const executeInApp = jest.fn<any>();
 jest.unstable_mockModule("../../core/executor.js", () => ({ executeInApp }));
 
 const { mirrorOnce, __resetMirrorState } = await import("../../core/sdkMirrorPoller.js");
-const { getLogBuffer, getNetworkBuffer, resetEpochs, bumpEpoch } = await import("../../core/state.js");
+const { getLogBuffer, getNetworkBuffer, resetEpochs, bumpEpoch, getEpoch } = await import("../../core/state.js");
 const { __resetLogSeq } = await import("../../core/logs.js");
 
-const payload = (network: any[], console_: any[]) => ({
+const payload = (network: any[], console_: any[], runId = "run-1") => ({
     success: true,
-    result: JSON.stringify({ network, console: console_ }),
+    result: JSON.stringify({ runId, network, console: console_ }),
 });
 
 const netEntry = (id: string) => ({
@@ -64,6 +64,30 @@ describe("mirrorOnce", () => {
         const afterRestart = await mirrorOnce("dev");
         expect(afterRestart).toEqual({ logs: 1, network: 1 });
         expect(getNetworkBuffer("dev").size).toBe(2);
+    });
+
+    it("bumps the epoch when the runtime nonce changes", async () => {
+        // The only reliable restart signal: Metro's inspector proxy reuses the
+        // CDP target id after a process kill, and a dead runtime emits no
+        // executionContextsCleared. A fresh globalThis is direct proof.
+        executeInApp.mockResolvedValue(payload([netEntry("n1")], [], "run-1"));
+        await mirrorOnce("dev");
+        expect(getEpoch("dev")).toBe(1);
+
+        // Same SDK id, new runtime: must land as a distinct entry, not overwrite.
+        executeInApp.mockResolvedValue(payload([netEntry("n1")], [], "run-2"));
+        const afterRestart = await mirrorOnce("dev");
+        expect(getEpoch("dev")).toBe(2);
+        expect(afterRestart).toEqual({ logs: 0, network: 1 });
+        expect(getNetworkBuffer("dev").size).toBe(2);
+    });
+
+    it("does not bump while the runtime nonce is stable", async () => {
+        executeInApp.mockResolvedValue(payload([netEntry("n1")], [], "run-1"));
+        await mirrorOnce("dev");
+        await mirrorOnce("dev");
+        await mirrorOnce("dev");
+        expect(getEpoch("dev")).toBe(1);
     });
 
     it("returns zeroes when the eval fails", async () => {
