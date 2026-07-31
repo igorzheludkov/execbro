@@ -1296,7 +1296,12 @@ async function tryCoordinateStrategy(
         if (platform === "ios") {
             const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
             const { getDevicePixelRatio } = await import("../core/ios.js");
-            const devicePixelRatio = await getDevicePixelRatio(udid);
+            // Reuse the caller's frame dimensions when it has them, so the first
+            // coordinate tap of a session doesn't pay for an extra screenshot.
+            const dprHint = lastScreenshot && lastScreenshot.originalWidth > 0 && lastScreenshot.originalHeight > 0
+                ? { width: lastScreenshot.originalWidth, height: lastScreenshot.originalHeight }
+                : undefined;
+            const devicePixelRatio = await getDevicePixelRatio(udid, dprHint);
 
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
             const tapResult = await iosTap(converted.x, converted.y, { udid });
@@ -1925,10 +1930,16 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // the before frame doesn't depend on whether we run the post-tap diff.
     let beforeBuffer: Buffer | null = null;
     let beforeScaleFactor: number | undefined;
+    // Pixel dimensions of the frame we just captured. getDevicePixelRatio would
+    // otherwise shell out for a screenshot of its own to learn exactly this.
+    let beforeDims: { width: number; height: number } | undefined;
     {
         const before = await captureScreenshot(platform, targetUdid);
         beforeBuffer = before?.buffer || null;
         beforeScaleFactor = before?.scaleFactor;
+        if (before && before.width > 0 && before.height > 0) {
+            beforeDims = { width: before.width, height: before.height };
+        }
     }
 
     // OCR runs lazily when the loop reaches it (see the `case "ocr"` branch).
@@ -1988,7 +1999,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                             query.y!,
                             platform,
                             beforeScaleFactor != null
-                                ? { originalWidth: 0, originalHeight: 0, scaleFactor: beforeScaleFactor }
+                                ? {
+                                    originalWidth: beforeDims?.width ?? 0,
+                                    originalHeight: beforeDims?.height ?? 0,
+                                    scaleFactor: beforeScaleFactor
+                                }
                                 : app?.lastScreenshot,
                             targetUdid
                         ),
@@ -2019,7 +2034,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             if (platform === "ios") {
                 try {
                     const { getDevicePixelRatio } = await import("../core/ios.js");
-                    dprForMarker = await getDevicePixelRatio(targetUdid);
+                    dprForMarker = await getDevicePixelRatio(targetUdid, beforeDims);
                 } catch { dprForMarker = 3; }
             }
             const strategyMarker = computeMarkerPx({
@@ -2150,7 +2165,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 if (platform === "ios") {
                     try {
                         const { getDevicePixelRatio } = await import("../core/ios.js");
-                        fnDpr = await getDevicePixelRatio(targetUdid);
+                        fnDpr = await getDevicePixelRatio(targetUdid, beforeDims);
                     } catch { fnDpr = 3; }
                 } else {
                     try {

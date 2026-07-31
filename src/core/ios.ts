@@ -2032,7 +2032,10 @@ export function calculateDPR(
  * Uses screenshot pixel width vs accessibility root frame width.
  * Result is cached per UDID for the session.
  */
-export async function getDevicePixelRatio(udid?: string): Promise<number> {
+export async function getDevicePixelRatio(
+  udid?: string,
+  pixelDims?: { width: number; height: number },
+): Promise<number> {
   const cacheKey = udid || "__default__";
   const cached = dprCache.get(cacheKey);
   if (cached) return cached;
@@ -2042,21 +2045,32 @@ export async function getDevicePixelRatio(udid?: string): Promise<number> {
     throw new Error(await buildNoSimulatorError());
   }
 
-  // Take screenshot to get pixel dimensions
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const screenshotPath = path.join(
-    os.tmpdir(),
-    `ios-dpr-screenshot-${timestamp}.png`,
-  );
-  await execAsync(
-    `xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`,
-    {
-      timeout: SIMCTL_TIMEOUT,
-    },
-  );
-  const metadata = await sharp(screenshotPath).metadata();
-  const pixelWidth = metadata.width!;
-  const pixelHeight = metadata.height!;
+  let pixelWidth: number;
+  let pixelHeight: number;
+
+  if (pixelDims && pixelDims.width > 0 && pixelDims.height > 0) {
+    // The caller already captured a frame this turn (tap always does) — reuse
+    // its dimensions instead of shelling out for a screenshot of our own, which
+    // measured ~230ms of the ~470ms first-call cost.
+    pixelWidth = pixelDims.width;
+    pixelHeight = pixelDims.height;
+  } else {
+    // Take screenshot to get pixel dimensions
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const screenshotPath = path.join(
+      os.tmpdir(),
+      `ios-dpr-screenshot-${timestamp}.png`,
+    );
+    await execAsync(
+      `xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`,
+      {
+        timeout: SIMCTL_TIMEOUT,
+      },
+    );
+    const metadata = await sharp(screenshotPath).metadata();
+    pixelWidth = metadata.width!;
+    pixelHeight = metadata.height!;
+  }
 
   // Try accessibility tree for exact DPR, fall back to inference
   const driver = getIosDriver();
