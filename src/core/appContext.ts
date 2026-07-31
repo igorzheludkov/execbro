@@ -1,6 +1,7 @@
 import { buildRequireSource } from "./moduleRegistry.js";
 
 export const CONTEXT_BINDINGS = [
+    "require",
     "store",
     "state",
     "apollo",
@@ -34,6 +35,10 @@ export const CONTEXT_BINDINGS = [
 export function buildContextPreamble(): string {
     return `
 ${buildRequireSource()}
+// Expose under the natural name too. Hermes has no require in the evaluate
+// scope, so this shadows nothing, and var keeps it local to the evaluated
+// program rather than mutating globalThis.
+var require = __eb_require;
 var __eb_fiberFind = function (predicate) {
     try {
         var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;

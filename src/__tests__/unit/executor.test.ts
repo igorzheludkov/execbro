@@ -90,11 +90,14 @@ describe("validateAndPreprocessExpression", () => {
         expect(result.valid).toBe(true);
     });
 
-    it("points require() callers at Metro's __r registry", () => {
+    it("accepts require() — the injected context now provides it", () => {
+        // Superseded behaviour: this used to be rejected pre-flight with a
+        // pointer at Metro's __r registry, which was the second-largest
+        // production failure class (236 events). The context defines `require`
+        // over that registry, so the caller no longer has to hand-roll it.
         const result = validateAndPreprocessExpression("require('react-native').Dimensions.get('window')");
-        expect(result.valid).toBe(false);
-        expect(result.error).toContain("require()");
-        expect(result.error).toContain("__r");
+        expect(result.valid).toBe(true);
+        expect(result.error).toBeUndefined();
     });
 
     it("strips comments and validates remaining expression", () => {
