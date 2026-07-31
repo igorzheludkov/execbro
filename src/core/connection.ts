@@ -11,6 +11,7 @@ import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
 import { startSelectionPoller } from "./selectionPoller.js";
+import { startSdkMirrorPoller, stopSdkMirrorPoller } from "./sdkMirrorPoller.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -1079,6 +1080,10 @@ export async function connectToDevice(
                 // Release connection lock if still held
                 connectionLocks.delete(appKey);
 
+                // Stop mirroring — the socket is gone, so every tick would just
+                // fail. No drain attempt here: there is nothing left to read.
+                stopSdkMirrorPoller(device.deviceName || device.title || "unknown");
+
                 connectedApps.delete(appKey);
                 clearLastCDPMessageTime(appKey);
                 // Clear active simulator UDID if this connection set it
@@ -1170,6 +1175,11 @@ export async function connectToDevice(
             // Watch RN's Element Inspector for selections made outside an agent
             // request. Idempotent, and a no-op when EXECBRO_DISABLE_SELECTION_POLL=1.
             startSelectionPoller(device.deviceName);
+
+            // Mirror the in-app SDK buffers into ours so a hard app restart
+            // does not take the only copy with it. No-op when the SDK is absent
+            // or EXECBRO_DISABLE_SDK_MIRROR=1.
+            startSdkMirrorPoller(device.deviceName);
 
             // Initialize or update connection state
             // Note: We do NOT reset reconnectionAttempts here - that happens

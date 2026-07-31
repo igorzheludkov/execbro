@@ -7,6 +7,7 @@ import { fetchDevices, filterDebuggableDevices, scanMetroPorts } from "./metro.j
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { isSDKInstalled } from "./sdkBridge.js";
+import { mirrorOnce } from "./sdkMirrorPoller.js";
 
 // Build the IIFE expression used by listDebugGlobals. Exported so tests can
 // assert structural invariants (e.g. that we probe __rn__, that we emit the
@@ -322,6 +323,18 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
     // instead of returning into the window where the MCP falls back to the
     // duplicate-prone CDP/interceptor buffer.
     const sdkWasPresent = app.sdkPresent === true;
+
+    // Best-effort drain: pull whatever the SDK holds before the runtime is
+    // replaced. The periodic mirror poller covers process death, but a reload
+    // is a boundary we can see coming, so there is no reason to lose the
+    // window since the last tick.
+    if (sdkWasPresent) {
+        try {
+            await mirrorOnce(app.deviceInfo.deviceName || app.deviceInfo.title || "unknown");
+        } catch {
+            // Non-fatal — the reload proceeds either way.
+        }
+    }
 
     // Fire-and-forget: send reload command via CDP without waiting for response.
     // The JS context is destroyed during reload, so Runtime.evaluate would always timeout.

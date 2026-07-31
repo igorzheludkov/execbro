@@ -276,6 +276,16 @@ export {
   stopAllSelectionPollers,
   isSelectionPollerRunning,
 } from "./selectionPoller.js";
+// SDK buffer mirroring — keeps a server-side copy so an app restart does not
+// destroy the only copy of the in-app SDK buffers.
+export {
+  mirrorOnce,
+  startSdkMirrorPoller,
+  stopSdkMirrorPoller,
+  stopAllSdkMirrorPollers,
+  isSdkMirrorPollerRunning,
+} from "./sdkMirrorPoller.js";
+
 export { SelectionBuffer, selectionBuffer } from "./selectionBuffer.js";
 export type { SelectionEntry, SelectionFrame, ComponentStack } from "./selectionBuffer.js";
 
