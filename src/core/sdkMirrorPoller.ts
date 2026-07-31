@@ -40,6 +40,24 @@ function pollingDisabled(): boolean {
     return process.env.EXECBRO_DISABLE_SDK_MIRROR === "1";
 }
 
+/**
+ * Map a caller-supplied device argument to the canonical buffer key.
+ *
+ * Tools pass a user-facing substring ("iPhone"); buffers are keyed by the full
+ * device name ("iPhone 17 Pro"). Mirroring under the substring creates a
+ * phantom buffer that device-scoped reads never resolve to, so the SDK data
+ * silently goes missing for exactly those calls. executeInApp does its own
+ * substring resolution, so the original argument still routes correctly.
+ */
+function bufferKeyFor(device: string): string {
+    const needle = device.toLowerCase();
+    for (const app of connectedApps.values()) {
+        const name = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+        if (name.toLowerCase().includes(needle)) return name;
+    }
+    return device;
+}
+
 function seenSet(device: string): Set<string> {
     let set = mirrored.get(device);
     if (!set) {
@@ -111,20 +129,24 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
         return { logs: 0, network: 0 };
     }
 
+    // `device` may be a substring; everything keyed below must use the
+    // canonical buffer key or the data lands where reads cannot find it.
+    const deviceKey = bufferKeyFor(device);
+
     // A changed runtime nonce means the app process was replaced. Bump before
     // stamping so the new run's entries land in their own epoch and cannot
     // overwrite the previous run's (SDK ids restart their counter each run).
     if (parsed.runId) {
-        const previous = lastRunId.get(device);
+        const previous = lastRunId.get(deviceKey);
         if (previous && previous !== parsed.runId) {
-            const next = bumpEpoch(device);
-            console.error(`[execbro] App restart detected on ${device} — now epoch ${next}`);
+            const next = bumpEpoch(deviceKey);
+            console.error(`[execbro] App restart detected on ${deviceKey} — now epoch ${next}`);
         }
-        lastRunId.set(device, parsed.runId);
+        lastRunId.set(deviceKey, parsed.runId);
     }
 
-    const epoch = getEpoch(device);
-    const seen = seenSet(device);
+    const epoch = getEpoch(deviceKey);
+    const seen = seenSet(deviceKey);
     let logs = 0;
     let network = 0;
 
@@ -132,7 +154,7 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
         const key = `n:${epoch}:${entry.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        getNetworkBuffer(device).set(entry.id, {
+        getNetworkBuffer(deviceKey).set(entry.id, {
             requestId: entry.id,
             timestamp: new Date(entry.timestamp),
             method: entry.method,
@@ -156,7 +178,7 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
         const key = `c:${epoch}:${entry.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        getLogBuffer(device).add({
+        getLogBuffer(deviceKey).add({
             timestamp: new Date(entry.timestamp),
             level: mapConsoleType(entry.level),
             message: entry.message,

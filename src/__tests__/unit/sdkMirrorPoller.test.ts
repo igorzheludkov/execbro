@@ -4,7 +4,7 @@ const executeInApp = jest.fn<any>();
 jest.unstable_mockModule("../../core/executor.js", () => ({ executeInApp }));
 
 const { mirrorOnce, __resetMirrorState } = await import("../../core/sdkMirrorPoller.js");
-const { getLogBuffer, getNetworkBuffer, resetEpochs, bumpEpoch, getEpoch } = await import("../../core/state.js");
+const { getLogBuffer, getNetworkBuffer, resetEpochs, bumpEpoch, getEpoch, connectedApps, logBuffers, networkBuffers } = await import("../../core/state.js");
 const { __resetLogSeq } = await import("../../core/logs.js");
 
 const payload = (network: any[], console_: any[], runId = "run-1") => ({
@@ -88,6 +88,32 @@ describe("mirrorOnce", () => {
         await mirrorOnce("dev");
         await mirrorOnce("dev");
         expect(getEpoch("dev")).toBe(1);
+    });
+
+    it("mirrors into the connected device's buffer key, not the caller's substring", async () => {
+        // Tools pass a user-facing substring ("iPhone"); the buffer key is the
+        // full device name. Using the substring as the key mirrors into a
+        // phantom buffer that device-scoped reads never resolve to, so the
+        // SDK data silently goes missing for exactly those calls.
+        connectedApps.set("8081-abc", {
+            ws: {} as any,
+            deviceInfo: { deviceName: "iPhone 17 Pro", title: "app", id: "abc" } as any,
+            port: 8081,
+            platform: "ios",
+        });
+        try {
+            executeInApp.mockResolvedValue(payload([netEntry("n1")], [logEntry("c1", "hi")]));
+            await mirrorOnce("iPhone");
+
+            expect(getNetworkBuffer("iPhone 17 Pro").size).toBe(1);
+            expect(getLogBuffer("iPhone 17 Pro").size).toBe(1);
+            expect(logBuffers.has("iPhone")).toBe(false);
+            expect(networkBuffers.has("iPhone")).toBe(false);
+        } finally {
+            connectedApps.delete("8081-abc");
+            getNetworkBuffer("iPhone 17 Pro").clear();
+            getLogBuffer("iPhone 17 Pro").clear();
+        }
     });
 
     it("returns zeroes when the eval fails", async () => {
