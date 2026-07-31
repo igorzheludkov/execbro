@@ -1,9 +1,13 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "@jest/globals";
 import {
     containsProblematicUnicode,
     stripLeadingComments,
     validateAndPreprocessExpression,
     formatScreenLayoutTree,
+    looksLikeAsyncFunction,
+    markAsyncEvalUnsupported,
+    isAsyncEvalUnsupported,
+    resetAsyncEvalSupport,
 } from "../../core/executor.js";
 
 describe("containsProblematicUnicode", () => {
@@ -309,5 +313,52 @@ describe("formatScreenLayoutTree off-screen summary", () => {
         const lines = out.split("\n");
         const summaryLineIdx = lines.findIndex((l) => l.includes("below fold"));
         expect(lines[summaryLineIdx - 1]).toBe("");
+    });
+});
+
+describe("async-function capability tracking (Hermes engine-dependent)", () => {
+    beforeEach(() => resetAsyncEvalSupport());
+
+    it("detects async function syntax in its common forms", () => {
+        expect(looksLikeAsyncFunction("(async () => { return 1; })()")).toBe(true);
+        expect(looksLikeAsyncFunction("async function f(){ return 1 }")).toBe(true);
+        expect(looksLikeAsyncFunction("async x => x + 1")).toBe(true);
+    });
+
+    it("does not flag promise chains or unrelated identifiers", () => {
+        expect(looksLikeAsyncFunction("Promise.resolve(1).then(function(x){ return x + 1 })")).toBe(false);
+        expect(looksLikeAsyncFunction("state.asyncStorage")).toBe(false);
+        expect(looksLikeAsyncFunction("foo.async")).toBe(false);
+    });
+
+    it("does not flag async-looking text inside string literals or comments", () => {
+        // Regression: an over-eager probe here reintroduces the pre-flight
+        // rejection of legitimate calls that f6fb8a0 removed.
+        expect(looksLikeAsyncFunction('(function(){ return "async (not really)"; })()')).toBe(false);
+        expect(looksLikeAsyncFunction("({ label: 'async () => {}' })")).toBe(false);
+        expect(looksLikeAsyncFunction("`async function x(){}`")).toBe(false);
+        expect(looksLikeAsyncFunction("// async () => {}\n1 + 1")).toBe(false);
+        expect(looksLikeAsyncFunction("/* async function f(){} */ 42")).toBe(false);
+    });
+
+    it("still flags real async syntax that follows a string literal", () => {
+        expect(looksLikeAsyncFunction('var label = "async"; (async () => 1)()')).toBe(true);
+    });
+
+    it("starts with every device assumed capable", () => {
+        expect(isAsyncEvalUnsupported("iPhone Air")).toBe(false);
+    });
+
+    it("records the capability per device, not globally", () => {
+        markAsyncEvalUnsupported("iPhone Air");
+        expect(isAsyncEvalUnsupported("iPhone Air")).toBe(true);
+        // A second device may run a Hermes build that does compile async.
+        expect(isAsyncEvalUnsupported("sdk_gphone16k_arm64")).toBe(false);
+    });
+
+    it("resets cleanly between sessions", () => {
+        markAsyncEvalUnsupported("iPhone Air");
+        resetAsyncEvalSupport();
+        expect(isAsyncEvalUnsupported("iPhone Air")).toBe(false);
     });
 });

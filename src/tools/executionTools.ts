@@ -15,7 +15,7 @@ export function registerExecutionTools(server: McpServer): void {
                 "RECOMMENDED WORKFLOW: 1) list_debug_globals to discover available objects, 2) inspect_global to see properties/methods, 3) execute_in_app to call methods or read values.\n\n" +
                 "LIMITATIONS (Hermes engine):\n" +
                 "- NO require() or import — only pre-existing globals are available\n" +
-                "- Async works via an async IIFE: `(async () => { const r = await foo(); return r; })()`; the Promise is resolved for you when awaitPromise:true. Only a BARE top-level `await foo()` is rejected.\n" +
+                "- Async: use `Promise.resolve(foo()).then(function(r){ return r; })` (resolved for you when awaitPromise:true). `async`/`await` syntax is engine-dependent — many Hermes builds reject it.\n" +
                 "- Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. If that can't yield a value (`if`/`for`/declaration), write the IIFE yourself with an explicit `return`.\n" +
                 "- Non-ASCII in string literals (emoji, Arabic, CJK) is auto-escaped server-side. Write it as-is.\n\n" +
                 "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
@@ -26,7 +26,7 @@ export function registerExecutionTools(server: McpServer): void {
                 expression: z
                     .string()
                     .describe(
-                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no bare top-level `await` (use an async IIFE: `(async () => { ... })()`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
+                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no `await`/`async` (use `Promise.resolve(foo()).then(function(r){ return r; })`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
                     ),
                 awaitPromise: z.coerce
                     .boolean()

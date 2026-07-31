@@ -173,16 +173,96 @@ function isIdentChar(c: string | undefined): boolean {
     return c !== undefined && /[A-Za-z0-9_$]/.test(c);
 }
 
+// Devices whose Hermes build rejects `async` function syntax in
+// Runtime.evaluate ("Compiling JS failed: N:M:async functions are unsupported").
+// Populated reactively on the first such failure, then used to reject
+// pre-flight with actionable guidance instead of spending another round trip.
+const asyncEvalUnsupported = new Set<string>();
+
+export function markAsyncEvalUnsupported(deviceKey: string): void {
+    asyncEvalUnsupported.add(deviceKey);
+}
+
+export function isAsyncEvalUnsupported(deviceKey: string): boolean {
+    return asyncEvalUnsupported.has(deviceKey);
+}
+
+// Test-only: async support is a per-engine property, so tests need a reset.
+export function resetAsyncEvalSupport(): void {
+    asyncEvalUnsupported.clear();
+}
+
+const ASYNC_UNSUPPORTED_HERMES = /async functions are unsupported/i;
+
+// Blank out string/template literal bodies and comments, preserving length and
+// structure, so syntax probes never match on text inside a literal. Replacing
+// rather than deleting keeps offsets stable for any future diagnostics.
+export function maskLiteralsAndComments(src: string): string {
+    const out = src.split("");
+    let i = 0;
+    while (i < src.length) {
+        const ch = src[i];
+        const next = src[i + 1];
+        if (ch === "/" && next === "/") {
+            const nl = src.indexOf("\n", i + 2);
+            const end = nl === -1 ? src.length : nl;
+            for (let j = i; j < end; j++) out[j] = " ";
+            i = end;
+            continue;
+        }
+        if (ch === "/" && next === "*") {
+            const close = src.indexOf("*/", i + 2);
+            const end = close === -1 ? src.length : close + 2;
+            for (let j = i; j < end; j++) out[j] = " ";
+            i = end;
+            continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") {
+            const quote = ch;
+            let j = i + 1;
+            while (j < src.length) {
+                if (src[j] === "\\") { out[j] = " "; out[j + 1] = " "; j += 2; continue; }
+                if (src[j] === quote) break;
+                out[j] = " ";
+                j++;
+            }
+            i = j + 1;
+            continue;
+        }
+        i++;
+    }
+    return out.join("");
+}
+
+// `async function foo(){}` / `async () => {}` / `async x => {}`.
+// Literals are masked first: a string containing "async (" must not be
+// mistaken for async syntax, or we reintroduce the over-eager pre-flight
+// rejection that f6fb8a0 removed.
+export function looksLikeAsyncFunction(src: string): boolean {
+    return /\basync\s*(function\b|\(|[A-Za-z_$][\w$]*\s*=>)/.test(maskLiteralsAndComments(src));
+}
+
+const ASYNC_UNSUPPORTED_GUIDANCE =
+    "async functions are not supported by this device's Hermes build in Runtime.evaluate " +
+    "(the engine compiles the expression directly, without the Babel transform your app code gets). " +
+    "Rewrite the async function as a promise chain: " +
+    "`Promise.resolve(foo()).then(function(r){ return r.someField; })` — " +
+    "the returned Promise is resolved for you when awaitPromise is true. " +
+    "Note this is engine-dependent: some Hermes builds do compile async functions, so the same " +
+    "expression may work on another device.";
+
 // Detect a bare top-level `await` in `src`. Walks char-by-char tracking string,
 // template, comment, and bracket depth so we don't false-positive on
 // substrings inside strings, identifiers like `awaiting`, etc.
 //
-// NOTE: `async function`/`async () => {}`/`(async () => {})()` are deliberately
-// NOT flagged. Hermes compiles them (they are expressions), the manual-await
-// wrapper in executeWithManualAwait resolves the Promise they return, and
-// telemetry showed this pre-flight rejecting ~20 legitimate calls/30d across 10
-// installations. Verified on-device (iOS 26 sim, Hermes): an async arrow with an
-// internal `await` evaluates correctly. Only a bare top-level `await` is a real
+// NOTE: `async function`/`async () => {}`/`(async () => {})()` are not flagged
+// unconditionally. Support is ENGINE-DEPENDENT: some Hermes builds compile them
+// (rejecting them outright cost ~20 legitimate calls/30d across 10
+// installations, which is why f6fb8a0 stopped doing so), while others fail with
+// "async functions are unsupported" — reproduced 2026-07-31 on Hermes/Expo 55
+// (iOS) and on Android. Blanket accept and blanket reject are both wrong, so
+// capability is learned per device from the first failure (see
+// asyncEvalUnsupported). Only a bare top-level `await` is unconditionally a
 // syntax error, because the wrapper emits `var __v=(<expr>);` — a non-async
 // context.
 function looksLikeTopLevelAwait(src: string): boolean {
@@ -575,15 +655,29 @@ async function executeExpressionCore(
 
     const cleanedExpression = validation.expression;
 
+    // This device's Hermes already told us it can't compile async functions —
+    // reject before spending a round trip on a guaranteed compiler error.
+    const deviceKey = app.deviceInfo?.deviceName || "__default__";
+    if (isAsyncEvalUnsupported(deviceKey) && looksLikeAsyncFunction(cleanedExpression)) {
+        return { success: false, error: ASYNC_UNSUPPORTED_GUIDANCE };
+    }
+
     // Hermes CDP does not support awaitPromise — it serializes the Promise's
     // internal fields (_A, _x, _y, _z) instead of waiting for resolution.
     // When the caller wants awaitPromise, we handle it ourselves: wrap the
     // expression to store the resolved value in a temp global, then poll.
-    if (awaitPromise) {
-        return executeWithManualAwait(app, cleanedExpression, timeoutMs);
+    const result = awaitPromise
+        ? await executeWithManualAwait(app, cleanedExpression, timeoutMs)
+        : await executeCDP(app, cleanedExpression, false, timeoutMs);
+
+    // Learn the capability from the engine's own compiler error, and replace
+    // the raw message with something the caller can act on.
+    if (!result.success && result.error && ASYNC_UNSUPPORTED_HERMES.test(result.error)) {
+        markAsyncEvalUnsupported(deviceKey);
+        return { success: false, error: ASYNC_UNSUPPORTED_GUIDANCE };
     }
 
-    return executeCDP(app, cleanedExpression, false, timeoutMs);
+    return result;
 }
 
 /**
