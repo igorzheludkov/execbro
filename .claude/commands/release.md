@@ -103,6 +103,16 @@ the one part that needs a step.
     - Commit in `../web` (its landing page prints the tool count, so the number
       users see moves with this commit).
 
+**When this release removes every tool in a catalogue section**, delete the whole
+section — heading, `note`, and rows. `catalog.test.ts` fails on an empty section
+and scans section notes for dead tool names, but it cannot tell you that a note's
+surrounding prose has quietly become a lie; read it.
+
+**The analytics dashboard needs no action.** It reads the published package's own
+`tools.json` at runtime via the worker's `/api/tools`, so its tool table follows
+this release automatically once npm publish completes (1h edge cache). There is no
+list to sync and no Pages redeploy.
+
 **When this release DELETES a parameter or a documented value**, add its name to
 the `RETIRED` list in `../web/__tests__/lib/tools/catalog.test.ts`. That list is
 the only guard against prose that names dead vocabulary without `=` syntax — the
