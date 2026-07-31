@@ -92,3 +92,50 @@ var __eb_nav = (function () {
 })();
 `.trim();
 }
+
+/**
+ * Injected source extracting the app's route table.
+ *
+ * React Navigation state carries `routeNames` per navigator — every registered
+ * route at that level, not merely the mounted ones — so the whole table is
+ * reachable without app cooperation. AppB's debug/navigation-debugger.tsx
+ * hand-computes this today; this replaces it.
+ *
+ * Measured tables: AppA 41 routes across 3 levels, AppB 25 across 3,
+ * AppC 5 across 2.
+ *
+ * Requires __eb_nav. ES5 only.
+ */
+export function buildRouteTableSource(): string {
+    return `
+function __eb_routeTable() {
+    var out = { levels: [], all: [], current: null };
+    var reader = __eb_nav && __eb_nav.stateReader;
+    if (!reader || typeof reader.getRootState !== 'function') return out;
+    var root;
+    try { root = reader.getRootState(); } catch (e) { return out; }
+    var seen = {};
+    function collect(st, d) {
+        if (!st || d > 6) return;
+        if (st.routeNames && st.routeNames.length) {
+            out.levels.push({ depth: d, type: st.type || 'unknown', routeNames: st.routeNames });
+            for (var i = 0; i < st.routeNames.length; i++) {
+                var n = st.routeNames[i];
+                if (!Object.prototype.hasOwnProperty.call(seen, n)) { seen[n] = 1; out.all.push(n); }
+            }
+        }
+        if (st.routes) {
+            for (var j = 0; j < st.routes.length; j++) {
+                if (st.routes[j] && st.routes[j].state) collect(st.routes[j].state, d + 1);
+            }
+        }
+    }
+    collect(root, 0);
+    try {
+        var cur = typeof reader.getCurrentRoute === 'function' ? reader.getCurrentRoute() : null;
+        out.current = cur ? cur.name : null;
+    } catch (e) { out.current = null; }
+    return out;
+}
+`.trim();
+}
