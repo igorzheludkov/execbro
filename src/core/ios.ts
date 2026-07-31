@@ -834,6 +834,11 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
       // Ignore if Simulator app doesn't open
     });
 
+    // The device inventory just changed — drop the cached copy so the next
+    // resolve/tap sees this simulator as booted without waiting out the TTL.
+    const { resetDeviceDiscoveryCache } = await import("./deviceDiscovery.js");
+    resetDeviceDiscoveryCache();
+
     return {
       success: true,
       result: `Simulator ${udid} is now booting`,
@@ -1213,9 +1218,12 @@ function formatAccessibilityTree(
  * relative to the content origin (below the inset) instead of the window. Knowing
  * the inset lets us detect and correct the shifted coordinate space.
  *
- * Cached briefly so a single tap flow doesn't incur multiple describe-ui calls.
+ * Cached so repeated taps don't each incur a describe-ui call. The probe costs
+ * ~200ms and ran on essentially every fiber+native tap under the old 5s TTL;
+ * the inset itself only changes on rotation, so a longer TTL is safe (a rotation
+ * mid-session costs at most one stale correction until the entry expires).
  */
-const SAFE_AREA_CACHE_TTL_MS = 5000;
+const SAFE_AREA_CACHE_TTL_MS = 30_000;
 const safeAreaTopCache = new Map<string, { value: number; expires: number }>();
 
 export async function getIOSSafeAreaTop(udid?: string): Promise<number> {

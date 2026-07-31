@@ -38,10 +38,21 @@ export interface ListAllDevicesResult {
     summary: { booted: number; total: number };
 }
 
-const CACHE_TTL_MS = 5000;
+// Every tap resolves its target device through this inventory, and a miss costs
+// a `simctl list devices -j` (~110ms) plus an `adb devices` — measured at
+// 140-330ms per tap on 2026-07-31, paid again on every tap more than 5s apart,
+// which is most agent-driven taps. The inventory only changes when a simulator
+// is booted/shut down or a device is plugged in, so we cache longer and
+// invalidate on the events that actually change it. `list_devices(refresh=true)`
+// remains the explicit escape hatch.
+const CACHE_TTL_MS = 30_000;
 let cache: { result: ListAllDevicesResult; timestamp: number } | null = null;
 
-/** Test-only: clear the cache so the next call re-queries. */
+/**
+ * Drop the cached inventory so the next call re-queries. Call after anything
+ * that changes which devices exist or are booted (boot, launch, connect,
+ * disconnect). Also used by tests.
+ */
 export function resetDeviceDiscoveryCache(): void {
     cache = null;
 }
