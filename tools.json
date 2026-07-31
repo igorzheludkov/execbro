@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 70,
+    "count": 71,
     "tools": [
         "activate_license",
         "android_get_screen_size",
@@ -11,6 +11,7 @@
         "android_list_packages",
         "android_long_press",
         "android_screenshot",
+        "app_request",
         "clear_bundle_errors",
         "clear_flowpoints",
         "clear_focused_input",
@@ -114,6 +115,15 @@
         "android_screenshot": [
             "deviceId",
             "outputPath"
+        ],
+        "app_request": [
+            "auth",
+            "body",
+            "device",
+            "headers",
+            "maxResultLength",
+            "method",
+            "url"
         ],
         "clear_bundle_errors": [],
         "clear_flowpoints": [
