@@ -542,11 +542,10 @@ export function registerConnectionTools(server: McpServer): void {
         "connect_metro",
         {
             description:
-                "Connect to a Metro server on a specific port.\n" +
-                "[DEPRECATED IN PRACTICE — prefer `scan_metro` which auto-discovers all common ports and connects every Bridgeless target at once. Use `connect_metro` only when you need to target a specific non-default port]\n" +
-                "PURPOSE: Establish a CDP WebSocket connection to a single Metro server on a known, non-default port.\n" +
-                "WHEN TO USE: Only when the Metro bundler is running on a port outside the common 8081/8082/19000-19002 range that `scan_metro` already covers — otherwise always prefer `scan_metro`.\n" +
-                "SEE ALSO: call scan_metro for auto-discovery; call get_apps afterwards to confirm the device attached.",
+                "Connect to a Metro server on a specific port. Not deprecated — this is the only way to reach a port scan_metro does not probe.\n" +
+                "PURPOSE: Establish a CDP WebSocket connection to a Metro server on a known port.\n" +
+                "WHEN TO USE: Metro is on a port outside 8081, 8082, 19000-19002. For any of those, scan_metro is strictly better — it probes them all and attaches every Bridgeless target in one call, where this connects to one port only.\n" +
+                "SEE ALSO: scan_metro for auto-discovery; get_apps afterwards to confirm the device attached.",
             inputSchema: {
                 port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")
             }
@@ -722,7 +721,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "WORKFLOW: screenshot → wait 2s for Fast Refresh → if still stale, reload_app. Auto-connects to Metro if no connection exists (with or without a device argument) — no need to call scan_metro first. After reload, wait a few seconds before running other tools.\n" +
                 "SEE ALSO: get_refresh_status (did Fast Refresh accept?), get_bundle_status (did Metro compile?).",
             inputSchema: {
-                device: z.string().optional().describe("Target device name, substring match against the name shown by get_apps (a simulator UDID or adb serial also works). OMIT THIS unless several devices are connected — passing a name copied from list_ios_simulators / adb devices that isn't attached to Metro is the most common cause of failure.")
+                device: z.string().optional().describe("Target device name, substring match against the name shown by get_apps (a simulator UDID or adb serial also works). OMIT THIS unless several devices are connected — passing a name copied from list_devices that isn't attached to Metro is the most common cause of failure.")
             }
         },
         async ({ device }) => {

@@ -89,7 +89,6 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 
 | Tool                       | Description                                                 |
 | -------------------------- | ----------------------------------------------------------- |
-| `list_android_devices`     | List connected Android devices and emulators via ADB        |
 | `android_screenshot`       | Take a screenshot from an Android device/emulator           |
 | `android_install_app`      | Install an APK on an Android device/emulator                |
 | `android_launch_app`       | Launch an app by package name                               |
@@ -102,7 +101,6 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 
 | Tool                   | Description                                               |
 | ---------------------- | --------------------------------------------------------- |
-| `list_ios_simulators`  | List available iOS simulators                             |
 | `ios_screenshot`       | Take a screenshot from an iOS simulator                   |
 | `ios_install_app`      | Install an app bundle (.app) on a simulator               |
 | `ios_launch_app`       | Launch an app by bundle ID                                |

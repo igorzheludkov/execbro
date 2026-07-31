@@ -1508,7 +1508,7 @@ export function describeDeviceResolution(resolution: DeviceResolution): string {
 
     const quoted = connected.map(a => `"${deviceLabel(a)}"`).join(", ");
     // Cross-platform mismatch is the dominant shape of this failure: the agent
-    // passes a name from list_ios_simulators / adb devices while only the other
+    // passes a name from list_devices while only the other
     // platform is attached to Metro. Saying so beats "retry with one of these".
     const requested = guessRequestedPlatform(device);
     const attachedPlatforms = new Set(connected.map(a => a.platform));

@@ -21,8 +21,7 @@ When this skill is invoked, follow these steps:
 
 First, check what devices are available:
 
-- Use `mcp__execbro__list_ios_simulators` to find running iOS simulators
-- Use `mcp__execbro__list_android_devices` to find connected Android devices/emulators
+- Use `mcp__execbro__list_devices` to find running simulators, emulators, and connected devices
 
 ### 2. Take Screenshots
 
@@ -73,8 +72,7 @@ If the user provides a Figma URL or design reference:
 
 ## MCP Tools Used
 
-- `mcp__execbro__list_ios_simulators`
-- `mcp__execbro__list_android_devices`
+- `mcp__execbro__list_devices`
 - `mcp__execbro__ios_screenshot`
 - `mcp__execbro__android_screenshot`
 - `mcp__execbro__inspect_at_point` (optional: per-ancestor frames + props at coordinates)

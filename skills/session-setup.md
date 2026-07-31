@@ -26,8 +26,7 @@ Before doing anything else, check if a connection already exists:
 ### 2. Discover Available Devices
 
 Find what devices are available:
-- Use `mcp__execbro__list_ios_simulators` to find iOS simulators (booted and available)
-- Use `mcp__execbro__list_android_devices` to find Android devices/emulators
+- Use `mcp__execbro__list_devices` to find iOS simulators, Android emulators, and physical devices in one call
 
 **If no devices are running:**
 - For iOS: use `mcp__execbro__ios_boot_simulator` with the desired simulator UDID to boot it
@@ -111,8 +110,7 @@ If the user wants to use the built-in React Native debugger:
 
 - `mcp__execbro__get_apps`
 - `mcp__execbro__get_connection_status`
-- `mcp__execbro__list_ios_simulators`
-- `mcp__execbro__list_android_devices`
+- `mcp__execbro__list_devices`
 - `mcp__execbro__ios_boot_simulator`
 - `mcp__execbro__ios_install_app`
 - `mcp__execbro__ios_launch_app`

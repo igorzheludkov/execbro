@@ -30,7 +30,7 @@ const guides: Guide[] = [
 3. get_connection_status — check connection health
 
 ## If No App Running
-- list_ios_simulators / list_android_devices — find available devices
+- list_devices — iOS simulators, Android emulators, and physical devices in one call
 - ios_boot_simulator — boot an iOS simulator if needed
 - ios_launch_app / android_launch_app — launch the app
 - Wait 2-3 seconds, then scan_metro

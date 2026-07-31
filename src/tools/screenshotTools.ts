@@ -40,7 +40,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "WORKFLOW: ios_screenshot -> pick element from pressables -> tap(x, y) or tap(testID=...) -> ios_screenshot to verify.\n" +
                 "LIMITATIONS: Requires a booted iOS simulator (simctl). For physical devices or system dialogs without RN, combine with tap(..., native=true).\n" +
                 "GOOD: ios_screenshot()\n" +
-                "BAD: ios_screenshot({ udid: \"guess\" }) with a made-up UDID — run list_ios_simulators first.\n" +
+                "BAD: ios_screenshot({ udid: \"guess\" }) with a made-up UDID — run list_devices first.\n" +
                 "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y) — it returns the absolute file and line.\n",
             inputSchema: {
                 outputPath: z
@@ -350,7 +350,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "WORKFLOW: android_screenshot -> pick element from pressables -> tap(x, y) or tap(testID=...) -> android_screenshot to verify.\n" +
                 "LIMITATIONS: Requires adb in PATH and a running device/emulator. For non-RN surfaces (system dialogs, permission prompts), combine with tap(..., native=true).\n" +
                 "GOOD: android_screenshot()\n" +
-                "BAD: android_screenshot({ deviceId: \"guess\" }) with a made-up serial — run list_android_devices first.\n" +
+                "BAD: android_screenshot({ deviceId: \"guess\" }) with a made-up serial — run list_devices first.\n" +
                 "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y).\n",
             inputSchema: {
                 outputPath: z

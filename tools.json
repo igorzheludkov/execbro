@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 60,
+    "count": 58,
     "tools": [
         "activate_license",
         "android_input_text",
@@ -46,10 +46,8 @@
         "ios_open_url",
         "ios_screenshot",
         "ios_terminate_app",
-        "list_android_devices",
         "list_debug_globals",
         "list_devices",
-        "list_ios_simulators",
         "logbox",
         "measure",
         "ocr_screenshot",
@@ -290,15 +288,11 @@
             "bundleId",
             "udid"
         ],
-        "list_android_devices": [],
         "list_debug_globals": [
             "device"
         ],
         "list_devices": [
             "refresh"
-        ],
-        "list_ios_simulators": [
-            "onlyBooted"
         ],
         "logbox": [
             "action",

@@ -147,7 +147,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in dp) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
 
 **Device Management:**
-- `list_ios_simulators` / `list_android_devices`: Find available simulators and devices
+- `list_devices`: Find available simulators, emulators, and physical devices in one call
 - `ios_boot_simulator`: Boot an iOS simulator by UDID
 - `ios_install_app` / `android_install_app`: Install app on device
 - `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name

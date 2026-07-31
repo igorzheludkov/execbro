@@ -436,7 +436,7 @@ export async function buildNoSimulatorError(): Promise<string> {
     }
     if (shutdown.length === 0) return base;
     const top = shutdown.slice(0, 6).map((d) => `  - ${d.name} (${d.udid})`).join("\n");
-    const more = shutdown.length > 6 ? `\n  ...and ${shutdown.length - 6} more (run list_ios_simulators)` : "";
+    const more = shutdown.length > 6 ? `\n  ...and ${shutdown.length - 6} more (run list_devices)` : "";
     return `${base}\n\nAvailable simulators (shutdown):\n${top}${more}`;
   } catch {
     return base;

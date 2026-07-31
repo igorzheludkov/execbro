@@ -122,32 +122,6 @@ export function registerDeviceTools(server: McpServer): void {
         }
     );
 
-    // Tool: List Android devices
-    registerToolWithTelemetry(
-        server,
-        "list_android_devices",
-        {
-            description: "DEPRECATED: prefer list_devices, which returns Android emulators (running + stopped) + iOS simulators + physical devices in one call.\n" +
-                "List connected Android devices and emulators via ADB.\n" +
-                "PURPOSE: Discover which physical devices and emulators are visible to adb so you can pick a target UDID/serial.\n" +
-                "WHEN TO USE: Before android_install_app / android_launch_app, or when a tool reports \"no device\" and you need to confirm visibility.\n",
-            inputSchema: {}
-        },
-        async () => {
-            const result = await listAndroidDevices();
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-    
     // Tool: Android install app
     registerToolWithTelemetry(
         server,
@@ -265,37 +239,7 @@ export function registerDeviceTools(server: McpServer): void {
             };
         }
     );
-    // Tool: List iOS simulators
-    registerToolWithTelemetry(
-        server,
-        "list_ios_simulators",
-        {
-            description: "DEPRECATED: prefer list_devices, which returns iOS simulators + Android emulators + physical devices in one call.\n" +
-                "List available iOS simulators.\n" +
-                "PURPOSE: Enumerate installed iOS simulators with their UDIDs and boot state so you can boot or install into the right one.\n" +
-                "WHEN TO USE: Before ios_boot_simulator / ios_install_app, or when you need a UDID for a specific device name.\n",
-            inputSchema: {
-                onlyBooted: z
-                    .boolean()
-                    .optional()
-                    .default(false)
-                    .describe("Only show currently running simulators (default: false)")
-            }
-        },
-        async ({ onlyBooted }) => {
-            const result = await listIOSSimulators(onlyBooted);
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
+    // Tool: iOS install app
     registerToolWithTelemetry(
         server,
         "ios_install_app",
@@ -326,6 +270,7 @@ export function registerDeviceTools(server: McpServer): void {
         }
     );
     
+
     // Tool: iOS launch app
     registerToolWithTelemetry(
         server,
@@ -431,9 +376,9 @@ export function registerDeviceTools(server: McpServer): void {
                 "PURPOSE: Bring a specific simulator online so you can install/launch an app in it.\n" +
                 "WHEN TO USE: At session start when no simulator is running, or after switching between device models.\n" +
                 platformUniqueBanner("booting an iOS simulator") +
-                " Use list_ios_simulators to find available simulators.",
+                " Use list_devices to find available simulators.",
             inputSchema: {
-                udid: z.string().describe("UDID of the simulator to boot (from list_ios_simulators)")
+                udid: z.string().describe("UDID of the simulator to boot (from list_devices)")
             }
         },
         async ({ udid }) => {

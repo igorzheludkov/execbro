@@ -19,8 +19,7 @@ Use this skill when the task involves:
 ### 1. Discover Available Devices
 
 First, check what devices are running:
-- Use `mcp__execbro__list_ios_simulators` to find iOS simulators
-- Use `mcp__execbro__list_android_devices` to find Android devices/emulators
+- Use `mcp__execbro__list_devices` to find iOS simulators, Android emulators, and physical devices in one call
 
 ### 2. See What's on Screen
 
@@ -75,7 +74,7 @@ Use `native=true` when tapping system dialogs, non-RN apps, or before establishi
 **Pin to a specific device when multiple are connected:**
 ```
 tap(text="Submit", device="iPhone SE")        # substring match on connected RN app's deviceName
-tap(text="Submit", udid="ABC-123-...")        # iOS simulator UDID (from list_ios_simulators)
+tap(text="Submit", udid="ABC-123-...")        # iOS simulator UDID (from list_devices)
 ```
 `device` mirrors the `device` parameter on `get_screen_layout`/`ios_screenshot`. `udid` mirrors `ios_screenshot`/`ios_swipe` and takes precedence over `device`/`platform`. `udid` is iOS-only — pairing it with `platform="android"` returns an error. Without these, `tap` follows the platform default, which can land on the wrong simulator when multiple are booted.
 
@@ -135,7 +134,7 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 When calculating swipe distances or tap positions on an unfamiliar device:
 - Android: `mcp__execbro__android_screenshot` reports the device's pixel resolution (`originalWidth` / `originalHeight`)
 - Use this before computing percentage-based coordinates (e.g., center = width/2, height/2)
-- For iOS simulators, the resolution is part of the simulator spec — use `list_ios_simulators` to identify the device model
+- For iOS simulators, the resolution is part of the simulator spec — use `list_devices` to identify the device model
 
 ### 6. Wait for UI Updates
 
@@ -166,8 +165,7 @@ After interactions, verify the result:
 
 - `mcp__execbro__tap`
 - `mcp__execbro__find_components`
-- `mcp__execbro__list_ios_simulators`
-- `mcp__execbro__list_android_devices`
+- `mcp__execbro__list_devices`
 - `mcp__execbro__ios_screenshot` / `android_screenshot`
 - `mcp__execbro__get_screen_layout`
 - `mcp__execbro__inspect_at_point`
