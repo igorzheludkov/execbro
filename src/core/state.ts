@@ -2,16 +2,35 @@ import { ConnectedApp, PendingExecution, LogEntry } from "./types.js";
 import { LogBuffer } from "./logs.js";
 import { NetworkBuffer } from "./network.js";
 import { ImageBuffer } from "./imageBuffer.js";
+import { logBufferSize, networkBufferSize } from "./bufferConfig.js";
 
 // Per-device log buffers (keyed by deviceName)
 export const logBuffers = new Map<string, LogBuffer>();
 export const networkBuffers = new Map<string, NetworkBuffer>();
 
+// Per-device app-run counter. Bumped when a new JS runtime is detected.
+const _sessionEpochs = new Map<string, number>();
+
+export function getEpoch(deviceName: string): number {
+    return _sessionEpochs.get(deviceName) ?? 1;
+}
+
+export function bumpEpoch(deviceName: string): number {
+    const next = getEpoch(deviceName) + 1;
+    _sessionEpochs.set(deviceName, next);
+    return next;
+}
+
+/** Test-only: clear all epoch state. */
+export function resetEpochs(): void {
+    _sessionEpochs.clear();
+}
+
 // Helper: get or create a log buffer for a device
 export function getLogBuffer(deviceName: string): LogBuffer {
     let buffer = logBuffers.get(deviceName);
     if (!buffer) {
-        buffer = new LogBuffer(500);
+        buffer = new LogBuffer(logBufferSize(), deviceName);
         logBuffers.set(deviceName, buffer);
     }
     return buffer;
@@ -21,7 +40,7 @@ export function getLogBuffer(deviceName: string): LogBuffer {
 export function getNetworkBuffer(deviceName: string): NetworkBuffer {
     let buffer = networkBuffers.get(deviceName);
     if (!buffer) {
-        buffer = new NetworkBuffer(200);
+        buffer = new NetworkBuffer(networkBufferSize(), deviceName);
         networkBuffers.set(deviceName, buffer);
     }
     return buffer;
