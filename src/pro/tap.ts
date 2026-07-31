@@ -1,4 +1,5 @@
 import { connectedApps } from "../core/state.js";
+import type { CoordinateMissDiagnosis } from "./coordinateMiss.js";
 import type { ConnectedApp } from "../core/types.js";
 import type { OCRResult, OCRWord } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
@@ -250,6 +251,13 @@ export interface TapResult {
     fiberPressableCount?: string;
     accessibilityMatchCount?: string;
     appRoute?: string;
+    /**
+     * Why a coordinate tap changed nothing: what occupied the point, whether an
+     * overlay covers it, and the nearest reachable pressable with re-tappable
+     * coordinates. Populated only on unmeaningful coordinate taps with a live
+     * Metro connection.
+     */
+    missDiagnosis?: CoordinateMissDiagnosis;
 }
 
 // --- Helpers ---
@@ -1517,6 +1525,58 @@ export function resetCoordArtifactDedup(): void {
     recentCoordArtifacts.clear();
 }
 
+/**
+ * Turn an unmeaningful coordinate tap into an explanation.
+ *
+ * The tricky part is coordinate spaces. The caller works in screenshot pixels;
+ * the tap was executed in points (iOS) or device pixels (Android); the screen
+ * state reports points/dp. We map the tapped point INTO screen-state space to
+ * do the hit test, and map the answer BACK into the caller's screenshot pixels
+ * so any suggested coordinates can be passed straight to another tap().
+ */
+async function diagnoseCoordinateMiss(args: {
+    point: { x: number; y: number };
+    pointUnit: string;
+    inputPoint: { x: number; y: number };
+    deviceName?: string;
+}): Promise<CoordinateMissDiagnosis | undefined> {
+    try {
+        const { getScreenState } = await import("../core/screenState.js");
+        const { explainCoordinateMiss } = await import("./coordinateMiss.js");
+
+        const ss = await getScreenState({ device: args.deviceName });
+        if (!ss.success || !ss.screenState) return undefined;
+
+        // Android taps are executed in device pixels; screen state speaks dp.
+        let pointInState = args.point;
+        if (args.pointUnit === "pixels") {
+            const { androidGetDensity } = await import("../core/android.js");
+            const density = await androidGetDensity();
+            const densityScale = (density.density || 420) / 160;
+            pointInState = { x: args.point.x / densityScale, y: args.point.y / densityScale };
+        }
+
+        // Ratio between screen-state space and the caller's screenshot pixels,
+        // derived from the conversion this very tap already performed. Uses the
+        // larger axis so a near-zero coordinate can't amplify rounding error.
+        const useY = Math.abs(pointInState.y) > Math.abs(pointInState.x);
+        const numerator = useY ? args.inputPoint.y : args.inputPoint.x;
+        const denominator = useY ? pointInState.y : pointInState.x;
+        const factor = denominator !== 0 && Number.isFinite(numerator / denominator)
+            ? numerator / denominator
+            : 1;
+
+        return explainCoordinateMiss(
+            pointInState,
+            ss.screenState,
+            (v) => Math.round(v * factor)
+        ) ?? undefined;
+    } catch {
+        // Diagnosis is best-effort — never let it turn a successful tap into an error.
+        return undefined;
+    }
+}
+
 async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureSignals | undefined> {
     try {
         const { getServerVersion, categorizeError } = await import("../core/telemetry.js");
@@ -2099,6 +2159,30 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             // Uses the same `meaningful` flag the agent sees so dashboard outcomes
             // stay consistent with what the caller observed.
             if (verification && !verification.skipped && verification.meaningful === false) {
+                // A coordinate tap that changed nothing is the one case where the
+                // agent has no idea what went wrong — it estimated x/y from a
+                // screenshot and got back "nothing happened". Screen state knows
+                // what sits at that point and what an overlay blocks; spend the
+                // ~200ms here (already the slow path) to turn a dead end into a
+                // next step. Text/testID/component predicates don't need this:
+                // their failure modes are already named in `attempted`.
+                if (strat === "coordinate" && result.convertedTo) {
+                    const diagnosis = await diagnoseCoordinateMiss({
+                        point: { x: result.convertedTo.x, y: result.convertedTo.y },
+                        pointUnit: result.convertedTo.unit,
+                        inputPoint: { x: query.x!, y: query.y! },
+                        deviceName
+                    });
+                    if (diagnosis) {
+                        successResult.missDiagnosis = diagnosis;
+                        if (successResult.verification) {
+                            successResult.verification = {
+                                ...successResult.verification,
+                                explanation: `${successResult.verification.explanation} ${diagnosis.suggestion}`
+                            };
+                        }
+                    }
+                }
                 const unmeaningfulSignals = await captureTapArtifact({
                     query,
                     outcome: "unmeaningful",
