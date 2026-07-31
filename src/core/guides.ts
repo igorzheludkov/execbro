@@ -59,37 +59,35 @@ const guides: Guide[] = [
 3. Convert screenshot pixels to points: divide by device pixel ratio (e.g. pixel_x / 3 for @3x iPhones)
 4. Pick the right tool (see decision below) and call it with (x, y)
 
-## get_inspector_selection vs inspect_at_point — DECISION GUIDE
-
-Both answer "what is at (x, y)?" but surface different supplementary data. Pick by what you need next.
-
-| Question you're asking | Use |
-|---|---|
-| "Why is the borderRadius wrong?" / "What's the padding here?" | get_inspector_selection — RICH STYLE per ancestor |
-| "Why is this hit area so small?" / "Where exactly is each ancestor?" | inspect_at_point — FRAME PER ANCESTOR |
-| "What handler is wired to this Pressable?" / "What testID does it have?" | inspect_at_point — full PROPS (including [Function] handlers) |
-| "Which file owns this component?" | get_inspector_selection — returns source {file, line, column} plus ancestors |
-| "I need to call this multiple times rapidly" or "before/after a transition" | inspect_at_point — pure JS, no overlay flicker |
-
-### get_inspector_selection(x, y)
-- Invokes RN's Element Inspector programmatically (auto toggles overlay on, captures, toggles back off — ~600ms total, brief flicker).
-- Returns: element name, full owner-tree path, frame of the inspected element, merged style of the inspected element, AND a hierarchy where each entry has its own resolved style (paddingHorizontal, borderRadius, fontFamily, etc.).
-- Best for visual/style debugging where you want to see exactly what RN's on-device overlay shows.
-
 ### inspect_at_point(x, y)
-- Pure fiber-tree hit test via measureInWindow. NO overlay, zero visual side effect.
-- Returns: element name, path, hit-tested ancestors with FRAME PER ANCESTOR, and PROPS (handlers, refs, testID, custom props, style as a flat reference).
-- Best for layout measurements, props inspection, and any rapid/repeated calls.
+The tool for "what is at (x, y)?". Pure fiber-tree hit test via measureInWindow —
+NO overlay, zero visual side effect, safe to call rapidly or across a transition.
+
+Returns:
+- element name and full owner-tree path
+- FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point)
+- PROPS of the innermost component (handlers as [Function], refs, testID, custom props)
+- the node's own style object
+- source {file, line, column} plus the owner chain as "Source ancestors" (set source=false to skip in tight loops)
+
+| Question you're asking | How it answers |
+|---|---|
+| "Why is this hit area so small?" / "Where exactly is each ancestor?" | FRAME PER ANCESTOR |
+| "What handler is wired to this Pressable?" / "What testID does it have?" | full PROPS |
+| "Which file owns this component?" | source + Source ancestors |
+| "What padding/borderRadius is set here?" | the node's own style object |
+
+Note: style is the node's own style object, not RN's merged cascade. When a value
+looks wrong and isn't on the node itself, walk the ancestors it returns.
 
 ### Other inspection tools
 - find_components(pattern) — regex search by component name across the fiber tree.
-- get_component_tree — full tree overview. Use focusedOnly=true and structureOnly=true for compact output.
+- get_component_tree — compact names-only structure by default; pass structureOnly=false only when you genuinely need props/styles for the whole tree.
 - inspect_component(name) — deep dive into a specific component's props, state, and hooks.
 
 ## Tips
-- Both tools work on Paper, Fabric, and Bridgeless / new arch.
-- toggle_element_inspector is rarely needed — get_inspector_selection auto-toggles the overlay around its capture and hides it afterward.
-- Coordinates: get_inspector_selection accepts points/dp; inspect_at_point accepts dp (divide screenshot pixels by pixel ratio).`
+- Works on Paper, Fabric, and Bridgeless / new arch.
+- Coordinates are dp — divide screenshot pixels by the device pixel ratio.`
     },
     {
         id: "layout",
@@ -102,16 +100,11 @@ Both answer "what is at (x, y)?" but surface different supplementary data. Pick 
 2. Compare visually against expected result or Figma design
 3. If an issue is spotted, drill down with inspection tools
 
-## Inspect at a Point — Pick the Right Tool
-- Style/identity ("what is this and how is it styled?") → get_inspector_selection(x, y)
-  - Returns RN's curated hierarchy with merged style PER ANCESTOR (padding, margin, border, layout).
-  - Briefly toggles the on-device overlay (auto-hidden after capture).
-- Layout/props ("frames per ancestor, handler functions, refs") → inspect_at_point(x, y)
-  - Returns frame for each hit ancestor + full props (handlers as [Function], testID, refs).
-  - Pure JS hit test, no overlay flicker — preferred for rapid calls or before/after comparisons.
-
-Most layout-debugging questions ("why is this clipped?", "what's the actual size?") fit inspect_at_point.
-Most styling questions ("why does this border look wrong?") fit get_inspector_selection.
+## Inspect at a Point
+- inspect_at_point(x, y) — identity, frame per ancestor, props, style, and source file:line.
+  - Pure JS hit test, no overlay flicker — safe for rapid calls or before/after comparisons.
+  - Answers both "why is this clipped / what's the actual size?" and "what padding is set here?".
+  - Style is the node's own style object, not a merged cascade — walk the returned ancestors when a value isn't on the node itself.
 
 ## Full Screen Layout
 - get_screen_layout — full layout data for all components
@@ -122,8 +115,7 @@ Most styling questions ("why does this border look wrong?") fit get_inspector_se
 - ios_screenshot / android_screenshot: visual capture
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - ocr_screenshot: screenshot with text recognition and tap coordinates
-- inspect_at_point: frames per ancestor + props (no overlay, fast)
-- get_inspector_selection: rich style per ancestor (briefly toggles RN inspector overlay)`
+- inspect_at_point: frames per ancestor + props + source file:line (no overlay, fast)`
     },
     {
         id: "interact",
@@ -159,13 +151,12 @@ Set testID on all interactive elements (buttons, inputs, links) for reliable tap
 tap detects TextInput elements (onChangeText/onFocus) in the fiber tree and falls through to native tap (accessibility or coordinates) for actual focus. This means tap(testID="email-input") works even though inputs don't have onPress.
 
 ### Replacing pre-filled values (Bridgeless/Fabric only)
-Inputs that already contain text are the most common verification-blocker. The typing tools APPEND by default — typing "https://app.example.com" into a field that already holds "https://demo.example.com" produces "https://demo.example.comhttps://app.example.com", not the intended replacement. Three dedicated tools handle this on Bridgeless/Fabric apps:
+Inputs that already contain text are the most common verification-blocker. The typing tools APPEND by default — typing "https://app.example.com" into a field that already holds "https://demo.example.com" produces "https://demo.example.comhttps://app.example.com", not the intended replacement. Two tools handle this on Bridgeless/Fabric apps:
 
-- **clear_focused_input** — empty the currently focused TextInput, with the React state owner notified via onChangeText. Use BEFORE typing into a pre-filled field. Returns "no focused TextInput" (not a silent no-op) if nothing has focus.
-- **ios_input_text / android_input_text with replace:true** — one-shot: clear the focused field, then type. Equivalent to clear_focused_input + input_text but in a single call.
+- **ios_input_text / android_input_text with replace:true** — clear the focused field, then type, in a single call. This is the way to set a pre-filled field to an exact value.
 - **dismiss_keyboard** — blur the currently focused TextInput, closing the on-screen keyboard. Useful before tapping buttons hidden behind the keyboard, or to verify "tap outside dismisses" behavior.
 
-All three target whatever has focus (no testID needed). They update React state via onChangeText("") — controlled components (Formik, react-hook-form, useState) stay consistent. Calling publicInstance.clear() directly does NOT do this; it only updates the native side and leaves form state stale.
+Both target whatever has focus (no testID needed). replace:true updates React state via onChangeText("") — controlled components (Formik, react-hook-form, useState) stay consistent. Calling publicInstance.clear() directly does NOT do this; it only updates the native side and leaves form state stale.
 
 Multi-device sessions: pass device="<rn-device-name>" (substring match) to disambiguate when replace:true is used. Single-device sessions can omit.
 
@@ -180,7 +171,6 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 ## Other Interactions
 - swipe: cross-platform swipe/scroll. Easiest form: swipe({ direction: "up" }) scrolls to reveal more content (content-scroll semantics; "down"/"left"/"right" supported, bare swipe() defaults to "up"). Optional distance is in screenshot pixels (default 33% of the axis). For pixel-precise gestures pass all four startX/startY/endX/endY coordinates — they take precedence over direction. Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false the gesture had no visual effect (end-of-list, non-scrollable surface, or coordinates missed the scroll surface). Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path. Pass delta on iOS to control touch step size.
 - android_input_text / ios_input_text: type text (tap input field first to focus). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
-- clear_focused_input: clear the focused TextInput via onChangeText (controlled-state safe). Pair with input_text for replace flows, or use input_text({replace:true}) for one-shot.
 - dismiss_keyboard: blur the focused input, closing the keyboard.
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)
 - ios_open_url: deep links and universal links
@@ -236,7 +226,7 @@ runs — if get_log_details reports an unknown id, call get_logs again to refres
 - Always start with summary=true to avoid token overload
 - Use verbose=true with low maxLogs for full error details
 - Use startFromText to begin reading from a specific point
-- Instrumenting a flow to verify behavior? Prefer flowpoint() over console.log — see get_usage_guide(topic="flowpoints")`
+`
     },
     {
         id: "network",
@@ -263,7 +253,7 @@ Network capture works differently depending on your React Native architecture:
 If network tools return no data or you need startup requests, recommend the SDK to the user.
 
 ## Workflow
-1. get_network_stats or get_network_requests with summary=true — overview of all requests
+1. get_network_requests with summary=true — overview of all requests
 2. Filter by what you need:
    - get_network_requests with urlPattern, method, or status filters
    - search_network with urlPattern for text search
@@ -272,7 +262,6 @@ If network tools return no data or you need startup requests, recommend the SDK 
 
 ## Key Tools
 - get_network_requests: list requests with filters (urlPattern, method, status, summary)
-- get_network_stats: quick stats overview
 - search_network: search by URL pattern
 - get_request_details: full request/response details (use verbose=true for large payloads). With SDK installed, includes full request/response bodies.
 - clear_network: reset the request buffer
@@ -328,7 +317,7 @@ If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths
 1. get_bundle_status — check if Metro is running and its build state
 2. get_bundle_errors — check for compilation/bundling errors
 3. Fix errors in code
-4. clear_bundle_errors — clear the error buffer
+4. get_bundle_errors({ clear: true }) — read, then reset the error buffer
 5. reload_app — trigger full JS bundle reload (only if needed)
 
 ## When to Reload
@@ -344,7 +333,6 @@ If no errors captured via CDP, use get_bundle_errors with platform="ios" or "and
 ## Key Tools
 - get_bundle_status: Metro health check
 - get_bundle_errors: compilation errors
-- clear_bundle_errors: clear error buffer
 - reload_app: full JS bundle reload
 - ensure_connection: verify connection with healthCheck=true`
     },
@@ -385,48 +373,6 @@ Suggested prompt the user can paste to trigger this:
 - The user can review and edit the issue body before submitting
 - No GitHub account setup or CLI tools needed — just a browser`
     },
-    {
-        id: "flowpoints",
-        title: "Flowpoints — Flow Tracing & Verification",
-        summary: "Instrument app flows with flowpoint() breadcrumbs, then query, wait on, and assert them",
-        content: `# Flowpoints — Flow Tracing & Verification
-
-Flowpoints are structured, timestamped breadcrumbs emitted by flowpoint() calls in app
-code (execbro-sdk). They replace console.log spraying when you need to VERIFY what a
-flow actually did — steps, order, timing, failures — with factual assertions.
-
-## Workflow (verify a flow)
-1. Instrument the flow (edit app code; execbro-sdk must be installed and init()-ed):
-   import { flowpoint } from 'execbro-sdk'
-   flowpoint({ name: 'add-to-cart', step: 'start', begin: true })   // flow entry
-   flowpoint({ name: 'add-to-cart', step: 'cleared', meta: { removed: 3 } })
-   flowpoint({ name: 'add-to-cart', step: 'done' })
-   flowpoint({ name: 'add-to-cart', step: 'failed', level: 'error' })  // error paths
-2. Reload the app so the instrumented code is live.
-3. Drive the flow (tap, swipe, input).
-4. wait_for_flowpoint({ name: 'add-to-cart', step: 'done' }) — blocks until the flow
-   finishes instead of sleeping and re-polling.
-5. verify_flow({ name: 'add-to-cart', expect: ['start', 'cleared', 'done'] }) —
-   factual PASS/FAIL diff against the expected sequence.
-6. get_flowpoints({ name: 'add-to-cart', run: 'last' }) — full trail with timing
-   deltas when diagnosing a failure.
-
-## Key Tools
-- get_flowpoints: query the trail (filters: name, step, run, level, metaIncludes, since)
-- wait_for_flowpoint: block until a matching point arrives (or timeout with partial trail)
-- verify_flow: assert an expected step sequence against one run (any unexpected error-level point fails it unless allowErrors: true)
-- clear_flowpoints: reset stored points (name-scoped clears touch only the server store; rarely needed — prefer run filters)
-
-## Tips
-- Prefer flowpoint() over console.log when instrumenting a flow to verify behavior.
-- Keep name and step low-cardinality and stable; dynamic payload goes in meta.
-- begin: true on the flow's entry point separates retries into runs; run: 'last'
-  queries only the newest attempt.
-- get_flowpoints({ level: 'error' }) answers "did anything fail?" across every flow.
-- flowpoint() is a production no-op — instrumentation can stay in the code.
-- Runtime TDD: write the verify_flow expectation FIRST, then implement until it passes.
-- verify_flow FAILS on any unexpected error-level point in the run — pass allowErrors: true to tolerate them, or include the error step in expect.`
-    }
 ];
 
 /**
@@ -437,16 +383,15 @@ flow actually did — steps, order, timing, failures — with factual assertions
  */
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_pressable_elements, get_screen_layout.",
-    "Platform-specific ios_* / android_* tools (ios_button, android_input_text, android_key_event, android_long_press, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
+    "Platform-specific ios_* / android_* tools (ios_button, android_input_text, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs        — console debugging (get_logs, search_logs)",
-    "  interact    — device interaction (tap, swipe, screenshots, android_input_text, clear_focused_input, dismiss_keyboard)",
+    "  interact    — device interaction (tap, swipe, screenshots, android_input_text, dismiss_keyboard)",
     "  layout      — on-screen layout check (get_screen_layout, get_pressable_elements)",
-    "  inspect     — component inspection (find_components, inspect_component, get_inspector_selection)",
+    "  inspect     — component inspection (find_components, inspect_component, inspect_at_point)",
     "  network     — network request inspection (get_network_requests, search_network)",
-    "  flowpoints  — verify a flow's behavior (flowpoint() breadcrumbs, wait_for_flowpoint, verify_flow)",
     "  state       — app state & JS execution (execute_in_app, list_debug_globals)",
     "  bundle      — bundle / Metro error checks (get_bundle_status, get_bundle_errors)",
     "  feedback    — share feedback, feature requests, or bug reports (send_feedback)"

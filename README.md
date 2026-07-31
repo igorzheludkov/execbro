@@ -44,7 +44,7 @@ Linking your installation here is also **required to unlock [ExecBro Pro](#prici
 - **Android Devices** - Screenshots, app install/launch, package management (via ADB)
 - **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots. Returns post-tap screenshot and verifies visual change by default
 - **Unified Swipe** - Single `swipe` tool that auto-routes to iOS or Android based on the connected device. Accepts screenshot pixel coordinates, handles per-platform conversion, and returns a `verification.meaningful` signal so agents detect end-of-list, non-scrollable surfaces, and missed coordinates. Essential for scrolling virtualized lists (FlatList/SectionList) where off-screen items aren't in the fiber tree
-- **UI Automation** - Swipe, long press, key events, and text input on both platforms. On Bridgeless/Fabric apps, `clear_focused_input` and `dismiss_keyboard` operate on whatever has focus, and `ios_input_text` / `android_input_text` accept `replace:true` to overwrite pre-filled values — all three update React state through `onChangeText` so controlled components (Formik, react-hook-form, useState) stay consistent
+- **UI Automation** - Swipe, long press, key events, and text input on both platforms. On Bridgeless/Fabric apps, `dismiss_keyboard` operates on whatever has focus, and `ios_input_text` / `android_input_text` accept `replace:true` to overwrite pre-filled values — updating React state through `onChangeText` so controlled components (Formik, react-hook-form, useState) stay consistent
 - **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
 - **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
 
@@ -110,11 +110,9 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `scan_metro`                            | **Start here** — scan for Metro servers and auto-connect                                 |
 | `get_logs` / `search_logs`              | Capture and search console logs with filtering and summaries                             |
 | `get_network_requests`                  | Monitor HTTP requests with method/status filtering                                       |
-| `get_flowpoints` / `verify_flow`         | Flow tracing + factual verification: query, wait on, and assert `flowpoint()` breadcrumbs (SDK) |
 | `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
 | `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
 | `ios_input_text` / `android_input_text` | Type text into the focused field. `replace:true` clears pre-filled values first (Fabric) |
-| `clear_focused_input`                   | Clear the focused TextInput via React `onChangeText`, keeping controlled state in sync   |
 | `dismiss_keyboard`                      | Blur the focused input and close the on-screen keyboard                                  |
 | `execute_in_app`                        | Run JS expressions in the app runtime (REPL-style)                                       |
 | `ios_screenshot` / `android_screenshot` | Take device screenshots                                                                  |
@@ -147,7 +145,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
     The list won't scroll — scroll it down and check what's going on
     ```
     ```
-    Instrument the checkout flow with flowpoints, run it, and verify the steps fire in order
+    Why does this button look wrong — what component renders it and where?
     ```
 
     The agent connects to Metro, reads logs and network, inspects the screen, and drives the UI as needed to answer.

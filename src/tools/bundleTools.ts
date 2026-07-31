@@ -242,7 +242,7 @@ export function registerBundleTools(server: McpServer): void {
                 "Get the current Metro bundler status including build state and any recent bundling errors. Use this to check if there are compilation/bundling errors that prevent the app from loading.\n" +
                 "PURPOSE: Snapshot Metro's current build state (idle / transforming / error) together with any captured errors — a fast \"is the bundler healthy?\" check.\n" +
                 "WHEN TO USE: Before diving into runtime debugging — rules out compile-time failures that would make get_logs and tap pointless.\n" +
-                "WORKFLOW: get_bundle_status -> if errors present: get_bundle_errors for detail -> fix -> clear_bundle_errors.\n" +
+                "WORKFLOW: get_bundle_status -> if errors present: get_bundle_errors for detail -> fix -> get_bundle_errors({ clear: true }).\n" +
                 "LIMITATIONS: Relies on Metro's WebSocket event stream; if Metro isn't running or the connection dropped, status may be stale.\n" +
                 "GOOD: get_bundle_status() at the start of a debug session.\n" +
                 "BAD: Polling every second — Metro events are push-based; just call once and act on the result.\n" +
@@ -276,13 +276,19 @@ export function registerBundleTools(server: McpServer): void {
                 "Retrieve captured Metro bundling/compilation errors. These are errors that occur during the bundle build process (import resolution, syntax errors, transform errors) that prevent the app from loading. If no errors are captured but Metro is running without connected apps, automatically falls back to screenshot+OCR to capture the error from the device screen.\n" +
                 "PURPOSE: Surface Metro's build-time failures (not runtime JS errors) that keep the app from booting or hot-reloading.\n" +
                 "WHEN TO USE: App shows the red error screen, refuses to connect, or Fast Refresh stops working after an edit. Also use when get_logs is silent but the app is clearly broken.\n" +
-                "WORKFLOW: get_bundle_status -> get_bundle_errors -> fix source -> clear_bundle_errors -> reload_app.\n" +
+                "WORKFLOW: get_bundle_status -> get_bundle_errors -> fix source -> get_bundle_errors({ clear: true }) -> reload_app.\n" +
                 "LIMITATIONS: Captures errors Metro emits via its WebSocket; the screenshot+OCR fallback requires a booted simulator and the platform param.\n" +
-                "GOOD: get_bundle_errors({ platform: \"ios\" })\n" +
+                "GOOD: get_bundle_errors({ platform: \"ios\" }); get_bundle_errors({ clear: true }) after fixing, so the next read reflects only new errors.\n" +
                 "BAD: Using get_bundle_errors to look for runtime TypeErrors — those live in get_logs, not the bundler.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"bundle\") for the full bundle-check playbook.",
             inputSchema: {
                 maxErrors: z.number().optional().default(10).describe("Maximum number of errors to return (default: 10)"),
+                clear: z
+                    .boolean()
+                    .optional()
+                    .describe(
+                        "If true, empty the bundle error buffer after reading it. Use once a bundling error is fixed so the next call reflects only fresh errors. The errors are still returned in this response."
+                    ),
                 platform: z
                     .enum(["ios", "android"])
                     .optional()
@@ -295,16 +301,21 @@ export function registerBundleTools(server: McpServer): void {
                     .describe("Optional device target for screenshot fallback. Accepts an adb serial / iOS UDID, an emulator/simulator name, or a substring of the connected RN device name. Uses first available device if not specified.")
             }
         },
-        async ({ maxErrors, platform, deviceId }) => {
+        async ({ maxErrors, platform, deviceId, clear }) => {
             // First, try to get errors from the buffer (captured via CDP/Metro WebSocket)
             const { errors, formatted } = getBundleErrors(bundleErrorBuffer, { maxErrors });
-    
+
+            // `clear` drains the buffer *after* the read above, so this call still
+            // reports what it found — the reset only affects subsequent calls.
+            const cleared = clear === true ? bundleErrorBuffer.clear() : 0;
+            const clearNote = clear === true ? `\n\nCleared ${cleared} error(s) from the buffer.` : "";
+
             if (errors.length > 0) {
                 return {
                     content: [
                         {
                             type: "text",
-                            text: `Bundle Errors (${errors.length} captured):\n\n${formatted}`
+                            text: `Bundle Errors (${errors.length} captured):\n\n${formatted}${clearNote}`
                         }
                     ]
                 };
@@ -317,7 +328,7 @@ export function registerBundleTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `Bundle Errors (0 captured):\n\nNo bundle errors captured.\n\nTip: If the app failed to load and you see a red error screen on the device, use the 'platform' parameter (ios/android) to enable screenshot+OCR fallback for error capture.`
+                            text: `Bundle Errors (0 captured):\n\nNo bundle errors captured.\n\nTip: If the app failed to load and you see a red error screen on the device, use the 'platform' parameter (ios/android) to enable screenshot+OCR fallback for error capture.${clearNote}`
                         }
                     ]
                 };
@@ -336,7 +347,7 @@ export function registerBundleTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `Bundle Errors (0 captured):\n\nNo bundle errors captured. ${statusMsg}`
+                            text: `Bundle Errors (0 captured):\n\nNo bundle errors captured. ${statusMsg}${clearNote}`
                         }
                     ]
                 };
@@ -433,31 +444,6 @@ export function registerBundleTools(server: McpServer): void {
                     ]
                 };
             }
-        }
-    );
-    
-    // Tool: Clear bundle errors
-    registerToolWithTelemetry(
-        server,
-        "clear_bundle_errors",
-        {
-            description: "Clear the bundle error buffer.\n" +
-                "PURPOSE: Reset captured Metro build errors after a fix so get_bundle_status/get_bundle_errors reflect the current state.\n" +
-                "WHEN TO USE: After fixing a bundling error and before re-triggering Metro to confirm the error is gone.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"bundle\") for the full bundle-check playbook.",
-            inputSchema: {}
-        },
-        async () => {
-            const count = bundleErrorBuffer.clear();
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `Cleared ${count} bundle errors from buffer.`
-                    }
-                ]
-            };
         }
     );
 }

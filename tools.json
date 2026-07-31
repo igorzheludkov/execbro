@@ -1,9 +1,8 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 70,
+    "count": 60,
     "tools": [
         "activate_license",
-        "android_get_screen_size",
         "android_input_text",
         "android_install_app",
         "android_key_event",
@@ -11,9 +10,6 @@
         "android_list_packages",
         "android_long_press",
         "android_screenshot",
-        "clear_bundle_errors",
-        "clear_flowpoints",
-        "clear_focused_input",
         "clear_logs",
         "clear_network",
         "connect_metro",
@@ -28,14 +24,11 @@
         "get_bundle_status",
         "get_component_tree",
         "get_connection_status",
-        "get_flowpoints",
         "get_images",
-        "get_inspector_selection",
         "get_license_status",
         "get_log_details",
         "get_logs",
         "get_network_requests",
-        "get_network_stats",
         "get_pressable_elements",
         "get_refresh_status",
         "get_request_details",
@@ -68,17 +61,11 @@
         "search_network",
         "send_feedback",
         "swipe",
-        "tap",
-        "toggle_element_inspector",
-        "verify_flow",
-        "wait_for_flowpoint"
+        "tap"
     ],
     "params": {
         "activate_license": [
             "token"
-        ],
-        "android_get_screen_size": [
-            "deviceId"
         ],
         "android_input_text": [
             "device",
@@ -114,14 +101,6 @@
         "android_screenshot": [
             "deviceId",
             "outputPath"
-        ],
-        "clear_bundle_errors": [],
-        "clear_flowpoints": [
-            "device",
-            "name"
-        ],
-        "clear_focused_input": [
-            "device"
         ],
         "clear_logs": [
             "device"
@@ -167,6 +146,7 @@
         ],
         "get_apps": [],
         "get_bundle_errors": [
+            "clear",
             "deviceId",
             "maxErrors",
             "platform"
@@ -187,16 +167,6 @@
             "eventLimit",
             "events"
         ],
-        "get_flowpoints": [
-            "device",
-            "level",
-            "limit",
-            "metaIncludes",
-            "name",
-            "run",
-            "since",
-            "step"
-        ],
         "get_images": [
             "clear",
             "frameIndex",
@@ -205,14 +175,6 @@
             "last",
             "list",
             "source"
-        ],
-        "get_inspector_selection": [
-            "device",
-            "history",
-            "limit",
-            "source",
-            "x",
-            "y"
         ],
         "get_license_status": [],
         "get_log_details": [
@@ -240,9 +202,6 @@
             "status",
             "summary",
             "urlPattern"
-        ],
-        "get_network_stats": [
-            "device"
         ],
         "get_pressable_elements": [
             "device"
@@ -424,24 +383,6 @@
             "verify",
             "x",
             "y"
-        ],
-        "toggle_element_inspector": [
-            "device"
-        ],
-        "verify_flow": [
-            "allowErrors",
-            "device",
-            "expect",
-            "name",
-            "run"
-        ],
-        "wait_for_flowpoint": [
-            "device",
-            "level",
-            "metaIncludes",
-            "name",
-            "step",
-            "timeoutMs"
         ]
     }
 }

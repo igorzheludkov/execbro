@@ -24,7 +24,7 @@ First, verify the debugger is connected:
 
 Start with statistics to understand the request landscape:
 - Use `mcp__execbro__get_network_requests` with `summary=true` to get counts by method, status, and domain
-- Alternatively, use `mcp__execbro__get_network_stats` for a quick stats overview
+- Alternatively, use `mcp__execbro__get_network_requests(summary=true)` for a quick stats overview
 
 ### 3. Filter and Find Requests
 
@@ -77,7 +77,6 @@ When you need to capture fresh network activity:
 - `mcp__execbro__ensure_connection`
 - `mcp__execbro__scan_metro`
 - `mcp__execbro__get_network_requests`
-- `mcp__execbro__get_network_stats`
 - `mcp__execbro__search_network`
 - `mcp__execbro__get_request_details`
 - `mcp__execbro__clear_network`

@@ -40,7 +40,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
                 "GOOD: tap({ testID: \"login-btn\" }); tap({ text: \"Submit\" }); tap({ x: 300, y: 600 }); tap({ x: 300, y: 600, native: true, device: \"emulator-5554\" })\n" +
                 "BAD: tap({ text: \"\" }) or tap({ x: 0, y: 0 }) — missing a target. tap({ text: \"Submit\" }) without first screenshotting an ambiguous screen.\n" +
-                "SOURCE: need the file:line that renders an element? get_inspector_selection(x, y).\n" +
+                "SOURCE: need the file:line that renders an element? inspect_at_point(x, y).\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
             inputSchema: {
                 text: z
@@ -624,38 +624,6 @@ export function registerInteractionTools(server: McpServer): void {
     );
     
     // Tool: Clear focused text input
-    registerToolWithTelemetry(
-        server,
-        "clear_focused_input",
-        {
-            description:
-                "Clear the contents of the currently focused TextInput, updating React state correctly so controlled components (Formik, react-hook-form, useState) stay consistent." +
-                "\nPURPOSE: Reset whatever TextInput has focus to empty, with the React state owner notified via onChangeText. Use BEFORE typing a replacement value into a pre-filled field." +
-                "\nWHEN TO USE: After tap(testID=...) focuses an input that already has text. Pair with ios_input_text/android_input_text (or use their replace:true flag for one-shot)." +
-                "\nPREREQUISITE: A TextInput must already have React focus. Tap the field first (e.g. tap({ testID: 'search' })) — this tool does NOT focus a field itself." +
-                "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). Returns 'no focused TextInput' if nothing is focused — does not silently no-op." +
-                "\nSEE ALSO: dismiss_keyboard, ios_input_text({replace:true}), android_input_text({replace:true}). call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
-            inputSchema: {
-                device: z
-                    .string()
-                    .optional()
-                    .describe("Optional device name (substring match). Uses default device if not specified.")
-            }
-        },
-        async ({ device }) => {
-            const result = await clearFocusedInput(device);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? `Cleared focused input (via ${result.via}).` : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-    
     // Tool: Dismiss keyboard
     registerToolWithTelemetry(
         server,

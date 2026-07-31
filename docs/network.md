@@ -97,12 +97,12 @@ Get statistics overview before fetching full requests:
 get_network_requests with summary=true
 ```
 
-This returns the same output as `get_network_stats` - counts by method, status, and domain.
+This returns counts by method, status, and domain.
 
 ## View Statistics
 
 ```
-get_network_stats
+get_network_requests with summary=true
 ```
 
 Example output:

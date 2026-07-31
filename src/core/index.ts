@@ -156,13 +156,8 @@ export {
   pressElement,
   // Coordinate-based inspection
   inspectAtPoint,
-  toggleElementInspector,
   isInspectorActive,
-  getInspectorSelection,
-  getInspectorSelectionAtPoint,
-  getSelectionHistory,
   harvestStacksAtPoint,
-  harvestStacksAtFrame,
   enrichWithSource,
 } from "./executor.js";
 
@@ -270,13 +265,6 @@ export {
 } from "./bundle.js";
 
 // Element Inspector selection capture
-export {
-  startSelectionPoller,
-  stopSelectionPoller,
-  stopAllSelectionPollers,
-  isSelectionPollerRunning,
-} from "./selectionPoller.js";
-export { SelectionBuffer, selectionBuffer } from "./selectionBuffer.js";
 export type { SelectionEntry, SelectionFrame, ComponentStack } from "./selectionBuffer.js";
 
 // License & Usage

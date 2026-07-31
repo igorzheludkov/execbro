@@ -14,7 +14,7 @@ function errResponse(text: string): ToolErrorResponse {
  * adb serial, emulator name) into the canonical adb serial that
  * `adb -s <serial>` accepts.
  *
- * Mirrors the resolution behaviour of `tap`, `clear_focused_input`,
+ * Mirrors the resolution behaviour of `tap`, `dismiss_keyboard`,
  * `inspect_at_point`, etc. so platform-specific tools (`android_input_text`,
  * `android_launch_app`, `android_screenshot`, …) accept the same hints
  * cross-platform tools do. Without this layer, agents who pass `"sdk_gphone"`

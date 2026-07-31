@@ -41,7 +41,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "LIMITATIONS: Requires a booted iOS simulator (simctl). For physical devices or system dialogs without RN, combine with tap(..., native=true).\n" +
                 "GOOD: ios_screenshot()\n" +
                 "BAD: ios_screenshot({ udid: \"guess\" }) with a made-up UDID — run list_ios_simulators first.\n" +
-                "SOURCE: to jump from a pixel to the code that renders it, call get_inspector_selection(x, y) — it returns the absolute file and line.\n" +
+                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y) — it returns the absolute file and line.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
             inputSchema: {
                 outputPath: z
@@ -352,7 +352,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "LIMITATIONS: Requires adb in PATH and a running device/emulator. For non-RN surfaces (system dialogs, permission prompts), combine with tap(..., native=true).\n" +
                 "GOOD: android_screenshot()\n" +
                 "BAD: android_screenshot({ deviceId: \"guess\" }) with a made-up serial — run list_android_devices first.\n" +
-                "SOURCE: to jump from a pixel to the code that renders it, call get_inspector_selection(x, y).\n" +
+                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y).\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
             inputSchema: {
                 outputPath: z
@@ -687,7 +687,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "LIMITATIONS: OCR accuracy degrades on very small or stylized text; icons with no label won't appear — use tap(component=...) instead.\n" +
                 "GOOD: ocr_screenshot({ platform: \"ios\" })\n" +
                 "BAD: ocr_screenshot used just to view the screen — plain ios_screenshot / android_screenshot is cheaper when you don't need OCR text.\n" +
-                "SOURCE: for RN screens, get_inspector_selection(x, y) returns the file and line that render an element — no OCR needed.\n" +
+                "SOURCE: for RN screens, inspect_at_point(x, y) returns the file and line that render an element — no OCR needed.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
             inputSchema: {
                 platform: z.enum(["ios", "android"]).describe("Platform to capture screenshot from"),

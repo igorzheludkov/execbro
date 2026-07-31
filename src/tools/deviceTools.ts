@@ -6,7 +6,6 @@ import {
     androidInstallApp,
     androidLaunchApp,
     androidListPackages,
-    androidGetScreenSize,
     listIOSSimulators,
     iosInstallApp,
     iosLaunchApp,
@@ -267,50 +266,6 @@ export function registerDeviceTools(server: McpServer): void {
                     }
                 ],
                 isError: !result.success
-            };
-        }
-    );
-    // Tool: Android get screen size
-    registerToolWithTelemetry(
-        server,
-        "android_get_screen_size",
-        {
-            description: "Get the screen size (resolution) of an Android device/emulator" +
-                platformUniqueBanner("reading Android device pixel resolution") +
-                "\nPURPOSE: Return the device's pixel width and height so you can compute safe tap/swipe coordinates." +
-                "\nWHEN TO USE: Before scripting raw-coordinate gestures on an unfamiliar device, or when normalizing coordinates across devices." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
-            inputSchema: {
-                deviceId: z
-                    .string()
-                    .optional()
-                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
-            }
-        },
-        async ({ deviceId }) => {
-            const r = await resolveAndroidDeviceId(deviceId);
-            if (!r.ok) return r.response;
-            const result = await androidGetScreenSize(r.serial);
-    
-            if (!result.success) {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Error: ${result.error}`
-                        }
-                    ],
-                    isError: true
-                };
-            }
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `Screen size: ${result.width}x${result.height} pixels`
-                    }
-                ]
             };
         }
     );
