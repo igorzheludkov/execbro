@@ -1,5 +1,36 @@
 import { buildRequireSource } from "./moduleRegistry.js";
 
+/**
+ * RESOLUTION ORDER — read this before adding a new handle to the context.
+ *
+ * When you need something the app holds privately, try the sources that are
+ * *records the runtime already keeps* before reaching into live internals.
+ * Records are stable and enumerable; internals are closures we usually cannot
+ * open, and the introspection that does work tends to be the first thing to
+ * break on a library upgrade.
+ *
+ *   1. Metro module registry (`__r.getModules()`) — anything a module exported.
+ *      Resolved expo-router's imperative API when no global existed.
+ *   2. SDK network buffer (`__RN_AI_DEVTOOLS__.getNetworkEntries()`) — anything
+ *      that went over the wire: headers, endpoints, credentials.
+ *      Resolved the bearer token for Apollo apps that keep none in redux.
+ *   3. Fiber tree — anything passed as props or context. Resolves the redux
+ *      store and React Navigation refs.
+ *   4. Known globals and the SDK registry — cheap, but app-specific and often
+ *      absent or, worse, a bespoke wrapper (AppB's `__EXPO_ROUTER__` is
+ *      not the library's `router`).
+ *   5. Introspection of live internals — last resort. Apollo's auth link is a
+ *      closure over an async getter; Zustand stores are module-scoped hooks and
+ *      never appear in the fiber tree at all.
+ *
+ * Two facts that motivate the ordering: single-strategy fiber resolution
+ * accounted for 33 of 103 redux-tool failures (32%), and the two hardest
+ * handles here — expo-router and the Apollo token — were both solved by
+ * records (1 and 2), not by introspection.
+ *
+ * Rationale and evidence: docs/devtools-core/specs/2026-07-31-bounded-state-reads-design.md §4.
+ */
+
 export const CONTEXT_BINDINGS = [
     "require",
     "store",
