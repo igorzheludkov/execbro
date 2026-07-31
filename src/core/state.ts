@@ -3,6 +3,7 @@ import { LogBuffer } from "./logs.js";
 import { NetworkBuffer } from "./network.js";
 import { ImageBuffer } from "./imageBuffer.js";
 import { logBufferSize, networkBufferSize } from "./bufferConfig.js";
+import { clearHandlesForDevice } from "./promiseHandles.js";
 
 // Per-device log buffers (keyed by deviceName)
 export const logBuffers = new Map<string, LogBuffer>();
@@ -18,6 +19,11 @@ export function getEpoch(deviceName: string): number {
 export function bumpEpoch(deviceName: string): number {
     const next = getEpoch(deviceName) + 1;
     _sessionEpochs.set(deviceName, next);
+    // A new JS runtime wipes every in-app promise slot, so any handle we
+    // handed out for this device can never resolve. Dropping them here — the
+    // one place every restart path funnels through — keeps us from offering a
+    // `collect` id that is guaranteed to come back "__missing__".
+    clearHandlesForDevice(deviceName);
     return next;
 }
 

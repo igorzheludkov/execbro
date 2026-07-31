@@ -148,6 +148,7 @@
         ],
         "execute_in_app": [
             "awaitPromise",
+            "collect",
             "device",
             "expression",
             "maxResultLength",

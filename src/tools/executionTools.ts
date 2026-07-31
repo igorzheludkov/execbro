@@ -4,6 +4,7 @@ import { registerToolWithTelemetry } from "../core/register.js";
 import { executeInApp, listDebugGlobals, inspectGlobal } from "../core/index.js";
 import { getRefreshStatus } from "../core/fastRefreshTools.js";
 import { applyResultBudget } from "../core/truncate.js";
+import { buildCollectExpression, dropHandle } from "../core/promiseHandles.js";
 
 export function registerExecutionTools(server: McpServer): void {
     // Tool: Execute JavaScript in app
@@ -24,8 +25,15 @@ export function registerExecutionTools(server: McpServer): void {
                 "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n" +
                 "SEE ALSO: call get_usage_guide(topic=\"state\") for the full app-state playbook.",
             inputSchema: {
+                collect: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Collect a deferred promise result by handle. When a promise outlives its poll budget the result is kept in the app and its handle returned; pass it here to retrieve the settled value. Use instead of `expression`, not alongside it."
+                    ),
                 expression: z
                     .string()
+                    .optional()
                     .describe(
                         "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no `await`/`async` (use `Promise.resolve(foo()).then(function(r){ return r; })`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
                     ),
@@ -55,7 +63,40 @@ export function registerExecutionTools(server: McpServer): void {
                     )
             }
         },
-        async ({ expression, awaitPromise, maxResultLength, verbose, device, timeoutMs }) => {
+        async ({ expression, collect, awaitPromise, maxResultLength, verbose, device, timeoutMs }) => {
+            if (collect) {
+                const collected = await executeInApp(
+                    buildCollectExpression(collect),
+                    false,
+                    { originatingToolName: "execute_in_app" },
+                    device
+                );
+                if (!collected.success) {
+                    return { content: [{ type: "text", text: `Error: ${collected.error}` }], isError: true };
+                }
+                if (collected.result === "__pending__") {
+                    return {
+                        content: [{ type: "text", text: `Still pending. Retry execute_in_app({ collect: "${collect}" }) shortly.` }]
+                    };
+                }
+                dropHandle(collect);
+                if (collected.result === "__missing__") {
+                    return {
+                        content: [{ type: "text", text: `Handle "${collect}" no longer exists — the app reloaded, or the value was already collected.` }],
+                        isError: true
+                    };
+                }
+                const boundedCollect = applyResultBudget(String(collected.result ?? ""), maxResultLength > 0 ? maxResultLength : Number.MAX_SAFE_INTEGER);
+                return { content: [{ type: "text", text: boundedCollect.text }] };
+            }
+
+            if (!expression) {
+                return {
+                    content: [{ type: "text", text: "Error: provide either `expression` to run, or `collect` with a deferred promise handle." }],
+                    isError: true
+                };
+            }
+
             const result = await executeInApp(expression, awaitPromise, {
                 timeoutMs,
                 originatingToolName: "execute_in_app",

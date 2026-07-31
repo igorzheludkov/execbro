@@ -9,6 +9,7 @@ import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connecti
 import { trackAutoReconnect } from "./telemetry.js";
 import { probeCdpAlive } from "./probe.js";
 import { buildContextPreamble } from "./appContext.js";
+import { registerHandle, clearHandlesForDevice } from "./promiseHandles.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
@@ -838,9 +839,18 @@ else{return __v}})()`;
         }
     }
 
-    // Cleanup on timeout
-    await executeCDP(app, `delete globalThis['${slotId}']`, false, 2000).catch(() => {});
-    return { success: false, error: "Timeout: Promise did not resolve within the time limit." };
+    // Budget expired. Keep the slot: the promise will very likely settle a
+    // moment from now, and deleting it here is what made 143 production results
+    // unrecoverable (43% of all execute_in_app timeouts).
+    const budgetMs = RETRY_DELAYS_MS.reduce((a, b) => a + b, 0);
+    registerHandle(app.deviceInfo?.deviceName || "__default__", slotId);
+    return {
+        success: false,
+        error:
+            `Promise did not settle within ${budgetMs}ms — but the result is NOT lost. ` +
+            `Collect it once the operation has had time to finish: ` +
+            `execute_in_app({ collect: "${slotId}" }).`
+    };
 }
 
 // Execute JavaScript in the connected React Native app with retry logic
