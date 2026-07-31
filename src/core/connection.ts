@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
-import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
+import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
@@ -36,6 +36,9 @@ import {
 
 // Connection locks to prevent concurrent connection attempts to the same device
 const connectionLocks: Set<string> = new Set();
+
+// Last CDP target id seen per device name, used to detect app relaunches.
+const lastTargetIdByDevice = new Map<string, string>();
 
 // Track Network.enable message IDs to detect CDP network support
 const pendingNetworkEnableIds: Set<number> = new Set();
@@ -744,7 +747,7 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             // SDK is the source — both would otherwise produce duplicate
             // entries for every request.
             if (!iApp?.cdpNetworkSupported && !iApp?.sdkPresent) {
-                applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName));
+                applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName), deviceName);
             }
             return;
         }
@@ -849,7 +852,8 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             timing: {
                 requestTime: params.timestamp
             },
-            completed: false
+            completed: false,
+            epoch: getEpoch(deviceName)
         };
 
         getNetworkBuffer(deviceName).set(params.requestId, request);
@@ -953,7 +957,11 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
         // Handle Runtime.executionContextsCleared
         if (method === "Runtime.executionContextsCleared") {
             markContextStale(appKey);
-            console.error(`[execbro] All contexts cleared`);
+            // A replaced JS runtime starts a new app run. Bump so pre-restart
+            // entries stay addressable and readers can draw the boundary.
+            const clearedDevice = device.deviceName || device.title || "unknown";
+            const nextEpoch = bumpEpoch(clearedDevice);
+            console.error(`[execbro] All contexts cleared — ${clearedDevice} now epoch ${nextEpoch}`);
         }
     }
 }
@@ -1148,6 +1156,16 @@ export async function connectToDevice(
             connectionLocks.delete(appKey);
             connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
             markConnectionEstablished();
+
+            // A new CDP target id under a device name we have buffered before
+            // means the app process was replaced. Bump so pre-restart entries
+            // stay addressable and readers can draw the boundary.
+            const bufferKey = device.deviceName || device.title || "unknown";
+            const previousTargetId = lastTargetIdByDevice.get(bufferKey);
+            if (previousTargetId && previousTargetId !== device.id) {
+                bumpEpoch(bufferKey);
+            }
+            lastTargetIdByDevice.set(bufferKey, device.id);
 
             // Watch RN's Element Inspector for selections made outside an agent
             // request. Idempotent, and a no-op when EXECBRO_DISABLE_SELECTION_POLL=1.

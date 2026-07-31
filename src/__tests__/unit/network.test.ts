@@ -10,6 +10,7 @@ function makeRequest(id: string, overrides: Partial<NetworkRequest> = {}): Netwo
         url: `https://api.example.com/${id}`,
         headers: {},
         completed: false,
+        epoch: 1,
         ...overrides,
     };
 }
