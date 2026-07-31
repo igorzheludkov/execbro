@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 71,
+    "count": 72,
     "tools": [
         "activate_license",
         "android_get_screen_size",
@@ -60,6 +60,7 @@
         "list_ios_simulators",
         "logbox",
         "measure",
+        "navigate",
         "ocr_screenshot",
         "redux_dispatch",
         "redux_get_state",
@@ -368,6 +369,13 @@
             "componentName",
             "device",
             "index"
+        ],
+        "navigate": [
+            "action",
+            "device",
+            "params",
+            "routeTable",
+            "to"
         ],
         "ocr_screenshot": [
             "deviceId",
