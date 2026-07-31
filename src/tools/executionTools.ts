@@ -3,6 +3,7 @@ import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { executeInApp, listDebugGlobals, inspectGlobal } from "../core/index.js";
 import { getRefreshStatus } from "../core/fastRefreshTools.js";
+import { applyResultBudget } from "../core/truncate.js";
 
 export function registerExecutionTools(server: McpServer): void {
     // Tool: Execute JavaScript in app
@@ -38,7 +39,7 @@ export function registerExecutionTools(server: McpServer): void {
                     .optional()
                     .default(2000)
                     .describe(
-                        "Max characters in result (default: 2000, set to 0 for unlimited). Tip: For large objects like Redux stores, use inspect_global instead or set higher limit."
+                        "Target size of the result in characters (default: 2000, 0 for unlimited). Oversized results are bounded structurally — arrays and objects are elided with count-preserving markers like \"…+150 more\" — not clipped mid-string."
                     ),
                 verbose: z
                     .boolean()
@@ -94,10 +95,24 @@ export function registerExecutionTools(server: McpServer): void {
 
             let resultText = result.result ?? "undefined";
 
-            // Apply truncation unless verbose or unlimited
-            if (!verbose && maxResultLength > 0 && resultText.length > maxResultLength) {
-                resultText =
-                    resultText.slice(0, maxResultLength) + `... [truncated: ${result.result?.length ?? 0} chars total]`;
+            // Bound the result unless verbose or explicitly unlimited.
+            //
+            // Structural bounding rather than a mid-string clip: a clip can cut
+            // JSON in half, which tells the reader nothing about what was lost
+            // and cannot be parsed. Bounding keeps the shape and reports real
+            // array lengths and key counts, so the next read can be targeted.
+            if (!verbose && maxResultLength > 0) {
+                const bounded = applyResultBudget(resultText, maxResultLength);
+                resultText = bounded.text;
+                if (bounded.budget.truncated) {
+                    const b = bounded.budget.appliedBudget;
+                    const shape = b
+                        ? `, depth<=${b.maxDepth}, arrays<=${b.maxArrayItems}, strings<=${b.maxStringLength}`
+                        : "";
+                    resultText +=
+                        `\n\n[bounded: ${bounded.budget.originalBytes} -> ${bounded.budget.returnedBytes} chars${shape}]` +
+                        `\nRead a narrower path, or raise maxResultLength, for full detail.`;
+                }
             }
 
             if (metaNotes.length > 0) resultText = `${resultText}\n\n${metaNotes.join("\n")}`;

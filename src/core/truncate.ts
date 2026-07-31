@@ -26,9 +26,16 @@ const BUDGET_LADDER: TruncateBudget[] = [
     { maxDepth: 1, maxArrayItems: 1, maxStringLength: 20 }
 ];
 
-function byteLength(value: unknown): number {
+/**
+ * Size of `value` as it will actually be rendered.
+ *
+ * `indent` must match the indentation the caller will serialise with —
+ * pretty-printing inflates output substantially, so measuring compact JSON and
+ * emitting indented JSON lets results exceed the budget they were bounded to.
+ */
+function byteLength(value: unknown, indent: number): number {
     try {
-        const json = JSON.stringify(value);
+        const json = JSON.stringify(value, null, indent);
         return json === undefined ? 0 : json.length;
     } catch {
         // Circular or otherwise unserialisable — treat as over any budget so
@@ -91,9 +98,10 @@ function bound(value: unknown, budget: TruncateBudget, depth: number, seen: Set<
 export function truncateToBudget(
     value: unknown,
     maxBytes: number,
-    explicit?: Partial<TruncateBudget>
+    explicit?: Partial<TruncateBudget>,
+    indent: number = 0
 ): TruncateResult {
-    const originalBytes = byteLength(value);
+    const originalBytes = byteLength(value, indent);
     const hasExplicit = explicit !== undefined && Object.keys(explicit).length > 0;
 
     if (!hasExplicit && originalBytes <= maxBytes) {
@@ -103,7 +111,7 @@ export function truncateToBudget(
     if (hasExplicit) {
         const budget: TruncateBudget = { ...BUDGET_LADDER[0], ...explicit };
         const boundedValue = bound(value, budget, 0, new Set());
-        const returnedBytes = byteLength(boundedValue);
+        const returnedBytes = byteLength(boundedValue, indent);
         return {
             value: boundedValue,
             truncated: returnedBytes !== originalBytes,
@@ -116,7 +124,7 @@ export function truncateToBudget(
     let last: { value: unknown; budget: TruncateBudget; bytes: number } | null = null;
     for (const budget of BUDGET_LADDER) {
         const boundedValue = bound(value, budget, 0, new Set());
-        const bytes = byteLength(boundedValue);
+        const bytes = byteLength(boundedValue, indent);
         last = { value: boundedValue, budget, bytes };
         if (bytes <= maxBytes) break;
     }
@@ -128,5 +136,71 @@ export function truncateToBudget(
         appliedBudget: chosen.budget,
         originalBytes,
         returnedBytes: chosen.bytes
+    };
+}
+
+export const DEFAULT_MAX_BYTES = 25000;
+
+export interface BudgetReport {
+    truncated: boolean;
+    originalBytes: number;
+    returnedBytes: number;
+    appliedBudget: TruncateBudget | null;
+}
+
+/**
+ * Bound an already-serialised tool result.
+ *
+ * Results reach us as strings: JSON for objects, a plain scalar rendering
+ * otherwise. Re-parse JSON so bounding is structural — markers then carry real
+ * array lengths and key counts, which is what lets a caller decide the next,
+ * narrower read. Non-JSON text has no structure to exploit, so it is clipped.
+ */
+export function applyResultBudget(
+    text: string,
+    maxBytes: number = DEFAULT_MAX_BYTES,
+    explicit?: Partial<TruncateBudget>
+): { text: string; budget: BudgetReport } {
+    const originalBytes = text.length;
+    const hasExplicit = explicit !== undefined && Object.keys(explicit).length > 0;
+
+    if (!hasExplicit && originalBytes <= maxBytes) {
+        return {
+            text,
+            budget: { truncated: false, originalBytes, returnedBytes: originalBytes, appliedBudget: null }
+        };
+    }
+
+    let parsed: unknown;
+    let isJson = true;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        isJson = false;
+    }
+
+    if (!isJson) {
+        // Reserve room for the marker so the result still honours maxBytes.
+        const keep = Math.max(0, maxBytes - 40);
+        const clipped = text.slice(0, keep) + "…+" + (originalBytes - keep);
+        return {
+            text: clipped,
+            budget: { truncated: true, originalBytes, returnedBytes: clipped.length, appliedBudget: null }
+        };
+    }
+
+    // Measure at the same indentation we render with, or the ladder converges
+    // on a size we never emit.
+    const RENDER_INDENT = 2;
+    const result = truncateToBudget(parsed, maxBytes, explicit, RENDER_INDENT);
+    const rendered = JSON.stringify(result.value, null, RENDER_INDENT) ?? "";
+    return {
+        text: rendered,
+        budget: {
+            truncated: result.truncated,
+            originalBytes,
+            returnedBytes: rendered.length,
+            appliedBudget: result.appliedBudget
+        }
     };
 }
