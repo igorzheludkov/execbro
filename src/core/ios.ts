@@ -834,6 +834,11 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
       // Ignore if Simulator app doesn't open
     });
 
+    // The device inventory just changed — drop the cached copy so the next
+    // resolve/tap sees this simulator as booted without waiting out the TTL.
+    const { resetDeviceDiscoveryCache } = await import("./deviceDiscovery.js");
+    resetDeviceDiscoveryCache();
+
     return {
       success: true,
       result: `Simulator ${udid} is now booting`,
@@ -1213,9 +1218,12 @@ function formatAccessibilityTree(
  * relative to the content origin (below the inset) instead of the window. Knowing
  * the inset lets us detect and correct the shifted coordinate space.
  *
- * Cached briefly so a single tap flow doesn't incur multiple describe-ui calls.
+ * Cached so repeated taps don't each incur a describe-ui call. The probe costs
+ * ~200ms and ran on essentially every fiber+native tap under the old 5s TTL;
+ * the inset itself only changes on rotation, so a longer TTL is safe (a rotation
+ * mid-session costs at most one stale correction until the entry expires).
  */
-const SAFE_AREA_CACHE_TTL_MS = 5000;
+const SAFE_AREA_CACHE_TTL_MS = 30_000;
 const safeAreaTopCache = new Map<string, { value: number; expires: number }>();
 
 export async function getIOSSafeAreaTop(udid?: string): Promise<number> {
@@ -1855,12 +1863,22 @@ function isAggregatorWrapper(
   return isLongConcatenatedLabel || isFullScreenFrame;
 }
 
+/** A pre-fetched accessibility tree, as returned by iosGetUITree. */
+export type IOSUITree = Awaited<ReturnType<typeof iosGetUITree>>;
+
 /**
- * Find element(s) in the iOS UI tree matching the given criteria
+ * Find element(s) in the iOS UI tree matching the given criteria.
+ *
+ * `tree` lets a caller reuse an accessibility dump it already has. Each fetch
+ * shells out to `axe describe-ui` (~210ms measured 2026-08-01) and the tap
+ * strategy runs two or three passes with different predicates, so re-fetching
+ * per pass was costing 400-600ms per accessibility tap for a tree that cannot
+ * change between passes.
  */
 export async function iosFindElement(
   options: IOSFindElementOptions,
   udid?: string,
+  tree?: IOSUITree,
 ): Promise<IOSFindElementResult> {
   try {
     if (
@@ -1880,7 +1898,7 @@ export async function iosFindElement(
       };
     }
 
-    const treeResult = await iosGetUITree(udid);
+    const treeResult = tree ?? (await iosGetUITree(udid));
     if (!treeResult.success || !treeResult.elements) {
       return {
         success: false,
@@ -2014,7 +2032,10 @@ export function calculateDPR(
  * Uses screenshot pixel width vs accessibility root frame width.
  * Result is cached per UDID for the session.
  */
-export async function getDevicePixelRatio(udid?: string): Promise<number> {
+export async function getDevicePixelRatio(
+  udid?: string,
+  pixelDims?: { width: number; height: number },
+): Promise<number> {
   const cacheKey = udid || "__default__";
   const cached = dprCache.get(cacheKey);
   if (cached) return cached;
@@ -2024,21 +2045,32 @@ export async function getDevicePixelRatio(udid?: string): Promise<number> {
     throw new Error(await buildNoSimulatorError());
   }
 
-  // Take screenshot to get pixel dimensions
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const screenshotPath = path.join(
-    os.tmpdir(),
-    `ios-dpr-screenshot-${timestamp}.png`,
-  );
-  await execAsync(
-    `xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`,
-    {
-      timeout: SIMCTL_TIMEOUT,
-    },
-  );
-  const metadata = await sharp(screenshotPath).metadata();
-  const pixelWidth = metadata.width!;
-  const pixelHeight = metadata.height!;
+  let pixelWidth: number;
+  let pixelHeight: number;
+
+  if (pixelDims && pixelDims.width > 0 && pixelDims.height > 0) {
+    // The caller already captured a frame this turn (tap always does) — reuse
+    // its dimensions instead of shelling out for a screenshot of our own, which
+    // measured ~230ms of the ~470ms first-call cost.
+    pixelWidth = pixelDims.width;
+    pixelHeight = pixelDims.height;
+  } else {
+    // Take screenshot to get pixel dimensions
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const screenshotPath = path.join(
+      os.tmpdir(),
+      `ios-dpr-screenshot-${timestamp}.png`,
+    );
+    await execAsync(
+      `xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`,
+      {
+        timeout: SIMCTL_TIMEOUT,
+      },
+    );
+    const metadata = await sharp(screenshotPath).metadata();
+    pixelWidth = metadata.width!;
+    pixelHeight = metadata.height!;
+  }
 
   // Try accessibility tree for exact DPR, fall back to inference
   const driver = getIosDriver();

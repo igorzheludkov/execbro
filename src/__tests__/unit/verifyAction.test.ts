@@ -7,7 +7,8 @@ describe("verifyAction module", () => {
         expect(typeof mod.verifyAndCapture).toBe("function");
         expect(typeof mod.burstCaptureAndVerify).toBe("function");
         expect(typeof mod.drawTapMarker).toBe("function");
-        expect(typeof mod.SETTLE_DELAY_MS).toBe("number");
+        expect(typeof mod.settleAndDiff).toBe("function");
+        expect(typeof mod.SETTLE_POLL_START_MS).toBe("number");
         expect(typeof mod.BURST_FRAME_COUNT).toBe("number");
         expect(typeof mod.BURST_FRAME_INTERVAL_MS).toBe("number");
     });

@@ -9,16 +9,114 @@ import {
     buildVerificationExplanation,
 } from "./tap.js";
 
-export const SETTLE_DELAY_MS = 800;
 export const BURST_FRAME_COUNT = 4;
 export const BURST_FRAME_INTERVAL_MS = 150;
-// Modal slide-up / sheet-present animations on iOS occasionally settle just
-// after the 800 ms window — first diff reports zero change while the second
-// (taken a few hundred ms later) catches the modal. We retry once when the
-// first diff is exactly 0 so a single missed animation frame doesn't flip
-// `meaningful` to false. Common-path taps that genuinely produce a change on
-// the first capture are unaffected.
-export const ZERO_DIFF_RETRY_DELAY_MS = 400;
+
+// --- Adaptive settle (replaces the old fixed 800ms sleep + zero-diff retries) ---
+//
+// Measured on device (iPhone Air sim, 2026-07-31): a tab switch is fully stable
+// at t+239ms while a heavier transition needed t+1557ms. A single constant is
+// therefore both too slow for the common case and too short for the slow one —
+// which is exactly why the zero-diff retry existed. We now poll instead: capture
+// frames until two consecutive ones are identical, then diff against `before`.
+//
+// Short lead-in before the first frame — under this, the capture reliably races
+// the very start of the touch-down animation and every screen looks "changing".
+export const SETTLE_POLL_START_MS = 150;
+// Hard cap on the whole settle loop for a screen that never stops moving
+// (spinners, video, looping animations). We return the last frame we have.
+export const SETTLE_STABLE_TIMEOUT_MS = 1600;
+// "Nothing happened" is the expensive conclusion to get wrong (it flips
+// `meaningful` to false and sends the agent down a diagnostic path), so an idle
+// screen keeps being watched until this much time has passed — long enough to
+// catch a modal that only starts animating after the first frames. The old code
+// sampled twice (t+800ms, t+1200ms on iOS; up to t+2000ms on Android); we sample
+// continuously instead, so a shorter window still covers strictly more moments.
+export const NO_CHANGE_CONFIRM_MS = 1100;
+// Emulators animate slower than the iOS simulator — the Android zero-diff retry
+// budget was double the iOS one for exactly this reason.
+export const NO_CHANGE_CONFIRM_ANDROID_MS = 1500;
+// Gap between captures while waiting out the no-change confirmation window. A
+// capture already costs ~220ms, which is the real sampling interval; this just
+// keeps us from hammering simctl/adb back-to-back.
+export const SETTLE_IDLE_POLL_MS = 60;
+
+export interface SettleFrame {
+    buffer: Buffer;
+    width: number;
+    height: number;
+    scaleFactor: number;
+}
+
+interface SettleDiff {
+    changed: boolean;
+    changeRate: number;
+    changedPixels: number;
+    totalPixels: number;
+}
+
+export interface SettleResult {
+    frame: SettleFrame;
+    diff: SettleDiff;
+    /** false when the cap was hit while the screen was still moving */
+    settled: boolean;
+    captures: number;
+}
+
+/**
+ * Wait for the screen to stop changing, then diff the settled frame against
+ * `before`. Returns null only when no frame could be captured at all.
+ *
+ * capture/compare/now/sleep are injected so the loop is unit-testable without a
+ * device; production callers use the module defaults.
+ */
+export async function settleAndDiff(args: {
+    beforeBuffer: Buffer;
+    statusBarHeight: number;
+    capture: () => Promise<SettleFrame | null>;
+    compare?: (a: Buffer, b: Buffer, o: { statusBarHeight: number }) => Promise<SettleDiff>;
+    noChangeConfirmMs?: number;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+}): Promise<SettleResult | null> {
+    const noChangeConfirmMs = args.noChangeConfirmMs ?? NO_CHANGE_CONFIRM_MS;
+    const compare = args.compare ?? compareScreenshots;
+    const now = args.now ?? (() => Date.now());
+    const sleep = args.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const opts = { statusBarHeight: args.statusBarHeight };
+
+    const start = now();
+    await sleep(SETTLE_POLL_START_MS);
+
+    let prev = await args.capture();
+    if (!prev) return null;
+    let captures = 1;
+    let diff = await compare(args.beforeBuffer, prev.buffer, opts);
+
+    while (now() - start < SETTLE_STABLE_TIMEOUT_MS) {
+        const next = await args.capture();
+        // A dropped capture mid-loop isn't fatal — report what we already have.
+        if (!next) return { frame: prev, diff, settled: true, captures };
+        captures++;
+
+        const stable = (await compare(prev.buffer, next.buffer, opts)).changedPixels === 0;
+        prev = next;
+        diff = await compare(args.beforeBuffer, next.buffer, opts);
+
+        if (stable) {
+            // Changed and stable: the common success path — return immediately.
+            if (diff.changedPixels > 0) return { frame: prev, diff, settled: true, captures };
+            // Still identical to `before`: keep watching until the window closes
+            // so a late-starting animation isn't reported as "no change".
+            if (now() - start >= noChangeConfirmMs) {
+                return { frame: prev, diff, settled: true, captures };
+            }
+            await sleep(SETTLE_IDLE_POLL_MS);
+        }
+    }
+
+    return { frame: prev, diff, settled: false, captures };
+}
 
 export async function captureScreenshot(
     platform: "ios" | "android",
@@ -112,9 +210,26 @@ export async function verifyAndCapture(args: {
         };
     }
 
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+    // The settle loop needs a `before` to diff against; without one (or with
+    // verification disabled) there's nothing to wait for beyond the animation
+    // lead-in, so take a single frame after a short pause.
+    const canSettleLoop = shouldVerify && !!beforeBuffer;
+    const rawStatusBar = platform === "ios" ? 177 : 142;
+    const settleStatusBarHeight = Math.round(rawStatusBar / (beforeScaleFactor || 1));
 
-    let after = await captureScreenshot(platform, udid);
+    let settle: SettleResult | null = null;
+    if (canSettleLoop) {
+        settle = await settleAndDiff({
+            beforeBuffer: beforeBuffer!,
+            statusBarHeight: settleStatusBarHeight,
+            capture: () => captureScreenshot(platform, udid),
+            noChangeConfirmMs: platform === "android" ? NO_CHANGE_CONFIRM_ANDROID_MS : NO_CHANGE_CONFIRM_MS
+        });
+    } else {
+        await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_START_MS));
+    }
+
+    let after = settle ? settle.frame : await captureScreenshot(platform, udid);
     if (!after) {
         if (shouldVerify) {
             return {
@@ -143,32 +258,14 @@ export async function verifyAndCapture(args: {
         };
     } else {
         try {
-            const rawStatusBar = platform === "ios" ? 177 : 142;
-            const scale = beforeScaleFactor || after.scaleFactor || 1;
-            const statusBarHeight = Math.round(rawStatusBar / scale);
-            let diff = await compareScreenshots(beforeBuffer, after.buffer, {
-                statusBarHeight
+            // The settle loop already diffed the frame it returned. Only recompute
+            // when it didn't run (e.g. a caller that passed a before-buffer but got
+            // no settle result), so the common path pays one diff, not two.
+            const diff = settle?.diff ?? await compareScreenshots(beforeBuffer, after.buffer, {
+                statusBarHeight: Math.round(
+                    (platform === "ios" ? 177 : 142) / (beforeScaleFactor || after.scaleFactor || 1)
+                )
             });
-            // Slide-up modal animations on Android have a longer linear-blend
-            // phase than iOS — the first retry at +400ms still catches the
-            // pre-animation frame on a slow emulator. Retry up to two times
-            // before giving up. Each retry only fires when the prior diff was
-            // exactly zero, so common-path taps that produced a change on the
-            // first capture are unaffected. Bug #4-on-Android (EC1, 2026-05-20).
-            const maxZeroDiffRetries = platform === "android" ? 2 : 1;
-            for (let attempt = 0; attempt < maxZeroDiffRetries && diff.changedPixels === 0; attempt++) {
-                await new Promise((resolve) => setTimeout(resolve, ZERO_DIFF_RETRY_DELAY_MS));
-                const retryAfter = await captureScreenshot(platform, udid);
-                if (!retryAfter) break;
-                const retryDiff = await compareScreenshots(beforeBuffer, retryAfter.buffer, {
-                    statusBarHeight
-                });
-                if (retryDiff.changedPixels > 0) {
-                    diff = retryDiff;
-                    after = retryAfter;
-                    break;
-                }
-            }
             verification = {
                 meaningful: diff.changed,
                 changeRate: diff.changeRate,

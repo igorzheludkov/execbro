@@ -1,4 +1,5 @@
 import { connectedApps } from "../core/state.js";
+import type { CoordinateMissDiagnosis } from "./coordinateMiss.js";
 import type { ConnectedApp } from "../core/types.js";
 import type { OCRResult, OCRWord } from "../core/ocr.js";
 import { executeInApp } from "../core/executor.js";
@@ -250,6 +251,13 @@ export interface TapResult {
     fiberPressableCount?: string;
     accessibilityMatchCount?: string;
     appRoute?: string;
+    /**
+     * Why a coordinate tap changed nothing: what occupied the point, whether an
+     * overlay covers it, and the nearest reachable pressable with re-tappable
+     * coordinates. Populated only on unmeaningful coordinate taps with a live
+     * Metro connection.
+     */
+    missDiagnosis?: CoordinateMissDiagnosis;
 }
 
 // --- Helpers ---
@@ -922,6 +930,12 @@ async function tryAccessibilityStrategy(
         }
 
         if (platform === "ios") {
+            // One accessibility dump serves every pass below: `axe describe-ui`
+            // costs ~210ms and the screen cannot change between predicates, so
+            // re-fetching per pass was pure overhead (2-3 dumps per tap).
+            const { iosGetUITree } = await import("../core/ios.js");
+            const tree = await iosGetUITree(udid);
+
             // iOS: testID maps to accessibilityIdentifier — search by identifier first,
             // then fall back to labelContains for text-based searches
             let result;
@@ -932,7 +946,8 @@ async function tryAccessibilityStrategy(
                         identifier: query.testID,
                         index
                     },
-                    udid
+                    udid,
+                    tree
                 );
                 // Fall back to identifierContains if exact match fails
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
@@ -941,7 +956,8 @@ async function tryAccessibilityStrategy(
                             identifierContains: query.testID,
                             index
                         },
-                        udid
+                        udid,
+                        tree
                     );
                 }
                 // Last resort: try labelContains in case testID is reflected in label
@@ -951,7 +967,8 @@ async function tryAccessibilityStrategy(
                             labelContains: query.testID,
                             index
                         },
-                        udid
+                        udid,
+                        tree
                     );
                 }
             } else {
@@ -963,7 +980,8 @@ async function tryAccessibilityStrategy(
                         label: searchText,
                         index
                     },
-                    udid
+                    udid,
+                    tree
                 );
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                     result = await iosFindElement(
@@ -971,7 +989,8 @@ async function tryAccessibilityStrategy(
                             labelContains: searchText,
                             index
                         },
-                        udid
+                        udid,
+                        tree
                     );
                 }
             }
@@ -1056,7 +1075,12 @@ async function tryAccessibilityStrategy(
                 searchOptions.textContains = query.text;
             }
 
-            let result = await androidFindElement(searchOptions, undefined, signal);
+            // Same single-dump reuse as iOS above — a uiautomator hierarchy dump
+            // is the most expensive step of an Android accessibility tap.
+            const { androidGetUITree } = await import("../core/android.js");
+            const androidTree = await androidGetUITree(undefined, signal);
+
+            let result = await androidFindElement(searchOptions, undefined, signal, androidTree);
 
             // If testID search via resourceId failed, try contentDescContains
             // (older RN versions map testID to content-description)
@@ -1064,7 +1088,7 @@ async function tryAccessibilityStrategy(
                 result = await androidFindElement({
                     contentDescContains: query.testID,
                     index
-                }, undefined, signal);
+                }, undefined, signal, androidTree);
             }
 
             if (sink && result.allMatches?.length) {
@@ -1280,7 +1304,12 @@ async function tryCoordinateStrategy(
         if (platform === "ios") {
             const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
             const { getDevicePixelRatio } = await import("../core/ios.js");
-            const devicePixelRatio = await getDevicePixelRatio(udid);
+            // Reuse the caller's frame dimensions when it has them, so the first
+            // coordinate tap of a session doesn't pay for an extra screenshot.
+            const dprHint = lastScreenshot && lastScreenshot.originalWidth > 0 && lastScreenshot.originalHeight > 0
+                ? { width: lastScreenshot.originalWidth, height: lastScreenshot.originalHeight }
+                : undefined;
+            const devicePixelRatio = await getDevicePixelRatio(udid, dprHint);
 
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
             const tapResult = await iosTap(converted.x, converted.y, { udid });
@@ -1494,6 +1523,58 @@ function shouldDedupArtifact(ctx: ArtifactCaptureContext): boolean {
 /** Test-only: drop the dedup state so a fresh tap always uploads. */
 export function resetCoordArtifactDedup(): void {
     recentCoordArtifacts.clear();
+}
+
+/**
+ * Turn an unmeaningful coordinate tap into an explanation.
+ *
+ * The tricky part is coordinate spaces. The caller works in screenshot pixels;
+ * the tap was executed in points (iOS) or device pixels (Android); the screen
+ * state reports points/dp. We map the tapped point INTO screen-state space to
+ * do the hit test, and map the answer BACK into the caller's screenshot pixels
+ * so any suggested coordinates can be passed straight to another tap().
+ */
+async function diagnoseCoordinateMiss(args: {
+    point: { x: number; y: number };
+    pointUnit: string;
+    inputPoint: { x: number; y: number };
+    deviceName?: string;
+}): Promise<CoordinateMissDiagnosis | undefined> {
+    try {
+        const { getScreenState } = await import("../core/screenState.js");
+        const { explainCoordinateMiss } = await import("./coordinateMiss.js");
+
+        const ss = await getScreenState({ device: args.deviceName });
+        if (!ss.success || !ss.screenState) return undefined;
+
+        // Android taps are executed in device pixels; screen state speaks dp.
+        let pointInState = args.point;
+        if (args.pointUnit === "pixels") {
+            const { androidGetDensity } = await import("../core/android.js");
+            const density = await androidGetDensity();
+            const densityScale = (density.density || 420) / 160;
+            pointInState = { x: args.point.x / densityScale, y: args.point.y / densityScale };
+        }
+
+        // Ratio between screen-state space and the caller's screenshot pixels,
+        // derived from the conversion this very tap already performed. Uses the
+        // larger axis so a near-zero coordinate can't amplify rounding error.
+        const useY = Math.abs(pointInState.y) > Math.abs(pointInState.x);
+        const numerator = useY ? args.inputPoint.y : args.inputPoint.x;
+        const denominator = useY ? pointInState.y : pointInState.x;
+        const factor = denominator !== 0 && Number.isFinite(numerator / denominator)
+            ? numerator / denominator
+            : 1;
+
+        return explainCoordinateMiss(
+            pointInState,
+            ss.screenState,
+            (v) => Math.round(v * factor)
+        ) ?? undefined;
+    } catch {
+        // Diagnosis is best-effort — never let it turn a successful tap into an error.
+        return undefined;
+    }
 }
 
 async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureSignals | undefined> {
@@ -1909,10 +1990,16 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // the before frame doesn't depend on whether we run the post-tap diff.
     let beforeBuffer: Buffer | null = null;
     let beforeScaleFactor: number | undefined;
+    // Pixel dimensions of the frame we just captured. getDevicePixelRatio would
+    // otherwise shell out for a screenshot of its own to learn exactly this.
+    let beforeDims: { width: number; height: number } | undefined;
     {
         const before = await captureScreenshot(platform, targetUdid);
         beforeBuffer = before?.buffer || null;
         beforeScaleFactor = before?.scaleFactor;
+        if (before && before.width > 0 && before.height > 0) {
+            beforeDims = { width: before.width, height: before.height };
+        }
     }
 
     // OCR runs lazily when the loop reaches it (see the `case "ocr"` branch).
@@ -1972,7 +2059,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                             query.y!,
                             platform,
                             beforeScaleFactor != null
-                                ? { originalWidth: 0, originalHeight: 0, scaleFactor: beforeScaleFactor }
+                                ? {
+                                    originalWidth: beforeDims?.width ?? 0,
+                                    originalHeight: beforeDims?.height ?? 0,
+                                    scaleFactor: beforeScaleFactor
+                                }
                                 : app?.lastScreenshot,
                             targetUdid
                         ),
@@ -2003,7 +2094,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             if (platform === "ios") {
                 try {
                     const { getDevicePixelRatio } = await import("../core/ios.js");
-                    dprForMarker = await getDevicePixelRatio(targetUdid);
+                    dprForMarker = await getDevicePixelRatio(targetUdid, beforeDims);
                 } catch { dprForMarker = 3; }
             }
             const strategyMarker = computeMarkerPx({
@@ -2068,6 +2159,30 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             // Uses the same `meaningful` flag the agent sees so dashboard outcomes
             // stay consistent with what the caller observed.
             if (verification && !verification.skipped && verification.meaningful === false) {
+                // A coordinate tap that changed nothing is the one case where the
+                // agent has no idea what went wrong — it estimated x/y from a
+                // screenshot and got back "nothing happened". Screen state knows
+                // what sits at that point and what an overlay blocks; spend the
+                // ~200ms here (already the slow path) to turn a dead end into a
+                // next step. Text/testID/component predicates don't need this:
+                // their failure modes are already named in `attempted`.
+                if (strat === "coordinate" && result.convertedTo) {
+                    const diagnosis = await diagnoseCoordinateMiss({
+                        point: { x: result.convertedTo.x, y: result.convertedTo.y },
+                        pointUnit: result.convertedTo.unit,
+                        inputPoint: { x: query.x!, y: query.y! },
+                        deviceName
+                    });
+                    if (diagnosis) {
+                        successResult.missDiagnosis = diagnosis;
+                        if (successResult.verification) {
+                            successResult.verification = {
+                                ...successResult.verification,
+                                explanation: `${successResult.verification.explanation} ${diagnosis.suggestion}`
+                            };
+                        }
+                    }
+                }
                 const unmeaningfulSignals = await captureTapArtifact({
                     query,
                     outcome: "unmeaningful",
@@ -2134,7 +2249,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 if (platform === "ios") {
                     try {
                         const { getDevicePixelRatio } = await import("../core/ios.js");
-                        fnDpr = await getDevicePixelRatio(targetUdid);
+                        fnDpr = await getDevicePixelRatio(targetUdid, beforeDims);
                     } catch { fnDpr = 3; }
                 } else {
                     try {

@@ -1168,10 +1168,14 @@ export async function androidGetUITree(deviceId?: string, signal?: AbortSignal):
 /**
  * Find element(s) in the UI tree matching the given criteria
  */
+/** A pre-fetched view hierarchy, as returned by androidGetUITree. */
+export type AndroidUITree = Awaited<ReturnType<typeof androidGetUITree>>;
+
 export async function androidFindElement(
     options: FindElementOptions,
     deviceId?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    tree?: AndroidUITree
 ): Promise<FindElementResult> {
     try {
         // Validate that at least one search criteria is provided
@@ -1184,7 +1188,10 @@ export async function androidFindElement(
             };
         }
 
-        const treeResult = await androidGetUITree(deviceId, signal);
+        // A caller that already dumped the hierarchy can pass it in — uiautomator
+        // dumps are the single most expensive step of an Android accessibility
+        // tap, and the tap strategy runs two passes over the same screen.
+        const treeResult = tree ?? (await androidGetUITree(deviceId, signal));
         if (!treeResult.success || !treeResult.elements) {
             return {
                 success: false,

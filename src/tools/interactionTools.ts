@@ -24,6 +24,14 @@ import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../cor
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
+import type { ConnectedApp } from "../core/types.js";
+
+/**
+ * Default swipe gesture duration. Android has always used 300ms; iOS passed no
+ * duration at all and inherited AXe's ~1s drag, which was both slower and too
+ * slow to trigger inertial scrolling. Shared so the platforms cannot drift again.
+ */
+export const SWIPE_DEFAULT_DURATION_MS = 300;
 
 export function registerInteractionTools(server: McpServer): void {
     // Tool: Unified tap — tries fiber, accessibility, OCR, coordinate strategies
@@ -390,21 +398,34 @@ export function registerInteractionTools(server: McpServer): void {
             const beforeBuffer = beforeCapture?.buffer ?? null;
             const beforeScaleFactor = beforeCapture?.scaleFactor;
 
+            // Prefer the scale factor of the frame captured for THIS device this
+            // turn over `connectedApps[0].lastScreenshot`, which may be stale or
+            // belong to another device on a multi-device setup — the same fix tap
+            // carries for its coordinate strategy (Bug #5, 2026-05-20).
+            const swipeScaleFactor =
+                beforeCapture?.scaleFactor
+                ?? (connectedApps.values().next().value as ConnectedApp | undefined)?.lastScreenshot?.scaleFactor
+                ?? 1;
+            const dprHint = beforeCapture && beforeCapture.width > 0 && beforeCapture.height > 0
+                ? { width: beforeCapture.width, height: beforeCapture.height }
+                : undefined;
+
             let driverResult: { success: boolean; result?: string; error?: string };
             if (resolvedPlatform === "ios") {
-                const dpr = await getDevicePixelRatio(resolvedUdid);
-                const firstApp = connectedApps.values().next().value;
-                const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
-                const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, scaleFactor);
-                const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, scaleFactor);
-                const duration = durationMs !== undefined ? durationMs / 1000 : undefined;
+                const dpr = await getDevicePixelRatio(resolvedUdid, dprHint);
+                const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, swipeScaleFactor);
+                const end = convertScreenshotToTapCoords(endX, endY, "ios", dpr, swipeScaleFactor);
+                // Without an explicit duration, AXe drags for ~1s (measured
+                // 2026-08-01) — slower than the Android path, which has always
+                // defaulted to 300ms, and slow enough that iOS never produced the
+                // inertial fling a real scroll gesture has. Default both platforms
+                // to the same 300ms flick.
+                const duration = (durationMs ?? SWIPE_DEFAULT_DURATION_MS) / 1000;
                 driverResult = await iosSwipe(start.x, start.y, end.x, end.y, { duration, delta, udid: resolvedUdid });
             } else {
-                const firstApp = connectedApps.values().next().value;
-                const scaleFactor = firstApp?.lastScreenshot?.scaleFactor ?? 1;
-                const start = convertScreenshotToTapCoords(startX, startY, "android", 1, scaleFactor);
-                const end = convertScreenshotToTapCoords(endX, endY, "android", 1, scaleFactor);
-                driverResult = await androidSwipe(start.x, start.y, end.x, end.y, durationMs ?? 300, resolved.target.androidSerial);
+                const start = convertScreenshotToTapCoords(startX, startY, "android", 1, swipeScaleFactor);
+                const end = convertScreenshotToTapCoords(endX, endY, "android", 1, swipeScaleFactor);
+                driverResult = await androidSwipe(start.x, start.y, end.x, end.y, durationMs ?? SWIPE_DEFAULT_DURATION_MS, resolved.target.androidSerial);
             }
 
             if (!driverResult.success) {

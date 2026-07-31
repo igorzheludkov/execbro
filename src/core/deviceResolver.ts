@@ -1,5 +1,5 @@
 import { getConnectedApps } from "./connection.js";
-import { listAllDevices } from "./deviceDiscovery.js";
+import { listAllDevices, resetDeviceDiscoveryCache } from "./deviceDiscovery.js";
 import { listDevices, recordDevice } from "./projectMemory.js";
 
 export type DeviceTargetSource =
@@ -23,6 +23,13 @@ export type DeviceResolverErrorCode =
     | "DEVICE_NOT_FOUND"
     | "SIMULATOR_NOT_BOOTED"
     | "CONFLICTING_IDENTIFIERS";
+
+/** Resolution failures that a stale device inventory could plausibly explain. */
+const STALE_INVENTORY_RETRY_CODES = new Set<DeviceResolverErrorCode>([
+    "NO_DEVICES_FOUND",
+    "DEVICE_NOT_FOUND",
+    "SIMULATOR_NOT_BOOTED"
+]);
 
 export interface DeviceResolverError {
     code: DeviceResolverErrorCode;
@@ -347,7 +354,18 @@ async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult>
  * consults project memory to auto-default on no-hint ambiguity (see Step 5).
  */
 export async function resolveDeviceTarget(device?: string): Promise<ResolveResult> {
-    const result = await resolveDeviceTargetInner(device);
+    let result = await resolveDeviceTargetInner(device);
+
+    // The device inventory is cached (see deviceDiscovery), so a device booted
+    // or plugged in moments ago can be missing from it. Every "I can't find it"
+    // outcome is therefore retried once against a freshly queried inventory —
+    // this is what makes the longer cache TTL safe: staleness can cost an extra
+    // ~150ms on a genuine miss, but never a wrong answer.
+    if (!result.ok && STALE_INVENTORY_RETRY_CODES.has(result.error.code)) {
+        resetDeviceDiscoveryCache();
+        result = await resolveDeviceTargetInner(device);
+    }
+
     if (result.ok) {
         try {
             const t = result.target;
