@@ -60,7 +60,7 @@ describe("buildRequestExpression — unresolved auth", () => {
     it("warns when auth=auto is requested (the note is emitted, gated at runtime)", () => {
         const src = buildRequestExpression({ method: "GET", url: "https://api.test/me", auth: "auto" });
         expect(src).toContain("UNAUTHENTICATED");
-        expect(src).toContain("Apollo auth link");
+        expect(src).toContain("no captured request carried an Authorization header");
     });
 
     it("does not emit the warning when auth is explicitly none", () => {
@@ -73,7 +73,11 @@ describe("buildRequestExpression — unresolved auth", () => {
 describe("buildRequestExpression — generated source behaviour", () => {
     type Captured = { url: string; init: { method: string; headers: Record<string, string>; body?: string } };
 
-    function runGenerated(src: string, stateStub: unknown): Promise<{ captured: Captured; result: Record<string, unknown> }> {
+    function runGenerated(
+        src: string,
+        stateStub: unknown,
+        globalStub: Record<string, unknown> = {}
+    ): Promise<{ captured: Captured; result: Record<string, unknown> }> {
         let captured: Captured | undefined;
         const fetchStub = (url: string, init: Captured["init"]) => {
             captured = { url, init };
@@ -83,8 +87,8 @@ describe("buildRequestExpression — generated source behaviour", () => {
                 text: () => Promise.resolve(JSON.stringify({ hello: "world" }))
             });
         };
-        const run = new Function("state", "fetch", "return " + src + ";");
-        return (run(stateStub, fetchStub) as Promise<Record<string, unknown>>).then((result) => ({
+        const run = new Function("state", "fetch", "globalThis", "return " + src + ";");
+        return (run(stateStub, fetchStub, globalStub) as Promise<Record<string, unknown>>).then((result) => ({
             captured: captured as Captured,
             result
         }));
@@ -131,5 +135,75 @@ describe("buildRequestExpression — generated source behaviour", () => {
         expect(captured.init.body).toBe('{"a":1}');
         expect(captured.init.headers["Content-Type"]).toBe("application/json");
         expect(result.body).toEqual({ hello: "world" });
+    });
+});
+
+describe("buildRequestExpression — token from captured requests (Apollo apps)", () => {
+    type Captured = { url: string; init: { method: string; headers: Record<string, string>; body?: string } };
+
+    function runWith(src: string, stateStub: unknown, globalStub: Record<string, unknown>) {
+        let captured: Captured | undefined;
+        const fetchStub = (url: string, init: Captured["init"]) => {
+            captured = { url, init };
+            return Promise.resolve({ status: 200, ok: true, text: () => Promise.resolve("{}") });
+        };
+        const run = new Function("state", "fetch", "globalThis", "return " + src + ";");
+        return (run(stateStub, fetchStub, globalStub) as Promise<Record<string, unknown>>).then((result) => ({
+            captured: captured as Captured,
+            result
+        }));
+    }
+
+    const sdkWith = (headers: Record<string, string>[]) => ({
+        __RN_AI_DEVTOOLS__: {
+            getNetworkEntries: () => headers.map((h) => ({ requestHeaders: h }))
+        }
+    });
+
+    it("reuses the Authorization header from the most recent captured request", async () => {
+        const src = buildRequestExpression({ method: "GET", url: "https://api.test/me", auth: "auto" });
+        const { captured, result } = await runWith(src, { auth: { isAuthenticated: true } }, sdkWith([
+            { Authorization: "Bearer old-token" },
+            { "content-type": "application/json" },
+            { authorization: "Bearer newest-token" }
+        ]));
+        expect(captured.init.headers.Authorization).toBe("Bearer newest-token");
+        expect(result.authSource).toBe("captured-request");
+        expect(result.authNote).toBeUndefined();
+    });
+
+    it("prefers redux over a captured header when both exist", async () => {
+        const src = buildRequestExpression({ method: "GET", url: "https://api.test/me", auth: "auto" });
+        const { captured, result } = await runWith(src, { user: { accessToken: "redux-tok" } }, sdkWith([
+            { Authorization: "Bearer captured-tok" }
+        ]));
+        expect(captured.init.headers.Authorization).toBe("Bearer redux-tok");
+        expect(result.authSource).toBe("redux");
+    });
+
+    it("still warns when neither redux nor any captured request has a token", async () => {
+        const src = buildRequestExpression({ method: "GET", url: "https://api.test/me", auth: "auto" });
+        const { result } = await runWith(src, null, sdkWith([{ "content-type": "application/json" }]));
+        expect(result.authorized).toBe(false);
+        expect(String(result.authNote)).toContain("UNAUTHENTICATED");
+    });
+
+    it("degrades quietly when the SDK is absent", async () => {
+        const src = buildRequestExpression({ method: "GET", url: "https://api.test/me", auth: "auto" });
+        const { result } = await runWith(src, null, {});
+        expect(result.authorized).toBe(false);
+        expect(String(result.authNote)).toContain("UNAUTHENTICATED");
+    });
+
+    it("reports an explicitly-passed header as the source", async () => {
+        const src = buildRequestExpression({
+            method: "GET",
+            url: "https://api.test/me",
+            auth: "auto",
+            headers: { Authorization: "Bearer explicit" }
+        });
+        const { captured, result } = await runWith(src, { user: { accessToken: "redux-tok" } }, sdkWith([]));
+        expect(captured.init.headers.Authorization).toBe("Bearer explicit");
+        expect(result.authSource).toBe("explicit");
     });
 });

@@ -32,15 +32,44 @@ export function buildRequestExpression(opts: AppRequestOptions): string {
     const authBlock = wantsAuth
         ? `
     var token = null;
+    var authFrom = headers['Authorization'] ? 'explicit' : null;
     try {
         if (typeof state !== 'undefined' && state) {
             token = (state.user && state.user.accessToken) ||
                     (state.auth && (state.auth.accessToken || state.auth.token)) || null;
+            if (token && !authFrom) authFrom = 'redux';
         }
     } catch (e) { token = null; }
-    // An explicit header wins: the caller knows where their token lives, and
-    // apps that keep it outside redux depend on being able to pass it.
-    if (token && !headers['Authorization']) headers['Authorization'] = 'Bearer ' + token;`
+    // Fallback: reuse the Authorization header from the app's most recent real
+    // request. Source-agnostic, so it works for apps that keep the token
+    // outside redux — Apollo holds it in the link chain, which is not
+    // introspectable, and is exactly why those requests used to be hand-written
+    // with a pasted JWT. Requires the SDK's network capture.
+    if (!token && !headers['Authorization']) {
+        try {
+            var sdk = globalThis.__RN_AI_DEVTOOLS__;
+            var entries = sdk && sdk.getNetworkEntries ? sdk.getNetworkEntries() : null;
+            if (entries) {
+                for (var ei = entries.length - 1; ei >= 0 && !token; ei--) {
+                    var rh = entries[ei] && entries[ei].requestHeaders;
+                    if (!rh) continue;
+                    var hk = Object.keys(rh);
+                    for (var hi = 0; hi < hk.length; hi++) {
+                        if (hk[hi].toLowerCase() === 'authorization' && rh[hk[hi]]) {
+                            headers['Authorization'] = rh[hk[hi]];
+                            authFrom = 'captured-request';
+                            token = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (e) { /* leave unauthenticated */ }
+    }
+    // An explicit header wins: the caller knows where their token lives.
+    if (token && authFrom === 'redux' && !headers['Authorization']) {
+        headers['Authorization'] = 'Bearer ' + token;
+    }`
         : "";
 
     return `(function(){
@@ -53,14 +82,16 @@ export function buildRequestExpression(opts: AppRequestOptions): string {
     if (bodyText !== null) init.body = bodyText;
     ${wantsAuth
         ? `var authNote = !headers['Authorization']
-        ? 'auth="auto" found no token in state.user.accessToken / state.auth.accessToken / state.auth.token. This request was sent UNAUTHENTICATED. Some apps hold the token outside redux (e.g. in an Apollo auth link) - pass headers.Authorization explicitly.'
-        : null;`
+        ? 'auth="auto" found no token: not in state.user.accessToken / state.auth.accessToken / state.auth.token, and no captured request carried an Authorization header (the SDK network capture may be absent, or the app has not made an authenticated request yet). This request was sent UNAUTHENTICATED - pass headers.Authorization explicitly.'
+        : null;
+    var authSource = headers['Authorization'] ? authFrom : null;`
         : `var authNote = null;`}
     return fetch(${url}, init).then(function (res) {
         return res.text().then(function (text) {
             var parsed = text;
             try { parsed = JSON.parse(text); } catch (e) { parsed = text; }
             var out = { status: res.status, ok: res.ok, authorized: !!headers['Authorization'], body: parsed };
+            if (typeof authSource !== 'undefined' && authSource) out.authSource = authSource;
             if (authNote) out.authNote = authNote;
             return out;
         });
