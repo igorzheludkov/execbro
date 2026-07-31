@@ -43,14 +43,14 @@ export function registerConnectionTools(server: McpServer): void {
         {
             description:
                 "Scan for running Metro bundler servers and automatically connect to any found React Native apps. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.\n" +
-                "PURPOSE: Discover Metro on common ports (8081, 8082, 19000-19002) and auto-connect all React Native debugger targets it advertises.\n" +
+                "PURPOSE: Discover Metro on ports 8081-8090 and auto-connect all React Native debugger targets it advertises.\n" +
                 "WHEN TO USE: At the start of any session, or after the user restarts Metro / boots a new simulator.\n" +
                 "WORKFLOW: scan_metro -> get_apps -> get_logs / ios_screenshot / tap.\n" +
                 "GOOD: scan_metro()\n" +
                 "BAD: scan_metro() called repeatedly in a loop — use ensure_connection to re-verify an existing connection.\n",
             inputSchema: {
                 startPort: z.coerce.number().optional().default(8081).describe("Start port for scanning (default: 8081)"),
-                endPort: z.coerce.number().optional().default(19002).describe("End port for scanning (default: 19002)")
+                endPort: z.coerce.number().optional().default(8090).describe("End port for scanning (default: 8090). Metro allocates upward from 8081, so ten ports covers several apps side by side; widen only if your bundler is pinned elsewhere.")
             }
         },
         async ({ startPort, endPort }) => {
@@ -545,7 +545,7 @@ export function registerConnectionTools(server: McpServer): void {
             description:
                 "Connect to a Metro server on a specific port — the only way to reach a port scan_metro does not probe.\n" +
                 "PURPOSE: Establish a CDP WebSocket connection to a Metro server on a known port.\n" +
-                "WHEN TO USE: Metro is on a port outside 8081, 8082, 19000-19002. For any of those, scan_metro is strictly better — it probes them all and attaches every Bridgeless target in one call, where this connects to one port only.\n" +
+                "WHEN TO USE: Metro is on a port outside 8081-8090. For any port in that range, scan_metro is strictly better — it probes them all and attaches every Bridgeless target in one call, where this connects to one port only.\n" +
                 "SEE ALSO: scan_metro for auto-discovery; get_apps afterwards to confirm the device attached.",
             inputSchema: {
                 port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")

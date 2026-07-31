@@ -1,8 +1,19 @@
 import * as net from "net";
 import { DeviceInfo } from "./types.js";
 
-// Common Metro ports
-export const COMMON_PORTS = [8081, 8082, 19000, 19001, 19002];
+// Default Metro scan range: ten contiguous ports from 8081.
+//
+// The previous list was [8081, 8082, 19000, 19001, 19002] — a gap that made a
+// third Metro instance on 8083 invisible to a default scan while the scan still
+// reported success. Running three or more apps side by side is ordinary now, and
+// Metro allocates upward from 8081, so contiguity matters more than the Expo
+// 19xxx ports, which modern Expo no longer uses for the bundler.
+export const DEFAULT_START_PORT = 8081;
+export const DEFAULT_END_PORT = 8090;
+export const COMMON_PORTS = Array.from(
+    { length: DEFAULT_END_PORT - DEFAULT_START_PORT + 1 },
+    (_, i) => DEFAULT_START_PORT + i
+);
 
 // Check if a port is open
 export async function isPortOpen(port: number, host: string = "localhost"): Promise<boolean> {
@@ -31,13 +42,12 @@ export async function isPortOpen(port: number, host: string = "localhost"): Prom
 
 // Scan for running Metro servers
 export async function scanMetroPorts(
-    startPort: number = 8081,
-    endPort: number = 19002
+    startPort: number = DEFAULT_START_PORT,
+    endPort: number = DEFAULT_END_PORT
 ): Promise<number[]> {
-    const portsToCheck =
-        startPort === 8081 && endPort === 19002
-            ? COMMON_PORTS
-            : Array.from({ length: endPort - startPort + 1 }, (_, i) => startPort + i);
+    // The default range is contiguous, so there is no longer a special case —
+    // generating the range always yields the same ports the default would.
+    const portsToCheck = Array.from({ length: endPort - startPort + 1 }, (_, i) => startPort + i);
 
     const openPorts: number[] = [];
 
@@ -119,8 +129,8 @@ export function filterDebuggableDevices(devices: DeviceInfo[]): DeviceInfo[] {
 
 // Scan for Metro and return all devices grouped by port
 export async function discoverMetroDevices(
-    startPort: number = 8081,
-    endPort: number = 19002
+    startPort: number = DEFAULT_START_PORT,
+    endPort: number = DEFAULT_END_PORT
 ): Promise<Map<number, DeviceInfo[]>> {
     const openPorts = await scanMetroPorts(startPort, endPort);
     const result = new Map<number, DeviceInfo[]>();
@@ -152,8 +162,8 @@ export interface MetroState {
  */
 export async function checkMetroState(
     connectedAppsCount: number,
-    startPort: number = 8081,
-    endPort: number = 19002
+    startPort: number = DEFAULT_START_PORT,
+    endPort: number = DEFAULT_END_PORT
 ): Promise<MetroState> {
     const openPorts = await scanMetroPorts(startPort, endPort);
     const metroRunning = openPorts.length > 0;

@@ -25,7 +25,7 @@ const guides: Guide[] = [
 - **Android:** ADB must be in PATH (comes with Android SDK Platform Tools)
 
 ## Quick Start
-1. scan_metro — auto-discovers Metro on common ports (8081, 8082, 19000-19002) and connects. Note: this occupies the CDP slot, which prevents the built-in React Native debugger from connecting. See "Switch to Native Debugger" below.
+1. scan_metro — auto-discovers Metro on ports 8081-8090 and connects. Note: this occupies the CDP slot, which prevents the built-in React Native debugger from connecting. See "Switch to Native Debugger" below.
 2. get_apps — verify the app appears in connected list
 3. get_connection_status — check connection health
 
