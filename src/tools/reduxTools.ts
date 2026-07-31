@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { reduxDispatch, reduxGetState } from "../core/redux.js";
+import { DEVICE_ARG_DESC } from "./_deviceArg.js";
 
 export function registerReduxTools(server: McpServer): void {
     registerToolWithTelemetry(
@@ -34,7 +35,7 @@ export function registerReduxTools(server: McpServer): void {
                 device: z
                     .string()
                     .optional()
-                    .describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                    .describe(DEVICE_ARG_DESC)
             }
         },
         async ({ action, storeIndex, returnPath, device }) => {
@@ -79,7 +80,7 @@ export function registerReduxTools(server: McpServer): void {
                 device: z
                     .string()
                     .optional()
-                    .describe("Target device name (substring match). Omit for default device.")
+                    .describe(DEVICE_ARG_DESC)
             }
         },
         async ({ storeIndex, path, device }) => {

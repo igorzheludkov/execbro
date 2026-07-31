@@ -30,7 +30,7 @@ Look for compilation/bundling errors:
 
 Based on the errors found:
 - Fix import paths, syntax issues, or missing modules in the code
-- Use `mcp__execbro__clear_bundle_errors` to clear the error buffer after fixing
+- Use `mcp__execbro__get_bundle_errors(clear=true)` to read and then reset the error buffer after fixing
 
 ### 4. Reload the App
 
@@ -70,7 +70,6 @@ If the app isn't responding:
 
 - `mcp__execbro__get_bundle_status`
 - `mcp__execbro__get_bundle_errors`
-- `mcp__execbro__clear_bundle_errors`
 - `mcp__execbro__reload_app`
 - `mcp__execbro__ensure_connection`
 - `mcp__execbro__scan_metro`

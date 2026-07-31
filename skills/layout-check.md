@@ -21,8 +21,7 @@ When this skill is invoked, follow these steps:
 
 First, check what devices are available:
 
-- Use `mcp__execbro__list_ios_simulators` to find running iOS simulators
-- Use `mcp__execbro__list_android_devices` to find connected Android devices/emulators
+- Use `mcp__execbro__list_devices` to find running simulators, emulators, and connected devices
 
 ### 2. Take Screenshots
 
@@ -50,7 +49,7 @@ Based on what's running, capture screenshots:
 If a screenshot reveals a layout issue and you need precise measurements:
 - Pick by question:
   - **Layout/measurement question** ("why is this clipped?", "what's the actual size?", "what handler fires here?") → `mcp__execbro__inspect_at_point(x, y)`. Returns FRAME PER ANCESTOR plus PROPS (handlers, refs, testID). Pure JS hit test — no overlay flicker, fast.
-  - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__execbro__get_inspector_selection(x, y)`. Returns RN's curated hierarchy with merged style per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.). Briefly toggles RN's Element Inspector on→off around the capture. Also returns `source: {file, line, column}` so you can open the owning file directly rather than searching for the component.
+  - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__execbro__inspect_at_point(x, y)`. Returns the node's own style object plus every ancestor's frame, and `source: {file, line, column}` so you can open the owning file directly rather than searching for the component. Style is not a merged cascade — when a value isn't on the node itself, walk the ancestors it returns.
 - Both tools work on Bridgeless / new arch and on Paper/Fabric.
 
 ### 5. Optional: Compare with Design
@@ -73,13 +72,11 @@ If the user provides a Figma URL or design reference:
 
 ## MCP Tools Used
 
-- `mcp__execbro__list_ios_simulators`
-- `mcp__execbro__list_android_devices`
+- `mcp__execbro__list_devices`
 - `mcp__execbro__ios_screenshot`
 - `mcp__execbro__android_screenshot`
 - `mcp__execbro__inspect_at_point` (optional: per-ancestor frames + props at coordinates)
 - `mcp__execbro__ocr_screenshot` (screenshot + OCR text with tap coordinates)
-- `mcp__execbro__get_inspector_selection` (optional: identity + rich style per ancestor at coordinates)
 
 ## Notes
 

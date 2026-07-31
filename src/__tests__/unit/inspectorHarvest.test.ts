@@ -13,7 +13,7 @@ jest.unstable_mockModule("../../core/jsExecute.js", () => ({
     markConnectionEstablished: jest.fn(),
 }));
 
-const { harvestStacksAtPoint, harvestStacksAtFrame } = await import("../../core/inspector.js");
+const { harvestStacksAtPoint } = await import("../../core/inspector.js");
 
 const OK = {
     success: true,
@@ -52,29 +52,5 @@ describe("harvestStacksAtPoint", () => {
     it("returns an empty list when the evaluate throws", async () => {
         executeInApp.mockRejectedValueOnce(new Error("boom"));
         expect(await harvestStacksAtPoint(1, 2)).toEqual([]);
-    });
-});
-
-describe("harvestStacksAtFrame", () => {
-    beforeEach(() => {
-        executeInApp.mockReset();
-    });
-
-    it("harvests at the centre of the frame", async () => {
-        executeInApp.mockResolvedValueOnce(OK);
-        await harvestStacksAtFrame({ left: 100, top: 200, width: 50, height: 20 });
-        const expr = executeInApp.mock.calls[0][0] as string;
-        expect(expr).toContain("125");
-        expect(expr).toContain("210");
-    });
-
-    it("returns an empty list without evaluating for a null frame", async () => {
-        expect(await harvestStacksAtFrame(null)).toEqual([]);
-        expect(executeInApp.mock.calls.length).toBe(0);
-    });
-
-    it("returns an empty list without evaluating for an incomplete frame", async () => {
-        expect(await harvestStacksAtFrame({ left: 1, top: 2 })).toEqual([]);
-        expect(executeInApp.mock.calls.length).toBe(0);
     });
 });

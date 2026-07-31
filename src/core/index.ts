@@ -156,13 +156,8 @@ export {
   pressElement,
   // Coordinate-based inspection
   inspectAtPoint,
-  toggleElementInspector,
   isInspectorActive,
-  getInspectorSelection,
-  getInspectorSelectionAtPoint,
-  getSelectionHistory,
   harvestStacksAtPoint,
-  harvestStacksAtFrame,
   enrichWithSource,
 } from "./executor.js";
 
@@ -269,13 +264,6 @@ export {
   getBundleStatusWithErrors,
 } from "./bundle.js";
 
-// Element Inspector selection capture
-export {
-  startSelectionPoller,
-  stopSelectionPoller,
-  stopAllSelectionPollers,
-  isSelectionPollerRunning,
-} from "./selectionPoller.js";
 // SDK buffer mirroring — keeps a server-side copy so an app restart does not
 // destroy the only copy of the in-app SDK buffers.
 export {
@@ -286,7 +274,7 @@ export {
   isSdkMirrorPollerRunning,
 } from "./sdkMirrorPoller.js";
 
-export { SelectionBuffer, selectionBuffer } from "./selectionBuffer.js";
+// Element Inspector selection types — still used by componentSource.ts
 export type { SelectionEntry, SelectionFrame, ComponentStack } from "./selectionBuffer.js";
 
 // License & Usage

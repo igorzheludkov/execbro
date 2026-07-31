@@ -30,10 +30,8 @@ const NATIVE_FALLBACKS: Record<string, string[]> = {
     clear_logs: [],
     get_network_requests: [],
     search_network: [],
-    get_network_stats: [],
     get_request_details: [],
     get_screen_layout: [],
-    get_inspector_selection: [],
 };
 
 export type MetroMissingHintOptions = {

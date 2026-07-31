@@ -436,7 +436,7 @@ export async function buildNoSimulatorError(): Promise<string> {
     }
     if (shutdown.length === 0) return base;
     const top = shutdown.slice(0, 6).map((d) => `  - ${d.name} (${d.udid})`).join("\n");
-    const more = shutdown.length > 6 ? `\n  ...and ${shutdown.length - 6} more (run list_ios_simulators)` : "";
+    const more = shutdown.length > 6 ? `\n  ...and ${shutdown.length - 6} more (run list_devices)` : "";
     return `${base}\n\nAvailable simulators (shutdown):\n${top}${more}`;
   } catch {
     return base;
@@ -709,7 +709,7 @@ export async function iosLaunchApp(
     let hint = "";
     if (msg.includes("FBSOpenApplicationErrorDomain")) {
       hint =
-        "\n\nCommon causes:\n- App is not installed on this simulator (install it first with ios_install_app)\n- Bundle ID is incorrect (check with: xcrun simctl listapps booted)";
+        "\n\nCommon causes:\n- App is not installed on this simulator (install it with `xcrun simctl install booted <path.app>`, or run your project's iOS build)\n- Bundle ID is incorrect (check with: xcrun simctl listapps booted)";
     }
     return {
       success: false,

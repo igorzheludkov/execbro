@@ -10,7 +10,6 @@ import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
-import { startSelectionPoller } from "./selectionPoller.js";
 import { startSdkMirrorPoller, stopSdkMirrorPoller } from "./sdkMirrorPoller.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
@@ -1172,10 +1171,6 @@ export async function connectToDevice(
             }
             lastTargetIdByDevice.set(bufferKey, device.id);
 
-            // Watch RN's Element Inspector for selections made outside an agent
-            // request. Idempotent, and a no-op when EXECBRO_DISABLE_SELECTION_POLL=1.
-            startSelectionPoller(device.deviceName);
-
             // Mirror the in-app SDK buffers into ours so a hard app restart
             // does not take the only copy with it. No-op when the SDK is absent
             // or EXECBRO_DISABLE_SDK_MIRROR=1.
@@ -1541,7 +1536,7 @@ export function describeDeviceResolution(resolution: DeviceResolution): string {
 
     const quoted = connected.map(a => `"${deviceLabel(a)}"`).join(", ");
     // Cross-platform mismatch is the dominant shape of this failure: the agent
-    // passes a name from list_ios_simulators / adb devices while only the other
+    // passes a name from list_devices while only the other
     // platform is attached to Metro. Saying so beats "retry with one of these".
     const requested = guessRequestedPlatform(device);
     const attachedPlatforms = new Set(connected.map(a => a.platform));

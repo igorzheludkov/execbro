@@ -32,7 +32,6 @@ import { registerConnectionTools } from "./tools/connectionTools.js";
 import { registerScreenshotTools } from "./tools/screenshotTools.js";
 import { registerInteractionTools } from "./tools/interactionTools.js";
 import { registerComponentTools } from "./tools/componentTools.js";
-import { registerFlowpointTools } from "./pro/flowpointTools.js";
 
 // Re-export so tests (src/__tests__/unit/toolDescriptions.test.ts) can enumerate
 // registered tools without booting the server.
@@ -66,7 +65,6 @@ registerLogTools(server);
 registerNetworkTools(server);
 registerRequestTools(server);
 registerNavigationTools(server);
-registerFlowpointTools(server);
 registerBundleTools(server);
 registerDeviceTools(server);
 registerConnectionTools(server);

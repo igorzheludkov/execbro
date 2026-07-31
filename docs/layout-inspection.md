@@ -9,12 +9,10 @@ Tools for understanding the structure and layout of your React Native screens. U
 | Tool                       | Purpose                                                                              |
 | -------------------------- | ------------------------------------------------------------------------------------ |
 | `get_screen_layout`        | Screen map of visible components with positions, sizes, and text content             |
-| `get_component_tree`       | Full React fiber tree including providers, navigation, and internal components       |
+| `get_component_tree`       | React fiber tree (providers, navigation, internals). Compact names-only by default    |
 | `find_components`          | Search for components by name pattern across the entire tree                         |
 | `inspect_component`        | Deep dive into a specific component's props, state, and hooks                        |
-| `inspect_at_point`         | Per-ancestor frames + props at (x, y) — pure JS, no overlay flicker                   |
-| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y), plus source file and line              |
-| `toggle_element_inspector` | Manually toggle RN's Element Inspector overlay (rarely needed)                       |
+| `inspect_at_point`         | Per-ancestor frames + props + style + source file:line at (x, y) — pure JS, no flicker |
 | `get_images`               | Access the shared image buffer (screenshots from all tools, tap verification frames) |
 
 ## get_screen_layout
@@ -89,78 +87,11 @@ Coordinates are in dp (density-independent pixels). Convert from screenshot pixe
 
 Works on Paper, Fabric, and Bridgeless / new arch. Skips RN primitives and common library wrappers to surface meaningful components.
 
-**Best for:** layout debugging ("where exactly is each ancestor positioned?"), props/handler inspection ("what fires when this Pressable is pressed?"), and rapid/repeated calls (no overlay flicker).
+It also returns `source: {file, line, column}` — the absolute path and line where the component is rendered — plus the owner chain as `Source ancestors`. These are resolved from the fiber's `_debugStack` via Metro symbolication, so they work on React 19 where `_debugSource` was dropped, and `node_modules` frames are filtered out so you land on your own code. If Metro is unreachable the response carries `sourceUnavailable` and identity + props are still returned. Pass `source=false` to skip resolution in tight loops.
 
-## get_inspector_selection
+Style is the node's own style object, not RN's merged cascade — when a value looks wrong and isn't set on the node itself, walk the ancestors the tool returns.
 
-Identity + RICH STYLE per ancestor at (x, y). Invokes RN's Element Inspector programmatically (briefly toggles the overlay on, captures, hides it again — no screenshot pollution). Returns the same data the on-device overlay shows: full curated hierarchy where each entry has its own merged style (paddingHorizontal, borderRadius, fontFamily, etc.), plus the inspected element's frame and merged style.
-
-```
-get_inspector_selection with x=200 y=450
-```
-
-Coordinates are in points/dp. Works on Paper, Fabric, and Bridgeless / new arch (uses RN's owner-tree internals, not adb-tap routing).
-
-- **With x/y:** toggles overlay on, captures the selection programmatically, hides overlay
-- **Without coordinates:** returns the current selection from a manually-driven overlay
-
-**Best for:** visual/styling debugging ("why is borderRadius 14 instead of 16?", "what padding does this card have?"). Use `inspect_at_point` if you need per-ancestor frames or non-style props.
-
-### Source resolution
-
-The response includes the absolute path and line where the component is rendered:
-
-```json
-{
-  "element": "RCTText",
-  "path": "App > HomeScreen > SearchView > TrendingTopics > Text > RCTText",
-  "source": { "file": "/Users/you/app/src/screens/HomeScreen/SearchView/TrendingTopics/TrendingTopics.tsx", "line": 20, "column": 7 },
-  "ancestors": [
-    { "component": "TrendingTopics", "file": "/Users/you/app/src/screens/HomeScreen/SearchView/SearchView.tsx", "line": 115 },
-    { "component": "SearchView",     "file": "/Users/you/app/src/screens/HomeScreen/HomeScreen.tsx",            "line": 175 }
-  ]
-}
-```
-
-Resolved from the fiber's `_debugStack` via Metro's `/symbolicate` endpoint, so it works on React 19
-where `_debugSource` was removed. Frames inside `node_modules` are filtered out, so you land on your own
-code rather than a library wrapper. If Metro is unreachable the response carries `sourceUnavailable`
-instead, and identity plus style are still returned.
-
-Set `source=false` to skip resolution when you only need identity and style.
-
-### Selection history
-
-While RN's Element Inspector is on, a background poller records each selection into a 100-entry circular
-buffer — including taps you make yourself without asking the agent.
-
-```
-get_inspector_selection with history=true
-```
-
-Entries come back newest first (`limit` defaults to 10), each with source resolved on read. Set
-`EXECBRO_DISABLE_SELECTION_POLL=1` to turn the poller off.
-
-## inspect_at_point vs get_inspector_selection — at a glance
-
-| | `inspect_at_point` | `get_inspector_selection` |
-|---|---|---|
-| Frame | Per ancestor | Inspected element only |
-| Style | Reference (no merging) | RICH per ancestor (padding, margin, border, layout) |
-| Props | Full (handlers, refs, testID, custom) | None |
-| Source paths | None | Pre-wired (null on React 19) |
-| Overlay flicker | None — pure JS | ~600ms on→off |
-| Best for | Layout, props, tight loops | Style, visual debugging |
-
-## toggle_element_inspector
-
-Toggle React Native's built-in Element Inspector overlay on/off.
-
-```
-toggle_element_inspector
-```
-
-Rarely needed directly — `get_inspector_selection` auto-toggles the overlay around its capture and hides it afterward. Use this only when you want the overlay to remain visible (e.g., capturing a user-facing screenshot of the inspector itself).
+**Best for:** identifying what renders a pixel, layout debugging ("where exactly is each ancestor positioned?"), props/handler inspection ("what fires when this Pressable is pressed?"), and rapid/repeated calls (no overlay flicker).
 
 ## get_images
 
@@ -178,13 +109,13 @@ Returns metadata only by default. Use `id` or `groupId` + `frameIndex` to retrie
 
 1. `get_screen_layout` — see all visible components with positions
 2. `find_components(pattern="...")` — find specific components by name
-3. `inspect_component(name="...")` — get full props, state, hooks for a component
+3. `inspect_component(componentName="...")` — get full props, state, hooks for a component
 
 ### Identify a Component from a Screenshot
 
 1. Take a screenshot (`ios_screenshot` / `android_screenshot`)
 2. Estimate the target element's coordinates
-3. `get_inspector_selection(x, y)` — get component hierarchy with file paths
+3. `inspect_at_point(x, y)` — get the component, its ancestors, and the source file:line
 4. Use the file path to find and edit the source code
 
 ### Debug Layout Issues

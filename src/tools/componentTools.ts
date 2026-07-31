@@ -5,18 +5,12 @@ import { iconLabel } from "../core/iconSemantics.js";
 import {
     getComponentTree,
     getScreenLayout,
-    formatScreenLayoutTree,
     getPressableElements,
     getScreenState,
     formatScreenStateSummary,
     inspectComponent,
     findComponents,
-    toggleElementInspector,
-    getInspectorSelection,
-    getInspectorSelectionAtPoint,
-    getSelectionHistory,
     harvestStacksAtPoint,
-    harvestStacksAtFrame,
     enrichWithSource,
     inspectAtPoint,
     measureComponent,
@@ -30,10 +24,10 @@ import {
     hasMetro,
     getConnectedAppByDevice,
     getFirstConnectedApp,
-    connectedApps,
 } from "../core/index.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
 import type { ExecutionResult } from "../core/types.js";
+import { DEVICE_ARG_DESC } from "./_deviceArg.js";
 
 function collectMetaNotes(r: ExecutionResult): string[] {
     const out: string[] = [];
@@ -61,8 +55,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: pass coordinates straight to tap(), which handles conversion — never multiply by devicePixelRatio yourself.\n" +
                 "GOOD: get_screen_layout({ extended: true })\n" +
                 "BAD: get_screen_layout({ summary: true }) when you actually need to pick a specific element — summary hides the tree.\n" +
-                "SOURCE: file:line for an element? get_inspector_selection(x, y).\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"layout\") for the full layout-check playbook.",
+                "SOURCE: file:line for an element? inspect_at_point(x, y).\n",
             inputSchema: {
                 extended: z
                     .boolean()
@@ -74,7 +67,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Return only component counts by name instead of full tree (default: false)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -128,21 +121,20 @@ export function registerComponentTools(server: McpServer): void {
         "get_component_tree",
         {
             description:
-                "Get the full React component tree from the running app. Shows the complete fiber hierarchy including providers, navigation wrappers, and internal components. For a screen overview with positions and text, use get_screen_layout instead. Use structureOnly=true for compact names-only output.\n" +
+                "Get the React component tree from the running app — the fiber hierarchy including providers, navigation wrappers, and internal components. For a screen overview with positions and text, use get_screen_layout instead. Returns compact names-only structure by default; pass structureOnly=false for the full detailed tree.\n" +
                 "PURPOSE: Expose the entire fiber tree — including providers, navigators, and off-screen subtrees — when get_screen_layout's visible-only view isn't enough.\n" +
                 "WHEN TO USE: Debugging context propagation, navigation wrappers, hidden modals, or when you need to understand the full React architecture.\n" +
-                "WORKFLOW: get_component_tree(structureOnly=true) for overview -> find_components for targeted lookup -> inspect_component for props/state.\n" +
-                "LIMITATIONS: Full trees can be large; always start with structureOnly=true. Ignores non-React native views. Minified builds return display names that may be opaque.\n" +
-                "GOOD: get_component_tree({ structureOnly: true })\n" +
-                "BAD: get_component_tree({ includeProps: true, includeStyles: true }) on a large app — likely hits response-size limits. Prefer inspect_component for specific nodes.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "WORKFLOW: get_component_tree() for overview -> find_components for targeted lookup -> inspect_component for props/state.\n" +
+                "LIMITATIONS: The detailed tree (structureOnly=false) is very large and routinely exceeds response-size limits on real apps — reach for inspect_component on a specific node instead. Ignores non-React native views. Minified builds return display names that may be opaque.\n" +
+                "GOOD: get_component_tree()\n" +
+                "BAD: get_component_tree({ structureOnly: false, includeProps: true, includeStyles: true }) on a large app — prefer inspect_component for specific nodes.\n",
             inputSchema: {
                 structureOnly: z
                     .boolean()
                     .optional()
-                    .default(false)
+                    .default(true)
                     .describe(
-                        "Return ultra-compact structure with just component names (no props, styles, or paths). Use this first for overview, then drill down with inspect_component."
+                        "Return ultra-compact structure with just component names (no props, styles, or paths). Default true — the detailed tree averages tens of thousands of tokens and is rarely what you want. Set false only when you specifically need props/styles/paths for the whole tree."
                     ),
                 maxDepth: z
                     .number()
@@ -174,7 +166,7 @@ export function registerComponentTools(server: McpServer): void {
                     .describe(
                         "Output format: 'json' or 'compact' (default, indented tree — roughly 6x smaller than json). Ignored if structureOnly=true."
                     ),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -225,10 +217,9 @@ export function registerComponentTools(server: McpServer): void {
                 "WORKFLOW: ios_screenshot / android_screenshot -> get_pressable_elements -> tap(testID=\"...\") or tap(x, y) using the center coordinates.\n" +
                 "LIMITATIONS: Visible-only (off-screen pressables are excluded). Requires a live React connection. Coordinates are in screenshot pixels — the tap tool converts to points internally.\n" +
                 "GOOD: get_pressable_elements()\n" +
-                "BAD: Calling when tap(testID=\"...\") already works — testID matching is faster and more stable.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full interaction playbook.",
+                "BAD: Calling when tap(testID=\"...\") already works — testID matching is faster and more stable.\n",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ARG_DESC)
             }
         },
         async ({ device }) => {
@@ -351,10 +342,10 @@ export function registerComponentTools(server: McpServer): void {
                 "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
                 "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection. Coordinates in points (iOS) / dp (Android); text frames are container-level (climb to nearest measurable host).\n" +
-                "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call get_inspector_selection(x, y).\n" +
+                "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call inspect_at_point(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false."),
                 fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false.")
             }
@@ -470,8 +461,7 @@ export function registerComponentTools(server: McpServer): void {
                 "WORKFLOW: get_screen_layout or find_components -> inspect_component(componentName=\"Foo\") -> tap or execute_in_app to change state -> inspect_component again.\n" +
                 "LIMITATIONS: Requires the component to be currently mounted in the fiber tree. Name matching is exact; use find_components for fuzzy/regex lookup.\n" +
                 "GOOD: inspect_component({ componentName: \"SneakerCard\", index: 0 })\n" +
-                "BAD: inspect_component({ componentName: \"Card\" }) when many Card instances exist — pass index or narrow via find_components.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "BAD: inspect_component({ componentName: \"Card\" }) when many Card instances exist — pass index or narrow via find_components.\n",
             inputSchema: {
                 componentName: z
                     .string()
@@ -507,7 +497,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe("Simplify hooks output by hiding effects and reducing depth (default: true)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -559,8 +549,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: Matches the React display name only; minified builds may return opaque names. Large result sets — use maxResults or a tighter pattern.\n" +
                 "GOOD: find_components({ pattern: \"Button\" }); find_components({ pattern: \"Screen$\" })\n" +
                 "BAD: find_components({ pattern: \".*\" }) — floods the response; narrow the regex.\n" +
-                "SOURCE: searching by name to find a file? If you can point at it on screen, get_inspector_selection(x, y) returns the file and line directly.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
+                "SOURCE: searching by name to find a file? If you can point at it on screen, inspect_at_point(x, y) returns the file and line directly.\n",
             inputSchema: {
                 pattern: z
                     .string()
@@ -589,7 +578,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default("compact")
                     .describe("Output format: 'json' or 'compact' (default, pipe-delimited rows — roughly 4.5x smaller than json)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 timeoutMs: z.coerce
                     .number()
                     .optional()
@@ -621,216 +610,6 @@ export function registerComponentTools(server: McpServer): void {
     );
     
     // Tool: Toggle Element Inspector programmatically
-    registerToolWithTelemetry(
-        server,
-        "toggle_element_inspector",
-        {
-            description:
-                "Toggle React Native's Element Inspector overlay on/off. Rarely needed directly — get_inspector_selection auto-toggles the overlay on for capture and back off afterward. Use only for edge cases (e.g., leaving the overlay visible on screen for a user-facing screenshot).\n" +
-                "PURPOSE: Manual control over the on-device inspector overlay.\n" +
-                "WHEN TO USE: Only for special cases like capturing a screenshot WITH the inspector visible. Normal inspection workflows should call get_inspector_selection directly.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"inspect\") for the full component-inspect playbook.",
-            inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
-            }
-        },
-        async ({ device }) => {
-            const result = await toggleElementInspector(device);
-    
-            if (!result.success) {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Error: ${result.error}`
-                        }
-                    ],
-                    isError: true
-                };
-            }
-    
-            try {
-                const parsed = JSON.parse(result.result || "{}");
-                if (parsed.error) {
-                    return {
-                        content: [
-                            {
-                                type: "text",
-                                text: `Failed to toggle Element Inspector: ${parsed.error}`
-                            }
-                        ],
-                        isError: true
-                    };
-                }
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: parsed.message || "Element Inspector toggled successfully"
-                        }
-                    ]
-                };
-            } catch {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: result.result || "Element Inspector toggled"
-                        }
-                    ]
-                };
-            }
-        }
-    );
-    
-    // Tool: Get currently selected element from Element Inspector
-    registerToolWithTelemetry(
-        server,
-        "get_inspector_selection",
-        {
-            description:
-                "Identify the React component at a screen location AND read its full styling. Returns RN's curated owner-tree hierarchy with per-component STYLE (padding, margin, border, layout, colors, fontSize, etc.) — the same data the on-device Element Inspector shows. Works on Bridgeless/new arch by invoking RN's inspector programmatically. With x/y: toggles the overlay on, captures, toggles it off. Without coordinates: reads the current selection from a manually-driven overlay.\n" +
-                "PURPOSE: Identity + styling — \"what is this and how is it styled?\" The primary tool for visual/style debugging at a coordinate.\n" +
-                "WHEN TO USE: You see a visual issue at a pixel and want the component name AND its style values (e.g. \"why is borderRadius 14 instead of 16?\").\n" +
-                "WORKFLOW: screenshot → note suspect pixel → get_inspector_selection(x, y) → edit returned style values.\n" +
-                "LIMITATIONS: Requires RN dev mode. Brief overlay flicker (~600ms). Source needs Metro reachable; otherwise `sourceUnavailable` is set and name + style still return.\n" +
-                "SOURCE: Returns `source: {file, line, column}` where the component is rendered, plus `ancestors[]` — open it directly instead of hunting for it.\n" +
-                "HISTORY: history=true returns recent buffered selections, including manual inspector taps.\n" +
-                "VS inspect_at_point: this returns RICH STYLE per ancestor but only ONE frame. inspect_at_point returns FRAME PER ANCESTOR + PROPS but no rich style merging.\n" +
-                "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
-            inputSchema: {
-                x: z
-                    .number()
-                    .optional()
-                    .describe("X coordinate (in points). If provided with y, auto-taps at this location."),
-                y: z
-                    .number()
-                    .optional()
-                    .describe("Y coordinate (in points). If provided with x, auto-taps at this location."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
-                source: z
-                    .boolean()
-                    .optional()
-                    .default(true)
-                    .describe("Resolve the component's source file and line via Metro symbolication. Default true. Set false to skip if you only need name and style."),
-                history: z
-                    .boolean()
-                    .optional()
-                    .default(false)
-                    .describe("Return recent buffered selections (newest first) instead of the current one. Captures taps made while RN's Element Inspector was on, including ones the agent never requested."),
-                limit: z
-                    .number()
-                    .optional()
-                    .describe("Max entries to return when history=true. Default 10.")
-            }
-        },
-        async ({ x, y, device, source = true, history = false, limit }) => {
-            if (!hasMetro()) {
-                const hint = await metroMissingHintIfAbsent("get_inspector_selection");
-                return {
-                    content: [{ type: "text", text: `Inspector selection unavailable.${hint}` }],
-                    isError: true
-                };
-            }
-
-            if (history) {
-                const entries = await getSelectionHistory({ device, limit });
-                return {
-                    content: [{
-                        type: "text",
-                        text: entries.length === 0
-                            ? "No buffered selections. Toggle RN's Element Inspector on and tap an element."
-                            : JSON.stringify(entries, null, 2)
-                    }]
-                };
-            }
-
-            // Coordinate path: use fiber-based hit testing (works on Bridgeless / new arch
-            // where RN's built-in inspector cannot populate hierarchy via UIManager.findSubviewIn).
-            // Avoids toggling the on-device overlay so screenshots stay clean.
-            const result =
-                x !== undefined && y !== undefined
-                    ? await getInspectorSelectionAtPoint(x, y, device)
-                    : await getInspectorSelection(device);
-    
-            if (!result.success) {
-                return {
-                    content: [{ type: "text", text: `Error: ${result.error}` }],
-                    isError: true
-                };
-            }
-    
-            try {
-                const parsed = JSON.parse(result.result || "{}");
-                if (parsed.error) {
-                    const hint = parsed.hint ? `\n\n${parsed.hint}` : "";
-                    return {
-                        content: [{ type: "text", text: `${parsed.error}${hint}` }],
-                        isError: true
-                    };
-                }
-    
-                let output = `Element: ${parsed.element}\n`;
-                output += `Path: ${parsed.path}\n`;
-                if (parsed.frame) {
-                    const f = parsed.frame;
-                    output += `Frame: (${f.left?.toFixed(1)}, ${f.top?.toFixed(1)}) ${f.width?.toFixed?.(1) ?? f.width}x${f.height?.toFixed?.(1) ?? f.height}\n`;
-                }
-
-                // Source resolution: harvest _debugStack at the selection, then
-                // symbolicate host-side. Failure only adds a reason — never drops
-                // the identity/style payload the caller already has.
-                if (source) {
-                    const stacks =
-                        x !== undefined && y !== undefined
-                            ? await harvestStacksAtPoint(x, y, device)
-                            : await harvestStacksAtFrame(parsed.frame, device);
-                    const enriched = await enrichWithSource({}, stacks);
-                    const loc = enriched.source as
-                        | { file: string; line: number; column: number }
-                        | undefined;
-                    if (loc) {
-                        output += `Source: ${loc.file}:${loc.line}:${loc.column}\n`;
-                        const ancestors = enriched.ancestors as
-                            | Array<{ component: string; file: string; line: number }>
-                            | undefined;
-                        if (ancestors && ancestors.length > 1) {
-                            output += `Source ancestors:\n`;
-                            for (const a of ancestors) {
-                                output += `  - ${a.component}  ${a.file}:${a.line}\n`;
-                            }
-                        }
-                    } else {
-                        output += `Source: unavailable (${enriched.sourceUnavailable})\n`;
-                    }
-                }
-                if (parsed.style) {
-                    output += `Style: ${JSON.stringify(parsed.style, null, 2)}\n`;
-                }
-                if (Array.isArray(parsed.hierarchy) && parsed.hierarchy.length > 0) {
-                    output += `\nHierarchy:\n`;
-                    for (const h of parsed.hierarchy as Array<{ name: string; source?: string; style?: Record<string, unknown> }>) {
-                        output += `  - ${h.name}`;
-                        if (h.source) output += `  (${h.source})`;
-                        output += `\n`;
-                        if (h.style && Object.keys(h.style).length > 0) {
-                            const styleStr = JSON.stringify(h.style);
-                            output += `      style: ${styleStr.length > 300 ? styleStr.slice(0, 300) + "…" : styleStr}\n`;
-                        }
-                    }
-                }
-    
-                return {
-                    content: [{ type: "text", text: output }]
-                };
-            } catch {
-                return {
-                    content: [{ type: "text", text: result.result || "No selection data" }]
-                };
-            }
-        }
-    );
-    
     // Tool: Inspect component at coordinates (like Element Inspector)
     registerToolWithTelemetry(
         server,
@@ -841,10 +620,8 @@ export function registerComponentTools(server: McpServer): void {
                 "PURPOSE: Layout/props diagnosis — \"where is each ancestor positioned, and what props does the touched component expose?\"\n" +
                 "WHEN TO USE: A button is clipped, hit area is wrong, animated frame is unexpected — or you need handler/ref/non-style props. Also preferred for tight loops (no overlay flicker).\n" +
                 "WORKFLOW: screenshot → suspect pixel → divide by pixel ratio → inspect_at_point(x, y).\n" +
-                "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is shown for reference only (no rich merging); for style debugging use get_inspector_selection.\n" +
-                "VS get_inspector_selection: this returns FRAME PER ANCESTOR + PROPS, no flicker. Inspector returns RICH STYLE per ancestor but only one frame and briefly toggles the overlay.\n" +
-                "SOURCE: also returns `source: {file, line, column}` for the component at the point (set source=false to skip in tight loops).\n" +
-                "SEE ALSO: get_usage_guide(topic=\"inspect\") for the full playbook.",
+                "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is the node's own style object, not the merged cascade.\n" +
+                "SOURCE: also returns `source: {file, line, column}` for the component at the point, plus the owner chain as `Source ancestors` (set source=false to skip in tight loops).\n",
             inputSchema: {
                 x: z
                     .number()
@@ -866,7 +643,7 @@ export function registerComponentTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe("Include position/dimensions (frame) in the output (default: true)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC),
                 source: z
                     .boolean()
                     .optional()
@@ -917,9 +694,23 @@ export function registerComponentTools(server: McpServer): void {
             if (source) {
                 const enriched = await enrichWithSource({}, await harvestStacksAtPoint(x, y, device));
                 const loc = enriched.source as { file: string; line: number; column: number } | undefined;
-                sourceLine = loc
-                    ? `\n\nSource: ${loc.file}:${loc.line}:${loc.column}`
-                    : `\n\nSource: unavailable (${enriched.sourceUnavailable})`;
+                if (loc) {
+                    sourceLine = `\n\nSource: ${loc.file}:${loc.line}:${loc.column}`;
+                    // The owner chain answers "which parent renders this?" — the one
+                    // thing a single file:line cannot, and the reason to inspect at
+                    // all when the innermost node is a shared primitive.
+                    const ancestors = enriched.ancestors as
+                        | Array<{ component: string; file: string; line: number }>
+                        | undefined;
+                    if (ancestors && ancestors.length > 1) {
+                        sourceLine += `\nSource ancestors:\n`;
+                        for (const a of ancestors) {
+                            sourceLine += `  - ${a.component}  ${a.file}:${a.line}\n`;
+                        }
+                    }
+                } else {
+                    sourceLine = `\n\nSource: unavailable (${enriched.sourceUnavailable})`;
+                }
             }
 
             return {
@@ -946,7 +737,7 @@ export function registerComponentTools(server: McpServer): void {
                 "LIMITATIONS: Returns post-layout on-screen geometry only — for static style use find_components({ includeLayout: true }). For point-based lookup use inspect_at_point. Off-screen fibers may return zeros; that's the truth, not an error. Composites with multiple host descendants return the first host descendant's bounds.\n" +
                 "GOOD: measure({ componentName: \"SneakerCard\", index: 0 })\n" +
                 "BAD: measure({ componentName: \"View\" }) — too generic; narrow with find_components first.\n" +
-                "SEE ALSO: inspect_at_point for point-based variant; find_components({ includeLayout: true }) for static style; get_usage_guide(topic=\"inspect\") for the full playbook.",
+                "SEE ALSO: inspect_at_point for point-based variant; find_components({ includeLayout: true }) for static style.",
             inputSchema: {
                 componentName: z
                     .string()
@@ -959,7 +750,7 @@ export function registerComponentTools(server: McpServer): void {
                 device: z
                     .string()
                     .optional()
-                    .describe("Target device name (substring match). Omit for default device. Run get_apps to see connected devices.")
+                    .describe(DEVICE_ARG_DESC)
             }
         },
         async ({ componentName, index, device }) => {

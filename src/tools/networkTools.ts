@@ -20,6 +20,7 @@ import { isSDKInstalled, clearSDKNetwork } from "../core/sdkBridge.js";
 import { refreshMirror } from "../core/sdkMirrorPoller.js";
 import { withRestartDividers, evictionNotice, resolveEpochFilter } from "../core/epochRender.js";
 import { formatRequest } from "../core/network.js";
+import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 
 // Network capture has no end-to-end probe equivalent to verifyLogPipeline, so
 // the "connected but nothing captured" verdict is always unverified: a silently
@@ -51,8 +52,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: scan_metro -> reproduce action -> get_network_requests({ summary: true }) -> get_network_requests({ status: 500 }) or search_network -> get_request_details(id).\n" +
                 "LIMITATIONS: Bridgeless targets without the SDK may miss pre-connect requests and response bodies — install execbro-sdk for full fidelity.\n" +
                 "GOOD: get_network_requests({ summary: true }) then get_network_requests({ urlPattern: \"/login\", status: 401 })\n" +
-                "BAD: get_network_requests({ maxRequests: 500 }) as the first call — start with summary=true.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: get_network_requests({ maxRequests: 500 }) as the first call — start with summary=true.\n",
             inputSchema: {
                 maxRequests: z
                     .number()
@@ -67,7 +67,7 @@ export function registerNetworkTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Return statistics only (count, methods, domains, status codes). Use for quick overview."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices."),
+                device: z.string().optional().describe(DEVICE_ALL_DESC),
                 epoch: z
                     .union([z.number(), z.literal("current"), z.literal("all")])
                     .optional()
@@ -204,12 +204,11 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: search_network(urlPattern=\"/api/\") -> get_request_details(requestId=\"...\") for full headers/body.\n" +
                 "LIMITATIONS: Matches URL only; for method/status/body filtering use get_network_requests. Bodies are only present when the SDK is installed.\n" +
                 "GOOD: search_network({ urlPattern: \"/graphql\" })\n" +
-                "BAD: search_network({ urlPattern: \"\" }) — empty pattern matches everything; use get_network_requests instead.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: search_network({ urlPattern: \"\" }) — empty pattern matches everything; use get_network_requests instead.\n",
             inputSchema: {
                 urlPattern: z.string().describe("URL pattern to search for"),
                 maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ urlPattern, maxResults, device }) => {
@@ -257,8 +256,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: get_network_requests / search_network -> copy id -> get_request_details(requestId).\n" +
                 "LIMITATIONS: Bodies require the execbro-sdk in the app; on CDP-only targets response bodies are missing. Large bodies are truncated — raise maxBodyLength.\n" +
                 "GOOD: get_request_details({ requestId: \"42\", maxBodyLength: 4000 })\n" +
-                "BAD: Guessing requestIds — always get them from get_network_requests / search_network first.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: Guessing requestIds — always get them from get_network_requests / search_network first.\n",
             inputSchema: {
                 requestId: z.string().describe("The request ID to get details for"),
                 maxBodyLength: z.coerce
@@ -273,7 +271,7 @@ export function registerNetworkTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Disable body truncation. Tip: Use when you need to inspect full JSON payloads."),
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ requestId, maxBodyLength, verbose, device }) => {
@@ -331,54 +329,6 @@ export function registerNetworkTools(server: McpServer): void {
     // Tool: Get network stats
     registerToolWithTelemetry(
         server,
-        "get_network_stats",
-        {
-            description: "Get statistics about captured network requests: counts by method, status code, and domain.\n" +
-                "PURPOSE: High-level view of traffic shape — totals, error counts, average duration, and top domains — without scanning every request.\n" +
-                "WHEN TO USE: To quickly answer \"is there a spike in 5xx?\", \"which domain is chattiest?\", or to sanity-check capture is working.\n" +
-                "WORKFLOW: get_network_stats -> if errors > 0: get_network_requests(status=\"500\") -> get_request_details.\n" +
-                "LIMITATIONS: Reflects only the buffered window (last 200 entries per device). Resets when clear_network is called.\n" +
-                "GOOD: get_network_stats()\n" +
-                "BAD: Using it to find a specific request — use search_network or get_network_requests.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
-            inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit for all devices. Run get_apps to see connected devices.")
-            }
-        },
-        async ({ device }) => {
-            await refreshMirror(device);
-
-            const stats = getNetworkStats(resolveNetworkBuffer(device));
-
-            // Check connection health
-            let connectionWarning = "";
-            if (resolveNetworkBuffer(device).size === 0) {
-                const status = await checkAndEnsureConnection(device);
-                connectionWarning = status.message ? `\n\n${status.message}` : "";
-                connectionWarning += await metroMissingHintIfAbsent("get_network_stats");
-            } else {
-                const passive = getPassiveConnectionStatus();
-                connectionWarning = !passive.connected
-                    ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
-                    : "";
-            }
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: `Network Statistics:\n\n${stats}${connectionWarning}`
-                    }
-                ]
-            };
-        },
-        // Empty result detector: buffer has no entries at all
-        () => { let total = 0; for (const b of networkBuffers.values()) total += b.size; return total === 0; }
-    );
-    
-    // Tool: Clear network requests
-    registerToolWithTelemetry(
-        server,
         "clear_network",
         {
             description: "Clear the network request buffer.\n" +
@@ -387,10 +337,9 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: clear_network -> trigger action (tap, execute_in_app) -> get_network_requests / search_network.\n" +
                 "LIMITATIONS: Irreversible — cleared requests cannot be recovered. Also clears the SDK's in-app buffer when SDK is present.\n" +
                 "GOOD: clear_network() before a reproduction.\n" +
-                "BAD: Using clear_network as a workaround for stale connections — use scan_metro / ensure_connection instead.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"network\") for the full network-inspect playbook.",
+                "BAD: Using clear_network as a workaround for stale connections — use scan_metro / ensure_connection instead.\n",
             inputSchema: {
-                device: z.string().optional().describe("Target device name (substring match). Omit to clear all devices. Run get_apps to see connected devices.")
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
         async ({ device }) => {

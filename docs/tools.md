@@ -31,7 +31,6 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `get_network_requests` | Retrieve network requests (filtering, summary)                |
 | `search_network`       | Search requests by URL pattern                                |
 | `get_request_details`  | Get full details of a request (headers, body with truncation) |
-| `get_network_stats`    | Get statistics: counts by method, status code, domain         |
 | `clear_network`        | Clear the network request buffer                              |
 
 ## App Inspection & Execution
@@ -45,26 +44,15 @@ The server also sends instructions on connection, so MCP clients automatically l
 
 > **Tip:** Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for a more robust approach — it provides full network capture from app startup (including request/response bodies), enhanced log collection, and access to global variables for navigation, state management, and more.
 
-## Flow Verification
-
-| Tool                 | Description                                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------------------------ |
-| `get_flowpoints`     | Read `flowpoint()` breadcrumbs grouped by flow and run, with inter-point timing deltas (SDK)          |
-| `wait_for_flowpoint` | Block until a flowpoint matching criteria arrives, or timeout — deterministic sync instead of polling |
-| `verify_flow`        | Assert a flow's actual step sequence against an expected one; factual PASS/FAIL diff                  |
-| `clear_flowpoints`   | Clear stored flowpoints, server-side and/or the in-app buffer                                          |
-
 ## Layout & Component Inspection
 
 | Tool                       | Description                                                                                                     |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `get_screen_layout`        | Screen map of visible components with positions, sizes, and text content. Use `extended=true` for layout styles |
-| `get_component_tree`       | Full React fiber tree. Use `structureOnly=true` for compact output                                              |
+| `get_component_tree`       | React fiber tree. Compact names-only by default; pass `structureOnly=false` for the full detailed tree          |
 | `find_components`          | Find components by name pattern. Use `includeLayout=true` for styles                                            |
 | `inspect_component`        | Inspect a component's props, state (hooks), and children                                                        |
-| `inspect_at_point`         | Per-ancestor frames + props at (x, y) — pure JS, no overlay flicker. Best for layout/handler debugging          |
-| `get_inspector_selection`  | Identity + rich style per ancestor at (x, y), plus `source: {file, line, column}` for the owning code. `history=true` returns recent buffered selections |
-| `toggle_element_inspector` | Manually toggle RN's Element Inspector overlay — rarely needed; `get_inspector_selection` auto-toggles          |
+| `inspect_at_point`         | Per-ancestor frames + props + style + `source: {file, line, column}` at (x, y) — pure JS, no overlay flicker    |
 | `get_images`               | Access shared image buffer (screenshots, tap verification frames)                                               |
 
 See [Layout & Component Inspection guide](layout-inspection.md) for detailed workflows.
@@ -74,8 +62,7 @@ See [Layout & Component Inspection guide](layout-inspection.md) for detailed wor
 | Tool                  | Description                                |
 | --------------------- | ------------------------------------------ |
 | `get_bundle_status`   | Get Metro bundler status and build state   |
-| `get_bundle_errors`   | Get compilation errors with file locations |
-| `clear_bundle_errors` | Clear the bundle error buffer              |
+| `get_bundle_errors`   | Get compilation errors with file locations. `clear=true` also resets the buffer |
 
 ## UI Interaction (Cross-Platform)
 
@@ -102,23 +89,18 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 
 | Tool                       | Description                                                 |
 | -------------------------- | ----------------------------------------------------------- |
-| `list_android_devices`     | List connected Android devices and emulators via ADB        |
 | `android_screenshot`       | Take a screenshot from an Android device/emulator           |
-| `android_install_app`      | Install an APK on an Android device/emulator                |
 | `android_launch_app`       | Launch an app by package name                               |
 | `android_list_packages`    | List installed packages (with optional filter)              |
 | `android_long_press`       | Long press at specific coordinates                          |
 | `android_input_text`       | Type text at current focus point                            |
 | `android_key_event`        | Send key events (HOME, BACK, ENTER, etc.)                   |
-| `android_get_screen_size`  | Get device screen resolution                                |
 
 ## iOS (Simulator)
 
 | Tool                   | Description                                               |
 | ---------------------- | --------------------------------------------------------- |
-| `list_ios_simulators`  | List available iOS simulators                             |
 | `ios_screenshot`       | Take a screenshot from an iOS simulator                   |
-| `ios_install_app`      | Install an app bundle (.app) on a simulator               |
 | `ios_launch_app`       | Launch an app by bundle ID                                |
 | `ios_open_url`         | Open a URL (deep links or web URLs)                       |
 | `ios_terminate_app`    | Terminate a running app                                   |

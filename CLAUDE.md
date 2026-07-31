@@ -101,7 +101,6 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `sdkMirrorPoller`: Copies the in-app `execbro-sdk` console and network buffers into the server-side buffers every 3-10s, so a hard app restart no longer destroys the only copy (the SDK stores everything in the app's JS heap, and the server suppresses its own capture while the SDK is present). Also drains before `reload_app`. Detects restarts via a per-runtime nonce on `globalThis` — CDP is not a reliable signal here, since Metro's inspector proxy reuses the target id after a process kill and a killed runtime never emits `executionContextsCleared`. Disable with `EXECBRO_DISABLE_SDK_MIRROR=1`.
 - **Session epochs**: every log and network entry carries a per-device `epoch` that increments on each new app run. `get_logs` / `get_network_requests` render a `── app restarted (epoch N) ──` divider at run boundaries and accept `epoch: "current" | <number> | "all"` (default `"all"`, so pre-restart data is never hidden by default).
 - `ImageBuffer`: Circular buffer (50 entries) storing screenshots from all image-producing tools (ios/android/ocr screenshots, tap verification frames). Supports grouping for burst frame sets.
-- `SelectionBuffer`: Circular buffer (100 entries) storing Element Inspector selections per device — element, owner path, frame, style, and the raw `_debugStack` needed to resolve source. Filled by a background poller so taps made during a manual inspector session are captured without the agent asking. Read via `get_inspector_selection(history=true)`. Disable the poller with `EXECBRO_DISABLE_SELECTION_POLL=1`.
 - `connectedApps`: Map tracking active WebSocket connections to devices
 - `pendingExecutions`: Map for tracking async `Runtime.evaluate` responses with timeout handling
 - MCP tools registered via `server.registerTool()` from `@modelcontextprotocol/sdk`
@@ -119,7 +118,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 **Logs & Network:**
 - `get_logs` / `search_logs` / `clear_logs`: Log management with level filtering, text search, summary mode, and `device` targeting. Use `source="native"` for device-level logs (Android logcat / iOS os_log) filtered to your app — surfaces crashes, ANRs and OOM kills that never reach the JS console. Native results are event-grouped (a backtrace is one row); expand with `get_log_details(id)`.
 - `get_log_details`: Full payload for one log event — complete backtrace, stack trace, or oversized message. Ids come from `get_logs`.
-- `get_network_requests` / `search_network` / `get_request_details` / `get_network_stats` / `clear_network`: Network request tracking with URL/method/status filtering
+- `get_network_requests` / `search_network` / `get_request_details` / `clear_network`: Network request tracking with URL/method/status filtering. `get_network_requests(summary=true)` returns counts by method, status, and domain
 
 **App State & Execution:**
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
@@ -128,7 +127,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `logbox`: Interact with React Native's LogBox overlay (dev mode only). Actions: "dismiss" clears entries and returns content, "push" displays a message in the error banner, "ignore" adds patterns to suppress future entries, "detect" reads current state.
 
 **UI Interaction:**
-- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `device` (substring match on the connected app's deviceName) or `udid` (iOS simulator UDID — takes precedence, iOS-only) to pin the tap to a specific device when multiple are connected. Use `screenshot=false` to disable screenshots, `verify=false` to skip verification. Use `burst=true` to capture rapid sequential screenshots for detecting transient visual feedback (press animations, highlights) — results stored in image buffer accessible via `get_images`.
+- `tap`: Unified tool to tap UI elements — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates. Returns post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `device` to pin the tap to a specific device when multiple are connected — one param, accepting an iOS simulator UDID, an Android adb serial, a simulator/emulator name, or the connected app's deviceName (substring match). Use `screenshot=false` to disable screenshots, `verify=false` to skip verification. Use `burst=true` to capture rapid sequential screenshots for detecting transient visual feedback (press animations, highlights) — results stored in image buffer accessible via `get_images`.
 - `swipe`: Cross-platform swipe/scroll gesture (auto-routes to iOS/Android). Returns `verification.meaningful` to detect no-op swipes (end-of-list, non-scrollable surface, missed coordinates). Use `burst:true` for overscroll/bounce detection, `verify:false, screenshot:false` for fastest path, `delta` for iOS touch step size.
 - `android_input_text`: Type text into the focused input field
 - `ios_button`: Press iOS hardware buttons (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
@@ -146,27 +145,21 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_screen_layout`: **Start here.** Screen map — indented tree of visible components with real screen positions (measureInWindow), text content, and identifiers. Shows only what's on screen, filters out off-screen and internal components. Use `extended=true` for layout styles (padding, flex, backgroundColor, etc.). Coordinates are in points (iOS) / dp (Android)
 - `find_components`: Fast regex search across the fiber tree by component name pattern. Returns all matching instances with path and depth. Use after `get_screen_layout` to locate specific components
 - `inspect_component`: Deep dive into a specific component's props, state (hooks), and optionally children tree. Use after finding a component name via `get_screen_layout` or `find_components`
-- `get_component_tree`: Full React fiber tree including all providers, navigation wrappers, and internal components. Use when you need to understand the complete React architecture, not just what's visible. Use `structureOnly=true` for compact names-only output
-- `get_inspector_selection`: Identity + RICH STYLE per ancestor at screen coordinates. Invokes RN's Element Inspector programmatically (briefly toggles overlay on, captures, hides it). Returns merged style for each ancestor (paddingHorizontal, borderRadius, fontFamily, etc.) — same data the on-device overlay shows. Best for visual/styling debugging. Also returns `source: {file, line, column}` — the absolute path and line where the component is rendered — plus `ancestors[]`, resolved from the fiber's `_debugStack` via Metro symbolication (works on React 19, where `_debugSource` no longer exists). Pass `history=true` for recent buffered selections.
+- `get_component_tree`: React fiber tree including all providers, navigation wrappers, and internal components. Use when you need to understand the complete React architecture, not just what's visible. Returns compact names-only output by default; pass `structureOnly=false` for the full detailed tree (very large — prefer `inspect_component` for a specific node)
 - `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in dp) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
-- `toggle_element_inspector`: Toggle RN's Element Inspector overlay manually (rarely needed — `get_inspector_selection` toggles on→off automatically around its capture).
 
 **Device Management:**
-- `list_ios_simulators` / `list_android_devices`: Find available simulators and devices
+- `list_devices`: Find available simulators, emulators, and physical devices in one call
 - `ios_boot_simulator`: Boot an iOS simulator by UDID
-- `ios_install_app` / `android_install_app`: Install app on device
 - `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name
 - `ios_terminate_app`: Terminate app on iOS simulator
 - `android_list_packages`: List installed packages on Android device
-
-**Accessibility Tree (native UI inspection):**
-- `android_get_screen_size`: Get device pixel resolution
 
 For React Native UI inspection, prefer the cross-platform tools: `get_screen_layout` (visible component tree), `inspect_at_point` (component at coordinates), `find_components` (regex search by component name), and `tap(text=...)` (tap by visible text).
 
 **Bundle & Errors:**
 - `get_bundle_status`: Check Metro build state
-- `get_bundle_errors` / `clear_bundle_errors`: Compilation/bundling errors with screenshot+OCR fallback
+- `get_bundle_errors`: Compilation/bundling errors with screenshot+OCR fallback. Pass `clear=true` to reset the buffer after reading
 
 **Account:**
 - `get_license_status`: Installation ID and license tier
@@ -202,19 +195,17 @@ When debugging React Native apps through this MCP server:
     1. Call `get_screen_layout` — returns a tree of visible components with positions, text, and identifiers. This is the fastest way to understand the current UI
     2. To find a specific component by name, use `find_components(pattern="Button")` — fast regex search across the fiber tree
     3. To inspect a component's props, state, and hooks, use `inspect_component(componentName="SneakerCard")`
-    4. To see the full React architecture (providers, navigation, hidden modals), use `get_component_tree(structureOnly=true)`
+    4. To see the full React architecture (providers, navigation, hidden modals), use `get_component_tree()`
 - **Component Inspection — Identifying elements at coordinates**: When you need to find which React component renders at a specific screen position:
     1. Take a screenshot (`ios_screenshot` / `android_screenshot`) to see the current screen
-    2. Pick `get_inspector_selection(x, y)` if you want **identity + rich style** (padding, margin, border, layout) — answers "what is this and why does it look this way?"
-    3. Pick `inspect_at_point(x, y)` if you want **per-ancestor frames + props** (handlers, refs, testID) — answers "where exactly is each ancestor and what props does the touched component expose?"
-    4. The two tools overlap on identity (component name + path) but their supplementary data is different. Both work on Bridgeless / new arch.
+    2. Call `inspect_at_point(x, y)` — returns identity, **per-ancestor frames**, **props** (handlers, refs, testID), the node's own style, and `source: {file, line, column}` plus the owner chain. Works on Bridgeless / new arch.
+    3. Style is not a merged cascade — when a value looks wrong and isn't set on the node itself, walk the ancestors it returns.
 - **When to use which inspection tool**:
     - `get_screen_layout` → **start here** — screen map with component tree, real positions, and text content
     - `find_components` → fast regex search by component name across the entire fiber tree
     - `inspect_component` → deep dive into props, hooks, and state of a specific component
-    - `get_component_tree` → full React fiber tree including internals, providers, hidden components
-    - `get_inspector_selection` → identity + rich per-ancestor style at coordinates (briefly toggles RN inspector overlay) — also the only tool that returns the source file and line, so prefer it when the goal is to edit the component rather than just identify it
-    - `inspect_at_point` → per-ancestor frames + props at coordinates (no overlay, fast — preferred for tight loops)
+    - `get_component_tree` → React fiber tree including internals, providers, hidden components (compact by default)
+    - `inspect_at_point` → identity, per-ancestor frames, props, style, and the source file:line at coordinates (no overlay, fast) — the tool to reach for when the goal is to edit the component, not just identify it
 - **Multi-Device Debugging**: When multiple devices are connected:
     1. Use `get_apps` to see all connected devices and their names
     2. Use `device="iPhone"` or `device="sdk_gphone"` to target specific devices (case-insensitive substring match)

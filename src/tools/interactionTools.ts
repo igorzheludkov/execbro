@@ -23,7 +23,7 @@ import {
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
-import { resolveAndroidDeviceId, resolveIosUdid } from "./_deviceArg.js";
+import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 
 export function registerInteractionTools(server: McpServer): void {
     // Tool: Unified tap — tries fiber, accessibility, OCR, coordinate strategies
@@ -40,8 +40,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
                 "GOOD: tap({ testID: \"login-btn\" }); tap({ text: \"Submit\" }); tap({ x: 300, y: 600 }); tap({ x: 300, y: 600, native: true, device: \"emulator-5554\" })\n" +
                 "BAD: tap({ text: \"\" }) or tap({ x: 0, y: 0 }) — missing a target. tap({ text: \"Submit\" }) without first screenshotting an ambiguous screen.\n" +
-                "SOURCE: need the file:line that renders an element? get_inspector_selection(x, y).\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full device-interaction playbook.",
+                "SOURCE: need the file:line that renders an element? inspect_at_point(x, y).\n",
             inputSchema: {
                 text: z
                     .string()
@@ -218,8 +217,7 @@ export function registerInteractionTools(server: McpServer): void {
             description: "Long press at specific coordinates on an Android device/emulator screen" +
                 platformFallbackBanner("`tap` for short taps; keep android_long_press for long-press gestures specifically") +
                 "\nPURPOSE: Emit a sustained touch at raw pixel coordinates to trigger long-press handlers (context menus, drag starts, multi-select)." +
-                "\nWHEN TO USE: Only when a long-press gesture is required — regular taps should go through `tap`." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+                "\nWHEN TO USE: Only when a long-press gesture is required — regular taps should go through `tap`.",
             inputSchema: {
                 x: z.coerce.number().describe("X coordinate in pixels"),
                 y: z.coerce.number().describe("Y coordinate in pixels"),
@@ -227,7 +225,7 @@ export function registerInteractionTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
+                    .describe(ANDROID_ARG_DESC)
             }
         },
         async ({ x, y, durationMs, deviceId }) => {
@@ -259,8 +257,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers — anything that needs a gesture rather than a tap. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
                 "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means the scroll did nothing (end-of-list, non-scrollable surface, or missed coordinates). burst=true catches transient feedback like overscroll bounce.\n" +
                 "WORKFLOW: swipe({ direction: \"up\" }) -> read response.verification.meaningful. Advanced: pass startX/startY/endX/endY for coordinate-precise gestures.\n" +
-                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
-                "SEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n",
             inputSchema: {
                 direction: z
                     .enum(["up", "down", "left", "right"])
@@ -487,8 +484,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "\nPURPOSE: Send keystrokes to whichever input currently has focus on Android — the tool does NOT focus a field itself." +
                 "\nWHEN TO USE: Only after an input is already focused, or when `tap(text=...)` on the input didn't take focus for some reason." +
                 "\nPREREQUISITE: A TextInput must already have focus. Tap the field first (e.g. tap({ testID: 'search' })) — `android_input_text` does NOT focus a field itself; replace:true also requires React focus." +
-                "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+                "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value.",
             inputSchema: {
                 text: z.string().describe("Text to type"),
                 replace: z
@@ -506,7 +502,7 @@ export function registerInteractionTools(server: McpServer): void {
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
+                    .describe(ANDROID_ARG_DESC)
             }
         },
         async ({ text, replace, device, deviceId }) => {
@@ -540,14 +536,13 @@ export function registerInteractionTools(server: McpServer): void {
                 platformUniqueBanner("sending Android key events (BACK, HOME, MENU, etc.)") +
                 ` Common keys: ${Object.keys(ANDROID_KEY_EVENTS).join(", ")}` +
                 "\nPURPOSE: Dispatch Android system keys (BACK, HOME, MENU, ENTER, DEL, etc.) that aren't reachable via on-screen tap." +
-                "\nWHEN TO USE: Navigate back from a screen, submit a form with ENTER, dismiss the keyboard, or press hardware-style keys during a flow." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+                "\nWHEN TO USE: Navigate back from a screen, submit a form with ENTER, dismiss the keyboard, or press hardware-style keys during a flow.",
             inputSchema: {
                 key: z.string().describe(`Key name (${Object.keys(ANDROID_KEY_EVENTS).join(", ")}) or numeric keycode`),
                 deviceId: z
                     .string()
                     .optional()
-                    .describe("Optional Android target. Accepts an adb serial (e.g. 'emulator-5554', 'RFCX20CLX3F'), an emulator name, or a substring of the connected RN device name (e.g. 'sdk_gphone'). Uses first available device if not specified.")
+                    .describe(ANDROID_ARG_DESC)
             }
         },
         async ({ key, deviceId }) => {
@@ -596,14 +591,13 @@ export function registerInteractionTools(server: McpServer): void {
                 platformUniqueBanner("pressing iOS hardware buttons (HOME, LOCK, SIRI, APPLE_PAY)") +
                 " Requires an iOS UI driver: AXe (recommended: brew install cameroncooke/axe/axe) or IDB (brew install idb-companion)." +
                 "\nPURPOSE: Trigger iOS hardware buttons (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY) that aren't reachable via on-screen tap." +
-                "\nWHEN TO USE: Send the app to background (HOME), lock the simulator (LOCK), or exercise Siri/Apple Pay flows." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+                "\nWHEN TO USE: Send the app to background (HOME), lock the simulator (LOCK), or exercise Siri/Apple Pay flows.",
             inputSchema: {
                 button: z
                     .enum(IOS_BUTTON_TYPES)
                     .describe("Hardware button to press: HOME, LOCK, SIDE_BUTTON, SIRI, or APPLE_PAY"),
                 duration: z.coerce.number().optional().describe("Optional button press duration in seconds"),
-                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe(IOS_ARG_DESC)
             }
         },
         async ({ button, duration, udid }) => {
@@ -624,38 +618,6 @@ export function registerInteractionTools(server: McpServer): void {
     );
     
     // Tool: Clear focused text input
-    registerToolWithTelemetry(
-        server,
-        "clear_focused_input",
-        {
-            description:
-                "Clear the contents of the currently focused TextInput, updating React state correctly so controlled components (Formik, react-hook-form, useState) stay consistent." +
-                "\nPURPOSE: Reset whatever TextInput has focus to empty, with the React state owner notified via onChangeText. Use BEFORE typing a replacement value into a pre-filled field." +
-                "\nWHEN TO USE: After tap(testID=...) focuses an input that already has text. Pair with ios_input_text/android_input_text (or use their replace:true flag for one-shot)." +
-                "\nPREREQUISITE: A TextInput must already have React focus. Tap the field first (e.g. tap({ testID: 'search' })) — this tool does NOT focus a field itself." +
-                "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). Returns 'no focused TextInput' if nothing is focused — does not silently no-op." +
-                "\nSEE ALSO: dismiss_keyboard, ios_input_text({replace:true}), android_input_text({replace:true}). call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
-            inputSchema: {
-                device: z
-                    .string()
-                    .optional()
-                    .describe("Optional device name (substring match). Uses default device if not specified.")
-            }
-        },
-        async ({ device }) => {
-            const result = await clearFocusedInput(device);
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? `Cleared focused input (via ${result.via}).` : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-    
     // Tool: Dismiss keyboard
     registerToolWithTelemetry(
         server,
@@ -702,8 +664,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "\nPURPOSE: Send keystrokes to the focused field on an iOS simulator via the active UI driver (AXe — preferred — or IDB)." +
                 "\nWHEN TO USE: Only after an input is already focused, or when `tap(testID=...)` on the input didn't take focus for some reason. Use the testID-first flow whenever possible — it's faster and survives UI repositioning." +
                 "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value." +
-                "\nLIMITATIONS: AXe types via the US-keyboard HID — non-ASCII characters (Cyrillic, CJK, Arabic) may not transmit correctly. If the active driver is AXe and the text contains non-ASCII chars, prefer pasting via the simulator pasteboard or setting IOS_DRIVER=idb." +
-                "\nSEE ALSO: call get_usage_guide(topic=\"interact\") for the full UI-interaction playbook.",
+                "\nLIMITATIONS: AXe types via the US-keyboard HID — non-ASCII characters (Cyrillic, CJK, Arabic) may not transmit correctly. If the active driver is AXe and the text contains non-ASCII chars, prefer pasting via the simulator pasteboard or setting IOS_DRIVER=idb.",
             inputSchema: {
                 text: z.string().describe("Text to type into the currently focused field."),
                 replace: z
@@ -718,7 +679,7 @@ export function registerInteractionTools(server: McpServer): void {
                     .describe(
                         "Optional RN device name (substring match) — needed by replace:true when multiple RN apps are connected, to disambiguate which device's focused input to clear. Single-device sessions can omit."
                     ),
-                udid: z.string().optional().describe("Optional iOS target. Accepts a simulator UDID, the simulator name (e.g. 'iPhone 17 Pro'), or a substring of the connected RN device name. Uses booted simulator if not specified.")
+                udid: z.string().optional().describe(IOS_ARG_DESC)
             }
         },
         async ({ text, replace, device, udid }) => {

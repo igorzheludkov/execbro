@@ -1,20 +1,15 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 72,
+    "count": 58,
     "tools": [
         "activate_license",
-        "android_get_screen_size",
         "android_input_text",
-        "android_install_app",
         "android_key_event",
         "android_launch_app",
         "android_list_packages",
         "android_long_press",
         "android_screenshot",
         "app_request",
-        "clear_bundle_errors",
-        "clear_flowpoints",
-        "clear_focused_input",
         "clear_logs",
         "clear_network",
         "connect_metro",
@@ -29,14 +24,11 @@
         "get_bundle_status",
         "get_component_tree",
         "get_connection_status",
-        "get_flowpoints",
         "get_images",
-        "get_inspector_selection",
         "get_license_status",
         "get_log_details",
         "get_logs",
         "get_network_requests",
-        "get_network_stats",
         "get_pressable_elements",
         "get_refresh_status",
         "get_request_details",
@@ -49,15 +41,12 @@
         "ios_boot_simulator",
         "ios_button",
         "ios_input_text",
-        "ios_install_app",
         "ios_launch_app",
         "ios_open_url",
         "ios_screenshot",
         "ios_terminate_app",
-        "list_android_devices",
         "list_debug_globals",
         "list_devices",
-        "list_ios_simulators",
         "logbox",
         "measure",
         "navigate",
@@ -70,29 +59,17 @@
         "search_network",
         "send_feedback",
         "swipe",
-        "tap",
-        "toggle_element_inspector",
-        "verify_flow",
-        "wait_for_flowpoint"
+        "tap"
     ],
     "params": {
         "activate_license": [
             "token"
-        ],
-        "android_get_screen_size": [
-            "deviceId"
         ],
         "android_input_text": [
             "device",
             "deviceId",
             "replace",
             "text"
-        ],
-        "android_install_app": [
-            "apkPath",
-            "deviceId",
-            "grantPermissions",
-            "replace"
         ],
         "android_key_event": [
             "deviceId",
@@ -125,14 +102,6 @@
             "maxResultLength",
             "method",
             "url"
-        ],
-        "clear_bundle_errors": [],
-        "clear_flowpoints": [
-            "device",
-            "name"
-        ],
-        "clear_focused_input": [
-            "device"
         ],
         "clear_logs": [
             "device"
@@ -179,6 +148,7 @@
         ],
         "get_apps": [],
         "get_bundle_errors": [
+            "clear",
             "deviceId",
             "maxErrors",
             "platform"
@@ -199,16 +169,6 @@
             "eventLimit",
             "events"
         ],
-        "get_flowpoints": [
-            "device",
-            "level",
-            "limit",
-            "metaIncludes",
-            "name",
-            "run",
-            "since",
-            "step"
-        ],
         "get_images": [
             "clear",
             "frameIndex",
@@ -217,14 +177,6 @@
             "last",
             "list",
             "source"
-        ],
-        "get_inspector_selection": [
-            "device",
-            "history",
-            "limit",
-            "source",
-            "x",
-            "y"
         ],
         "get_license_status": [],
         "get_log_details": [
@@ -254,9 +206,6 @@
             "status",
             "summary",
             "urlPattern"
-        ],
-        "get_network_stats": [
-            "device"
         ],
         "get_pressable_elements": [
             "device"
@@ -324,10 +273,6 @@
             "text",
             "udid"
         ],
-        "ios_install_app": [
-            "appPath",
-            "udid"
-        ],
         "ios_launch_app": [
             "bundleId",
             "udid"
@@ -345,15 +290,11 @@
             "bundleId",
             "udid"
         ],
-        "list_android_devices": [],
         "list_debug_globals": [
             "device"
         ],
         "list_devices": [
             "refresh"
-        ],
-        "list_ios_simulators": [
-            "onlyBooted"
         ],
         "logbox": [
             "action",
@@ -445,24 +386,6 @@
             "verify",
             "x",
             "y"
-        ],
-        "toggle_element_inspector": [
-            "device"
-        ],
-        "verify_flow": [
-            "allowErrors",
-            "device",
-            "expect",
-            "name",
-            "run"
-        ],
-        "wait_for_flowpoint": [
-            "device",
-            "level",
-            "metaIncludes",
-            "name",
-            "step",
-            "timeoutMs"
         ]
     }
 }

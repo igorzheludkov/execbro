@@ -44,10 +44,7 @@ Based on the task, inspect individual components:
 **By screen coordinates — pick the tool by what you need:**
 1. Take a screenshot (`ios_screenshot` / `android_screenshot`) or use `ocr_screenshot` to see the current screen
 2. Identify the target element visually and estimate its coordinates (convert screenshot pixels to points: divide by device pixel ratio)
-3. Pick by question:
-   - **"What is this and how is it styled?"** → `mcp__execbro__get_inspector_selection(x, y)`. Invokes RN's Element Inspector programmatically (briefly toggles overlay on, captures, hides it). Returns identity + RICH STYLE per ancestor (paddingHorizontal, borderRadius, fontFamily, etc.) — same data the on-device overlay shows. Best for visual/styling debugging.
-   - **"Where exactly are ancestors positioned, and what props does this component expose?"** → `mcp__execbro__inspect_at_point(x, y)`. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR plus full PROPS (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props/handler inspection, and rapid/repeated calls.
-4. The two overlap on identity (component name + path). Use both if you need style AND props/per-ancestor frames.
+3. Call `mcp__execbro__inspect_at_point(x, y)`. Pure JS hit test — no overlay flicker. Returns identity, FRAME PER ANCESTOR, full PROPS (handlers as `[Function]`, refs, testID, custom props), the node's own style, and `source: {file, line, column}` plus the owner chain.
 
 ### 4. Get Layout Details
 
@@ -56,14 +53,11 @@ For layout debugging:
 - Use `mcp__execbro__find_components` with `includeLayout=true` for targeted layout info
 - Use `componentsOnly=true` on `get_screen_layout` to hide host components (View, Text) and see only custom components
 
-### 5. Element Inspector Mode
+### 5. When to use which inspection tool
 
-`get_inspector_selection` auto-toggles RN's Element Inspector on for capture and back off afterward (no screenshot pollution), so `toggle_element_inspector` is rarely needed directly. Use it only when you want the overlay to remain visible (e.g., capturing a user-facing screenshot of the inspector itself).
-
-**When to use which inspection tool:**
-- `get_inspector_selection(x, y)` → identity + RICH STYLE per ancestor (padding, margin, border, layout) — answers "what is this and why does it look this way?". Briefly toggles the on-device overlay around the capture.
-- `inspect_at_point(x, y)` → identity + FRAME PER ANCESTOR + PROPS (handlers, refs, testID) — answers "where exactly is each ancestor and what does this Pressable do?". Pure JS, no overlay flicker.
+- `inspect_at_point(x, y)` → identity + FRAME PER ANCESTOR + PROPS (handlers, refs, testID) + style + source file:line — answers "what is this, where exactly is each ancestor, and what does this Pressable do?". Pure JS, no overlay flicker.
 - `find_components(pattern)` → searching for components by name pattern across the entire fiber tree.
+- `inspect_component(name)` → props, state, and hooks for a named component.
 
 ### 6. Present Findings
 
@@ -91,19 +85,15 @@ For layout debugging:
 - `mcp__execbro__inspect_component`
 - `mcp__execbro__find_components`
 - `mcp__execbro__get_screen_layout`
-- `mcp__execbro__get_inspector_selection`
 - `mcp__execbro__inspect_at_point`
-- `mcp__execbro__toggle_element_inspector`
 
 ## Notes
 
 - Requires the ExecBro MCP server to be running and connected to the app
 - Always start with `structureOnly=true` to get an overview before drilling down
-- Both `inspect_at_point` and `get_inspector_selection` work on Paper, Fabric, and Bridgeless / new arch.
-- `inspect_at_point` returns frame per ancestor + props (handlers, refs, custom props). Pure JS — no overlay toggle, no visual side effect, fastest. Style is shown as a flat reference (no rich merging).
-- `get_inspector_selection` returns RN's curated hierarchy with merged style per ancestor (padding, margin, border, layout) — same rich data as the on-device overlay. Briefly toggles the inspector overlay on→off (~600ms total).
-- `get_inspector_selection` returns `source: {file, line, column}` — the absolute path and line where the component is rendered — plus `ancestors[]`. Resolved from the fiber's `_debugStack` via Metro symbolication, so it works on React 19 where `_debugSource` was dropped. `node_modules` frames are filtered out, so you land on your own code. If Metro is unreachable the response carries `sourceUnavailable` and identity + style are still returned.
-- Pass `history=true` to read recent selections from the buffer, including taps made while you drove RN's Element Inspector manually.
+- `inspect_at_point` works on Paper, Fabric, and Bridgeless / new arch.
+- `inspect_at_point` returns frame per ancestor + props (handlers, refs, custom props). Pure JS — no overlay toggle, no visual side effect. Style is the node's own style object, not RN's merged cascade — when a value looks wrong and isn't on the node, walk the ancestors it returns.
+- `inspect_at_point` returns `source: {file, line, column}` — the absolute path and line where the component is rendered — plus the owner chain as `Source ancestors`. Resolved from the fiber's `_debugStack` via Metro symbolication, so it works on React 19 where `_debugSource` was dropped. `node_modules` frames are filtered out, so you land on your own code. If Metro is unreachable the response carries `sourceUnavailable` and identity + props are still returned. Pass `source=false` to skip resolution in tight loops.
 - Layout data can be large for complex screens - use `find_components` with `includeLayout=true` for targeted queries
 - Use `device` param on any tool to target a specific device when multiple are connected (case-insensitive substring match, e.g. `device="iPhone"`)
 - **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.

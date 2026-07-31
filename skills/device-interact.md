@@ -19,8 +19,7 @@ Use this skill when the task involves:
 ### 1. Discover Available Devices
 
 First, check what devices are running:
-- Use `mcp__execbro__list_ios_simulators` to find iOS simulators
-- Use `mcp__execbro__list_android_devices` to find Android devices/emulators
+- Use `mcp__execbro__list_devices` to find iOS simulators, Android emulators, and physical devices in one call
 
 ### 2. See What's on Screen
 
@@ -61,23 +60,23 @@ tap(component="MenuIcon")  # case-insensitive substring match
 
 **By pixel coordinates (from screenshot):**
 ```
-tap(x=300, y=600)          # auto-converts pixels to points on iOS
-tap(x=300, y=600, platform="android")  # explicit platform when both are connected
+tap(x=300, y=600)                      # auto-converts pixels to points on iOS
+tap(x=300, y=600, device="emulator-5554")  # pin the device when both platforms are connected
 ```
 
 **Native mode (no React Native connection needed):**
 ```
-tap(x=300, y=600, native=true)            # taps directly via ADB/simctl
-tap(x=300, y=600, native=true, platform="android")  # explicit platform
+tap(x=300, y=600, native=true)                          # taps directly via ADB/simctl
+tap(x=300, y=600, native=true, device="emulator-5554")  # pin the device
 ```
-Use `native=true` when tapping system dialogs, non-RN apps, or before establishing a React Native connection. Requires x/y coordinates. Platform is auto-detected if not specified.
+Use `native=true` when tapping system dialogs, non-RN apps, or before establishing a React Native connection. Requires x/y coordinates. The platform is inferred from the resolved device.
 
 **Pin to a specific device when multiple are connected:**
 ```
-tap(text="Submit", device="iPhone SE")        # substring match on connected RN app's deviceName
-tap(text="Submit", udid="ABC-123-...")        # iOS simulator UDID (from list_ios_simulators)
+tap(text="Submit", device="iPhone SE")        # simulator/emulator or RN app name (substring)
+tap(text="Submit", device="ABC-123-...")      # an iOS UDID or adb serial works too
 ```
-`device` mirrors the `device` parameter on `get_screen_layout`/`ios_screenshot`. `udid` mirrors `ios_screenshot`/`ios_swipe` and takes precedence over `device`/`platform`. `udid` is iOS-only — pairing it with `platform="android"` returns an error. Without these, `tap` follows the platform default, which can land on the wrong simulator when multiple are booted.
+`tap` takes a single `device` param — there is no separate `udid` or `platform` argument. It accepts an iOS simulator UDID, an Android adb serial (`emulator-5554`), a simulator/emulator name, or a connected RN app's deviceName, all by substring match, and mirrors `device` on `get_screen_layout`/`swipe`. Omit it when exactly one device is available; without it on a multi-device session the tap can land on the wrong simulator. Call `list_devices` to enumerate.
 
 **Force a specific strategy:**
 ```
@@ -133,9 +132,9 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 ### 5. Get Screen Dimensions (when needed for coordinates)
 
 When calculating swipe distances or tap positions on an unfamiliar device:
-- Android: `mcp__execbro__android_get_screen_size` returns the device's pixel resolution
+- Android: `mcp__execbro__android_screenshot` reports the device's pixel resolution (`originalWidth` / `originalHeight`)
 - Use this before computing percentage-based coordinates (e.g., center = width/2, height/2)
-- For iOS simulators, the resolution is part of the simulator spec — use `list_ios_simulators` to identify the device model
+- For iOS simulators, the resolution is part of the simulator spec — use `list_devices` to identify the device model
 
 ### 6. Wait for UI Updates
 
@@ -166,8 +165,7 @@ After interactions, verify the result:
 
 - `mcp__execbro__tap`
 - `mcp__execbro__find_components`
-- `mcp__execbro__list_ios_simulators`
-- `mcp__execbro__list_android_devices`
+- `mcp__execbro__list_devices`
 - `mcp__execbro__ios_screenshot` / `android_screenshot`
 - `mcp__execbro__get_screen_layout`
 - `mcp__execbro__inspect_at_point`
@@ -176,7 +174,6 @@ After interactions, verify the result:
 - `mcp__execbro__android_input_text`
 - `mcp__execbro__ios_button` / `android_key_event`
 - `mcp__execbro__ios_open_url`
-- `mcp__execbro__android_get_screen_size`
 
 ## Notes
 
@@ -187,5 +184,5 @@ After interactions, verify the result:
 - Poll with `get_screen_layout` (or `find_components`) after navigation to ensure the next screen is ready before interacting
 - For Android, the Back button is available via `android_key_event` with key "BACK"
 - `ios_open_url` works for both custom scheme deep links (`myapp://`) and universal links (`https://`)
-- Use `android_get_screen_size` before computing swipe coordinates on physical devices where screen resolution varies
+- Read the resolution from `android_screenshot` before computing swipe coordinates on physical devices where screen resolution varies
 - **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.

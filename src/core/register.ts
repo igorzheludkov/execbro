@@ -27,13 +27,10 @@ const NON_METRO_TOOLS = new Set([
     "delete_account",
     "get_usage_guide",
     "get_apps",
-    "list_ios_simulators",
-    "list_android_devices",
+    "list_devices",
     "ios_boot_simulator",
     "ios_launch_app",
     "android_launch_app",
-    "ios_install_app",
-    "android_install_app",
     "send_feedback"
 ]);
 
