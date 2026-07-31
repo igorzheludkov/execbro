@@ -542,7 +542,7 @@ export function registerConnectionTools(server: McpServer): void {
         "connect_metro",
         {
             description:
-                "Connect to a Metro server on a specific port. Not deprecated — this is the only way to reach a port scan_metro does not probe.\n" +
+                "Connect to a Metro server on a specific port — the only way to reach a port scan_metro does not probe.\n" +
                 "PURPOSE: Establish a CDP WebSocket connection to a Metro server on a known port.\n" +
                 "WHEN TO USE: Metro is on a port outside 8081, 8082, 19000-19002. For any of those, scan_metro is strictly better — it probes them all and attaches every Bridgeless target in one call, where this connects to one port only.\n" +
                 "SEE ALSO: scan_metro for auto-discovery; get_apps afterwards to confirm the device attached.",
