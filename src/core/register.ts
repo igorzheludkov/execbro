@@ -31,8 +31,6 @@ const NON_METRO_TOOLS = new Set([
     "ios_boot_simulator",
     "ios_launch_app",
     "android_launch_app",
-    "ios_install_app",
-    "android_install_app",
     "send_feedback"
 ]);
 

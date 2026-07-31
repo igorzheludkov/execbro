@@ -149,7 +149,6 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 **Device Management:**
 - `list_devices`: Find available simulators, emulators, and physical devices in one call
 - `ios_boot_simulator`: Boot an iOS simulator by UDID
-- `ios_install_app` / `android_install_app`: Install app on device
 - `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name
 - `ios_terminate_app`: Terminate app on iOS simulator
 - `android_list_packages`: List installed packages on Android device

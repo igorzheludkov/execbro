@@ -3,11 +3,9 @@ import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import {
     listAndroidDevices,
-    androidInstallApp,
     androidLaunchApp,
     androidListPackages,
     listIOSSimulators,
-    iosInstallApp,
     iosLaunchApp,
     iosTerminateApp,
     iosBootSimulator,
@@ -122,50 +120,6 @@ export function registerDeviceTools(server: McpServer): void {
         }
     );
 
-    // Tool: Android install app
-    registerToolWithTelemetry(
-        server,
-        "android_install_app",
-        {
-            description: "Install an APK on an Android device/emulator" +
-                platformUniqueBanner("installing an Android APK") +
-                "\nPURPOSE: Push a built APK to a connected Android device or emulator via adb." +
-                "\nWHEN TO USE: After producing a fresh build, when switching app variants, or when preparing a clean test run.",
-            inputSchema: {
-                apkPath: z.string().describe("Path to the APK file to install"),
-                deviceId: z
-                    .string()
-                    .optional()
-                    .describe(ANDROID_ARG_DESC),
-                replace: z
-                    .boolean()
-                    .optional()
-                    .default(true)
-                    .describe("Replace existing app if already installed (default: true)"),
-                grantPermissions: z
-                    .boolean()
-                    .optional()
-                    .default(false)
-                    .describe("Grant all runtime permissions on install (default: false)")
-            }
-        },
-        async ({ apkPath, deviceId, replace, grantPermissions }) => {
-            const r = await resolveAndroidDeviceId(deviceId);
-            if (!r.ok) return r.response;
-            const result = await androidInstallApp(apkPath, r.serial, { replace, grantPermissions });
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-    
     // Tool: Android launch app
     registerToolWithTelemetry(
         server,
@@ -174,7 +128,7 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Launch an app on an Android device/emulator by package name" +
                 platformUniqueBanner("launching an Android app by package name") +
                 "\nPURPOSE: Start an installed Android app by its package (and optional activity) so the next tool calls hit a running process." +
-                "\nWHEN TO USE: After android_install_app, after a force-stop, or when the app isn't foregrounded before interaction.",
+                "\nWHEN TO USE: After a force-stop or install, or when the app isn't foregrounded before interaction.",
             inputSchema: {
                 packageName: z.string().describe("Package name of the app (e.g., com.example.myapp)"),
                 activityName: z
@@ -239,38 +193,6 @@ export function registerDeviceTools(server: McpServer): void {
             };
         }
     );
-    // Tool: iOS install app
-    registerToolWithTelemetry(
-        server,
-        "ios_install_app",
-        {
-            description: "Install an app bundle (.app) on an iOS simulator" +
-                platformUniqueBanner("installing an iOS .app/.ipa bundle") +
-                "\nPURPOSE: Deploy a built .app bundle onto a booted iOS simulator via simctl." +
-                "\nWHEN TO USE: After producing a fresh simulator build, when switching app variants, or when preparing a clean test run.",
-            inputSchema: {
-                appPath: z.string().describe("Path to the .app bundle to install"),
-                udid: z.string().optional().describe(IOS_ARG_DESC)
-            }
-        },
-        async ({ appPath, udid }) => {
-            const r = await resolveIosUdid(udid);
-            if (!r.ok) return r.response;
-            const result = await iosInstallApp(appPath, r.udid);
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-    
-
     // Tool: iOS launch app
     registerToolWithTelemetry(
         server,
@@ -279,7 +201,7 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Launch an app on an iOS simulator by bundle ID" +
                 platformUniqueBanner("launching an iOS app by bundle ID") +
                 "\nPURPOSE: Start an installed iOS app by its bundle ID so the next tool calls hit a running process." +
-                "\nWHEN TO USE: After ios_install_app, after ios_terminate_app, or when the app isn't foregrounded before interaction.",
+                "\nWHEN TO USE: After ios_terminate_app or an install, or when the app isn't foregrounded before interaction.",
             inputSchema: {
                 bundleId: z.string().describe("Bundle ID of the app (e.g., com.example.myapp)"),
                 udid: z.string().optional().describe(IOS_ARG_DESC)

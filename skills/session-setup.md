@@ -38,11 +38,11 @@ Before launching, verify the app is present on the device:
 
 **iOS:**
 - If you know the bundle ID, skip to launch; otherwise ask the user
-- If the app is not installed, use `mcp__execbro__ios_install_app` with the `.app` bundle path
+- If the app is not installed, build and install it from a terminal (`npm run ios`, or `xcrun simctl install booted <path.app>`)
 
 **Android:**
 - Use `mcp__execbro__android_list_packages` to verify the package is installed
-- If not installed, use `mcp__execbro__android_install_app` with the APK path
+- If not installed, build and install it from a terminal (`npm run android`, or `adb install <path.apk>`)
 
 ### 4. Launch the App
 
@@ -112,10 +112,8 @@ If the user wants to use the built-in React Native debugger:
 - `mcp__execbro__get_connection_status`
 - `mcp__execbro__list_devices`
 - `mcp__execbro__ios_boot_simulator`
-- `mcp__execbro__ios_install_app`
 - `mcp__execbro__ios_launch_app`
 - `mcp__execbro__ios_terminate_app`
-- `mcp__execbro__android_install_app`
 - `mcp__execbro__android_launch_app`
 - `mcp__execbro__android_list_packages`
 - `mcp__execbro__scan_metro`

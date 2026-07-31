@@ -709,7 +709,7 @@ export async function iosLaunchApp(
     let hint = "";
     if (msg.includes("FBSOpenApplicationErrorDomain")) {
       hint =
-        "\n\nCommon causes:\n- App is not installed on this simulator (install it first with ios_install_app)\n- Bundle ID is incorrect (check with: xcrun simctl listapps booted)";
+        "\n\nCommon causes:\n- App is not installed on this simulator (install it with `xcrun simctl install booted <path.app>`, or run your project's iOS build)\n- Bundle ID is incorrect (check with: xcrun simctl listapps booted)";
     }
     return {
       success: false,

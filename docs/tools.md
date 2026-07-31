@@ -90,7 +90,6 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 | Tool                       | Description                                                 |
 | -------------------------- | ----------------------------------------------------------- |
 | `android_screenshot`       | Take a screenshot from an Android device/emulator           |
-| `android_install_app`      | Install an APK on an Android device/emulator                |
 | `android_launch_app`       | Launch an app by package name                               |
 | `android_list_packages`    | List installed packages (with optional filter)              |
 | `android_long_press`       | Long press at specific coordinates                          |
@@ -102,7 +101,6 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 | Tool                   | Description                                               |
 | ---------------------- | --------------------------------------------------------- |
 | `ios_screenshot`       | Take a screenshot from an iOS simulator                   |
-| `ios_install_app`      | Install an app bundle (.app) on a simulator               |
 | `ios_launch_app`       | Launch an app by bundle ID                                |
 | `ios_open_url`         | Open a URL (deep links or web URLs)                       |
 | `ios_terminate_app`    | Terminate a running app                                   |

@@ -1,10 +1,9 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 58,
+    "count": 56,
     "tools": [
         "activate_license",
         "android_input_text",
-        "android_install_app",
         "android_key_event",
         "android_launch_app",
         "android_list_packages",
@@ -41,7 +40,6 @@
         "ios_boot_simulator",
         "ios_button",
         "ios_input_text",
-        "ios_install_app",
         "ios_launch_app",
         "ios_open_url",
         "ios_screenshot",
@@ -70,12 +68,6 @@
             "deviceId",
             "replace",
             "text"
-        ],
-        "android_install_app": [
-            "apkPath",
-            "deviceId",
-            "grantPermissions",
-            "replace"
         ],
         "android_key_event": [
             "deviceId",
@@ -265,10 +257,6 @@
             "device",
             "replace",
             "text",
-            "udid"
-        ],
-        "ios_install_app": [
-            "appPath",
             "udid"
         ],
         "ios_launch_app": [
