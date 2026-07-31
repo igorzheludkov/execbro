@@ -8,10 +8,31 @@ import type { DeviceInfo } from "./types.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 import { trackAutoReconnect } from "./telemetry.js";
 import { probeCdpAlive } from "./probe.js";
+import { buildContextPreamble } from "./appContext.js";
+import { registerHandle, clearHandlesForDevice } from "./promiseHandles.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
 const GLOBAL_POLYFILL = `var global = typeof global !== 'undefined' ? global : globalThis;`;
+
+// The preamble is static source; re-stringifying it per call would be waste.
+let cachedContextPreamble: string | null = null;
+
+/**
+ * Assemble what Hermes actually compiles: global polyfill, then the resolved
+ * app context, then the caller's expression verbatim.
+ *
+ * The caller's expression is never wrapped — PR #5 reverted blanket IIFE
+ * wrapping because it discarded return values and double-wrapped tools that
+ * build their own IIFE. Context bindings use `var` so they remain visible
+ * inside the manual-await wrapper, which emits `var __v=(<expr>);` downstream.
+ */
+export function buildEvaluationSource(cleanedExpression: string): string {
+    if (cachedContextPreamble === null) {
+        cachedContextPreamble = buildContextPreamble();
+    }
+    return `${GLOBAL_POLYFILL}\n${cachedContextPreamble}\n${cleanedExpression}`;
+}
 
 // ============================================================================
 // Expression Preprocessing & Validation
@@ -117,23 +138,11 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
         };
     }
 
-    // Check for require() calls that don't work in Hermes Runtime.evaluate
-    if (/\brequire\s*\(/.test(trimmed)) {
-        return {
-            valid: false,
-            expression: escaped,
-            error:
-                "require() is not available in Hermes Runtime.evaluate. " +
-                "Modules cannot be imported at runtime. " +
-                "In a Metro dev build you can reach already-loaded modules through Metro's registry: " +
-                "`(function(){ var hit=null; __r.getModules().forEach(function(m,id){ " +
-                "if(!hit && m.verboseName && m.verboseName.indexOf('react-native/index.js') !== -1) hit=id; }); " +
-                "return __r(hit).Dimensions.get('window'); })()` " +
-                "(swap the verboseName match for the module you want). " +
-                "Otherwise use list_debug_globals to discover exposed globals, or add " +
-                "`globalThis.__MY_VAR__ = myModule;` in your app code."
-        };
-    }
+    // NOTE: require() used to be rejected here. It now works — the injected
+    // context defines `require` over Metro's module registry (see
+    // appContext.ts / moduleRegistry.ts), which addressed the second-largest
+    // production failure class (236 events). Unresolvable names return an
+    // object carrying __eb_error rather than throwing.
 
     // Check for multi-statement expressions. Runtime.evaluate compiles input as
     // a single expression — `console.log('x'); 1+1` raises `')' expected at end
@@ -691,7 +700,7 @@ function executeCDP(
 ): Promise<ExecutionResult> {
     const TIMEOUT_MS = timeoutMs;
     const currentMessageId = getNextMessageId();
-    const wrappedExpression = `${GLOBAL_POLYFILL} ${cleanedExpression}`;
+    const wrappedExpression = buildEvaluationSource(cleanedExpression);
 
     // Every send funnels through here, including executeWithManualAwait's poll
     // loop — which re-enters between sleeps and so can start on a socket that
@@ -830,9 +839,18 @@ else{return __v}})()`;
         }
     }
 
-    // Cleanup on timeout
-    await executeCDP(app, `delete globalThis['${slotId}']`, false, 2000).catch(() => {});
-    return { success: false, error: "Timeout: Promise did not resolve within the time limit." };
+    // Budget expired. Keep the slot: the promise will very likely settle a
+    // moment from now, and deleting it here is what made 143 production results
+    // unrecoverable (43% of all execute_in_app timeouts).
+    const budgetMs = RETRY_DELAYS_MS.reduce((a, b) => a + b, 0);
+    registerHandle(app.deviceInfo?.deviceName || "__default__", slotId);
+    return {
+        success: false,
+        error:
+            `Promise did not settle within ${budgetMs}ms — but the result is NOT lost. ` +
+            `Collect it once the operation has had time to finish: ` +
+            `execute_in_app({ collect: "${slotId}" }).`
+    };
 }
 
 // Execute JavaScript in the connected React Native app with retry logic

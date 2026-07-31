@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 56,
+    "count": 58,
     "tools": [
         "activate_license",
         "android_input_text",
@@ -9,6 +9,7 @@
         "android_list_packages",
         "android_long_press",
         "android_screenshot",
+        "app_request",
         "clear_logs",
         "clear_network",
         "connect_metro",
@@ -48,6 +49,7 @@
         "list_devices",
         "logbox",
         "measure",
+        "navigate",
         "ocr_screenshot",
         "redux_dispatch",
         "redux_get_state",
@@ -92,6 +94,15 @@
             "deviceId",
             "outputPath"
         ],
+        "app_request": [
+            "auth",
+            "body",
+            "device",
+            "headers",
+            "maxResultLength",
+            "method",
+            "url"
+        ],
         "clear_logs": [
             "device"
         ],
@@ -117,6 +128,7 @@
         ],
         "execute_in_app": [
             "awaitPromise",
+            "collect",
             "device",
             "expression",
             "maxResultLength",
@@ -298,6 +310,13 @@
             "componentName",
             "device",
             "index"
+        ],
+        "navigate": [
+            "action",
+            "device",
+            "params",
+            "routeTable",
+            "to"
         ],
         "ocr_screenshot": [
             "deviceId",

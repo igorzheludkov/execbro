@@ -3,6 +3,8 @@ import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { executeInApp, listDebugGlobals, inspectGlobal } from "../core/index.js";
 import { getRefreshStatus } from "../core/fastRefreshTools.js";
+import { applyResultBudget } from "../core/truncate.js";
+import { buildCollectExpression, dropHandle } from "../core/promiseHandles.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
 
 export function registerExecutionTools(server: McpServer): void {
@@ -23,8 +25,15 @@ export function registerExecutionTools(server: McpServer): void {
                 "BAD examples: `await fetch(...)` (bare top-level await), `require('react-native')`\n" +
                 "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n",
             inputSchema: {
+                collect: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Collect a deferred promise result by handle. When a promise outlives its poll budget the result is kept in the app and its handle returned; pass it here to retrieve the settled value. Use instead of `expression`, not alongside it."
+                    ),
                 expression: z
                     .string()
+                    .optional()
                     .describe(
                         "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no `await`/`async` (use `Promise.resolve(foo()).then(function(r){ return r; })`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
                     ),
@@ -38,7 +47,7 @@ export function registerExecutionTools(server: McpServer): void {
                     .optional()
                     .default(2000)
                     .describe(
-                        "Max characters in result (default: 2000, set to 0 for unlimited). Tip: For large objects like Redux stores, use inspect_global instead or set higher limit."
+                        "Target size of the result in characters (default: 2000, 0 for unlimited). Oversized results are bounded structurally — arrays and objects are elided with count-preserving markers like \"…+150 more\" — not clipped mid-string."
                     ),
                 verbose: z
                     .boolean()
@@ -54,7 +63,40 @@ export function registerExecutionTools(server: McpServer): void {
                     )
             }
         },
-        async ({ expression, awaitPromise, maxResultLength, verbose, device, timeoutMs }) => {
+        async ({ expression, collect, awaitPromise, maxResultLength, verbose, device, timeoutMs }) => {
+            if (collect) {
+                const collected = await executeInApp(
+                    buildCollectExpression(collect),
+                    false,
+                    { originatingToolName: "execute_in_app" },
+                    device
+                );
+                if (!collected.success) {
+                    return { content: [{ type: "text", text: `Error: ${collected.error}` }], isError: true };
+                }
+                if (collected.result === "__pending__") {
+                    return {
+                        content: [{ type: "text", text: `Still pending. Retry execute_in_app({ collect: "${collect}" }) shortly.` }]
+                    };
+                }
+                dropHandle(collect);
+                if (collected.result === "__missing__") {
+                    return {
+                        content: [{ type: "text", text: `Handle "${collect}" no longer exists — the app reloaded, or the value was already collected.` }],
+                        isError: true
+                    };
+                }
+                const boundedCollect = applyResultBudget(String(collected.result ?? ""), maxResultLength > 0 ? maxResultLength : Number.MAX_SAFE_INTEGER);
+                return { content: [{ type: "text", text: boundedCollect.text }] };
+            }
+
+            if (!expression) {
+                return {
+                    content: [{ type: "text", text: "Error: provide either `expression` to run, or `collect` with a deferred promise handle." }],
+                    isError: true
+                };
+            }
+
             const result = await executeInApp(expression, awaitPromise, {
                 timeoutMs,
                 originatingToolName: "execute_in_app",
@@ -94,10 +136,24 @@ export function registerExecutionTools(server: McpServer): void {
 
             let resultText = result.result ?? "undefined";
 
-            // Apply truncation unless verbose or unlimited
-            if (!verbose && maxResultLength > 0 && resultText.length > maxResultLength) {
-                resultText =
-                    resultText.slice(0, maxResultLength) + `... [truncated: ${result.result?.length ?? 0} chars total]`;
+            // Bound the result unless verbose or explicitly unlimited.
+            //
+            // Structural bounding rather than a mid-string clip: a clip can cut
+            // JSON in half, which tells the reader nothing about what was lost
+            // and cannot be parsed. Bounding keeps the shape and reports real
+            // array lengths and key counts, so the next read can be targeted.
+            if (!verbose && maxResultLength > 0) {
+                const bounded = applyResultBudget(resultText, maxResultLength);
+                resultText = bounded.text;
+                if (bounded.budget.truncated) {
+                    const b = bounded.budget.appliedBudget;
+                    const shape = b
+                        ? `, depth<=${b.maxDepth}, arrays<=${b.maxArrayItems}, strings<=${b.maxStringLength}`
+                        : "";
+                    resultText +=
+                        `\n\n[bounded: ${bounded.budget.originalBytes} -> ${bounded.budget.returnedBytes} chars${shape}]` +
+                        `\nRead a narrower path, or raise maxResultLength, for full detail.`;
+                }
             }
 
             if (metaNotes.length > 0) resultText = `${resultText}\n\n${metaNotes.join("\n")}`;
