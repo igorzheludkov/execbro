@@ -139,3 +139,141 @@ function __eb_routeTable() {
 }
 `.trim();
 }
+
+/**
+ * Injected scorer for route-name suggestions.
+ *
+ * AppA registers 41 routes with names like CheckoutVerification and
+ * AssociatedAccountVerification, so listing them all in an error is noise
+ * exactly where the reader is already confused. Rank by closeness, show a few.
+ *
+ * Levenshtein is affordable here — route tables are tens of entries, not
+ * thousands — and it catches the dropped-letter and transposition typos that
+ * substring matching misses ("CheckoutVerfication").
+ *
+ * ES5 only.
+ */
+export function buildNearestRoutesSource(): string {
+    return `
+function __eb_editDistance(a, b) {
+    var m = a.length, n = b.length;
+    if (!m) return n;
+    if (!n) return m;
+    var prev = [], cur = [], i, j;
+    for (j = 0; j <= n; j++) prev[j] = j;
+    for (i = 1; i <= m; i++) {
+        cur[0] = i;
+        for (j = 1; j <= n; j++) {
+            var cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+        }
+        for (j = 0; j <= n; j++) prev[j] = cur[j];
+    }
+    return prev[n];
+}
+function __eb_nearestRoutes(needle, names, limit) {
+    var lowerNeedle = String(needle).toLowerCase();
+    var scored = [];
+    for (var i = 0; i < names.length; i++) {
+        var name = names[i];
+        var lower = name.toLowerCase();
+        var score;
+        if (lower === lowerNeedle) score = -3;
+        else if (lower.indexOf(lowerNeedle) === 0) score = -2;
+        else if (lower.indexOf(lowerNeedle) !== -1) score = -1;
+        else score = __eb_editDistance(lowerNeedle, lower);
+        scored.push({ name: name, score: score });
+    }
+    scored.sort(function (x, y) { return x.score - y.score; });
+    var out = [];
+    var cutoff = Math.max(3, Math.ceil(lowerNeedle.length / 2));
+    for (var k = 0; k < scored.length && out.length < limit; k++) {
+        if (scored[k].score <= cutoff) out.push(scored[k].name);
+    }
+    return out;
+}
+`.trim();
+}
+
+export type NavAction = "navigate" | "push" | "replace" | "back" | "reset";
+
+/**
+ * Injected source that validates, then performs, one navigation.
+ *
+ * Validation matters because the failure mode is silent: a path sent to a
+ * React Navigation ref throws nothing, changes nothing, and reports only to
+ * LogBox. Validating against the real route table converts that into an error
+ * before dispatch. Expo Router destinations are paths, which never appear in
+ * routeNames, so validation applies to React Navigation only.
+ *
+ * ES5 only.
+ */
+export function buildNavigateSource(
+    action: string,
+    to: string | null,
+    params: Record<string, unknown> | null
+): string {
+    const actionLit = JSON.stringify(action);
+    const toLit = JSON.stringify(to);
+    const paramsLit = JSON.stringify(params);
+
+    return `(function(){
+    var action = ${actionLit};
+    var to = ${toLit};
+    var params = ${paramsLit};
+    var nav = __eb_nav;
+    if (!nav || !nav.navigator) {
+        return { ok: false, kind: null, error: nav && nav.note ? nav.note : 'No router resolved.' };
+    }
+    var n = nav.navigator;
+    var table = __eb_routeTable();
+    var before = table.current;
+
+    if (action !== 'back' && action !== 'reset' && !to) {
+        return { ok: false, kind: nav.kind, error: 'A destination is required for action "' + action + '".', before: before };
+    }
+
+    if (nav.kind === 'react-navigation' && to && table.all.length) {
+        var known = false;
+        for (var i = 0; i < table.all.length; i++) { if (table.all[i] === to) { known = true; break; } }
+        if (!known) {
+            var suggestions = __eb_nearestRoutes(to, table.all, 5);
+            var extra = table.all.length - suggestions.length;
+            var hint = suggestions.length
+                ? 'Did you mean: ' + suggestions.join(', ') + (extra > 0 ? ' (' + extra + ' other routes registered)' : '')
+                : table.all.length + ' routes are registered.';
+            return {
+                ok: false,
+                kind: nav.kind,
+                before: before,
+                error: 'No route named "' + to + '" is registered. ' + hint +
+                       ' (React Navigation takes route NAMES, not paths - a path here is silently ignored.)'
+            };
+        }
+    }
+
+    try {
+        if (action === 'back') {
+            if (typeof n.back === 'function') { n.back(); }
+            else if (typeof n.goBack === 'function') { n.goBack(); }
+            else { return { ok: false, kind: nav.kind, before: before, error: 'This router exposes neither back() nor goBack().' }; }
+        } else if (action === 'reset') {
+            if (typeof n.resetRoot === 'function') { n.resetRoot(); }
+            else if (typeof n.dismissAll === 'function') { n.dismissAll(); }
+            else { return { ok: false, kind: nav.kind, before: before, error: 'This router exposes neither resetRoot() nor dismissAll().' }; }
+        } else {
+            if (typeof n[action] !== 'function') {
+                return {
+                    ok: false, kind: nav.kind, before: before,
+                    error: 'Action "' + action + '" is not available on this router (' + nav.kind +
+                           '). A React Navigation root ref exposes navigate/goBack/reset only; push and replace are stack-scoped.'
+                };
+            }
+            if (params) { n[action](to, params); } else { n[action](to); }
+        }
+    } catch (e) {
+        return { ok: false, kind: nav.kind, before: before, error: String(e && e.message ? e.message : e) };
+    }
+    return { ok: true, kind: nav.kind, before: before };
+})()`;
+}

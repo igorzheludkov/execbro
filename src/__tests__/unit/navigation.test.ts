@@ -1,5 +1,10 @@
 import { describe, it, expect } from "@jest/globals";
-import { buildNavHandlesSource, buildRouteTableSource } from "../../core/navigation.js";
+import {
+    buildNavHandlesSource,
+    buildRouteTableSource,
+    buildNearestRoutesSource,
+    buildNavigateSource
+} from "../../core/navigation.js";
 
 describe("buildNavHandlesSource", () => {
     const source = buildNavHandlesSource();
@@ -157,5 +162,138 @@ describe("buildRouteTableSource", () => {
         const run = new Function("globalThis", source + "; return __eb_routeTable();");
         const out = run(stub) as { levels: unknown[]; all: string[] };
         expect(out.all).toHaveLength(0);
+    });
+});
+
+describe("buildNavigateSource", () => {
+    function run(
+        globalStub: Record<string, unknown>,
+        action: string,
+        to: string | null,
+        params: Record<string, unknown> | null = null
+    ) {
+        // The preamble is statements; only the navigate call is an expression.
+        const preamble =
+            buildNavHandlesSource() + "\n" + buildRouteTableSource() + "\n" + buildNearestRoutesSource();
+        const fn = new Function("globalThis", preamble + "\nreturn " + buildNavigateSource(action, to, params) + ";");
+        return fn(globalStub) as { ok: boolean; kind: string | null; error?: string; before?: string | null };
+    }
+
+    function rnStub(calls: string[]) {
+        return {
+            __EB_TEST_FIBER_NAV__: {
+                navigate: (name: string) => calls.push("navigate:" + name),
+                goBack: () => calls.push("goBack"),
+                reset: () => calls.push("reset"),
+                resetRoot: () => calls.push("resetRoot"),
+                getCurrentRoute: () => ({ name: "Home" }),
+                getRootState: () => ({ routeNames: ["Home", "TarotNav"], index: 0, routes: [{ name: "Home" }] })
+            }
+        };
+    }
+
+    function expoStub(calls: string[]) {
+        return {
+            __EB_TEST_MODULE_ROUTER__: {
+                navigate: (p: string) => calls.push("navigate:" + p),
+                push: (p: string) => calls.push("push:" + p),
+                replace: (p: string) => calls.push("replace:" + p),
+                back: () => calls.push("back"),
+                dismiss: () => calls.push("dismiss")
+            }
+        };
+    }
+
+    it("emits Hermes-compatible ES5 only", () => {
+        expect(buildNavigateSource("navigate", "/x", null)).not.toMatch(/=>|\bconst\b|\blet\b/);
+        expect(buildNearestRoutesSource()).not.toMatch(/=>|\bconst\b|\blet\b/);
+    });
+
+    it("navigates by route name on React Navigation", () => {
+        const calls: string[] = [];
+        const out = run(rnStub(calls), "navigate", "TarotNav");
+        expect(out.ok).toBe(true);
+        expect(calls).toContain("navigate:TarotNav");
+        expect(out.before).toBe("Home");
+    });
+
+    it("rejects an unknown route name before dispatching", () => {
+        const calls: string[] = [];
+        const out = run(rnStub(calls), "navigate", "NoSuchScreen");
+        expect(out.ok).toBe(false);
+        expect(String(out.error)).toContain("NoSuchScreen");
+        expect(calls).toHaveLength(0);
+    });
+
+    it("suggests the nearest route names instead of listing all of them", () => {
+        const calls: string[] = [];
+        const many = {
+            __EB_TEST_FIBER_NAV__: {
+                navigate: (name: string) => calls.push("navigate:" + name),
+                resetRoot: () => undefined,
+                getCurrentRoute: () => ({ name: "Home" }),
+                getRootState: () => ({
+                    index: 0,
+                    routeNames: [
+                        "CheckoutVerification", "CheckoutProcessing", "AssociatedAccountVerification",
+                        "VoucherVerification", "OtpVerification", "NeedHelp", "ThanksScreen",
+                        "Home", "Cart", "GiftDetails", "SelectCountry", "ShippingAddresses"
+                    ],
+                    routes: [{ name: "Home" }]
+                })
+            }
+        };
+        // A dropped letter — substring matching alone would miss this.
+        const out = run(many, "navigate", "CheckoutVerfication");
+        expect(out.ok).toBe(false);
+        expect(String(out.error)).toContain("Did you mean");
+        expect(String(out.error)).toContain("CheckoutVerification");
+        expect(String(out.error)).toContain("other routes registered");
+        expect(String(out.error)).not.toContain("ShippingAddresses");
+        expect(calls).toHaveLength(0);
+    });
+
+    it("navigates by path on Expo Router without route-name validation", () => {
+        const calls: string[] = [];
+        const out = run(expoStub(calls), "navigate", "/event-details?id=1");
+        expect(out.ok).toBe(true);
+        expect(calls).toContain("navigate:/event-details?id=1");
+    });
+
+    it("maps back to goBack on React Navigation and back on Expo Router", () => {
+        const rnCalls: string[] = [];
+        expect(run(rnStub(rnCalls), "back", null).ok).toBe(true);
+        expect(rnCalls).toContain("goBack");
+
+        const expoCalls: string[] = [];
+        expect(run(expoStub(expoCalls), "back", null).ok).toBe(true);
+        expect(expoCalls).toContain("back");
+    });
+
+    it("reports that push is unavailable on a React Navigation root ref", () => {
+        const calls: string[] = [];
+        const out = run(rnStub(calls), "push", "TarotNav");
+        expect(out.ok).toBe(false);
+        expect(String(out.error)).toContain("push");
+        expect(calls).toHaveLength(0);
+    });
+
+    it("fails clearly when no router resolved", () => {
+        const out = run({}, "navigate", "Anywhere");
+        expect(out.ok).toBe(false);
+        expect(String(out.error)).toContain("No router");
+    });
+
+    it("passes params through as the second argument", () => {
+        const received: unknown[] = [];
+        const stub = {
+            __EB_TEST_MODULE_ROUTER__: {
+                navigate: (p: string, q: unknown) => received.push([p, q]),
+                dismiss: () => undefined
+            }
+        };
+        const out = run(stub, "navigate", "/event-details", { id: "abc" });
+        expect(out.ok).toBe(true);
+        expect(received[0]).toEqual(["/event-details", { id: "abc" }]);
     });
 });
