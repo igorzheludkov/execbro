@@ -922,6 +922,12 @@ async function tryAccessibilityStrategy(
         }
 
         if (platform === "ios") {
+            // One accessibility dump serves every pass below: `axe describe-ui`
+            // costs ~210ms and the screen cannot change between predicates, so
+            // re-fetching per pass was pure overhead (2-3 dumps per tap).
+            const { iosGetUITree } = await import("../core/ios.js");
+            const tree = await iosGetUITree(udid);
+
             // iOS: testID maps to accessibilityIdentifier — search by identifier first,
             // then fall back to labelContains for text-based searches
             let result;
@@ -932,7 +938,8 @@ async function tryAccessibilityStrategy(
                         identifier: query.testID,
                         index
                     },
-                    udid
+                    udid,
+                    tree
                 );
                 // Fall back to identifierContains if exact match fails
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
@@ -941,7 +948,8 @@ async function tryAccessibilityStrategy(
                             identifierContains: query.testID,
                             index
                         },
-                        udid
+                        udid,
+                        tree
                     );
                 }
                 // Last resort: try labelContains in case testID is reflected in label
@@ -951,7 +959,8 @@ async function tryAccessibilityStrategy(
                             labelContains: query.testID,
                             index
                         },
-                        udid
+                        udid,
+                        tree
                     );
                 }
             } else {
@@ -963,7 +972,8 @@ async function tryAccessibilityStrategy(
                         label: searchText,
                         index
                     },
-                    udid
+                    udid,
+                    tree
                 );
                 if (!result.success || !result.allMatches || result.allMatches.length === 0) {
                     result = await iosFindElement(
@@ -971,7 +981,8 @@ async function tryAccessibilityStrategy(
                             labelContains: searchText,
                             index
                         },
-                        udid
+                        udid,
+                        tree
                     );
                 }
             }
@@ -1056,7 +1067,12 @@ async function tryAccessibilityStrategy(
                 searchOptions.textContains = query.text;
             }
 
-            let result = await androidFindElement(searchOptions, undefined, signal);
+            // Same single-dump reuse as iOS above — a uiautomator hierarchy dump
+            // is the most expensive step of an Android accessibility tap.
+            const { androidGetUITree } = await import("../core/android.js");
+            const androidTree = await androidGetUITree(undefined, signal);
+
+            let result = await androidFindElement(searchOptions, undefined, signal, androidTree);
 
             // If testID search via resourceId failed, try contentDescContains
             // (older RN versions map testID to content-description)
@@ -1064,7 +1080,7 @@ async function tryAccessibilityStrategy(
                 result = await androidFindElement({
                     contentDescContains: query.testID,
                     index
-                }, undefined, signal);
+                }, undefined, signal, androidTree);
             }
 
             if (sink && result.allMatches?.length) {

@@ -1863,12 +1863,22 @@ function isAggregatorWrapper(
   return isLongConcatenatedLabel || isFullScreenFrame;
 }
 
+/** A pre-fetched accessibility tree, as returned by iosGetUITree. */
+export type IOSUITree = Awaited<ReturnType<typeof iosGetUITree>>;
+
 /**
- * Find element(s) in the iOS UI tree matching the given criteria
+ * Find element(s) in the iOS UI tree matching the given criteria.
+ *
+ * `tree` lets a caller reuse an accessibility dump it already has. Each fetch
+ * shells out to `axe describe-ui` (~210ms measured 2026-08-01) and the tap
+ * strategy runs two or three passes with different predicates, so re-fetching
+ * per pass was costing 400-600ms per accessibility tap for a tree that cannot
+ * change between passes.
  */
 export async function iosFindElement(
   options: IOSFindElementOptions,
   udid?: string,
+  tree?: IOSUITree,
 ): Promise<IOSFindElementResult> {
   try {
     if (
@@ -1888,7 +1898,7 @@ export async function iosFindElement(
       };
     }
 
-    const treeResult = await iosGetUITree(udid);
+    const treeResult = tree ?? (await iosGetUITree(udid));
     if (!treeResult.success || !treeResult.elements) {
       return {
         success: false,
