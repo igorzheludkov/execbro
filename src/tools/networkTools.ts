@@ -2,8 +2,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import {
-    getNetworkRequests,
-    searchNetworkRequests,
     getNetworkStats,
     formatRequestDetails,
     getConnectedAppByDevice,
@@ -18,7 +16,10 @@ import {
 import { resolveNetworkBuffer } from "../core/toolHelpers.js";
 import { UserInputError } from "../core/errors.js";
 import { diagnoseEmptyResult, type EmptyDiagnosisLabels } from "../core/logDiagnosis.js";
-import { isSDKInstalled, querySDKNetwork, getSDKNetworkEntry, getSDKNetworkStats, clearSDKNetwork } from "../core/sdkBridge.js";
+import { isSDKInstalled, clearSDKNetwork } from "../core/sdkBridge.js";
+import { refreshMirror } from "../core/sdkMirrorPoller.js";
+import { withRestartDividers, evictionNotice, resolveEpochFilter } from "../core/epochRender.js";
+import { formatRequest } from "../core/network.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 
 // Network capture has no end-to-end probe equivalent to verifyLogPipeline, so
@@ -66,56 +67,22 @@ export function registerNetworkTools(server: McpServer): void {
                     .optional()
                     .default(false)
                     .describe("Return statistics only (count, methods, domains, status codes). Use for quick overview."),
-                device: z.string().optional().describe(DEVICE_ALL_DESC)
+                device: z.string().optional().describe(DEVICE_ALL_DESC),
+                epoch: z
+                    .union([z.number(), z.literal("current"), z.literal("all")])
+                    .optional()
+                    .describe("Filter by app run. 'current' = the live run only; a number targets a specific run; omit or 'all' for everything including pre-restart data (default).")
             }
         },
-        async ({ maxRequests, method, urlPattern, status, summary, device }) => {
-            // Check if SDK is installed — prefer SDK data over CDP/interceptor buffer
+        async ({ maxRequests, method, urlPattern, status, summary, device, epoch }) => {
+            // The buffer is a superset of the SDK's in-app buffer (mirrored), the
+            // CDP domain and the JS interceptor, and it retains prior app runs.
+            // Refresh it first so this read is as current as a live SDK query.
+            await refreshMirror(device);
+
+            // Kept only for the "install the SDK" hint on an empty result.
             const sdkAvailable = await isSDKInstalled(device);
-    
-            if (sdkAvailable) {
-                if (summary) {
-                    const sdkStats = await getSDKNetworkStats(device);
-                    // An empty SDK buffer is not an answer — fall through to CDP.
-                    if (sdkStats.success && sdkStats.data.total > 0) {
-                        const s = sdkStats.data;
-                        const lines: string[] = [];
-                        lines.push(`Total requests: ${s.total}`);
-                        lines.push(`Completed: ${s.completed}`);
-                        lines.push(`Errors: ${s.errors}`);
-                        if (s.avgDuration != null) lines.push(`Avg duration: ${s.avgDuration}ms`);
-                        if (s.byMethod && Object.keys(s.byMethod).length > 0) {
-                            lines.push("\nBy Method:");
-                            for (const [m, c] of Object.entries(s.byMethod)) lines.push(`  ${m}: ${c}`);
-                        }
-                        if (s.byStatus && Object.keys(s.byStatus).length > 0) {
-                            lines.push("\nBy Status:");
-                            for (const [st, c] of Object.entries(s.byStatus)) lines.push(`  ${st}: ${c}`);
-                        }
-                        if (s.byDomain && Object.keys(s.byDomain).length > 0) {
-                            lines.push("\nBy Domain:");
-                            for (const [d, c] of Object.entries(s.byDomain).sort((a: any, b: any) => b[1] - a[1]).slice(0, 10)) lines.push(`  ${d}: ${c}`);
-                        }
-                        // Served real SDK data — not empty, regardless of what the
-                        // (separate) CDP/interceptor buffer happens to hold.
-                        return { _emptyResult: false, content: [{ type: "text" as const, text: `Network Summary (SDK):\n\n${lines.join("\n")}` }] };
-                    }
-                }
-    
-                const sdkResult = await querySDKNetwork({ count: maxRequests, method, urlPattern, status }, device);
-                if (sdkResult.success && sdkResult.data.length > 0) {
-                    const entries = sdkResult.data;
-                    const lines = entries.map((r) => {
-                        const time = new Date(r.timestamp).toLocaleTimeString();
-                        const st = r.status ?? "pending";
-                        const dur = r.duration != null ? `${r.duration}ms` : "-";
-                        return `[${r.id}] ${time} ${r.method} ${st} ${dur} ${r.url}`;
-                    });
-                    return { _emptyResult: false, content: [{ type: "text" as const, text: `Network Requests (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
-                }
-            }
-    
-            // Fallback: read from in-process buffer (CDP/interceptor)
+
             // Return summary if requested
             if (summary) {
                 const buffer = resolveNetworkBuffer(device);
@@ -140,7 +107,7 @@ export function registerNetworkTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `Network Summary:\n\n${stats}${connectionWarning}`
+                            text: `Network Summary:\n\n${stats}${evictionNotice(buffer.droppedCount, "EXECBRO_NET_BUFFER_SIZE")}${connectionWarning}`
                         }
                     ]
                 };
@@ -149,13 +116,18 @@ export function registerNetworkTools(server: McpServer): void {
             // Resolved once: for the all-devices case this copies every buffered
             // entry into a merged buffer, so it is not free to call repeatedly.
             const networkBuffer = resolveNetworkBuffer(device);
-            const { count, formatted } = getNetworkRequests(networkBuffer, {
-                maxRequests,
+            const requests = networkBuffer.getAll({
+                count: maxRequests,
                 method,
                 urlPattern,
-                status
+                status,
+                epoch: resolveEpochFilter(epoch, device)
             });
-    
+            const count = requests.length;
+            const formatted = count === 0
+                ? "No network requests captured yet."
+                : withRestartDividers(requests, formatRequest);
+
             // `_emptyResult` measures CAPTURE reliability, not whether this
             // particular call returned rows — see the 2026-03-19 empty-result
             // spec. Filters matching nothing is a natural outcome, reported via
@@ -210,7 +182,7 @@ export function registerNetworkTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: `Network Requests (${count} entries):\n\n${formatted}${gapWarning}${connectionWarning}`
+                        text: `Network Requests (${count} entries):\n\n${formatted}${evictionNotice(networkBuffer.droppedCount, "EXECBRO_NET_BUFFER_SIZE")}${gapWarning}${connectionWarning}`
                     }
                 ]
             };
@@ -240,25 +212,14 @@ export function registerNetworkTools(server: McpServer): void {
             }
         },
         async ({ urlPattern, maxResults, device }) => {
-            // Check if SDK is installed — prefer SDK data
-            const sdkAvailable = await isSDKInstalled(device);
-    
-            if (sdkAvailable) {
-                const sdkResult = await querySDKNetwork({ count: maxResults, urlPattern }, device);
-                if (sdkResult.success && sdkResult.data.length > 0) {
-                    const entries = sdkResult.data;
-                    const lines = entries.map((r) => {
-                        const time = new Date(r.timestamp).toLocaleTimeString();
-                        const st = r.status ?? "pending";
-                        const dur = r.duration != null ? `${r.duration}ms` : "-";
-                        return `[${r.id}] ${time} ${r.method} ${st} ${dur} ${r.url}`;
-                    });
-                    return { content: [{ type: "text" as const, text: `Network search results for "${urlPattern}" (${entries.length} matches, SDK):\n\n${lines.join("\n")}` }] };
-                }
-            }
-    
-            const { count, formatted } = searchNetworkRequests(resolveNetworkBuffer(device), urlPattern, maxResults);
-    
+            await refreshMirror(device);
+
+            const matches = resolveNetworkBuffer(device).search(urlPattern, maxResults);
+            const count = matches.length;
+            const formatted = count === 0
+                ? "No network requests captured yet."
+                : withRestartDividers(matches, formatRequest);
+
             // Check connection health
             let connectionWarning = "";
             if (count === 0) {
@@ -314,54 +275,12 @@ export function registerNetworkTools(server: McpServer): void {
             }
         },
         async ({ requestId, maxBodyLength, verbose, device }) => {
-            // Resolve once per call so a mid-call SDK socket flap can't flip
-            // routing partway through. Try SDK first (richer data), but ALWAYS
-            // fall back to the CDP buffer on a miss — CDP records carry numeric
-            // ids the SDK store doesn't know about, and vice versa.
-            const sdkAvailable = await isSDKInstalled(device);
-            if (sdkAvailable) {
-                const sdkResult = await getSDKNetworkEntry(requestId, device);
-                if (sdkResult.success && sdkResult.data) {
-                    const r = sdkResult.data;
-                    const lines: string[] = [];
-                    lines.push(`=== ${r.method} ${r.url} ===`);
-                    lines.push(`Request ID: ${r.id}`);
-                    lines.push(`Time: ${new Date(r.timestamp).toISOString()}`);
-                    lines.push(`Status: ${r.status ?? "pending"} ${r.statusText ?? ""}`);
-                    if (r.duration != null) lines.push(`Duration: ${r.duration}ms`);
-                    if (r.mimeType) lines.push(`Content-Type: ${r.mimeType}`);
-                    if (r.error) lines.push(`Error: ${r.error}`);
-                    if (r.requestHeaders && Object.keys(r.requestHeaders).length > 0) {
-                        lines.push("\n--- Request Headers ---");
-                        for (const [k, v] of Object.entries(r.requestHeaders)) lines.push(`${k}: ${v}`);
-                    }
-                    if (r.requestBody) {
-                        lines.push("\n--- Request Body ---");
-                        let body = r.requestBody;
-                        if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
-                            body = body.slice(0, maxBodyLength) + `... [truncated: ${r.requestBody.length} chars]`;
-                        }
-                        lines.push(body);
-                    }
-                    if (r.responseHeaders && Object.keys(r.responseHeaders).length > 0) {
-                        lines.push("\n--- Response Headers ---");
-                        for (const [k, v] of Object.entries(r.responseHeaders)) lines.push(`${k}: ${v}`);
-                    }
-                    if (r.responseBody) {
-                        lines.push("\n--- Response Body ---");
-                        let body = r.responseBody;
-                        if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
-                            body = body.slice(0, maxBodyLength) + `... [truncated: ${r.responseBody.length} chars]`;
-                        }
-                        lines.push(body);
-                    }
-                    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-                }
-            }
-    
-            // Fallback: read from in-process buffer
+            // Single source: the buffer holds mirrored SDK entries (with bodies),
+            // CDP entries and interceptor entries, across every app run. get()
+            // falls back across epochs so a pre-restart id still resolves.
+            await refreshMirror(device);
             const request = resolveNetworkBuffer(device).get(requestId);
-    
+
             if (!request) {
                 const status = await checkAndEnsureConnection(device);
                 let connectionNote = status.message ? `\n\n${status.message}` : "";

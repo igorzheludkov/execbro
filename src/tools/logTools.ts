@@ -21,17 +21,51 @@ import {
 import { resolveLogBuffer } from "../core/toolHelpers.js";
 import { diagnoseEmptyLogs, type LogDiagnosis } from "../core/logDiagnosis.js";
 import { UserInputError } from "../core/errors.js";
-import {
-    isSDKInstalled,
-    querySDKConsole,
-    clearSDKConsole,
-    getSDKConsoleStats,
-} from "../core/sdkBridge.js";
+import { isSDKInstalled, clearSDKConsole } from "../core/sdkBridge.js";
+import { refreshMirror } from "../core/sdkMirrorPoller.js";
+import { evictionNotice, resolveEpochFilter } from "../core/epochRender.js";
+import type { LogEntry } from "../core/types.js";
+
 import { findLogEvent, nativeLogBuffers, getNativeLogBuffer, type LogEvent } from "../core/logEvents.js";
 import { jsEventsFromEntries } from "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
 import { collectNativeEvents, deviceKeyOf } from "../core/nativeLogs.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
+
+/**
+ * Render JS log events with an "app restarted" divider at each run boundary.
+ *
+ * LogEvent is shared with the native pipeline, so rather than widening that
+ * type we recover each event's epoch from the source entries (events are
+ * derived 1:1 from entries, keyed `j<seq>`) and format each same-epoch run
+ * through the normal formatter so output is otherwise byte-identical.
+ */
+function renderWithRestartDividers(
+    events: LogEvent[],
+    entries: LogEntry[],
+    options: { showDevice: boolean; maxLength: number; verbose: boolean }
+): string {
+    if (events.length === 0) return formatEventList(events, options);
+
+    const epochBySeq = new Map(entries.map((e) => [`j${e.seq}`, e.epoch]));
+    const runs: { epoch: number; events: LogEvent[] }[] = [];
+    for (const event of events) {
+        const epoch = epochBySeq.get(event.id) ?? 1;
+        const last = runs[runs.length - 1];
+        if (last && last.epoch === epoch) {
+            last.events.push(event);
+        } else {
+            runs.push({ epoch, events: [event] });
+        }
+    }
+
+    return runs
+        .map((run, i) =>
+            (i === 0 ? "" : `── app restarted (epoch ${run.epoch}) ──\n`) +
+            formatEventList(run.events, options)
+        )
+        .join("\n");
+}
 
 // Binds the live connection/pipeline probes for `diagnoseEmptyLogs`. Kept here
 // so the diagnosis logic itself stays free of module-level state and testable.
@@ -193,6 +227,10 @@ export function registerLogTools(server: McpServer): void {
                         "Return summary statistics instead of full logs (count by level + last 5 messages). Use for quick overview."
                     ),
                 device: z.string().optional().describe(DEVICE_ALL_DESC),
+                epoch: z
+                    .union([z.number(), z.literal("current"), z.literal("all")])
+                    .optional()
+                    .describe("Filter by app run. 'current' = the live run only; a number targets a specific run; omit or 'all' for everything including pre-restart data (default)."),
                 source: z
                     .enum(["js", "native", "all"])
                     .optional()
@@ -219,13 +257,7 @@ export function registerLogTools(server: McpServer): void {
                     .describe("Native acquisition window — ISO timestamp or a duration like \"5m\". Widens the device query; already-seen events are still deduped.")
             }
         },
-        async ({ maxLogs, level, startFromText, maxMessageLength, verbose, summary, device, source, kind, minLevel, since }) => {
-            // Check if SDK is installed — prefer SDK data for richer logs.
-            // `device` must be threaded through: without it the SDK bridge reads
-            // whichever app happens to be first, so a multi-device session
-            // silently answers with the wrong device's buffer.
-            const sdkAvailable = await isSDKInstalled(device);
-
+        async ({ maxLogs, level, startFromText, maxMessageLength, verbose, summary, device, source, kind, minLevel, since, epoch }) => {
             // Prepended to every return's text below when source==="all".
             let nativePrefix = "";
             // Set when source==="native"/"all" already paid for a native fetch
@@ -268,40 +300,11 @@ export function registerLogTools(server: McpServer): void {
                 nativePrefix = `Native Log Events (${capped.length}):\n\n${rendered}${cappedNote}${noteText}${sinceNote}\n\n`;
             }
 
-            if (sdkAvailable) {
-                if (summary) {
-                    const sdkStats = await getSDKConsoleStats(device);
-                    // An empty SDK buffer is not an answer — fall through to the
-                    // CDP buffer below rather than reporting zero logs.
-                    if (sdkStats.success && sdkStats.data.total > 0) {
-                        const s = sdkStats.data;
-                        const lines: string[] = [];
-                        lines.push(`Total logs: ${s.total}`);
-                        if (s.byLevel && Object.keys(s.byLevel).length > 0) {
-                            lines.push("\nBy Level:");
-                            for (const [lvl, cnt] of Object.entries(s.byLevel)) lines.push(`  ${lvl}: ${cnt}`);
-                        }
-                        // Served real SDK data — not empty, regardless of what the
-                        // (separate) CDP buffer happens to hold.
-                        return { _emptyResult: false, content: [{ type: "text" as const, text: `${nativePrefix}Log Summary (SDK):\n\n${lines.join("\n")}` }] };
-                    }
-                }
-    
-                const sdkResult = await querySDKConsole({ count: maxLogs, level, text: startFromText }, device);
-                if (sdkResult.success && sdkResult.data.length > 0) {
-                    const entries = sdkResult.data;
-                    const lines = entries.map((e) => {
-                        const time = new Date(e.timestamp).toLocaleTimeString();
-                        let msg = e.message;
-                        if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
-                            msg = msg.slice(0, maxMessageLength) + "...";
-                        }
-                        return `[${time}] [${e.level.toUpperCase()}] ${msg}`;
-                    });
-                    return { _emptyResult: false, content: [{ type: "text" as const, text: `${nativePrefix}Console Logs (${entries.length} entries, SDK):\n\n${lines.join("\n")}` }] };
-                }
-            }
-    
+            // The buffer is a superset of the SDK's in-app buffer (mirrored) and
+            // the CDP console stream, and it retains prior app runs. Refresh it
+            // first so this read is as current as a live SDK query would have been.
+            await refreshMirror(device);
+
             // Return summary if requested
             if (summary) {
                 const buffer = resolveLogBuffer(device);
@@ -323,7 +326,7 @@ export function registerLogTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `${nativePrefix}Log Summary:\n\n${summaryText}${connectionWarning}`
+                            text: `${nativePrefix}Log Summary:\n\n${summaryText}${evictionNotice(buffer.droppedCount, "EXECBRO_LOG_BUFFER_SIZE")}${connectionWarning}`
                         }
                     ]
                 };
@@ -332,13 +335,9 @@ export function registerLogTools(server: McpServer): void {
             // Resolved once: for the all-devices case this copies every buffered
             // entry into a merged buffer, so it is not free to call repeatedly.
             const logBuffer = resolveLogBuffer(device);
-            const { logs, count } = getLogs(logBuffer, {
-                maxLogs,
-                level,
-                startFromText,
-                maxMessageLength,
-                verbose
-            });
+            const epochFilter = resolveEpochFilter(epoch, device);
+            const logs = logBuffer.get(maxLogs, level, startFromText, epochFilter);
+            const count = logs.length;
 
             // `_emptyResult` measures CAPTURE reliability, not whether this
             // particular call returned rows — see the 2026-03-19 empty-result
@@ -450,7 +449,11 @@ export function registerLogTools(server: McpServer): void {
 
             const jsEvents = jsEventsFromEntries(logs, device ?? "all devices");
             const jsFiltered = kind ? jsEvents.filter((e) => e.kind === kind) : jsEvents;
-            const jsRendered = formatEventList(jsFiltered, { showDevice: logBuffers.size > 1, maxLength: maxMessageLength, verbose });
+            const jsRendered = renderWithRestartDividers(jsFiltered, logs, {
+                showDevice: logBuffers.size > 1,
+                maxLength: maxMessageLength,
+                verbose
+            });
 
             return {
                 _emptyResult: bufferEmpty,
@@ -458,7 +461,7 @@ export function registerLogTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: `${nativePrefix}React Native Console Logs (${jsFiltered.length} entries)${startNote}:\n\n${jsRendered}${gapWarning}${connectionWarning}`
+                        text: `${nativePrefix}React Native Console Logs (${jsFiltered.length} entries)${startNote}:\n\n${jsRendered}${evictionNotice(logBuffer.droppedCount, "EXECBRO_LOG_BUFFER_SIZE")}${gapWarning}${connectionWarning}`
                     }
                 ]
             };
@@ -498,29 +501,12 @@ export function registerLogTools(server: McpServer): void {
             }
         },
         async ({ text, maxResults, maxMessageLength, verbose, device }) => {
-            // Check if SDK is installed — prefer SDK data. See get_logs: the
-            // device must be threaded through, and an empty SDK result falls
-            // through to the CDP buffer instead of short-circuiting.
-            const sdkAvailable = await isSDKInstalled(device);
-    
-            if (sdkAvailable) {
-                const sdkResult = await querySDKConsole({ count: maxResults, text }, device);
-                if (sdkResult.success && sdkResult.data.length > 0) {
-                    const entries = sdkResult.data;
-                    const lines = entries.map((e) => {
-                        const time = new Date(e.timestamp).toLocaleTimeString();
-                        let msg = e.message;
-                        if (!verbose && maxMessageLength > 0 && msg.length > maxMessageLength) {
-                            msg = msg.slice(0, maxMessageLength) + "...";
-                        }
-                        return `[${time}] [${e.level.toUpperCase()}] ${msg}`;
-                    });
-                    return { content: [{ type: "text" as const, text: `Search results for "${text}" (${entries.length} matches, SDK):\n\n${lines.join("\n")}` }] };
-                }
-            }
-    
+            // The buffer already holds the SDK's entries (mirrored) plus the CDP
+            // console stream, across every app run. Refresh, then read once.
+            await refreshMirror(device);
+
             const { count, formatted } = searchLogs(resolveLogBuffer(device), text, { maxResults, maxMessageLength, verbose });
-    
+
             // Check connection health
             let connectionWarning = "";
             if (count === 0) {

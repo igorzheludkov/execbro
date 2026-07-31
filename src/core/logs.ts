@@ -1,4 +1,5 @@
 import { LogEntry, LogLevel } from "./types.js";
+import { getEpoch } from "./state.js";
 
 // Process-global so ids never collide across per-device buffers.
 let nextSeq = 1;
@@ -12,21 +13,37 @@ export function __resetLogSeq(): void {
 export class LogBuffer {
     private logs: LogEntry[] = [];
     private maxSize: number;
+    private deviceName?: string;
+    private dropped = 0;
 
-    constructor(maxSize: number = 1000) {
+    /**
+     * @param deviceName When set, add() stamps this device's current epoch.
+     *   Omit for merged read buffers so copied entries keep their own epoch.
+     */
+    constructor(maxSize: number = 1000, deviceName?: string) {
         this.maxSize = maxSize;
+        this.deviceName = deviceName;
     }
 
-    add(entry: Omit<LogEntry, "seq"> & { seq?: number }): void {
-        const stamped: LogEntry = { ...entry, seq: entry.seq ?? nextSeq++ };
+    add(entry: Omit<LogEntry, "seq" | "epoch"> & { seq?: number; epoch?: number }): void {
+        const stamped: LogEntry = {
+            ...entry,
+            seq: entry.seq ?? nextSeq++,
+            epoch: entry.epoch ?? (this.deviceName ? getEpoch(this.deviceName) : 1),
+        };
         this.logs.push(stamped);
         if (this.logs.length > this.maxSize) {
             this.logs.shift();
+            this.dropped++;
         }
     }
 
-    get(count?: number, level?: string, startFromText?: string): LogEntry[] {
+    get(count?: number, level?: string, startFromText?: string, epoch?: number): LogEntry[] {
         let filtered = this.logs;
+
+        if (epoch != null) {
+            filtered = filtered.filter((log) => log.epoch === epoch);
+        }
 
         // If startFromText is provided, find the LAST matching line and start from there
         if (startFromText) {
@@ -46,8 +63,10 @@ export class LogBuffer {
             filtered = filtered.filter((log) => log.level === level);
         }
 
+        // Newest N. Was slice(0, count) — that returned the OLDEST entries and
+        // made a restarted app look like it had produced nothing new.
         if (count && count > 0) {
-            filtered = filtered.slice(0, count);
+            filtered = filtered.slice(-count);
         }
 
         return filtered;
@@ -58,7 +77,7 @@ export class LogBuffer {
             log.message.toLowerCase().includes(text.toLowerCase())
         );
         if (maxResults && maxResults > 0) {
-            return results.slice(0, maxResults);
+            return results.slice(-maxResults);
         }
         return results;
     }
@@ -66,6 +85,7 @@ export class LogBuffer {
     clear(): number {
         const count = this.logs.length;
         this.logs = [];
+        this.dropped = 0;
         return count;
     }
 
@@ -77,6 +97,11 @@ export class LogBuffer {
 
     get size(): number {
         return this.logs.length;
+    }
+
+    /** Entries evicted by the capacity cap since the last clear(). */
+    get droppedCount(): number {
+        return this.dropped;
     }
 
     getAll(): LogEntry[] {

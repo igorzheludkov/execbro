@@ -43,7 +43,7 @@ describe("applyInterceptedEvent", () => {
             timestamp: 1700000000000,
         });
 
-        applyInterceptedEvent(json, buffer);
+        applyInterceptedEvent(json, buffer, "dev");
 
         expect(buffer.size).toBe(1);
         const entry = buffer.get("js-ab12-1");
@@ -63,7 +63,8 @@ describe("applyInterceptedEvent", () => {
                 url: "https://api.example.com/users",
                 timestamp: 1700000000000,
             }),
-            buffer
+            buffer,
+            "dev"
         );
 
         // Then apply the response
@@ -75,7 +76,8 @@ describe("applyInterceptedEvent", () => {
                 statusText: "OK",
                 duration: 150,
             }),
-            buffer
+            buffer,
+            "dev"
         );
 
         expect(buffer.size).toBe(1);
@@ -96,7 +98,8 @@ describe("applyInterceptedEvent", () => {
                 url: "https://api.example.com/fail",
                 timestamp: 1700000000000,
             }),
-            buffer
+            buffer,
+            "dev"
         );
 
         applyInterceptedEvent(
@@ -106,7 +109,8 @@ describe("applyInterceptedEvent", () => {
                 error: "Network request failed",
                 duration: 50,
             }),
-            buffer
+            buffer,
+            "dev"
         );
 
         expect(buffer.size).toBe(1);
@@ -118,7 +122,7 @@ describe("applyInterceptedEvent", () => {
     });
 
     it("invalid JSON is silently ignored", () => {
-        applyInterceptedEvent("not valid json{{{", buffer);
+        applyInterceptedEvent("not valid json{{{", buffer, "dev");
         expect(buffer.size).toBe(0);
     });
 
@@ -131,7 +135,8 @@ describe("applyInterceptedEvent", () => {
                 statusText: "OK",
                 duration: 100,
             }),
-            buffer
+            buffer,
+            "dev"
         );
 
         expect(buffer.size).toBe(0);

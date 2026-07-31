@@ -264,7 +264,17 @@ export {
   getBundleStatusWithErrors,
 } from "./bundle.js";
 
-// Element Inspector selection capture
+// SDK buffer mirroring — keeps a server-side copy so an app restart does not
+// destroy the only copy of the in-app SDK buffers.
+export {
+  mirrorOnce,
+  startSdkMirrorPoller,
+  stopSdkMirrorPoller,
+  stopAllSdkMirrorPollers,
+  isSdkMirrorPollerRunning,
+} from "./sdkMirrorPoller.js";
+
+// Element Inspector selection types — still used by componentSource.ts
 export type { SelectionEntry, SelectionFrame, ComponentStack } from "./selectionBuffer.js";
 
 // License & Usage

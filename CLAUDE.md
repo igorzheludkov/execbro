@@ -89,15 +89,17 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 3. **CDP Connection**: Connects via WebSocket to device's debugger URL
 4. **Log Capture**: Enables `Runtime.enable` and `Log.enable` CDP domains to receive console events
 5. **Network Tracking**: Three capture strategies (auto-selected):
-   - **SDK mode** (best): If `execbro-sdk` is installed in the app, reads from its in-app buffer via `Runtime.evaluate`. Captures all requests from startup with full headers and bodies.
+   - **SDK mode** (best): If `execbro-sdk` is installed in the app, its in-app buffer is *mirrored* into the server-side buffer every 3-10s via `Runtime.evaluate` (see `sdkMirrorPoller` below). Captures all requests from startup with full headers and bodies. Reads go through the server buffer, not a live query, so data survives an app restart.
    - **CDP mode**: `Network.enable` CDP domain — works on RN 0.73-0.75 (Hermes + Bridge) and future RN 0.83+. Not supported on Bridgeless targets (Expo SDK 52-54).
    - **JS interceptor fallback**: Injects a fetch patch via `Runtime.evaluate` on Bridgeless targets. May miss early startup requests due to injection timing.
 6. **Code Execution**: Uses `Runtime.evaluate` CDP method for REPL-style JavaScript execution
 
 ### Key Components
 
-- `LogBuffer`: Circular buffer (500 entries) storing captured logs with level filtering and text search
-- `NetworkBuffer`: Circular buffer (200 entries) storing captured network requests with filtering by method, URL, and status
+- `LogBuffer`: Circular buffer (2000 entries, override `EXECBRO_LOG_BUFFER_SIZE`) storing captured logs with level filtering and text search. Entries evicted by the cap are counted and reported in tool output rather than silently dropped.
+- `NetworkBuffer`: Circular buffer (1000 entries, override `EXECBRO_NET_BUFFER_SIZE`) storing captured network requests with filtering by method, URL, and status. Keyed by `epoch:requestId` — a fresh JS runtime restarts CDP/SDK id counters, so without the epoch a post-restart request would overwrite its pre-restart namesake.
+- `sdkMirrorPoller`: Copies the in-app `execbro-sdk` console and network buffers into the server-side buffers every 3-10s, so a hard app restart no longer destroys the only copy (the SDK stores everything in the app's JS heap, and the server suppresses its own capture while the SDK is present). Also drains before `reload_app`. Detects restarts via a per-runtime nonce on `globalThis` — CDP is not a reliable signal here, since Metro's inspector proxy reuses the target id after a process kill and a killed runtime never emits `executionContextsCleared`. Disable with `EXECBRO_DISABLE_SDK_MIRROR=1`.
+- **Session epochs**: every log and network entry carries a per-device `epoch` that increments on each new app run. `get_logs` / `get_network_requests` render a `── app restarted (epoch N) ──` divider at run boundaries and accept `epoch: "current" | <number> | "all"` (default `"all"`, so pre-restart data is never hidden by default).
 - `ImageBuffer`: Circular buffer (50 entries) storing screenshots from all image-producing tools (ios/android/ocr screenshots, tap verification frames). Supports grouping for burst frame sets.
 - `connectedApps`: Map tracking active WebSocket connections to devices
 - `pendingExecutions`: Map for tracking async `Runtime.evaluate` responses with timeout handling

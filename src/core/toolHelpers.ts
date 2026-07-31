@@ -9,13 +9,48 @@ import {
 } from "./index.js";
 import { UserInputError } from "./errors.js";
 
+/**
+ * Find a buffered device name matching `device` when no app is currently
+ * connected. Data outlives the connection now, so a read during the window
+ * between an app being killed and reconnecting must still resolve — otherwise
+ * the retained pre-restart entries are unreachable exactly when they matter.
+ */
+function bufferedDeviceName(device: string, keys: Iterable<string>): string | undefined {
+    const needle = device.toLowerCase();
+    for (const key of keys) {
+        if (key.toLowerCase().includes(needle)) return key;
+    }
+    return undefined;
+}
+
+/**
+ * Resolve the buffer key for `device`.
+ *
+ * Prefers a live connection (authoritative, and handles ambiguity), but
+ * getConnectedAppByDevice throws when nothing is connected — so fall back to a
+ * buffered device name before giving up, and rethrow the original, richer
+ * error when there is no buffered data either.
+ */
+function resolveBufferKey(device: string, bufferKeys: Iterable<string>): string {
+    try {
+        const app = getConnectedAppByDevice(device);
+        if (app) {
+            return app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+        }
+    } catch (error) {
+        const buffered = bufferedDeviceName(device, bufferKeys);
+        if (buffered) return buffered;
+        throw error;
+    }
+    const buffered = bufferedDeviceName(device, bufferKeys);
+    if (buffered) return buffered;
+    throw new UserInputError(`No connected device matches "${device}"`);
+}
+
 // Helper: resolve log buffer for a device (or create a merged buffer from all devices)
 export function resolveLogBuffer(device?: string): LogBuffer {
     if (device) {
-        const app = getConnectedAppByDevice(device);
-        if (!app) throw new UserInputError(`No connected device matches "${device}"`);
-        const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
-        return getLogBuffer(deviceName);
+        return getLogBuffer(resolveBufferKey(device, logBuffers.keys()));
     }
     // Merge all logs into a temporary buffer for read operations
     const merged = new LogBuffer(5000);
@@ -30,10 +65,7 @@ export function resolveLogBuffer(device?: string): LogBuffer {
 // Helper: resolve network buffer for a device (or create a merged buffer from all devices)
 export function resolveNetworkBuffer(device?: string): NetworkBuffer {
     if (device) {
-        const app = getConnectedAppByDevice(device);
-        if (!app) throw new UserInputError(`No connected device matches "${device}"`);
-        const deviceName = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
-        return getNetworkBuffer(deviceName);
+        return getNetworkBuffer(resolveBufferKey(device, networkBuffers.keys()));
     }
     // Merge all network requests into a temporary buffer for read operations.
     // Key by the request's own id so get(requestId) works — earlier this used
