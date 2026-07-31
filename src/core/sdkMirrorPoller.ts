@@ -1,5 +1,5 @@
 import { executeInApp } from "./executor.js";
-import { getLogBuffer, getNetworkBuffer, getEpoch } from "./state.js";
+import { getLogBuffer, getNetworkBuffer, getEpoch, connectedApps } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 
 export const ACTIVE_INTERVAL_MS = 3000;
@@ -140,6 +140,25 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
     }
 
     return { logs, network };
+}
+
+/**
+ * Pull anything the in-app SDK holds into the server buffer before a read.
+ * The background poller runs every 3-10s; this closes the gap so a read never
+ * shows data staler than a live SDK query would have.
+ */
+export async function refreshMirror(device?: string): Promise<void> {
+    try {
+        if (device) {
+            await mirrorOnce(device);
+            return;
+        }
+        for (const app of connectedApps.values()) {
+            await mirrorOnce(app.deviceInfo.deviceName || app.deviceInfo.title || "unknown");
+        }
+    } catch {
+        // Non-fatal — a stale read beats a failed one.
+    }
 }
 
 export function isSdkMirrorPollerRunning(device: string): boolean {
