@@ -25,6 +25,7 @@ import {
     getConnectedAppByDevice,
     getFirstConnectedApp,
 } from "../core/index.js";
+import { readKeyboardState } from "../core/keyboardMetrics.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
 import type { ExecutionResult } from "../core/types.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
@@ -359,7 +360,13 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
-            const result = await getScreenState({ device });
+            // In parallel: the keyboard read is a second CDP round trip and has
+            // no reason to queue behind the fiber walk. It degrades to
+            // { visible: false, error } on failure, so it cannot fail this call.
+            const [result, keyboard] = await Promise.all([
+                getScreenState({ device }),
+                readKeyboardState(device)
+            ]);
 
             const metaNotes = collectMetaNotes(result);
 
@@ -374,7 +381,7 @@ export function registerComponentTools(server: McpServer): void {
             }
 
             const ss = result.screenState;
-            const summary = ss ? formatScreenStateSummary(ss, undefined, { pressablesOnly, fullText }) : (result.result ?? "{}");
+            const summary = ss ? formatScreenStateSummary(ss, undefined, { pressablesOnly, fullText, keyboard }) : (result.result ?? "{}");
             const body = metaNotes.length > 0
                 ? `${summary}\n\n${metaNotes.join("\n")}`
                 : summary;
