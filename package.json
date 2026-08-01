@@ -6,14 +6,14 @@
     "type": "module",
     "main": "build/index.js",
     "bin": {
-        "execbro": "./build/index.js"
+        "execbro": "./build/bin.js"
     },
     "scripts": {
-        "build": "tsc && chmod 755 build/index.js",
+        "build": "tsc && chmod 755 build/bin.js build/index.js",
         "inject-token": "node scripts/inject-build-token.mjs",
-        "start": "node build/index.js",
-        "dev": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js'",
-        "dev:mcp": "nodemon --watch src --ext ts --exec 'npm run build && node build/index.js --http'",
+        "start": "node build/bin.js",
+        "dev": "nodemon --watch src --ext ts --exec 'npm run build && node build/bin.js'",
+        "dev:mcp": "nodemon --watch src --ext ts --exec 'npm run build && node build/bin.js --http'",
         "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
         "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/unit'",
         "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
