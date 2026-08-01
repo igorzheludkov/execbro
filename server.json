@@ -3,7 +3,7 @@
     "name": "com.execbro/execbro",
     "title": "ExecBro",
     "description": "Gives AI agents eyes and hands into running React Native apps: logs, REPL, tap, screenshots",
-    "version": "2.1.1",
+    "version": "2.1.2",
     "websiteUrl": "https://execbro.com",
     "repository": {
         "url": "https://github.com/igorzheludkov/execbro",
@@ -13,7 +13,7 @@
         {
             "registryType": "npm",
             "identifier": "execbro",
-            "version": "2.1.1",
+            "version": "2.1.2",
             "runtimeHint": "npx",
             "transport": {
                 "type": "stdio"
