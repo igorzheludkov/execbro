@@ -41,6 +41,8 @@ export type InputOp =
     | { kind: "focus" }
     | { kind: "read" }
     | { kind: "setValue"; value: string }
+    /** Writes native text directly, for a field with no handler to drive. */
+    | { kind: "setNative"; value: string }
     | { kind: "clear" }
     | { kind: "blur" };
 
@@ -130,6 +132,14 @@ function prelude(query: InputQuery | undefined): string {
       if (p.memoizedProps && typeof p.memoizedProps.onChangeText === "function") return p;
     }
     return null;
+  }
+
+  // A field's descriptive props. An input with NO onChangeText has no owner
+  // composite at all, so reading placeholder/value from the owner alone makes
+  // handler-less fields invisible to textMatch and blank in candidate lists.
+  function __eb_props(hostFiber) {
+    var o = __eb_owner(hostFiber);
+    return (o && o.memoizedProps) || hostFiber.memoizedProps || {};
   }
 
   // The field wrapper — the OUTERMOST ancestor still carrying onChangeText.
@@ -232,8 +242,7 @@ function prelude(query: InputQuery | undefined): string {
   }
 
   function __eb_describe(hostFiber, idx) {
-    var o = __eb_owner(hostFiber);
-    var op = o ? o.memoizedProps : {};
+    var op = __eb_props(hostFiber);
     return {
       index: idx,
       component: __eb_componentOf(hostFiber),
@@ -273,8 +282,7 @@ function prelude(query: InputQuery | undefined): string {
   } else if (wantText !== null) {
     var wt = String(wantText).toLowerCase();
     for (i = 0; i < __eb_inputs.length; i++) {
-      var o = __eb_owner(__eb_inputs[i]);
-      var mp3 = o ? o.memoizedProps : {};
+      var mp3 = __eb_props(__eb_inputs[i]);
       var hay = String(
         (mp3.value || "") + " " + (mp3.placeholder || "") + " " +
         (mp3.accessibilityLabel || "") + " " + (__eb_labelOf(__eb_inputs[i]) || "")
@@ -390,6 +398,19 @@ export function buildInputExpression(op: InputOp, query?: InputQuery): string {
     return { ${BASE}, value: next, ok: true, via: "onChangeText" };
   }
   return { ${BASE}, ok: false, via: "no onChangeText (uncontrolled input)" };`;
+            break;
+
+        case "setNative":
+            // Sets the native text without firing onChangeText. Only correct
+            // where there is no handler to fire — otherwise the field would
+            // show text the app never received.
+            action = `
+  var nv = ${JSON.stringify((op as { kind: "setNative"; value: string }).value)};
+  if (__eb_pubi && typeof __eb_pubi.setNativeProps === "function") {
+    __eb_pubi.setNativeProps({ text: nv });
+    return { ${BASE}, ok: true, via: "setNativeProps" };
+  }
+  return { ${BASE}, ok: false, via: "input exposes no setNativeProps" };`;
             break;
 
         case "clear":

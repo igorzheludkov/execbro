@@ -170,13 +170,35 @@ describe("enterText", () => {
         expect(raiseOrder).toBeGreaterThan(lastOp);
     });
 
-    it("falls back to HID and reports verified:false for an uncontrolled field", async () => {
+    it("reports verified:false for an uncontrolled field with no accessibility read-back", async () => {
+        // Without readNativeFields there is no way to see what landed, so the
+        // write must be reported as unconfirmed rather than as a success.
         const d = deps([found({ controlled: false, hasOnChangeText: false, value: null })]);
         const r = await enterText({ text: "hi" }, d);
-        expect(r.path).toBe("hid");
+        expect(r.success).toBe(true);
         expect(r.verified).toBe(false);
         expect(r.error).toContain("uncontrolled");
-        expect(d.typeHid).toHaveBeenCalledWith("hi");
+    });
+
+    it("uses setNativeProps for an uncontrolled field with NO handler", async () => {
+        // Nothing to fire, so writing the native text directly is exact,
+        // instant and Unicode-safe where HID is none of those.
+        const d = deps([found({ controlled: false, hasOnChangeText: false, value: null })]);
+        const r = await enterText({ text: "Привіт світ 世界" }, d);
+        expect(r.path).toBe("native");
+        expect(d.typeHid).not.toHaveBeenCalled();
+        const ops = (d.runOp as jest.Mock).mock.calls.map((c) => (c[0] as InputOp).kind);
+        expect(ops).toContain("setNative");
+    });
+
+    it("keeps HID when an uncontrolled field HAS a handler", async () => {
+        // setNativeProps would set the text without firing onChangeText, so the
+        // field would show text the app never received.
+        const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })]);
+        const r = await enterText({ text: "Alice" }, d);
+        expect(r.path).toBe("hid");
+        const ops = (d.runOp as jest.Mock).mock.calls.map((c) => (c[0] as InputOp).kind);
+        expect(ops).not.toContain("setNative");
     });
 
     it("uses HID even when an uncontrolled field carries an onChangeText", async () => {

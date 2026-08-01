@@ -16,10 +16,13 @@ export type EnterTextArgs = {
     device?: string;
 };
 
+/** How the text was written. See the branch in `write` for why each exists. */
+export type WritePath = "react" | "hid" | "native";
+
 export type TextEntryResult = {
     success: boolean;
     value?: string;
-    path?: "react" | "hid";
+    path?: WritePath;
     /** True only when the landed text was read back and matched exactly. */
     verified?: boolean;
     retried?: boolean;
@@ -109,14 +112,27 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     const previous = target.value ?? "";
     const desired = args.replace ? args.text : previous + args.text;
 
-    // The write path turns on whether the value is READABLE, not on whether a
-    // handler exists. An uncontrolled field can carry an onChangeText that does
-    // not drive its text — the test app's is literally `() => {}` — so the React
-    // path would report a clean write while the field never changed.
-    const write = async (): Promise<{ path: "react" | "hid"; ok: boolean; error?: string }> => {
+    // Three paths, chosen by what the field can actually honour:
+    //
+    //   controlled            -> onChangeText. The value prop mirrors the text,
+    //                            so this both writes and stays verifiable.
+    //   uncontrolled + handler-> real keystrokes. setNativeProps would set the
+    //                            text WITHOUT firing onChangeText, so the field
+    //                            would show text the app never received — the
+    //                            "looks right, isn't" failure this tool exists
+    //                            to remove. ASCII-only and racy, but honest.
+    //   uncontrolled, no handler -> setNativeProps. Nothing to fire, so the
+    //                            objection above does not apply, and it is
+    //                            exact, instant and Unicode-safe where HID is
+    //                            none of those.
+    const write = async (): Promise<{ path: WritePath; ok: boolean; error?: string }> => {
         if (target.controlled) {
             const r = await deps.runOp({ kind: "setValue", value: desired }, q, args.device);
             return { path: "react", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
+        }
+        if (!target.hasOnChangeText) {
+            const r = await deps.runOp({ kind: "setNative", value: desired }, q, args.device);
+            return { path: "native", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
         }
         const r = await deps.typeHid(args.text);
         return { path: "hid", ok: r.success, error: r.error };
