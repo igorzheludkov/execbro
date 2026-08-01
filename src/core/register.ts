@@ -77,6 +77,11 @@ export function registerToolWithTelemetry(
         let success = true;
         let errorMessage: string | undefined;
         let errorContext: string | undefined;
+        // Which of the two failure paths ran. Both set success=false and share the
+        // trackToolInvocation call below, so without this the dashboard cannot tell
+        // a handled { isError: true } return from a real thrown exception — and only
+        // the latter produces a stack trace or reaches captureException.
+        let errorOrigin: "thrown" | "returned" | undefined;
         let inputTokens: number | undefined;
         let outputTokens: number | undefined;
         let emptyResult: boolean | undefined;
@@ -103,6 +108,7 @@ export function registerToolWithTelemetry(
             // Check if result indicates an error
             if (result?.isError) {
                 success = false;
+                errorOrigin = "returned";
                 // Prefer concise _errorMessage over full response text (which may be large JSON)
                 errorMessage = result._errorMessage || result.content?.[0]?.text || "Unknown error";
             }
@@ -180,6 +186,7 @@ export function registerToolWithTelemetry(
             return result;
         } catch (error) {
             success = false;
+            errorOrigin = "thrown";
             errorMessage = error instanceof Error ? error.message : String(error);
             // Thrown validation errors can carry a triage tag; without this the
             // error-context column is empty for every throwing tool path.
@@ -197,7 +204,7 @@ export function registerToolWithTelemetry(
             throw error;
         } finally {
             const duration = Date.now() - startTime;
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin);
             // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
             // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
             let platformKind: "rn" | "native" | null = null;
@@ -217,7 +224,8 @@ export function registerToolWithTelemetry(
                     server_version: getServerVersion(),
                     package_name: getPackageName(),
                     ...(errorMessage && { error: errorMessage.substring(0, 200) }),
-                    ...(errorMessage && { error_category: categorizeError(errorMessage) }),
+                    ...(errorMessage && { error_category: categorizeError(errorMessage, errorContext) }),
+                    ...(errorOrigin && { error_origin: errorOrigin }),
                     ...(getTargetPlatform() && { platform: getTargetPlatform() }),
                     ...(platformKind && { platform_kind: platformKind }),
                     ...(tapStrategy && { tap_strategy: tapStrategy }),

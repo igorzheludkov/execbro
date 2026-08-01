@@ -59,6 +59,22 @@ export function getPackageName(): string {
 
 type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'driver_missing' | 'unknown';
 
+/**
+ * How a failure reached telemetry. Both paths set success=false and converge on
+ * the same trackToolInvocation call, so without this the two are indistinguishable
+ * downstream — the gap that made the 30d error analysis report a 203–2,516 range
+ * instead of a number (docs/telemetry/error-tracking-value-analysis.md, Q4).
+ *
+ * - 'returned' — the handler returned { isError: true }. Handled, no exception,
+ *   no stack trace, never sent to captureException.
+ * - 'thrown'   — the handler threw. Real exception with a stack, and the only
+ *   kind forwarded to PostHog error tracking (UserInputError excepted).
+ *
+ * Only 'thrown' failures can benefit from stack traces, so this is the field that
+ * makes "how many real crashes do we have" answerable.
+ */
+type ErrorOrigin = 'thrown' | 'returned';
+
 interface TelemetryEvent {
     name: string;
     timestamp: number;
@@ -69,6 +85,7 @@ interface TelemetryEvent {
     errorCategory?: ErrorCategory;
     errorMessage?: string;
     errorContext?: string; // Additional context like the expression that caused the error
+    errorOrigin?: ErrorOrigin; // How the failure reached telemetry — see ErrorOrigin
     inputTokens?: number;
     outputTokens?: number;
     targetPlatform?: string;
@@ -108,19 +125,62 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
             return 'driver_missing';
         }
     }
+    // Genuine JS runtime faults — the only signal that means "something actually
+    // broke at runtime". Checked before 'network' because that rule matches the
+    // bare substring 'fetch', which would swallow "TypeError: fetch is not a
+    // function", and before the Hermes guards below so a real fault inside an
+    // evaluated expression is not mistaken for an unsupported-syntax rejection.
+    if (lower.includes('typeerror') || lower.includes('referenceerror') || lower.includes('rangeerror') ||
+        lower.includes('is not a function') || lower.includes('is not defined') ||
+        lower.includes('cannot read propert') || lower.includes('maximum call stack') ||
+        lower.includes('is not an object')) {
+        return 'execution';
+    }
     if (lower.includes('websocket') || lower.includes('econnrefused') || lower.includes('socket') || lower.includes('fetch')) {
         return 'network';
     }
     if (lower.includes('timeout') || lower.includes('timed out')) {
         return 'timeout';
     }
+    // Hermes eval guards. These reject an unsupported expression before anything
+    // runs, so they are agent-input mistakes, not runtime faults — but they say
+    // "Hermes Runtime.evaluate", which the generic execution rule below matches.
+    // In the 30d window ending 2026-08-01 that misfire was the *entire* contents
+    // of the execution category (203 events), hiding real faults in 'unknown'.
+    if (lower.includes('hermes') && (lower.includes('not supported') || lower.includes('not available'))) {
+        return 'validation';
+    }
     // Check connection errors before validation (since "no debuggable devices found" contains "no")
     if (lower.includes('no apps connected') || lower.includes('scan_metro') || lower.includes('not connected') ||
         lower.includes('no debuggable devices') || lower.includes('no metro server') || lower.includes('connection failed')) {
         return 'connection';
     }
+    // App-state / environment problems: the tooling is fine, the app or device
+    // is not in a usable state. Grouped with 'connection' rather than earning a
+    // new category so the existing dashboard blob6 mapping stays valid.
+    if (lower.includes('react devtools hook') || lower.includes('no android device connected') ||
+        lower.includes('no ios device connected') || lower.includes('app is not available')) {
+        return 'connection';
+    }
+    // A native helper ran and failed (as opposed to being absent — driver_missing
+    // above already claimed that case). Real execution faults, and the ones most
+    // likely to be environment-specific and unreproducible locally.
+    if (lower.includes('command failed:')) {
+        return 'execution';
+    }
     // Syntax/compilation errors in JS code
     if (lower.includes('compiling js failed') || lower.includes('syntaxerror')) {
+        return 'validation';
+    }
+    // Agent-input and UI-state guards: the tool refused before doing anything
+    // because the request did not describe a reachable target. Placed after the
+    // connection checks so "No connected device matches …" only lands here when
+    // devices *are* connected and the name simply did not match — when nothing
+    // is connected the message carries the scan_metro hint and is a connection
+    // problem instead.
+    if (lower.includes('no focused textinput') || lower.includes('must provide at least one') ||
+        lower.includes('not visible on screen') || lower.includes('no component found') ||
+        lower.includes('no connected device matches') || lower.includes('redux-shaped store')) {
         return 'validation';
     }
     if (lower.includes('invalid') || lower.includes('required') || lower.includes('missing')) {
@@ -380,7 +440,8 @@ export function trackToolInvocation(
     ocrClosestMatch?: string,
     fiberPressableCount?: string,
     accessibilityMatchCount?: string,
-    appRoute?: string
+    appRoute?: string,
+    errorOrigin?: ErrorOrigin
 ): void {
     // Append to local JSONL file for local dashboard (dev mode only)
     if (isDevMode()) try {
@@ -395,6 +456,7 @@ export function trackToolInvocation(
         if (!success && errorMessage) {
             localEvent.errorCategory = categorizeError(errorMessage, errorContext);
             localEvent.errorMessage = errorMessage.substring(0, 200);
+            if (errorOrigin) localEvent.errorOrigin = errorOrigin;
         }
         // Always propagate errorContext when provided — unmeaningful taps are success=true
         // but still carry triage context (predicate, strategy chain) that must reach blob8.
@@ -472,6 +534,7 @@ export function trackToolInvocation(
     if (!success && errorMessage) {
         event.errorCategory = categorizeError(errorMessage, errorContext);
         event.errorMessage = errorMessage.substring(0, 200);
+        if (errorOrigin) event.errorOrigin = errorOrigin;
     }
     // Always propagate errorContext when provided — unmeaningful taps are success=true
     // but still carry triage context (predicate, strategy chain) that must reach blob8.
@@ -521,6 +584,7 @@ export function trackToolInvocation(
                 if (event.errorCategory) phProps.error_category = event.errorCategory;
                 if (event.errorMessage) phProps.error_message = event.errorMessage;
                 if (event.errorContext) phProps.error_context = event.errorContext;
+                if (event.errorOrigin) phProps.error_origin = event.errorOrigin;
                 if (targetPlatform) phProps.target_platform = targetPlatform;
                 if (emptyResult !== undefined) phProps.empty_result = emptyResult;
                 if (meaningful !== undefined) phProps.meaningful = meaningful;
