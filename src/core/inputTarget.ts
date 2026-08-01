@@ -60,6 +60,13 @@ export type InputMissing = {
     /** True when the target matched several inputs and none was chosen. */
     ambiguous?: boolean;
     candidates?: InputCandidate[];
+    /**
+     * How many inputs exist in total. The candidate list is capped, and a cap
+     * that is not reported reads as "this is everything" — which is how a
+     * caller concludes the field it wants is absent when it is simply beyond
+     * the cut.
+     */
+    totalInputs?: number;
 };
 
 export type InputResult = InputFound | InputMissing;
@@ -286,7 +293,8 @@ function prelude(query: InputQuery | undefined): string {
       reason: targeted
         ? ("no TextInput matched that target (" + __eb_inputs.length + " input(s) mounted)")
         : ${JSON.stringify(NO_FOCUS_REASON)},
-      candidates: candidates
+      candidates: candidates,
+      totalInputs: __eb_inputs.length
     };
   }
 
@@ -296,7 +304,8 @@ function prelude(query: InputQuery | undefined): string {
       return {
         found: false,
         reason: "index " + __eb_index + " is out of range — " + __eb_matches.length + " input(s) matched",
-        candidates: __eb_matches.map(__eb_describe)
+        candidates: __eb_matches.map(__eb_describe),
+        totalInputs: __eb_inputs.length
       };
     }
   } else if (__eb_matches.length > 1) {
@@ -304,7 +313,8 @@ function prelude(query: InputQuery | undefined): string {
       found: false,
       ambiguous: true,
       reason: __eb_matches.length + " inputs match this target — pass index to choose one, or target more precisely",
-      candidates: __eb_matches.map(__eb_describe)
+      candidates: __eb_matches.map(__eb_describe),
+      totalInputs: __eb_inputs.length
     };
   }
 

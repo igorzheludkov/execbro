@@ -82,6 +82,38 @@ describe("formatTextEntryResponse", () => {
         expect(r.content[0].text).toContain("UNVERIFIED");
     });
 
+    it("says how many inputs were left out of a capped list", () => {
+        // A cap that is not reported reads as "this is everything", which is how
+        // a caller concludes its field is absent when it is simply past the cut.
+        const r = formatTextEntryResponse({
+            success: false,
+            error: "no focused TextInput",
+            totalInputs: 19,
+            candidates: Array.from({ length: 12 }, (_, i) => ({
+                index: i,
+                component: "FormInput",
+                label: `field ${i}`,
+                placeholder: null,
+                value: null,
+                testID: null
+            }))
+        });
+        expect(r.content[0].text).toContain("showing 12 of 19");
+    });
+
+    it("does not claim truncation when the whole list is shown", () => {
+        const r = formatTextEntryResponse({
+            success: false,
+            error: "no focused TextInput",
+            totalInputs: 2,
+            candidates: [
+                { index: 0, component: "FormInput", label: "a", placeholder: null, value: null, testID: null },
+                { index: 1, component: "FormInput", label: "b", placeholder: null, value: null, testID: null }
+            ]
+        });
+        expect(r.content[0].text).not.toContain("showing");
+    });
+
     it("lists inputs on screen when nothing matched at all", () => {
         const r = formatTextEntryResponse({
             success: false,

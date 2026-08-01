@@ -28,6 +28,8 @@ export type TextEntryResult = {
     landed?: string | null;
     ambiguous?: boolean;
     candidates?: InputCandidate[];
+    /** Total inputs mounted, so a capped candidate list cannot read as complete. */
+    totalInputs?: number;
 };
 
 export type TextEntryDeps = {
@@ -64,7 +66,8 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
             success: false,
             error: target.reason,
             ...(target.ambiguous && { ambiguous: true }),
-            ...(target.candidates && { candidates: target.candidates })
+            ...(target.candidates && { candidates: target.candidates }),
+            ...(target.totalInputs !== undefined && { totalInputs: target.totalInputs })
         };
     }
 

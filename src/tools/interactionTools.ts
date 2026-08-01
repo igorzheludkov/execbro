@@ -821,7 +821,13 @@ export function formatTextEntryResponse(r: TextEntryResult): {
         if (r.sent !== undefined) lines.push(`  sent:   ${JSON.stringify(r.sent)}`);
         if (r.landed !== undefined) lines.push(`  landed: ${JSON.stringify(r.landed)}`);
         if (r.candidates?.length) {
-            lines.push(r.ambiguous ? "  matching inputs:" : "  inputs on screen:");
+            // Never let a capped list read as the complete picture — that is how
+            // a caller concludes its field is absent when it is past the cut.
+            const hidden =
+                !r.ambiguous && r.totalInputs !== undefined && r.totalInputs > r.candidates.length
+                    ? ` (showing ${r.candidates.length} of ${r.totalInputs})`
+                    : "";
+            lines.push(r.ambiguous ? "  matching inputs:" : `  inputs on screen${hidden}:`);
             for (const c of r.candidates) {
                 const bits = [
                     c.label ? `label:${JSON.stringify(c.label)}` : null,
