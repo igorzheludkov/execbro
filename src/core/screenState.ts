@@ -2,6 +2,7 @@ import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
+import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 
 // ============================================================================
 // Types matching the spec response shape
@@ -743,8 +744,10 @@ export async function getScreenState(
     // as no-own-label so the icon child still surfaces (the count is kept as nearby text).
     var COUNT_BADGE = /^\\d{1,3}\\+?$/;
 
-    var RN_PRIMITIVES = /^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|ScrollViewContext(Base)?|VirtualizedListContext(Resetter)?|TextInputContext|KeyboardAvoidingViewContext|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/;
-    var GENERIC_COMPONENT = /^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText|Unknown)$/;
+    // Shared with the input resolver — see injectedFilters.ts for why these must
+    // not diverge (an agent reads a name here and passes it back as a target).
+    var RN_PRIMITIVES = ${RN_PRIMITIVES_SRC};
+    var GENERIC_COMPONENT = ${GENERIC_COMPONENT_SRC};
     var PDV_OWNER_COMPONENT = /^(Pressable|Touchable(Opacity|Highlight|WithoutFeedback|NativeFeedback|Bounce))$/;
 
     var PAGE_COMPONENT = /^(.*Screen|.*Page|.*View$|.*Container$|.*Layout$|.*Root$|ExpoRoot|App$)/;

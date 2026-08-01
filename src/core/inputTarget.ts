@@ -18,8 +18,23 @@
 export type InputQuery = {
     testID?: string;
     component?: string;
+    /** Matches the input's value, placeholder, accessibilityLabel or visible field label. */
     textMatch?: string;
+    /** Zero-based choice among matches. Required when a target matches more than one input. */
+    index?: number;
 };
+
+/** What an agent needs to tell two inputs apart and target the right one. */
+export type InputCandidate = {
+    index: number;
+    component: string | null;
+    label: string | null;
+    placeholder: string | null;
+    value: string | null;
+    testID: string | null;
+};
+
+import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 
 export type InputOp =
     | { kind: "find" }
@@ -42,7 +57,9 @@ export type InputFound = {
 export type InputMissing = {
     found: false;
     reason: string;
-    candidates?: string[];
+    /** True when the target matched several inputs and none was chosen. */
+    ambiguous?: boolean;
+    candidates?: InputCandidate[];
 };
 
 export type InputResult = InputFound | InputMissing;
@@ -86,6 +103,9 @@ function prelude(query: InputQuery | undefined): string {
     return sn;
   }
 
+  var RN_PRIMITIVES = ${RN_PRIMITIVES_SRC};
+  var GENERIC_COMPONENT = ${GENERIC_COMPONENT_SRC};
+
   function __eb_owner(hostFiber) {
     for (var p = hostFiber; p; p = p.return) {
       if (p.memoizedProps && typeof p.memoizedProps.onChangeText === "function") return p;
@@ -93,22 +113,84 @@ function prelude(query: InputQuery | undefined): string {
     return null;
   }
 
-  // Nearest testID at or above the host, so a testID set on the RN <TextInput>
-  // wrapper still matches its host descendant.
+  // testID at the host or its controlling owner ONLY — never an arbitrary
+  // ancestor. Climbing freely picks up a ScrollView's internal nativeID: on a
+  // 7-field form every input answered to testID "7", so one target matched
+  // them all. nativeID is accepted only as a fallback on those same two fibers.
   function __eb_testIDOf(hostFiber) {
-    for (var p = hostFiber; p; p = p.return) {
-      var mp = p.memoizedProps;
-      if (mp && (mp.testID || mp.nativeID)) return mp.testID || mp.nativeID;
+    var owner = __eb_owner(hostFiber);
+    var scope = owner && owner !== hostFiber ? [hostFiber, owner] : [hostFiber];
+    var s;
+    for (s = 0; s < scope.length; s++) {
+      var mp = scope[s].memoizedProps;
+      if (mp && mp.testID) return mp.testID;
+    }
+    for (s = 0; s < scope.length; s++) {
+      var mp2 = scope[s].memoizedProps;
+      if (mp2 && mp2.nativeID) return mp2.nativeID;
+    }
+    return null;
+  }
+
+  // The authored component name, resolved exactly as get_screen_state resolves
+  // it — capped composite climb, skipping framework wrappers. Without the
+  // filters every input reports "TextAncestorContext", which names nothing and
+  // matches everything.
+  function __eb_componentFiber(hostFiber) {
+    var an = hostFiber.return;
+    var composites = 0;
+    var dep = 0;
+    while (an && dep < 12 && composites < 4) {
+      if (typeof an.type !== "string" && an.type !== null) {
+        var n = __eb_name(an);
+        if (n) {
+          composites++;
+          if (!RN_PRIMITIVES.test(n) && !GENERIC_COMPONENT.test(n)) return an;
+        }
+      }
+      an = an.return;
+      dep++;
     }
     return null;
   }
 
   function __eb_componentOf(hostFiber) {
-    for (var p = hostFiber; p; p = p.return) {
-      var n = __eb_name(p.type);
-      if (n && n.length > 0 && HOSTS.indexOf(n) === -1) return n;
-    }
-    return null;
+    var cf = __eb_componentFiber(hostFiber);
+    return cf ? __eb_name(cf) : null;
+  }
+
+  // The field's visible label — the text the wrapper renders beside the input
+  // ("First Name"), which is how a human identifies a field and how
+  // get_screen_state prints it. Host input subtrees are skipped so a field's
+  // own value never becomes its label.
+  function __eb_labelOf(hostFiber) {
+    var cf = __eb_componentFiber(hostFiber);
+    if (!cf) return null;
+    var parts = [];
+    (function collect(f, d) {
+      if (!f || d > 12 || parts.length >= 4) return;
+      if (HOSTS.indexOf(__eb_name(f.type)) !== -1) return;
+      var mp = f.memoizedProps;
+      if (mp && typeof mp.children === "string" && mp.children.trim().length > 0) {
+        parts.push(mp.children.trim());
+      }
+      if (f.child) collect(f.child, d + 1);
+      if (f.sibling) collect(f.sibling, d);
+    })(cf.child, 0);
+    return parts.length ? parts.join(" ").slice(0, 80) : null;
+  }
+
+  function __eb_describe(hostFiber, idx) {
+    var o = __eb_owner(hostFiber);
+    var op = o ? o.memoizedProps : {};
+    return {
+      index: idx,
+      component: __eb_componentOf(hostFiber),
+      label: __eb_labelOf(hostFiber),
+      placeholder: op.placeholder != null ? String(op.placeholder) : null,
+      value: op.value != null ? String(op.value) : null,
+      testID: __eb_testIDOf(hostFiber)
+    };
   }
 
   var __eb_inputs = [];
@@ -122,48 +204,74 @@ function prelude(query: InputQuery | undefined): string {
   }
   if (__eb_inputs.length === 0) return { found: false, reason: "no TextInput found on screen" };
 
-  var __eb_host = null;
+  // EVERY match is collected. Taking the first silently is how a form gets the
+  // right text written into the wrong field and still verifies clean — the
+  // exact class of confident-but-wrong result this tool exists to remove.
+  var __eb_matches = [];
   var i;
   if (wantTestID !== null) {
     for (i = 0; i < __eb_inputs.length; i++) {
-      if (__eb_testIDOf(__eb_inputs[i]) === wantTestID) { __eb_host = __eb_inputs[i]; break; }
+      if (__eb_testIDOf(__eb_inputs[i]) === wantTestID) __eb_matches.push(__eb_inputs[i]);
     }
   } else if (wantComponent !== null) {
     var wc = String(wantComponent).toLowerCase();
     for (i = 0; i < __eb_inputs.length; i++) {
       var cn = __eb_componentOf(__eb_inputs[i]);
-      if (cn && cn.toLowerCase().indexOf(wc) !== -1) { __eb_host = __eb_inputs[i]; break; }
+      if (cn && cn.toLowerCase().indexOf(wc) !== -1) __eb_matches.push(__eb_inputs[i]);
     }
   } else if (wantText !== null) {
     var wt = String(wantText).toLowerCase();
     for (i = 0; i < __eb_inputs.length; i++) {
       var o = __eb_owner(__eb_inputs[i]);
-      var mp2 = o ? o.memoizedProps : {};
-      var hay = String((mp2.value || "") + " " + (mp2.placeholder || "")).toLowerCase();
-      if (hay.indexOf(wt) !== -1) { __eb_host = __eb_inputs[i]; break; }
+      var mp3 = o ? o.memoizedProps : {};
+      var hay = String(
+        (mp3.value || "") + " " + (mp3.placeholder || "") + " " +
+        (mp3.accessibilityLabel || "") + " " + (__eb_labelOf(__eb_inputs[i]) || "")
+      ).toLowerCase();
+      if (hay.indexOf(wt) !== -1) __eb_matches.push(__eb_inputs[i]);
     }
   } else {
     for (i = 0; i < __eb_inputs.length; i++) {
       var pf = __eb_pub(__eb_inputs[i]);
-      if (pf && pf.isFocused && pf.isFocused()) { __eb_host = __eb_inputs[i]; break; }
+      if (pf && pf.isFocused && pf.isFocused()) __eb_matches.push(__eb_inputs[i]);
     }
   }
 
-  if (!__eb_host) {
+  var targeted = (wantTestID !== null || wantComponent !== null || wantText !== null);
+
+  if (__eb_matches.length === 0) {
     var candidates = [];
-    for (var c = 0; c < __eb_inputs.length && candidates.length < 8; c++) {
-      var tid = __eb_testIDOf(__eb_inputs[c]);
-      if (tid && candidates.indexOf(tid) === -1) candidates.push(tid);
+    for (var c = 0; c < __eb_inputs.length && candidates.length < 12; c++) {
+      candidates.push(__eb_describe(__eb_inputs[c], c));
     }
-    var targeted = (wantTestID !== null || wantComponent !== null || wantText !== null);
     return {
       found: false,
       reason: targeted
-        ? ("no TextInput matched that target (" + __eb_inputs.length + " input(s) on screen)")
+        ? ("no TextInput matched that target (" + __eb_inputs.length + " input(s) mounted)")
         : ${JSON.stringify(NO_FOCUS_REASON)},
       candidates: candidates
     };
   }
+
+  var __eb_index = ${typeof query?.index === "number" ? String(query.index) : "null"};
+  if (__eb_index !== null) {
+    if (__eb_index < 0 || __eb_index >= __eb_matches.length) {
+      return {
+        found: false,
+        reason: "index " + __eb_index + " is out of range — " + __eb_matches.length + " input(s) matched",
+        candidates: __eb_matches.map(__eb_describe)
+      };
+    }
+  } else if (__eb_matches.length > 1) {
+    return {
+      found: false,
+      ambiguous: true,
+      reason: __eb_matches.length + " inputs match this target — pass index to choose one, or target more precisely",
+      candidates: __eb_matches.map(__eb_describe)
+    };
+  }
+
+  var __eb_host = __eb_matches[__eb_index === null ? 0 : __eb_index];
 
   var __eb_ownerFiber = __eb_owner(__eb_host);
   var __eb_pubi = __eb_pub(__eb_host);
