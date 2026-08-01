@@ -45,6 +45,8 @@ export type TextEntryDeps = {
      * into props, so this is the only way to verify a write into one.
      */
     readNativeFields?: () => Promise<NativeFieldsResult>;
+    /** Injected so the native read-back's settle poll is testable without waiting. */
+    delay?: (ms: number) => Promise<void>;
 };
 
 /**
@@ -124,7 +126,24 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         if (!focused.ok) return { success: false, error: focused.via ?? "could not focus the input" };
     }
 
-    const previous = target.value ?? "";
+    // An uncontrolled field's current text is not in props, so `target.value` is
+    // always null for one. Taking that as "" made append silently behave as
+    // replace, and the retry then CLEARED the field to make the wrong answer
+    // verify clean. The accessibility tree is the only place the real previous
+    // text exists, so it has to be read before `desired` is computed.
+    let nativeBefore: NativeField[] = [];
+    const usesNativeReadBack = !target.controlled && deps.readNativeFields !== undefined;
+    let previous = target.value ?? "";
+    let previousKnown = target.controlled;
+    if (usesNativeReadBack) {
+        nativeBefore = (await deps.readNativeFields!()).fields;
+        const current = resolveWrittenField(nativeBefore, nativeBefore, target.testID);
+        if (current && current.text !== null) {
+            previous = current.text;
+            previousKnown = true;
+        }
+    }
+
     const desired = args.replace ? args.text : previous + args.text;
 
     // Three paths, chosen by what the field can actually honour:
@@ -141,42 +160,59 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     //                            offer; firing the handler is what keeps the
     //                            app from missing text the field displays.
     //   uncontrolled, no handler -> setNativeProps. Nothing to fire.
-    const write = async (): Promise<{ path: WritePath; ok: boolean; error?: string }> => {
+    // `fromEmpty` says whether the field was just cleared. It matters only for
+    // HID, which appends at the caret rather than setting a value: typing the
+    // delta into a populated field is right, but typing it into a cleared one
+    // would lose whatever came before.
+    const write = async (fromEmpty: boolean): Promise<{ path: WritePath; ok: boolean; error?: string }> => {
         if (target.controlled) {
             const r = await deps.runOp({ kind: "setValue", value: desired }, q, args.device);
             return { path: "react", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
         }
         if (target.hasOnChangeText && isHidTypeable(args.text)) {
-            const r = await deps.typeHid(args.text);
+            const r = await deps.typeHid(fromEmpty ? desired : args.text);
             return { path: "hid", ok: r.success, error: r.error };
         }
         const r = await deps.runOp({ kind: "setNative", value: desired }, q, args.device);
         return { path: "native", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
     };
 
-    // An uncontrolled field has no readable prop, so its read-back comes from
-    // the accessibility tree. `undefined` means "could not determine" and must
-    // surface as unverified — never as a mismatch, which is what comparing
-    // against an always-null read produced before.
-    let nativeBefore: NativeField[] = [];
-    const usesNativeReadBack = !target.controlled && deps.readNativeFields !== undefined;
-    if (usesNativeReadBack) {
-        nativeBefore = (await deps.readNativeFields!()).fields;
-    }
-
+    // `undefined` from readBack means "could not determine" and must surface as
+    // unverified — never as a mismatch, which is what comparing against an
+    // always-null read produced before.
     const readBack = async (): Promise<string | null | undefined> => {
         if (target.controlled) {
             const r = await deps.runOp({ kind: "read" }, q, args.device);
             return r.found ? r.value : null;
         }
         if (!usesNativeReadBack) return undefined;
-        const after = await deps.readNativeFields!();
-        if (after.error) return undefined;
-        const hit = resolveWrittenField(nativeBefore, after.fields, target.testID);
-        return hit ? hit.text : undefined;
+        // A native write updates the view asynchronously, and the accessibility
+        // dump is a separate process — reading immediately captures the state
+        // from before the write. Poll until the text appears, then stop. Going
+        // through MCP hid this because the call latency happened to cover it.
+        const wait = deps.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+        let last: string | null | undefined;
+        for (const ms of [0, 250, 500]) {
+            if (ms > 0) await wait(ms);
+            const after = await deps.readNativeFields!();
+            if (after.error) {
+                last = undefined;
+                continue;
+            }
+            const hit = resolveWrittenField(nativeBefore, after.fields, target.testID);
+            last = hit ? hit.text : undefined;
+            if (last === desired) return last;
+        }
+        return last;
     };
 
-    const first = await write();
+    // HID appends at the caret, so a replace must clear first or it concatenates.
+    const needsClearFirst =
+        args.replace === true && !target.controlled && target.hasOnChangeText &&
+        isHidTypeable(args.text) && previous.length > 0;
+    if (needsClearFirst) await deps.runOp({ kind: "clear" }, q, args.device);
+
+    const first = await write(needsClearFirst);
     if (!first.ok) {
         // A failed replace already cleared the field. Put it back rather than
         // leaving the user's data destroyed with no mention of it.
@@ -213,8 +249,13 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     let retried = false;
     if (landed !== desired) {
         retried = true;
-        await deps.runOp({ kind: "clear" }, q, args.device);
-        const second = await write();
+        // Clear only for HID, which appends at the caret. The other paths set
+        // the whole value, so a clear is redundant — and actively harmful:
+        // publicInstance.clear() after HID typing races the setNativeProps that
+        // follows and wipes it, which made every non-ASCII retry land empty.
+        const clearedForRetry = first.path === "hid";
+        if (clearedForRetry) await deps.runOp({ kind: "clear" }, q, args.device);
+        const second = await write(clearedForRetry);
         if (!second.ok) {
             return { success: false, path: second.path, retried, error: second.error ?? "rewrite failed" };
         }
@@ -238,7 +279,10 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
             retried,
             sent: desired,
             landed,
-            error: `text landed differently than it was sent${diagnoseMismatch(desired, landed)}`
+            error: `text landed differently than it was sent${diagnoseMismatch(desired, landed)}` +
+                (!previousKnown && !args.replace
+                    ? " — note the field's prior text could not be read, so the appended result was predicted from an empty starting point; pass replace:true to write an exact value"
+                    : "")
         };
     }
 

@@ -37,16 +37,18 @@ describe("enterText", () => {
 
     it("retries once on a mismatch and succeeds", async () => {
         // The reproduced corruption is a reorder: CASEB landed as CSEBA.
+        // No clear between attempts: setValue sets the whole value, so clearing
+        // first is redundant (and on the native path, harmful).
         const d = deps([
             found(),
             found({ value: "CASEB" }),
             found({ value: "CSEBA" }),
-            found({ value: "" }),
             found({ value: "CASEB" }),
             found({ value: "CASEB" })
         ]);
         const r = await enterText({ text: "CASEB" }, d);
         expect(r).toMatchObject({ success: true, value: "CASEB", retried: true, verified: true });
+        expect(opsOf(d)).not.toContain("clear");
     });
 
     it("fails hard when the mismatch survives the retry", async () => {
@@ -54,7 +56,6 @@ describe("enterText", () => {
             found(),
             found({ value: "CASEB" }),
             found({ value: "CSEBA" }),
-            found({ value: "" }),
             found({ value: "CASEB" }),
             found({ value: "CSEBA" })
         ]);
@@ -257,5 +258,72 @@ describe("isHidTypeable", () => {
         expect(isHidTypeable("Señor")).toBe(false);
         expect(isHidTypeable("á")).toBe(false);
         expect(isHidTypeable("über")).toBe(false);
+    });
+});
+
+describe("append and replace on an uncontrolled field", () => {
+    const nativeDeps = (fields: Array<{ id: string | null; text: string | null; focused: boolean }>) => ({
+        readNativeFields: jest.fn(async () => ({ fields }))
+    });
+
+    it("reads the prior text from accessibility so append does not behave as replace", async () => {
+        // target.value is always null for an uncontrolled field, so treating it
+        // as "" made append overwrite — and the retry then cleared the field,
+        // making the wrong answer verify clean.
+        const d = deps([found({ controlled: false, hasOnChangeText: true, testID: "f", value: null })], {
+            ...nativeDeps([{ id: "f", text: "abc", focused: true }])
+        });
+        await enterText({ text: "de", testID: "f" }, d);
+        expect(d.typeHid).toHaveBeenCalledWith("de");
+    });
+
+    it("clears before an HID replace, since typing appends at the caret", async () => {
+        const d = deps([found({ controlled: false, hasOnChangeText: true, testID: "f", value: null })], {
+            ...nativeDeps([{ id: "f", text: "old", focused: true }])
+        });
+        await enterText({ text: "new", testID: "f", replace: true }, d);
+        const ops = (d.runOp as jest.Mock).mock.calls.map((c) => (c[0] as InputOp).kind);
+        expect(ops).toContain("clear");
+        // After a clear the caret is at the start, so the full value is typed.
+        expect(d.typeHid).toHaveBeenCalledWith("new");
+    });
+
+    it("does not clear when the field is already empty", async () => {
+        // The read must reflect the write, or verification mismatches and the
+        // retry clears — which would mask what this test is checking.
+        let call = 0;
+        const d = deps([found({ controlled: false, hasOnChangeText: true, testID: "f", value: null })], {
+            readNativeFields: jest.fn(async () => ({
+                fields: [{ id: "f", text: call++ === 0 ? "" : "new", focused: true }]
+            }))
+        });
+        const r = await enterText({ text: "new", testID: "f", replace: true }, d);
+        expect(r.verified).toBe(true);
+        const ops = (d.runOp as jest.Mock).mock.calls.map((c) => (c[0] as InputOp).kind);
+        expect(ops).not.toContain("clear");
+    });
+});
+
+describe("retry clearing", () => {
+    it("does not clear before retrying a native write", async () => {
+        // publicInstance.clear() races the setNativeProps that follows it, which
+        // made every non-ASCII retry land empty on a real device. The native
+        // path sets the whole value, so the clear was redundant anyway.
+        const d = deps([found({ controlled: false, hasOnChangeText: false, testID: "f", value: null })], {
+            readNativeFields: jest.fn(async () => ({ fields: [{ id: "f", text: "stale", focused: true }] }))
+        });
+        await enterText({ text: "Привіт", testID: "f", replace: true }, d);
+        const ops = (d.runOp as jest.Mock).mock.calls.map((c) => (c[0] as InputOp).kind);
+        expect(ops).toContain("setNative");
+        expect(ops).not.toContain("clear");
+    });
+
+    it("still clears before retrying an HID write, which appends", async () => {
+        const d = deps([found({ controlled: false, hasOnChangeText: true, testID: "f", value: null })], {
+            readNativeFields: jest.fn(async () => ({ fields: [{ id: "f", text: "stale", focused: true }] }))
+        });
+        await enterText({ text: "abc", testID: "f", replace: true }, d);
+        const ops = (d.runOp as jest.Mock).mock.calls.map((c) => (c[0] as InputOp).kind);
+        expect(ops).toContain("clear");
     });
 });

@@ -94,8 +94,18 @@ export const readNativeFields: NativeFieldsReader = async (platform, deviceId) =
             return { fields: parseIosFields(stdout) };
         }
         const target = deviceId ? `-s ${deviceId}` : "";
-        await execAsync(`adb ${target} shell uiautomator dump /sdcard/execbro-ui.xml`, { timeout: 20_000 });
-        const { stdout } = await execAsync(`adb ${target} shell cat /sdcard/execbro-ui.xml`, { timeout: 20_000 });
+        const path = "/sdcard/execbro-ui.xml";
+        // Delete before dumping. `uiautomator dump` fails outright when the UI
+        // never reaches idle — a blinking caret in a focused field is enough —
+        // and `cat` would then return the PREVIOUS dump. Reading stale text as
+        // if it were current is worse than reporting nothing.
+        await execAsync(`adb ${target} shell rm -f ${path}`, { timeout: 10_000 }).catch(() => undefined);
+        const dump = await execAsync(`adb ${target} shell uiautomator dump ${path}`, { timeout: 20_000 });
+        const { stdout } = await execAsync(`adb ${target} shell cat ${path}`, { timeout: 20_000 });
+        if (!stdout.includes("<node")) {
+            const why = `${dump.stdout} ${dump.stderr}`.trim().replace(/\s+/g, " ").slice(0, 160);
+            return { fields: [], error: `uiautomator dump produced no hierarchy${why ? `: ${why}` : ""}` };
+        }
         return { fields: parseAndroidFields(stdout) };
     } catch (e) {
         return { fields: [], error: e instanceof Error ? e.message : String(e) };
