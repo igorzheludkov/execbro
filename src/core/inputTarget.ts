@@ -49,6 +49,13 @@ export type InputFound = {
     focused: boolean;
     nativeTag: number | null;
     value: string | null;
+    /** The resolved field's testID, so a native read-back can find the same one. */
+    testID: string | null;
+    /**
+     * True when the field's value prop mirrors its text — the only way to read
+     * it back from JS, and therefore the only way a write can be verified.
+     */
+    controlled: boolean;
     hasOnChangeText: boolean;
     ok: boolean;
     via?: string;
@@ -322,7 +329,15 @@ function prelude(query: InputQuery | undefined): string {
 
   var __eb_ownerFiber = __eb_owner(__eb_host);
   var __eb_pubi = __eb_pub(__eb_host);
-  var __eb_value = __eb_ownerFiber && __eb_ownerFiber.memoizedProps.value != null
+  // Controlled means the value prop MIRRORS the field's text — the only way to
+  // read a field back from JS. RN does not reflect native text into fiber props
+  // for uncontrolled inputs (verified on device: the host's text prop stays
+  // undefined after typing, though mostRecentEventCount increments; an
+  // uncontrolled field
+  // cannot be verified this way no matter which write path put the text there.
+  var __eb_controlled = !!(__eb_ownerFiber &&
+    typeof __eb_ownerFiber.memoizedProps.value === "string");
+  var __eb_value = __eb_controlled
     ? String(__eb_ownerFiber.memoizedProps.value) : null;
   var __eb_focused = !!(__eb_pubi && __eb_pubi.isFocused && __eb_pubi.isFocused());
   var __eb_tag = __eb_pubi && __eb_pubi.__nativeTag != null ? __eb_pubi.__nativeTag : null;
@@ -335,6 +350,8 @@ const BASE = `
     focused: __eb_focused,
     nativeTag: __eb_tag,
     value: __eb_value,
+    testID: __eb_testIDOf(__eb_host),
+    controlled: __eb_controlled,
     hasOnChangeText: !!__eb_ownerFiber`;
 
 export function buildInputExpression(op: InputOp, query?: InputQuery): string {
@@ -376,14 +393,17 @@ export function buildInputExpression(op: InputOp, query?: InputQuery): string {
             break;
 
         case "clear":
+            // Only a controlled field can be cleared through its handler. On an
+            // uncontrolled one that handler may be a no-op (or may not drive the
+            // text at all), so calling it clears nothing while reporting success.
             action = `
-  if (__eb_ownerFiber) {
+  if (__eb_controlled) {
     __eb_ownerFiber.memoizedProps.onChangeText("");
     return { ${BASE}, value: "", ok: true, via: "onChangeText" };
   }
   if (__eb_pubi && typeof __eb_pubi.clear === "function") {
     __eb_pubi.clear();
-    return { ${BASE}, value: "", ok: true, via: "publicInstance.clear" };
+    return { ${BASE}, value: null, ok: true, via: "publicInstance.clear" };
   }
   return { ${BASE}, ok: false, via: "input exposes no clear() method" };`;
             break;

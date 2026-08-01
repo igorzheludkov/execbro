@@ -7,6 +7,8 @@ const found = (over: Partial<Extract<InputResult, { found: true }>> = {}): Input
     focused: true,
     nativeTag: 1,
     value: null,
+    testID: null,
+    controlled: true,
     hasOnChangeText: true,
     ok: true,
     ...over
@@ -168,15 +170,32 @@ describe("enterText", () => {
         expect(raiseOrder).toBeGreaterThan(lastOp);
     });
 
-    it("falls back to HID and reports verified:false when no value can be read", async () => {
-        const d = deps([
-            found({ hasOnChangeText: false, value: null }),
-            found({ hasOnChangeText: false, value: null })
-        ]);
+    it("falls back to HID and reports verified:false for an uncontrolled field", async () => {
+        const d = deps([found({ controlled: false, hasOnChangeText: false, value: null })]);
         const r = await enterText({ text: "hi" }, d);
         expect(r.path).toBe("hid");
         expect(r.verified).toBe(false);
-        expect(r.error).toContain("could not be confirmed");
+        expect(r.error).toContain("uncontrolled");
         expect(d.typeHid).toHaveBeenCalledWith("hi");
+    });
+
+    it("uses HID even when an uncontrolled field carries an onChangeText", async () => {
+        // The test app's uncontrolled inputs pass `onChangeText={() => {}}`.
+        // Branching on the handler would take the React path, call the no-op,
+        // read back null, and report the text "landed differently than sent" —
+        // reproduced on device before this branch keyed on `controlled`.
+        const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })]);
+        const r = await enterText({ text: "Alice", testID: "name-input" }, d);
+        expect(r.path).toBe("hid");
+        expect(r.success).toBe(true);
+        expect(r.verified).toBe(false);
+        expect(d.typeHid).toHaveBeenCalledWith("Alice");
+    });
+
+    it("never reports an uncontrolled write as a mismatch", async () => {
+        const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })]);
+        const r = await enterText({ text: "Alice" }, d);
+        expect(r.sent).toBeUndefined();
+        expect(r.landed).toBeUndefined();
     });
 });

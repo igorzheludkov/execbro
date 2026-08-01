@@ -1,5 +1,6 @@
 import type { InputCandidate, InputOp, InputQuery, InputResult } from "./inputTarget.js";
 import type { RaiseResult } from "./keyboardRaise.js";
+import { resolveWrittenField, type NativeField, type NativeFieldsResult } from "./nativeInputValue.js";
 
 export type EnterTextArgs = {
     /** The text to write. */
@@ -36,7 +37,33 @@ export type TextEntryDeps = {
     runOp: (op: InputOp, query?: InputQuery, device?: string) => Promise<InputResult>;
     typeHid: (text: string) => Promise<{ success: boolean; error?: string }>;
     raise: () => Promise<RaiseResult>;
+    /**
+     * Reads the platform accessibility tree. Uncontrolled fields mirror nothing
+     * into props, so this is the only way to verify a write into one.
+     */
+    readNativeFields?: () => Promise<NativeFieldsResult>;
 };
+
+/**
+ * Names the likely cause of a mismatch. The field's own keyboard settings
+ * transform text on the way in, and "landed differently" alone sends the
+ * reader hunting for a bug in the write when the write was fine.
+ */
+export function diagnoseMismatch(sent: string, landed: string | null): string {
+    if (landed === null) return "";
+    if (landed !== sent && landed.toLowerCase() === sent.toLowerCase()) {
+        return " — only the capitalisation differs, which is the field's keyboard transforming input" +
+            " (RN TextInput defaults autoCapitalize to 'sentences'); set autoCapitalize=\"none\" to type verbatim";
+    }
+    if (landed.replace(/\s+/g, "") === sent.replace(/\s+/g, "")) {
+        return " — only whitespace differs, which is usually iOS smart punctuation or autocorrect spacing";
+    }
+    if (landed.length === sent.length && [...landed].sort().join("") === [...sent].sort().join("")) {
+        return " — the same characters arrived in a different order, which is the HID keystroke race;" +
+            " the retry already ran, so this one did not settle";
+    }
+    return "";
+}
 
 function queryOf(a: EnterTextArgs): InputQuery | undefined {
     const q: InputQuery = {};
@@ -82,8 +109,12 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     const previous = target.value ?? "";
     const desired = args.replace ? args.text : previous + args.text;
 
+    // The write path turns on whether the value is READABLE, not on whether a
+    // handler exists. An uncontrolled field can carry an onChangeText that does
+    // not drive its text — the test app's is literally `() => {}` — so the React
+    // path would report a clean write while the field never changed.
     const write = async (): Promise<{ path: "react" | "hid"; ok: boolean; error?: string }> => {
-        if (target.hasOnChangeText) {
+        if (target.controlled) {
             const r = await deps.runOp({ kind: "setValue", value: desired }, q, args.device);
             return { path: "react", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
         }
@@ -91,9 +122,26 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         return { path: "hid", ok: r.success, error: r.error };
     };
 
-    const readBack = async (): Promise<string | null> => {
-        const r = await deps.runOp({ kind: "read" }, q, args.device);
-        return r.found ? r.value : null;
+    // An uncontrolled field has no readable prop, so its read-back comes from
+    // the accessibility tree. `undefined` means "could not determine" and must
+    // surface as unverified — never as a mismatch, which is what comparing
+    // against an always-null read produced before.
+    let nativeBefore: NativeField[] = [];
+    const usesNativeReadBack = !target.controlled && deps.readNativeFields !== undefined;
+    if (usesNativeReadBack) {
+        nativeBefore = (await deps.readNativeFields!()).fields;
+    }
+
+    const readBack = async (): Promise<string | null | undefined> => {
+        if (target.controlled) {
+            const r = await deps.runOp({ kind: "read" }, q, args.device);
+            return r.found ? r.value : null;
+        }
+        if (!usesNativeReadBack) return undefined;
+        const after = await deps.readNativeFields!();
+        if (after.error) return undefined;
+        const hit = resolveWrittenField(nativeBefore, after.fields, target.testID);
+        return hit ? hit.text : undefined;
     };
 
     const first = await write();
@@ -115,16 +163,18 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
 
     let landed = await readBack();
 
-    // An uncontrolled input exposes no value to read. Say so rather than
-    // claiming a success we did not confirm.
-    if (landed === null && !target.hasOnChangeText) {
+    // Could not read the field at all — say so instead of guessing either way.
+    if (landed === undefined) {
         const keyboard = await deps.raise();
         return {
             success: true,
             path: first.path,
             verified: false,
             keyboard,
-            error: "the field exposes no readable value, so the text could not be confirmed"
+            error: target.controlled
+                ? "the value could not be read back"
+                : "this field is uncontrolled and could not be located in the accessibility tree" +
+                  (target.testID ? "" : " (it has no testID, and no single field's text changed)")
         };
     }
 
@@ -140,6 +190,15 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     }
 
     if (landed !== desired) {
+        // A read that failed only on the retry is still "unconfirmed", not a
+        // mismatch — we have no evidence about what the field holds.
+        if (landed === undefined) {
+            const keyboard = await deps.raise();
+            return {
+                success: true, path: first.path, verified: false, retried, keyboard,
+                error: "the rewrite could not be read back, so the result is unconfirmed"
+            };
+        }
         return {
             success: false,
             path: first.path,
@@ -147,7 +206,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
             retried,
             sent: desired,
             landed,
-            error: "text landed differently than it was sent"
+            error: `text landed differently than it was sent${diagnoseMismatch(desired, landed)}`
         };
     }
 

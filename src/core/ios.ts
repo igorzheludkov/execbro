@@ -1016,7 +1016,13 @@ export async function iosInputText(
     const { driver, targetUdid } = preflight;
 
     if (driver === "axe") {
-      await runAxe("type", text, "--udid", targetUdid);
+      // Submit one HID event per chunk instead of AXe's default 200. Text
+      // arriving out of order has been observed on device ("Alice" landing as
+      // "Aicel", "CASEB" as "CSEBA" — in both cases the second keystroke last),
+      // and a single large submission is the plausible cause. Measured at the
+      // same latency as plain `axe type` (1432ms vs 1519ms for 19 chars), so
+      // the serialisation is free.
+      await runAxe("batch", "--udid", targetUdid, "--type-chunk-size", "1", "--step", `type '${text.replace(/'/g, "'\\''")}'`);
     } else {
       const { stderr } = await runIdb("ui", "text", "--udid", targetUdid, text);
       if (stderr) throw new Error(stderr);

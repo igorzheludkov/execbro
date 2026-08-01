@@ -24,6 +24,7 @@ import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../cor
 import { enterText, type TextEntryResult } from "../core/textEntry.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
+import { readNativeFields } from "../core/nativeInputValue.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
@@ -790,7 +791,9 @@ export function registerInteractionTools(server: McpServer): void {
                     runOp: (op, query, dev) => runInputOp(op, query, dev),
                     typeHid: async (t) =>
                         platform === "ios" ? await iosInputText(t, iosUdid) : await androidInputText(t, androidSerial),
-                    raise: () => raiseKeyboard(platform, platform === "ios" ? iosUdid : androidSerial)
+                    raise: () => raiseKeyboard(platform, platform === "ios" ? iosUdid : androidSerial),
+                    readNativeFields: () =>
+                        readNativeFields(platform, platform === "ios" ? iosUdid : androidSerial)
                 }
             );
 
