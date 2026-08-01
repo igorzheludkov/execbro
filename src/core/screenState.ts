@@ -3,6 +3,7 @@ import { executeInApp, delay } from "./jsExecute.js";
 import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
+import type { KeyboardState } from "./keyboardMetrics.js";
 
 // ============================================================================
 // Types matching the spec response shape
@@ -145,6 +146,9 @@ export type PressableCoordConverter = ItemCoordConverter;
 
 const identityCoords: ItemCoordConverter = (item) => ({ center: item.center, frame: item.bounds });
 
+/** Stand-in when no keyboard state was read: nothing is blocked. */
+const NO_KEYBOARD: KeyboardState = { visible: false, height: null, screenY: null, width: null };
+
 const TEXT_DISPLAY_MAX = 80;
 const IMAGE_SRC_DISPLAY_MAX = 60;
 
@@ -191,6 +195,43 @@ const IMAGE_CAP = 40;
  * 80-char text truncation.
  */
 /**
+ * One line describing the keyboard, or "" when it is down and known to be.
+ *
+ * The point is layout validation: a raised keyboard shrinks the usable area,
+ * and that is exactly when bottom-anchored UI misbehaves. Reporting the height
+ * and the remaining content area makes that inspectable without a screenshot.
+ */
+export function formatKeyboardLine(k: KeyboardState): string {
+    if (k.error) return `⌨️ Keyboard: unknown (${k.error})`;
+    if (!k.visible || k.height == null || k.screenY == null) return "";
+    // Android reports fractional dp (288.3809509277344); whole points are what
+    // a reader can act on, and the sub-pixel tail only obscures the number.
+    const r = (n: number) => Math.round(n);
+    const width = k.width != null ? `${r(k.width)}x` : "";
+    return `⌨️ Keyboard: visible, ${r(k.height)}pt — content area above it ${width}${r(k.screenY)}pt`;
+}
+
+/**
+ * Splits elements the keyboard covers from those still reachable.
+ *
+ * Mirrors the existing overlay handling rather than inventing a second notion
+ * of "blocked": an element under the keyboard cannot be tapped, for the same
+ * reason and with the same consequence as one under a sheet.
+ */
+export function partitionByKeyboard<T extends { center: { x: number; y: number } }>(
+    items: T[],
+    k: KeyboardState
+): { reachable: T[]; blocked: T[] } {
+    if (!k.visible || k.screenY == null) return { reachable: items, blocked: [] };
+    const reachable: T[] = [];
+    const blocked: T[] = [];
+    for (const item of items) {
+        (item.center.y >= k.screenY ? blocked : reachable).push(item);
+    }
+    return { reachable, blocked };
+}
+
+/**
  * Renders an input's state so the value is unmistakably the value and the
  * placeholder is unmistakably a placeholder. Returns "" for non-inputs.
  */
@@ -209,7 +250,7 @@ export function formatInputState(p: ScreenStatePressable): string {
 export function formatScreenStateSummary(
     ss: ScreenState,
     convert: ItemCoordConverter = identityCoords,
-    opts: { pressablesOnly?: boolean; fullText?: boolean } = {}
+    opts: { pressablesOnly?: boolean; fullText?: boolean; keyboard?: KeyboardState } = {}
 ): string {
     const lines: string[] = [];
     if (ss.route) {
@@ -220,6 +261,10 @@ export function formatScreenStateSummary(
         }
     } else {
         lines.push("📍 Currently focused screen: unknown (no React Navigation / Expo Router detected)");
+    }
+    if (opts.keyboard) {
+        const kbLine = formatKeyboardLine(opts.keyboard);
+        if (kbLine) lines.push(kbLine);
     }
     if (ss.nativeOverlay) {
         const comp = ss.nativeOverlay.component ? ` (${ss.nativeOverlay.component})` : "";
@@ -300,10 +345,24 @@ export function formatScreenStateSummary(
             renderGroup(blockedP, blockedT, blockedI).forEach((l) => lines.push(l));
         }
     } else {
+        // A raised keyboard blocks taps exactly as an overlay does, so it gets
+        // the same treatment rather than a second notion of "blocked".
+        const kb = opts.keyboard;
+        const splitP = partitionByKeyboard(ss.pressables, kb ?? NO_KEYBOARD);
+        const splitT = partitionByKeyboard(ss.texts, kb ?? NO_KEYBOARD);
+        const splitI = partitionByKeyboard(ss.images, kb ?? NO_KEYBOARD);
+
         lines.push(opts.pressablesOnly ? "\n🎯 Pressables:" : "\n🎯 On screen:");
-        const body = renderGroup(ss.pressables, ss.texts, ss.images);
+        const body = renderGroup(splitP.reachable, splitT.reachable, splitI.reachable);
         if (body.length > 0) body.forEach((l) => lines.push(l));
         else lines.push("  (none)");
+
+        if (splitP.blocked.length > 0 || splitT.blocked.length > 0 || splitI.blocked.length > 0) {
+            lines.push(
+                "\n🚫 Blocked by keyboard (behind the raised keyboard — taps will NOT reach them until it is dismissed):"
+            );
+            renderGroup(splitP.blocked, splitT.blocked, splitI.blocked).forEach((l) => lines.push(l));
+        }
     }
     return lines.join("\n");
 }
