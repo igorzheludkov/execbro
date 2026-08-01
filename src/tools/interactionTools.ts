@@ -21,6 +21,9 @@ import {
     burstCaptureAndVerify,
 } from "../pro/verifyAction.js";
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
+import { enterText, type TextEntryResult } from "../core/textEntry.js";
+import { runInputOp } from "../core/inputTargetTools.js";
+import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
@@ -500,7 +503,7 @@ export function registerInteractionTools(server: McpServer): void {
         {
             description:
                 "Type text on an Android device/emulator." +
-                platformFallbackBanner("`tap(text=...)` — it auto-focuses TextInput via the fiber tree") +
+                platformFallbackBanner("`input_text` — it targets, focuses, writes and verifies in one call") +
                 " The text will be input at the current focus point (tap an input field first)." +
                 "\nPURPOSE: Send keystrokes to whichever input currently has focus on Android — the tool does NOT focus a field itself." +
                 "\nWHEN TO USE: Only after an input is already focused, or when `tap(text=...)` on the input didn't take focus for some reason." +
@@ -680,7 +683,7 @@ export function registerInteractionTools(server: McpServer): void {
         {
             description:
                 "Type text on an iOS simulator." +
-                platformFallbackBanner("`tap(text=...)` — it auto-focuses TextInput via the fiber tree") +
+                platformFallbackBanner("`input_text` — it targets, focuses, writes and verifies in one call") +
                 " The text is typed into whichever field currently has focus (tap an input first). Mirrors `android_input_text` so cross-platform agents can use `<platform>_input_text` without branching on the iOS driver shell-out." +
                 "\nPURPOSE: Send keystrokes to the focused field on an iOS simulator via the active UI driver (AXe — preferred — or IDB)." +
                 "\nWHEN TO USE: Only after an input is already focused, or when `tap(testID=...)` on the input didn't take focus for some reason. Use the testID-first flow whenever possible — it's faster and survives UI repositioning." +
@@ -724,4 +727,125 @@ export function registerInteractionTools(server: McpServer): void {
             };
         }
     );
+
+    // Tool: cross-platform text entry
+    registerToolWithTelemetry(
+        server,
+        "input_text",
+        {
+            description:
+                "Write text into a React Native TextInput and verify it landed." +
+                primaryInteractionBanner() +
+                "\nPURPOSE: Set a field's text and confirm, by reading the value back, that the field holds exactly what you sent." +
+                "\nWHEN TO USE: Any text entry in a React Native app. Pass testID (or component/textMatch) and this tool focuses the field itself — no separate tap needed." +
+                "\nWORKFLOW: get_screen_state to see the fields -> input_text({ testID, text }) -> read `verified`.\n" +
+                "VERIFICATION: the write is read back and compared EXACTLY. A mismatch retries once, then fails with `sent` vs `landed`. A success means the field really holds your string.\n" +
+                "AMBIGUITY: if the target matches several inputs the tool refuses and returns a numbered candidate list (label, placeholder, value, testID) — pick one with `index` rather than guessing. Forms routinely share a placeholder across every field.\n" +
+                "KEYBOARD: after the text is in, the software keyboard is raised on a best-effort basis so keyboard-up layout can be inspected. Failure there is reported, never fatal.\n" +
+                "LIMITATIONS: fields with no onChangeText (uncontrolled, or non-RN) fall back to the platform driver, which is US-keyboard only — non-ASCII fails there and the result may be verified:false.\n" +
+                "GOOD: input_text({ testID: \"new-topic-title\", text: \"Q3 budget\", replace: true })\n" +
+                "BAD: input_text({ text: \"...\" }) with nothing focused — pass a target instead.\n",
+            inputSchema: {
+                text: z.string().describe("The text to write into the field."),
+                testID: z
+                    .string()
+                    .optional()
+                    .describe("Target the input with this testID. Most reliable — the tool focuses it itself, no prior tap needed."),
+                component: z
+                    .string()
+                    .optional()
+                    .describe("Target by React component name (case-insensitive substring), e.g. 'FormInput'. Use when there is no testID."),
+                textMatch: z
+                    .string()
+                    .optional()
+                    .describe("Target by the field's visible label, placeholder, or current value (case-insensitive substring). NOTE: this picks WHICH field to write to; `text` is what gets written."),
+                index: z
+                    .number()
+                    .optional()
+                    .describe("Zero-based choice when the target matches several inputs. The response's candidate list gives the indexes."),
+                replace: z
+                    .boolean()
+                    .optional()
+                    .describe("Replace the field's contents instead of appending. Default false (append)."),
+                device: z
+                    .string()
+                    .optional()
+                    .describe("RN device name (substring match). Omit when one app is connected; see get_apps.")
+            }
+        },
+        async ({ text, testID, component, textMatch, index, replace, device }) => {
+            const resolved = await resolveDeviceTarget(device);
+            if (!resolved.ok) {
+                return {
+                    content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
+                    isError: true
+                };
+            }
+
+            const { platform, iosUdid, androidSerial } = resolved.target;
+
+            const result = await enterText(
+                { text, testID, component, textMatch, index, replace, device },
+                {
+                    runOp: (op, query, dev) => runInputOp(op, query, dev),
+                    typeHid: async (t) =>
+                        platform === "ios" ? await iosInputText(t, iosUdid) : await androidInputText(t, androidSerial),
+                    raise: () => raiseKeyboard(platform, platform === "ios" ? iosUdid : androidSerial)
+                }
+            );
+
+            return formatTextEntryResponse(result);
+        }
+    );
+}
+
+/**
+ * Renders a text-entry outcome. Two rules carry the whole design:
+ * an unverified write must never read as a plain success, and a failed
+ * keyboard raise must never read as a failed write.
+ */
+export function formatTextEntryResponse(r: TextEntryResult): {
+    content: Array<{ type: "text"; text: string }>;
+    isError?: boolean;
+} {
+    const lines: string[] = [];
+
+    if (r.success) {
+        lines.push(
+            r.verified
+                ? `Set to ${JSON.stringify(r.value)} (${r.path}, verified${r.retried ? ", retried once" : ""}).`
+                : `Wrote via ${r.path} but UNVERIFIED — ${r.error ?? "the value could not be read back"}.`
+        );
+    } else {
+        lines.push(`Error: ${r.error ?? "text entry failed"}`);
+        if (r.sent !== undefined) lines.push(`  sent:   ${JSON.stringify(r.sent)}`);
+        if (r.landed !== undefined) lines.push(`  landed: ${JSON.stringify(r.landed)}`);
+        if (r.candidates?.length) {
+            lines.push(r.ambiguous ? "  matching inputs:" : "  inputs on screen:");
+            for (const c of r.candidates) {
+                const bits = [
+                    c.label ? `label:${JSON.stringify(c.label)}` : null,
+                    c.placeholder ? `placeholder:${JSON.stringify(c.placeholder)}` : null,
+                    c.value ? `value:${JSON.stringify(c.value)}` : null,
+                    c.testID ? `testID:${JSON.stringify(c.testID)}` : null,
+                    c.component ? `<${c.component} />` : null
+                ].filter(Boolean);
+                lines.push(`    ${c.index}: ${bits.join(" ")}`);
+            }
+            if (r.ambiguous) lines.push("  Re-run with index: <n>, or target more precisely.");
+        }
+    }
+
+    if (r.keyboard) {
+        lines.push(
+            r.keyboard.raised
+                ? `  keyboard: visible${r.keyboard.changed ? " (raised)" : ""}`
+                : `  keyboard: not raised — ${r.keyboard.reason ?? "unknown"}`
+        );
+    }
+
+    return {
+        content: [{ type: "text" as const, text: lines.join("\n") }],
+        ...(r.success ? {} : { isError: true })
+    };
 }

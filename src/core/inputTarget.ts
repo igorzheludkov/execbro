@@ -133,7 +133,7 @@ function prelude(query: InputQuery | undefined): string {
     while (p && d < 30) {
       if (typeof p.type !== "string" && p.memoizedProps &&
           typeof p.memoizedProps.onChangeText === "function") {
-        var n = __eb_name(p);
+        var n = __eb_name(p.type);
         if (n && !RN_PRIMITIVES.test(n) && !GENERIC_COMPONENT.test(n)) best = p;
       }
       p = p.return;
@@ -173,7 +173,7 @@ function prelude(query: InputQuery | undefined): string {
     var dep = 0;
     while (an && dep < 12 && composites < 4) {
       if (typeof an.type !== "string" && an.type !== null) {
-        var n = __eb_name(an);
+        var n = __eb_name(an.type);
         if (n) {
           composites++;
           if (!RN_PRIMITIVES.test(n) && !GENERIC_COMPONENT.test(n)) return an;
@@ -187,7 +187,7 @@ function prelude(query: InputQuery | undefined): string {
 
   function __eb_componentOf(hostFiber) {
     var cf = __eb_componentFiber(hostFiber);
-    return cf ? __eb_name(cf) : null;
+    return cf ? __eb_name(cf.type) : null;
   }
 
   // The field's visible label — the text the wrapper renders beside the input
