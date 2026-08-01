@@ -1,5 +1,5 @@
 import { describe, expect, it, jest } from "@jest/globals";
-import { enterText, type TextEntryDeps } from "../../core/textEntry.js";
+import { enterText, isHidTypeable, type TextEntryDeps } from "../../core/textEntry.js";
 import type { InputOp, InputResult } from "../../core/inputTarget.js";
 
 const found = (over: Partial<Extract<InputResult, { found: true }>> = {}): InputResult => ({
@@ -191,6 +191,23 @@ describe("enterText", () => {
         expect(ops).toContain("setNative");
     });
 
+    it("switches an uncontrolled+handler field to setNativeProps for non-ASCII", async () => {
+        // HID has no keycode for these, so faithfulness is not on offer; the
+        // resolver's setNative also fires onChangeText, so the app still gets it.
+        for (const text of ["Привіт", "世界", "Señor", "aeñ"]) {
+            const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })]);
+            const r = await enterText({ text }, d);
+            expect(r.path).toBe("native");
+            expect(d.typeHid).not.toHaveBeenCalled();
+        }
+    });
+
+    it("keeps HID for plain ASCII, including symbols", async () => {
+        const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })]);
+        const r = await enterText({ text: "a@b.com #1 {ok}" }, d);
+        expect(r.path).toBe("hid");
+    });
+
     it("keeps HID when an uncontrolled field HAS a handler", async () => {
         // setNativeProps would set the text without firing onChangeText, so the
         // field would show text the app never received.
@@ -219,5 +236,26 @@ describe("enterText", () => {
         const r = await enterText({ text: "Alice" }, d);
         expect(r.sent).toBeUndefined();
         expect(r.landed).toBeUndefined();
+    });
+});
+
+describe("isHidTypeable", () => {
+    it("accepts printable ASCII", () => {
+        expect(isHidTypeable("Alice in Wonderland")).toBe(true);
+        expect(isHidTypeable("a@b.com !#$%^&*()_+-={}[]|\\:\";'<>?,./`~")).toBe(true);
+        expect(isHidTypeable("")).toBe(true);
+    });
+
+    it("rejects Cyrillic, CJK and emoji", () => {
+        expect(isHidTypeable("Привіт")).toBe(false);
+        expect(isHidTypeable("世界")).toBe(false);
+        expect(isHidTypeable("🎉")).toBe(false);
+    });
+
+    it("rejects Spanish accents, which look Latin but have no keycode", () => {
+        // The easy one to miss: the text is otherwise ASCII.
+        expect(isHidTypeable("Señor")).toBe(false);
+        expect(isHidTypeable("á")).toBe(false);
+        expect(isHidTypeable("über")).toBe(false);
     });
 });

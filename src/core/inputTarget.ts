@@ -401,16 +401,22 @@ export function buildInputExpression(op: InputOp, query?: InputQuery): string {
             break;
 
         case "setNative":
-            // Sets the native text without firing onChangeText. Only correct
-            // where there is no handler to fire — otherwise the field would
-            // show text the app never received.
+            // Sets the native text, then fires onChangeText if the field has
+            // one. Both halves matter: without the first the field shows
+            // nothing, without the second the app never receives the text —
+            // and a field that displays text the app does not have is the
+            // "looks right, isn't" failure this tool exists to remove.
             action = `
   var nv = ${JSON.stringify((op as { kind: "setNative"; value: string }).value)};
-  if (__eb_pubi && typeof __eb_pubi.setNativeProps === "function") {
-    __eb_pubi.setNativeProps({ text: nv });
-    return { ${BASE}, ok: true, via: "setNativeProps" };
+  if (!__eb_pubi || typeof __eb_pubi.setNativeProps !== "function") {
+    return { ${BASE}, ok: false, via: "input exposes no setNativeProps" };
   }
-  return { ${BASE}, ok: false, via: "input exposes no setNativeProps" };`;
+  __eb_pubi.setNativeProps({ text: nv });
+  if (__eb_ownerFiber) {
+    __eb_ownerFiber.memoizedProps.onChangeText(nv);
+    return { ${BASE}, value: __eb_controlled ? nv : __eb_value, ok: true, via: "setNativeProps+onChangeText" };
+  }
+  return { ${BASE}, ok: true, via: "setNativeProps" };`;
             break;
 
         case "clear":

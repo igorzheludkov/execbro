@@ -68,6 +68,21 @@ export function diagnoseMismatch(sent: string, landed: string | null): string {
     return "";
 }
 
+/**
+ * Whether the HID driver can express this text at all.
+ *
+ * AXe types US-keyboard HID keycodes: A-Z, a-z, 0-9, space and the ASCII
+ * symbols. Nothing outside that map has a keycode to send — which rules out
+ * Cyrillic and CJK, and equally Spanish accents (á, ñ, ü), a case that is easy
+ * to miss because the text otherwise looks Latin. `adb shell input text` is no
+ * better: non-ASCII throws a NullPointerException inside InputShellCommand.
+ */
+export function isHidTypeable(text: string): boolean {
+    // Printable ASCII plus tab/newline. Deliberately excludes the C1 range and
+    // anything above 0x7E.
+    return /^[\x20-\x7E\t\n]*$/.test(text);
+}
+
 function queryOf(a: EnterTextArgs): InputQuery | undefined {
     const q: InputQuery = {};
     if (a.testID != null) q.testID = a.testID;
@@ -116,26 +131,27 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     //
     //   controlled            -> onChangeText. The value prop mirrors the text,
     //                            so this both writes and stays verifiable.
-    //   uncontrolled + handler-> real keystrokes. setNativeProps would set the
-    //                            text WITHOUT firing onChangeText, so the field
-    //                            would show text the app never received — the
-    //                            "looks right, isn't" failure this tool exists
-    //                            to remove. ASCII-only and racy, but honest.
-    //   uncontrolled, no handler -> setNativeProps. Nothing to fire, so the
-    //                            objection above does not apply, and it is
-    //                            exact, instant and Unicode-safe where HID is
-    //                            none of those.
+    //   uncontrolled + handler, ASCII -> real keystrokes. The most faithful
+    //                            simulation, and the retry now catches its
+    //                            keystroke race, so the racy path is only taken
+    //                            where it can actually succeed.
+    //   uncontrolled + handler, non-ASCII -> setNativeProps AND a direct
+    //                            onChangeText call. HID cannot express these
+    //                            characters at all, so faithfulness is not on
+    //                            offer; firing the handler is what keeps the
+    //                            app from missing text the field displays.
+    //   uncontrolled, no handler -> setNativeProps. Nothing to fire.
     const write = async (): Promise<{ path: WritePath; ok: boolean; error?: string }> => {
         if (target.controlled) {
             const r = await deps.runOp({ kind: "setValue", value: desired }, q, args.device);
             return { path: "react", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
         }
-        if (!target.hasOnChangeText) {
-            const r = await deps.runOp({ kind: "setNative", value: desired }, q, args.device);
-            return { path: "native", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
+        if (target.hasOnChangeText && isHidTypeable(args.text)) {
+            const r = await deps.typeHid(args.text);
+            return { path: "hid", ok: r.success, error: r.error };
         }
-        const r = await deps.typeHid(args.text);
-        return { path: "hid", ok: r.success, error: r.error };
+        const r = await deps.runOp({ kind: "setNative", value: desired }, q, args.device);
+        return { path: "native", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
     };
 
     // An uncontrolled field has no readable prop, so its read-back comes from
