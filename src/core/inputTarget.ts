@@ -106,11 +106,40 @@ function prelude(query: InputQuery | undefined): string {
   var RN_PRIMITIVES = ${RN_PRIMITIVES_SRC};
   var GENERIC_COMPONENT = ${GENERIC_COMPONENT_SRC};
 
+  // The fiber whose onChangeText we call and whose value we read: the INNERMOST
+  // composite carrying it. Host fibers are skipped — props are spread down to
+  // them, so the host's onChangeText is the same function reached one level up,
+  // but only the composite is a documented RN contract of (text: string).
   function __eb_owner(hostFiber) {
     for (var p = hostFiber; p; p = p.return) {
+      if (typeof p.type === "string") continue;
       if (p.memoizedProps && typeof p.memoizedProps.onChangeText === "function") return p;
     }
     return null;
+  }
+
+  // The field wrapper — the OUTERMOST ancestor still carrying onChangeText.
+  //
+  // A generic capped climb cannot find this. Measured on a real form: the
+  // wrapper (FormInput) sits 10 levels above the host behind four plain Views,
+  // so a 4-composite budget is spent on Views long before reaching it, and
+  // every input resolves to nothing. get_screen_state only names it because it
+  // matches that fiber directly. onChangeText is the signal that separates a
+  // field's own wrapper from the layout Views around it.
+  function __eb_fieldFiber(hostFiber) {
+    var best = null;
+    var p = hostFiber;
+    var d = 0;
+    while (p && d < 30) {
+      if (typeof p.type !== "string" && p.memoizedProps &&
+          typeof p.memoizedProps.onChangeText === "function") {
+        var n = __eb_name(p);
+        if (n && !RN_PRIMITIVES.test(n) && !GENERIC_COMPONENT.test(n)) best = p;
+      }
+      p = p.return;
+      d++;
+    }
+    return best;
   }
 
   // testID at the host or its controlling owner ONLY — never an arbitrary
@@ -132,11 +161,13 @@ function prelude(query: InputQuery | undefined): string {
     return null;
   }
 
-  // The authored component name, resolved exactly as get_screen_state resolves
-  // it — capped composite climb, skipping framework wrappers. Without the
-  // filters every input reports "TextAncestorContext", which names nothing and
-  // matches everything.
+  // The authored component name. Prefer the field wrapper; fall back to the
+  // capped composite climb get_screen_state uses for inputs that have no
+  // wrapper of their own. The filters matter either way — without them every
+  // input reports "TextAncestorContext", which names nothing and matches all.
   function __eb_componentFiber(hostFiber) {
+    var field = __eb_fieldFiber(hostFiber);
+    if (field) return field;
     var an = hostFiber.return;
     var composites = 0;
     var dep = 0;
@@ -168,11 +199,17 @@ function prelude(query: InputQuery | undefined): string {
     if (!cf) return null;
     var parts = [];
     (function collect(f, d) {
-      if (!f || d > 12 || parts.length >= 4) return;
+      if (!f || d > 14 || parts.length >= 4) return;
+      // Never descend into an input: a field's own value must not become its label.
       if (HOSTS.indexOf(__eb_name(f.type)) !== -1) return;
       var mp = f.memoizedProps;
       if (mp && typeof mp.children === "string" && mp.children.trim().length > 0) {
+        // Take the outermost fiber of a text branch and stop. A single label
+        // repeats down its Text -> RCTText chain, which otherwise renders as
+        // "Title Title Title *".
         parts.push(mp.children.trim());
+        if (f.sibling) collect(f.sibling, d);
+        return;
       }
       if (f.child) collect(f.child, d + 1);
       if (f.sibling) collect(f.sibling, d);

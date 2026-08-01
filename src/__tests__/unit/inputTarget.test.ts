@@ -143,4 +143,26 @@ describe("targeting keys", () => {
         const expr = buildInputExpression({ kind: "find" }, { textMatch: "x" });
         expect(expr).toMatch(/HOSTS\.indexOf\(__eb_name\(f\.type\)\) !== -1\) return;/);
     });
+
+    it("finds the field wrapper by outermost onChangeText, not a capped climb", () => {
+        const expr = buildInputExpression({ kind: "find" }, { component: "FormInput" });
+        // Measured on a real form: the wrapper sits 10 levels above the host behind
+        // four plain Views, so a 4-composite budget is spent before reaching it and
+        // every input resolves to nothing. onChangeText is what distinguishes a
+        // field's wrapper from the layout Views around it.
+        expect(expr).toContain("__eb_fieldFiber");
+        expect(expr).toContain("d < 30");
+    });
+
+    it("reads and writes through the innermost composite, skipping host fibers", () => {
+        const expr = buildInputExpression({ kind: "setValue", value: "x" });
+        expect(expr).toMatch(/if \(typeof p\.type === "string"\) continue;/);
+    });
+
+    it("stops descending a text branch once it yields a string", () => {
+        const expr = buildInputExpression({ kind: "find" });
+        // One label repeats down its Text -> RCTText chain; descending through it
+        // renders "Title Title Title *" instead of "Title *".
+        expect(expr).toMatch(/parts\.push\(mp\.children\.trim\(\)\);[\s\S]{0,80}return;/);
+    });
 });
