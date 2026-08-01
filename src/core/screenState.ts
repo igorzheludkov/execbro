@@ -18,6 +18,14 @@ export interface ScreenStatePressable {
     icon?: string | null;
     /** True for TextInput-like elements (onChangeText/onFocus) — tap to focus, then type. */
     isInput?: boolean;
+    /**
+     * The input's current text, from props.value/defaultValue. Null when empty.
+     * Kept separate from `inputPlaceholder` so a placeholder can never be read
+     * as content — that misreading made every correct write look like a failure.
+     */
+    inputValue?: string | null;
+    /** The input's placeholder. Rendered only when the field is actually empty. */
+    inputPlaceholder?: string | null;
     /** Nearest standalone text (row sibling preferred) when the pressable has no label of its own. */
     nearbyText?: string | null;
     /** True when an overlay fully covers this root pressable — taps will not reach it. */
@@ -181,6 +189,22 @@ const IMAGE_CAP = 40;
  * pressablesOnly restores the lean pressable-only snapshot; fullText disables the
  * 80-char text truncation.
  */
+/**
+ * Renders an input's state so the value is unmistakably the value and the
+ * placeholder is unmistakably a placeholder. Returns "" for non-inputs.
+ */
+export function formatInputState(p: ScreenStatePressable): string {
+    if (!p.isInput) return "";
+    if (p.inputValue) return ` [input] value:${JSON.stringify(p.inputValue)}`;
+    // inputValue/inputPlaceholder are absent on entries captured before this
+    // field existed (or by other producers); fall back to the bare marker
+    // rather than asserting the field is empty.
+    if (p.inputValue === undefined && p.inputPlaceholder === undefined) return " [input]";
+    return p.inputPlaceholder
+        ? ` [input] empty, placeholder:${JSON.stringify(p.inputPlaceholder)}`
+        : " [input] empty";
+}
+
 export function formatScreenStateSummary(
     ss: ScreenState,
     convert: ItemCoordConverter = identityCoords,
@@ -213,7 +237,7 @@ export function formatScreenStateSummary(
         const marker = opts.pressablesOnly ? "" : " 🔘";
         return `  (${center.x}, ${center.y})${marker}${p.component ? ` <${p.component} />` : ""} ${p.label ? `"${p.label}"` : "(unlabeled)"}` +
             `${p.nearbyText ? ` near "${p.nearbyText}"` : ""}${p.onPressHint ? ` ${p.onPressHint}` : ""}` +
-            `${p.testID ? ` testID="${p.testID}"` : ""}${p.isInput ? " [input]" : ""}` +
+            `${p.testID ? ` testID="${p.testID}"` : ""}${formatInputState(p)}` +
             ` frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
     };
 
@@ -926,8 +950,11 @@ export async function getScreenState(
             }
         }
 
-        // TextInputs — not covered by PressabilityDebugView or onPress. Label falls
-        // back to the placeholder so empty form fields stay identifiable.
+        // TextInputs — not covered by PressabilityDebugView or onPress.
+        // A controlled TextInput holds its text in props.value, NOT in a child
+        // text node, so collectText comes back empty for a filled field. Reading
+        // value/defaultValue first is what stops a placeholder being reported as
+        // the field's content (pressables.ts already did this; this aligns them).
         if (!nextHidden && props && typeof props.onPress !== 'function' &&
             (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function')) {
             var hostsI = [];
@@ -935,14 +962,21 @@ export async function getScreenState(
             if (hostsI.length > 0) {
                 var pI = fiber.memoizedProps || {};
                 var textI = collectText(fiber, 0);
+                var valueI = (typeof pI.value === 'string' && pI.value.length > 0) ? pI.value
+                           : (typeof pI.defaultValue === 'string' && pI.defaultValue.length > 0) ? pI.defaultValue
+                           : null;
                 var placeholderI = (typeof pI.placeholder === 'string' && pI.placeholder.length > 0) ? pI.placeholder : null;
                 var testIDI = pI.testID || pI.nativeID || null;
-                var baseLabelI = pI.accessibilityLabel || (textI && textI.length > 0 ? textI.slice(0, 80) : null) || (placeholderI ? placeholderI.slice(0, 80) : null) || null;
+                var baseLabelI = pI.accessibilityLabel
+                    || (valueI ? valueI.slice(0, 80) : null)
+                    || (textI && textI.length > 0 ? textI.slice(0, 80) : null)
+                    || (placeholderI ? placeholderI.slice(0, 80) : null)
+                    || null;
                 var labelI = resolveLabel(fiber, hostsI[0], baseLabelI, testIDI);
                 var iconI = baseLabelI ? null : findMeaningfulChildName(fiber);
                 var hostIdxI = hostFibers.length;
                 hostFibers.push(hostsI[0]);
-                fiberMeta.push({ label: labelI, testID: testIDI, hostIdx: hostIdxI, icon: iconI, overlayIdx: ovIdx, component: resolveComponentName(fiber), isInput: true, hasOwnLabel: !!baseLabelI });
+                fiberMeta.push({ label: labelI, testID: testIDI, hostIdx: hostIdxI, icon: iconI, overlayIdx: ovIdx, component: resolveComponentName(fiber), isInput: true, hasOwnLabel: !!baseLabelI, inputValue: valueI, inputPlaceholder: placeholderI });
             }
         }
 
@@ -1294,6 +1328,8 @@ export async function getScreenState(
             testID: meta[i].testID,
             icon: meta[i].icon || null,
             isInput: !!meta[i].isInput,
+            inputValue: (meta[i].inputValue != null ? meta[i].inputValue : null),
+            inputPlaceholder: (meta[i].inputPlaceholder != null ? meta[i].inputPlaceholder : null),
             overlayIdx: (meta[i].overlayIdx != null ? meta[i].overlayIdx : null),
             hasOwnLabel: !!meta[i].hasOwnLabel,
             handler: meta[i].handler || null,
