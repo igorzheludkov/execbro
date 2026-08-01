@@ -254,7 +254,16 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         // publicInstance.clear() after HID typing races the setNativeProps that
         // follows and wipes it, which made every non-ASCII retry land empty.
         const clearedForRetry = first.path === "hid";
-        if (clearedForRetry) await deps.runOp({ kind: "clear" }, q, args.device);
+        if (clearedForRetry) {
+            await deps.runOp({ kind: "clear" }, q, args.device);
+        } else {
+            // A native write immediately after another input operation is
+            // sometimes swallowed — the value simply does not change. Give the
+            // previous operation a beat to settle before rewriting, rather than
+            // repeating the same call into the same contention.
+            const wait = deps.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+            await wait(300);
+        }
         const second = await write(clearedForRetry);
         if (!second.ok) {
             return { success: false, path: second.path, retried, error: second.error ?? "rewrite failed" };
