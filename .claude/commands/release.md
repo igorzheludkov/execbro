@@ -71,14 +71,31 @@ after step 8 has succeeded.
 
 - Confirm the tarball is live and marked:
   `npm view execbro version mcpName` — version must be the new one, `mcpName`
-  must be `io.github.igorzheludkov/execbro`
+  must be `com.execbro/execbro`
 - Run `mcp-publisher publish` from the repo root
-- If it reports no valid token, `mcp-publisher login github` is required first.
-  That is an interactive GitHub device flow — ask the user to run it themselves
-  (`! mcp-publisher login github`) and authorize as **igorzheludkov**; the
-  registry only grants the `io.github.igorzheludkov/*` namespace to that identity
+- If it reports an expired or missing token, re-authenticate. This is **domain**
+  auth, not GitHub — it is non-interactive and safe to run unattended:
+
+  ```bash
+  mcp-publisher login dns --domain=execbro.com \
+    --private-key="$(openssl pkey -in mcp-registry-key.pem -outform DER | tail -c 32 | xxd -p -c 64)"
+  ```
+
+  The registry grants the `com.execbro/*` namespace to whoever can sign for the
+  apex TXT record on `execbro.com`. `mcp-registry-key.pem` is gitignored and
+  lives only on the maintainer's machine — if it is missing, the key must be
+  restored from the password manager, not regenerated (regenerating requires
+  replacing the DNS record, see below).
 - Verify:
-  `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.igorzheludkov/execbro"`
+  `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=com.execbro/execbro"`
+
+**Key rotation.** If the signing key is ever replaced, the **old apex TXT record
+must be deleted**. A stale record is tried first and causes verification to fail
+with a generic signature error that says nothing about the real cause.
+
+**The old namespace is frozen, not redirected.** `io.github.igorzheludkov/execbro`
+still lists versions up to 2.1.1 and will never update again. There is no
+redirect; nothing to do about it, but do not be surprised to see it in search.
 
 ### 10. Sync the website's tool registry (only when the tool list changed)
 

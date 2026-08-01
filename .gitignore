@@ -35,3 +35,8 @@ Thumbs.db
 
 # Claude Code harness-generated files
 .claude/scheduled_tasks.lock
+# MCP Registry DNS auth signing key — permanent credential for the
+# com.execbro/* namespace. Never commit; rotating it requires deleting the
+# old apex TXT record on execbro.com or verification fails.
+*.pem
+mcp-registry-key.hex

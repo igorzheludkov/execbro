@@ -1,7 +1,7 @@
 {
     "name": "execbro",
     "version": "2.1.1",
-    "mcpName": "io.github.igorzheludkov/execbro",
+    "mcpName": "com.execbro/execbro",
     "description": "ExecBro — MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
     "type": "module",
     "main": "build/index.js",
