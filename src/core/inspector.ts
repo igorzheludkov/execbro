@@ -3,6 +3,7 @@ import { executeInApp } from "./jsExecute.js";
 import { resolveStacksToSource, buildDebugStackHarvestExpression } from "./componentSource.js";
 import type { RawComponentStack } from "./componentSource.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
+import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 
 // ============================================================================
 // Coordinate-Based Element Inspection (via DevTools Inspector API)
@@ -74,9 +75,15 @@ export async function inspectAtPoint(
         includeProps?: boolean;
         includeFrame?: boolean;
         device?: string;
+        /**
+         * Top inset used to lift raw measurements into screen space. Omit (or pass a zero
+         * inset) to hit-test in raw fiber space — the pre-normalisation behaviour.
+         */
+        screenSpace?: ScreenSpaceMetrics;
     } = {}
 ): Promise<ExecutionResult> {
-    const { includeProps = true, includeFrame = true, device } = options;
+    const { includeProps = true, includeFrame = true, device, screenSpace } = options;
+    const metrics: ScreenSpaceMetrics = screenSpace ?? { platform: "ios", topInset: 0 };
 
     const expression = `
         new Promise(function(resolve) {
@@ -167,6 +174,9 @@ export async function inspectAtPoint(
                 resolve(buildResult(hostFibers, measurements));
             }
 
+            ${SCREEN_SPACE_HELPER_JS}
+            var SCREEN_SPACE = ${JSON.stringify(metrics)};
+
             hostFibers.forEach(function(fiber, i) {
                 try {
                     getMeasurable(fiber).measureInWindow(function(fx, fy, fw, fh) {
@@ -190,6 +200,33 @@ export async function inspectAtPoint(
             function buildResult(fibers, measurements) {
                 var targetX = ${x};
                 var targetY = ${y};
+
+            // Lift measurements into screen space once, before anything reads them, so the
+            // hit-test, the element frame, hitFrame and the hierarchy all share the caller's
+            // coordinate space.
+            //
+            // Root containers are exempt. The band rule ("a y above the safe-area inset means
+            // this node measured from a modal's container") holds for leaf elements — which is
+            // all the screenshot formatters ever fed it — but a full-screen root legitimately
+            // starts at y=0, and shifting it produced NativeStackView at (0,59) with height 912,
+            // running 59pt off the bottom of a 912pt screen. A node at y=0 that is as tall as the
+            // tallest thing measured is the root, not modal content.
+            if (SCREEN_SPACE.topInset > 0) {
+                // hostFibers[0] is the first host reached from the fiber root — the app's root
+                // view — so its height is the screen height. Deriving it from the tallest
+                // measurement instead does not work: scrollable content routinely exceeds the
+                // screen, which lifts the threshold above every real root and exempts nothing.
+                var screenH = (measurements[0] && measurements[0].height) || 0;
+                // 0.9 rather than (screenH - inset): the app container sits a little inside the
+                // window (measured 844 against a 912 screen) and must still count as a root.
+                var rootMinH = screenH > 0 ? screenH * 0.9 : Infinity;
+                for (var ms = 0; ms < measurements.length; ms++) {
+                    var mm2 = measurements[ms];
+                    if (!mm2) continue;
+                    if (mm2.y === 0 && mm2.height >= rootMinH) continue;
+                    mm2.y = toScreenSpaceY(mm2.y, SCREEN_SPACE);
+                }
+            }
 
             var hits = [];
             for (var i = 0; i < measurements.length; i++) {
@@ -283,12 +320,27 @@ export async function inspectAtPoint(
             // Previously the reported frame was the innermost hit host while the element name and
             // props came from an ancestor, so the two described different boxes and any tap target
             // computed from the frame was wrong.
+            // The component's own box: its nearest measured host descendant.
+            //
+            // Look the fiber up by identity OR by its alternate. React double-buffers fibers, so
+            // a re-render between the collection walk and this descent leaves the subtree mixed:
+            // bailed-out nodes keep the same object and hit, re-rendered ones are new objects and
+            // miss. An identity-only lookup therefore skipped a 128x48 button box and reported
+            // the 20x20 icon nested inside it as the button's frame.
+            //
+            // Not a union of the subtree: for a screen component that spans its scrollable
+            // content, which reported a 5289pt-tall "frame" for a 912pt screen.
+            function measurementFor(f) {
+                var idx = hostIndex.get(f);
+                if (idx === undefined && f.alternate) idx = hostIndex.get(f.alternate);
+                return idx !== undefined ? measurements[idx] : null;
+            }
             function frameOfNamed(namedFiber) {
                 var found = null;
                 (function down(f, d) {
                     if (found || !f || d > 40) return;
-                    var idx = hostIndex.get(f);
-                    if (idx !== undefined && measurements[idx]) { found = measurements[idx]; return; }
+                    var m = measurementFor(f);
+                    if (m && m.width > 0 && m.height > 0) { found = m; return; }
                     var c = f.child;
                     while (c && !found) { down(c, d + 1); c = c.sibling; }
                 })(namedFiber, 0);

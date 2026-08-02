@@ -23,7 +23,7 @@ import {
     androidGetStatusBarHeight,
     androidGetDensity,
 } from "../core/index.js";
-import { getJpegDimensions, estimateImageTokens } from "../core/toolHelpers.js";
+import { screenStateToScreenSpace } from "../core/screenSpace.js";
 
 export function registerScreenshotTools(server: McpServer): void {
     // Tool: iOS screenshot
@@ -180,20 +180,23 @@ export function registerScreenshotTools(server: McpServer): void {
                         if (ssResult && ssResult.success && ssResult.screenState) {
                             const screenshotScale = result.scaleFactor || 1;
                             const toPx = (v: number) => Math.round((v * scaleFactor) / screenshotScale);
-                            pressablesText = formatScreenStateSummary(ssResult.screenState, (p) => {
-                                // See enrichScreenshotWithLayout: shift y when fiber reports the
-                                // element inside the safe-area band (react-native-screens modals).
-                                const yShift = safeAreaTop > 0 && p.center.y < safeAreaTop ? safeAreaTop : 0;
-                                return {
-                                    center: { x: toPx(p.center.x), y: toPx(p.center.y + yShift) },
-                                    frame: {
-                                        x: toPx(p.bounds.x),
-                                        y: toPx(p.bounds.y + yShift),
-                                        width: toPx(p.bounds.width),
-                                        height: toPx(p.bounds.height),
-                                    },
-                                };
+                            // Normalise once, then scale. The y-shift used to live inline here
+                            // (and in a second copy for the flat pressables path), which is how
+                            // the pixel output ended up correct while the point-space tools were
+                            // an inset off — see core/screenSpace.ts.
+                            const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
+                                platform: "ios",
+                                topInset: safeAreaTop
                             });
+                            pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
+                                center: { x: toPx(p.center.x), y: toPx(p.center.y) },
+                                frame: {
+                                    x: toPx(p.bounds.x),
+                                    y: toPx(p.bounds.y),
+                                    width: toPx(p.bounds.width),
+                                    height: toPx(p.bounds.height),
+                                },
+                            }));
                             pressablesIsScreenState = true;
                         }
                     } catch {
@@ -470,12 +473,18 @@ export function registerScreenshotTools(server: McpServer): void {
                             const screenshotScale = result.scaleFactor || 1;
                             const densityScale = densityDpi / 160;
                             const toPx = (v: number) => Math.round((v * densityScale) / screenshotScale);
-                            const toPxY = (v: number) => Math.round((v * densityScale + statusBarPixels) / screenshotScale);
-                            pressablesText = formatScreenStateSummary(ssResult.screenState, (p) => ({
-                                center: { x: toPx(p.center.x), y: toPxY(p.center.y) },
+                            // Same normalise-then-scale as iOS. Android's inset is the status bar,
+                            // which measureInWindow excludes because it reports app-window
+                            // coordinates — see core/screenSpace.ts.
+                            const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
+                                platform: "android",
+                                topInset: statusBarDp
+                            });
+                            pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
+                                center: { x: toPx(p.center.x), y: toPx(p.center.y) },
                                 frame: {
                                     x: toPx(p.bounds.x),
-                                    y: toPxY(p.bounds.y),
+                                    y: toPx(p.bounds.y),
                                     width: toPx(p.bounds.width),
                                     height: toPx(p.bounds.height),
                                 },

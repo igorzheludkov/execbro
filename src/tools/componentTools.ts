@@ -1,11 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
-import { iconLabel } from "../core/iconSemantics.js";
 import {
     getComponentTree,
     getScreenLayout,
-    getPressableElements,
     getScreenState,
     formatScreenStateSummary,
     inspectComponent,
@@ -14,21 +12,34 @@ import {
     enrichWithSource,
     inspectAtPoint,
     measureComponent,
-    iosScreenshot,
-    androidScreenshot,
-    androidGetDensity,
-    getDevicePixelRatio,
-    getIOSSafeAreaTop,
-    inferIOSDevicePixelRatio,
     metroMissingHintIfAbsent,
     hasMetro,
     getConnectedAppByDevice,
     getFirstConnectedApp,
 } from "../core/index.js";
+import { screenStateToScreenSpace, type ScreenSpaceMetrics } from "../core/screenSpace.js";
+import { resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
 import type { ExecutionResult } from "../core/types.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
+
+/**
+ * Top inset for whichever device a layout tool is about to answer for.
+ *
+ * A zero inset is the safe default: {@link toScreenSpaceY} treats it as "leave coordinates
+ * alone", so an unresolvable device degrades to the previous raw-fiber behaviour rather
+ * than to a wrongly shifted one.
+ */
+async function resolveScreenSpaceMetricsFor(device?: string): Promise<ScreenSpaceMetrics> {
+    const app = (device ? getConnectedAppByDevice(device) : getFirstConnectedApp()) ?? getFirstConnectedApp();
+    if (!app) return { platform: "ios", topInset: 0 };
+    return resolveScreenSpaceMetrics({
+        platform: app.platform,
+        udid: app.simulatorUdid,
+        deviceId: app.adbSerial
+    });
+}
 
 function collectMetaNotes(r: ExecutionResult): string[] {
     const out: string[] = [];
@@ -252,7 +263,12 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
-            const ss = result.screenState;
+            // Normalise to screen space so a coordinate read here can be handed straight to
+            // tap()/inspect_at_point/a screenshot. Raw measureInWindow is not screen-relative
+            // (Android excludes the status bar; iOS modals measure from their own container),
+            // which is why point-space output used to disagree with screenshot pixels.
+            const rawSs = result.screenState;
+            const ss = rawSs ? screenStateToScreenSpace(rawSs, await resolveScreenSpaceMetricsFor(device)) : rawSs;
             const summary = ss ? formatScreenStateSummary(ss, undefined, { pressablesOnly, fullText, keyboard }) : (result.result ?? "{}");
             const body = metaNotes.length > 0
                 ? `${summary}\n\n${metaNotes.join("\n")}`
@@ -465,7 +481,12 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ x, y, includeProps, includeFrame, device, source = true }) => {
-            const result = await inspectAtPoint(x, y, { includeProps, includeFrame, device });
+            const result = await inspectAtPoint(x, y, {
+                includeProps,
+                includeFrame,
+                device,
+                screenSpace: await resolveScreenSpaceMetricsFor(device)
+            });
     
             if (!result.success) {
                 return {

@@ -57,3 +57,45 @@ export function fromScreenSpaceY(y: number, m: ScreenSpaceMetrics): number {
  * way the Node side does — a second copy of this rule is exactly what caused the drift.
  */
 export const SCREEN_SPACE_HELPER_JS = `var toScreenSpaceY = ${toScreenSpaceY.toString()};`;
+
+interface Box {
+    center: { x: number; y: number };
+    bounds: { x: number; y: number; width: number; height: number };
+}
+
+function shiftBox<T extends Box>(el: T, m: ScreenSpaceMetrics): T {
+    return {
+        ...el,
+        center: { x: el.center.x, y: toScreenSpaceY(el.center.y, m) },
+        bounds: { ...el.bounds, y: toScreenSpaceY(el.bounds.y, m) }
+    };
+}
+
+/**
+ * Return a copy of a screen state with every y in screen space.
+ *
+ * Only y moves — no horizontal inset exists on either platform — and height is untouched,
+ * because the shift translates a box rather than resizing it.
+ */
+export function screenStateToScreenSpace<
+    T extends {
+        pressables: Box[];
+        texts: Box[];
+        images: Box[];
+        overlays: { pressables: Box[]; texts?: Box[]; images?: Box[] }[];
+    }
+>(ss: T, m: ScreenSpaceMetrics): T {
+    if (!m.topInset || m.topInset <= 0) return ss;
+    return {
+        ...ss,
+        pressables: ss.pressables.map((p) => shiftBox(p, m)),
+        texts: ss.texts.map((t) => shiftBox(t, m)),
+        images: ss.images.map((i) => shiftBox(i, m)),
+        overlays: ss.overlays.map((o) => ({
+            ...o,
+            pressables: o.pressables.map((p) => shiftBox(p, m)),
+            texts: o.texts ? o.texts.map((t) => shiftBox(t, m)) : o.texts,
+            images: o.images ? o.images.map((i) => shiftBox(i, m)) : o.images
+        }))
+    };
+}
