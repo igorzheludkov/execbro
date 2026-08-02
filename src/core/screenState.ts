@@ -840,6 +840,9 @@ export async function getScreenState(
 
     var PAGE_COMPONENT = /^(.*Screen|.*Page|.*View$|.*Container$|.*Layout$|.*Root$|ExpoRoot|App$)/;
 
+    // Scroll/list containers end the search for a pressable's owning component.
+    var SCROLL_BOUNDARY = /^(ScrollView|FlatList|SectionList|VirtualizedList|VirtualizedSectionList|RCTScrollView|RCTScrollContentView)$/;
+
     // Layout-only and touch-wrapper components skipped when scanning a pressable's
     // children for a meaningful icon component name (e.g. SvgChevronBack).
     var SKIP_IN_CHILD_SCAN = /^(View|Text|Image|ImageBackground|ScrollView|FlatList|SectionList|KeyboardAvoidingView|SafeAreaView|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|TouchableNativeFeedback|Pressable|TextInput|ActivityIndicator|Switch|Modal|StatusBar|VirtualizedList|RefreshControl|Animated\\(.*|withAnimated.*|AnimatedComponent.*)$/;
@@ -892,6 +895,11 @@ export async function getScreenState(
             if (typeof an.type !== 'string' && an.type !== null) {
                 var n = getComponentName(an);
                 if (n) {
+                    // Stop at a scroll/list boundary. A pressable's owning component lives
+                    // inside the same scroll container; past it the next non-generic ancestor
+                    // is the screen itself, and "<TapTargetsScreen />" on a Submit button is a
+                    // worse answer than the "<Pressable />" the caller falls back to.
+                    if (SCROLL_BOUNDARY.test(n)) return null;
                     composites++;
                     if (!RN_PRIMITIVES.test(n) && !GENERIC_COMPONENT.test(n)) return an;
                 }
@@ -904,7 +912,13 @@ export async function getScreenState(
 
     function resolveComponentName(fiber) {
         var cf = resolveComponentFiber(fiber);
-        return cf ? getComponentName(cf) : null;
+        if (cf) return getComponentName(cf);
+        // Nothing meaningful above this pressable: name the pressable itself. Climbing
+        // further reaches the screen component, and "<TapTargetsScreen />" on a Submit
+        // button is a worse answer than "<Pressable />".
+        var own = getComponentName(fiber);
+        if (own && typeof fiber.type !== 'string' && !RN_PRIMITIVES.test(own)) return own;
+        return null;
     }
 
     // Event-handler props (onBack, onSelect, ...) of the custom component — context
@@ -968,6 +982,19 @@ export async function getScreenState(
         return isHiddenNavigationScene(name, props);
     }
 
+    // A pressable whose own rendered box is invisible must not be listed.
+    //
+    // Checking the composite alone is not enough: react-navigation's drawer scrim keeps
+    // opacity on the host View it renders, while the Overlay composite above it carries
+    // only a backgroundColor. The composite therefore looks visible, and by the time the
+    // walk descends to the host that says opacity:0 the pressable has already been
+    // collected — surfacing a full-screen tappable <Overlay /> over the middle of every
+    // screen on any app with a drawer.
+    function isHostHidden(hostFiber) {
+        if (!hostFiber) return false;
+        return isScreenHidden(getComponentName(hostFiber), hostFiber.memoizedProps);
+    }
+
     function walkPressabilityDebugViews(fiber, depth, hidden, ovIdx) {
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
@@ -1022,7 +1049,7 @@ export async function getScreenState(
         if (!nextHidden && props && typeof props.onPress === 'function') {
             var hosts3 = [];
             findHostsInSubtree(fiber, 0, hosts3, 8);
-            if (hosts3.length > 0) {
+            if (hosts3.length > 0 && !isHostHidden(hosts3[0])) {
                 var p2 = fiber.memoizedProps || {};
                 var text2 = collectText(fiber, 0);
                 var a11y2 = p2.accessibilityLabel || null;

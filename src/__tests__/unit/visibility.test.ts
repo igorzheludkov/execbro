@@ -35,6 +35,32 @@ describe("isHiddenNavigationScene", () => {
         expect(isHiddenNavigationScene("SceneView", { focused: false })).toBe(true);
     });
 
+    // A closed react-navigation drawer leaves its scrim mounted at full screen with
+    // opacity 0. It surfaced in get_screen_state as a tappable
+    // `<Overlay /> "[Wrap]" frame:(0,0 420x912)` sitting over the middle of every
+    // screen — in two of three real apps audited, and on iOS it was classified
+    // "blocked by overlay" while Android called the same node "reachable".
+    it("prunes an opacity:0 node (object and array style)", () => {
+        expect(isHiddenNavigationScene("View", { style: { opacity: 0 } })).toBe(true);
+        expect(
+            isHiddenNavigationScene("RCTView", {
+                style: [{ position: "absolute" }, { backgroundColor: "rgba(0,0,0,0.5)" }, { opacity: 0 }]
+            })
+        ).toBe(true);
+    });
+
+    it("keeps a partially transparent node", () => {
+        expect(isHiddenNavigationScene("View", { style: { opacity: 0.01 } })).toBe(false);
+        expect(isHiddenNavigationScene("View", { style: [{ opacity: 1 }] })).toBe(false);
+    });
+
+    // An Animated opacity is a node object, not a number. Treating it as 0 would prune
+    // whole subtrees mid-animation, so only a literal numeric 0 counts.
+    it("keeps a node whose opacity is an Animated value rather than a number", () => {
+        expect(isHiddenNavigationScene("View", { style: { opacity: { __isAnimated: true } } })).toBe(false);
+        expect(isHiddenNavigationScene("View", { style: { opacity: "0" } })).toBe(false);
+    });
+
     it("prunes display:none (object and array style)", () => {
         expect(isHiddenNavigationScene("View", { style: { display: "none" } })).toBe(true);
         expect(isHiddenNavigationScene("View", { style: [{ flex: 1 }, { display: "none" }] })).toBe(true);
