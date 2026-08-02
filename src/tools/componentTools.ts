@@ -59,7 +59,7 @@ export function registerComponentTools(server: McpServer): void {
         "get_screen_layout",
         {
             description:
-                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are in **points** (iOS) or **dp** (Android) — NOT screenshot pixels. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
+                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are screen space — the same space screenshots, get_screen_state and tap() use, so pass them through unchanged. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
                 primaryInteractionBanner() + "\n" +
                 "PURPOSE: Quickest textual map of what is actually on screen right now — component names, positions, and text — so you can plan taps and inspections without guessing.\n" +
                 "WHEN TO USE: First step whenever the user asks \"what's on screen\", \"why is X covering Y\", or before tapping a visually ambiguous element.\n" +
@@ -231,7 +231,7 @@ export function registerComponentTools(server: McpServer): void {
                 "Each line carries an (x, y) center + frame bounds (so anything is a tap(x, y) target), typed by a leading marker: 🔘 pressable (with component JSX tag, label, testID, onPress hint), 📝 text, 🖼 image (with src/alt). " +
                 "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
-                "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection. Coordinates in points (iOS) / dp (Android); text frames are container-level (climb to nearest measurable host).\n" +
+                "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection.\n" +
                 "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call inspect_at_point(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
@@ -454,19 +454,19 @@ export function registerComponentTools(server: McpServer): void {
                 "Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point) + the innermost component's PROPS (handlers as [Function], refs, custom props like onPress/data/testID). Pure JS hit-test via fiber + measureInWindow — no overlay toggled, zero visual side effect. Works on Paper and Fabric.\n" +
                 "PURPOSE: Layout/props diagnosis — \"where is each ancestor positioned, and what props does the touched component expose?\"\n" +
                 "WHEN TO USE: A button is clipped, hit area is wrong, animated frame is unexpected — or you need handler/ref/non-style props. Also preferred for tight loops (no overlay flicker).\n" +
-                "WORKFLOW: screenshot → suspect pixel → divide by pixel ratio → inspect_at_point(x, y).\n" +
-                "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is the node's own style object, not the merged cascade.\n" +
+                "WORKFLOW: screenshot or get_screen_state → take the coordinate as-is → inspect_at_point(x, y).\n" +
+                "LIMITATIONS: Style is the node's own style object, not the merged cascade. `frame` is the element's own box; `hitFrame` (when present) is the innermost node actually under the point.\n" +
                 "SOURCE: also returns `source: {file, line, column}` for the component at the point, plus the owner chain as `Source ancestors` (set source=false to skip in tight loops).\n",
             inputSchema: {
                 x: z
                     .number()
                     .describe(
-                        "X coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."
+                        "X coordinate in screen space — take it straight from a screenshot, get_screen_state or get_screen_layout. No conversion."
                     ),
                 y: z
                     .number()
                     .describe(
-                        "Y coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."
+                        "Y coordinate in screen space — take it straight from a screenshot, get_screen_state or get_screen_layout. No conversion."
                     ),
                 includeProps: z
                     .boolean()
@@ -570,7 +570,7 @@ export function registerComponentTools(server: McpServer): void {
         "measure",
         {
             description:
-                "Get on-screen geometry {x, y, width, height} for a named React component instance. Calls measureInWindow on the matched fiber (or its nearest host descendant for composite components). Coordinates are in points (iOS) / dp (Android), same space as get_screen_layout and inspect_at_point.\n" +
+                "Get on-screen geometry {x, y, width, height} for a named React component instance. Calls measureInWindow on the matched fiber (or its nearest host descendant for composite components). Coordinates are screen space, the same space as get_screen_layout, get_screen_state, inspect_at_point and tap().\n" +
                 "PURPOSE: One-shot, name-based component measurement — avoids hand-rolling fiber walks and Promise-wrapping measureInWindow callbacks in execute_in_app.\n" +
                 "WHEN TO USE: You already know the component's display name (from get_screen_layout or find_components) and just need its current bounds — e.g. to verify a layout change, compute a tap target, or compare against design specs.\n" +
                 "WORKFLOW: find_components(pattern=\"...\") -> measure(componentName=\"...\", index=N) -> tap(x, y) at the center, or inspect_at_point at the center to verify identity.\n" +
