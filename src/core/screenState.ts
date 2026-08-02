@@ -656,6 +656,35 @@ export async function getScreenState(
             navState = findNavStateByShape(roots[0].current, 0);
         }
 
+        // Last resort: React Navigation exposes the root state on a context provider's
+        // value, not on a hook's memoizedState. With createStaticNavigation the container
+        // fiber is anonymous (no displayName) and nothing nav-shaped ever reaches
+        // memoizedState, so every strategy above misses and the tool reports "no React
+        // Navigation detected" on an app that plainly has it.
+        //
+        // Measured across three apps: this provider is present in all of them (depth 20-40),
+        // while the memoizedState shape exists only under dynamic config / expo-router.
+        // That makes it the one location covering static config, dynamic config and
+        // expo-router alike. Kept last so the cheaper strategies still win when they work.
+        if (!navState) {
+            function findNavStateByProviderValue(fiber, depth) {
+                if (!fiber || depth > 400) return null;
+                var p = fiber.memoizedProps;
+                if (p && p.value && typeof p.value === 'object') {
+                    try {
+                        if (typeof p.value.getRootState === 'function') {
+                            var rs = p.value.getRootState();
+                            if (isNavState(rs)) return rs;
+                        }
+                    } catch (e) {}
+                }
+                var result = findNavStateByProviderValue(fiber.child, depth + 1);
+                if (result) return result;
+                return findNavStateByProviderValue(fiber.sibling, depth + 1);
+            }
+            navState = findNavStateByProviderValue(roots[0].current, 0);
+        }
+
         if (navState && navState.routes) {
             var fiberStack = [];
             var fiberLeafParams = null;
