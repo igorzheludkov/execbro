@@ -1216,6 +1216,16 @@ export async function connectToDevice(
             // Inject JS network interceptor (immediate capture, may fail if context not ready)
             injectNetworkInterceptor(ws);
 
+            // Route history accrues from connect, so the first includeHistory read
+            // is not an empty trail. Non-fatal by contract: a failure here just
+            // leaves the reader on the sampled path.
+            //
+            // Imported lazily: routeHistory reaches this module through jsExecute,
+            // and deferring to call time keeps that cycle out of module init.
+            void import("./routeHistory.js")
+                .then((m) => m.installRouteHistory(device.deviceName))
+                .catch(() => {});
+
             // Also try CDP Network.enable (takes priority if supported)
             const networkEnableId = sendNetworkEnable(ws);
             pendingNetworkEnableIds.add(networkEnableId);

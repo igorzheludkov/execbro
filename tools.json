@@ -227,6 +227,7 @@
         "get_screen_state": [
             "device",
             "fullText",
+            "includeHistory",
             "pressablesOnly"
         ],
         "get_usage_guide": [

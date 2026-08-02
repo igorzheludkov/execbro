@@ -2,6 +2,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import {
+    readRouteHistory,
+    recordSampledRoute,
+    formatRouteTrail
+} from "../core/routeHistory.js";
+import { getEpoch } from "../core/state.js";
+import {
     getComponentTree,
     getScreenLayout,
     getScreenState,
@@ -240,19 +246,21 @@ export function registerComponentTools(server: McpServer): void {
             description:
                 "Screenshot-free snapshot of the current screen: active route + params, blocking overlays (sheets, modals, alerts), and every on-screen element merged top-to-bottom within reachability groups. Call after any tap or navigation to orient before the next action. " +
                 "Each line carries an (x, y) center + frame bounds (so anything is a tap(x, y) target), typed by a leading marker: 🔘 pressable (with component JSX tag, label, testID, onPress hint), 📝 text, 🖼 image (with src/alt). " +
-                "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
+                "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
                 "COORDINATES: delivered-screenshot pixels — the same space as ios_screenshot/android_screenshot, get_screen_layout, inspect_at_point, measure and tap(). Pass them through unchanged; never scale by devicePixelRatio yourself.\n" +
                 "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection.\n" +
+                "HISTORY: includeHistory=true appends the route trail (dwell + origin per screen).\n" +
                 "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call inspect_at_point(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
                 device: z.string().optional().describe(DEVICE_ARG_DESC),
                 pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false."),
-                fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false.")
+                fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false."),
+                includeHistory: z.boolean().optional().describe("Append the route trail — which screens the app has been on, most recent first, with dwell time and the route each was entered from. Recorded from connection time; an app restart shows an epoch divider. If no navigation listener could be attached the trail reports itself as sampled, meaning transitions between calls may be missing. Default false.")
             }
         },
-        async ({ device, pressablesOnly, fullText }) => {
+        async ({ device, pressablesOnly, fullText, includeHistory }) => {
             if (!hasMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_state");
                 return {
@@ -296,11 +304,25 @@ export function registerComponentTools(server: McpServer): void {
                     pressablesOnly, fullText, keyboard, pixelScale: metrics.pixelScale
                 })
                 : (result.result ?? "{}");
+            // Sample on every read, not only when history is requested — the
+            // fallback trail has to exist before someone first asks for it.
+            const routeName = ss?.route?.name;
+            if (routeName) {
+                const key = device ?? "default";
+                recordSampledRoute(key, routeName, getEpoch(key), Date.now());
+            }
+
             const scaleNote = unresolvedScaleNote(metrics);
             const allNotes = scaleNote ? [scaleNote, ...metaNotes] : metaNotes;
-            const body = allNotes.length > 0
+            let body = allNotes.length > 0
                 ? `${summary}\n\n${allNotes.join("\n")}`
                 : summary;
+
+            if (includeHistory) {
+                const history = await readRouteHistory(device);
+                body += `\n\n${formatRouteTrail(history, Date.now())}`;
+            }
+
             return { content: [{ type: "text", text: body }] };
         }
     );
