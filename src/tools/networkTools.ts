@@ -60,7 +60,7 @@ export function registerNetworkTools(server: McpServer): void {
                     .default(50)
                     .describe("Maximum number of requests to return (default: 50)"),
                 method: z.string().optional().describe("Filter by HTTP method (GET, POST, PUT, DELETE, etc.)"),
-                urlPattern: z.string().optional().describe("Filter by URL pattern (case-insensitive substring match)"),
+                urlPattern: z.string().optional().describe("Filter by URL pattern (case-insensitive substring match). Also matches GraphQL operation names (e.g. \"GetCharacters\"), since every GraphQL call shares one URL."),
                 status: z.number().optional().describe("Filter by HTTP status code (e.g., 200, 401, 500)"),
                 summary: z
                     .boolean()
@@ -206,7 +206,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "GOOD: search_network({ urlPattern: \"/graphql\" })\n" +
                 "BAD: search_network({ urlPattern: \"\" }) — empty pattern matches everything; use get_network_requests instead.\n",
             inputSchema: {
-                urlPattern: z.string().describe("URL pattern to search for"),
+                urlPattern: z.string().describe("URL pattern to search for. Also matches GraphQL operation names (e.g. \"GetCharacters\") — use the operation name to find one GraphQL call among many sharing the same endpoint."),
                 maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
                 device: z.string().optional().describe(DEVICE_ALL_DESC)
             }

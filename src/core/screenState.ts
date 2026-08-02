@@ -788,10 +788,10 @@ export async function getScreenState(
     }
 
     // The opaque surface is usually NOT on the positioned node. The common shape is a
-    // transparent absolutely-positioned wrapper whose child paints the panel — Buoy's
-    // sheet is exactly that: an absolute View wrapping an Animated View with
-    // backgroundColor #1A1A1A. Inspecting only the wrapper's own style (the first version
-    // of this rule) therefore recognises almost no real sheet.
+    // transparent absolutely-positioned wrapper whose child paints the panel — a bottom
+    // sheet is typically an absolute View wrapping an inner (often animated) View that
+    // carries the opaque backgroundColor. Inspecting only the wrapper's own style (the
+    // first version of this rule) therefore recognises almost no real sheet.
     function hasOpaqueSurface(fiber, ownStyle) {
         // A wrapper that is itself faded out is not covering anything, whatever its
         // children declare.
