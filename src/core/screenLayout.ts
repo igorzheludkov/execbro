@@ -1,6 +1,7 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
+import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 
 export interface ComponentSummary {
     component: string;
@@ -308,6 +309,8 @@ export async function getScreenLayout(
         device?: string;
         raw?: boolean;
         timeoutMs?: number;
+        /** Top inset for screen-space normalisation. Omit for raw fiber coordinates. */
+        screenSpace?: ScreenSpaceMetrics;
     } = {}
 ): Promise<ExecutionResult & {
     parsedElements?: ScreenElement[];
@@ -316,6 +319,7 @@ export async function getScreenLayout(
     offScreenAbove?: string[];
 }> {
     const { extended = false, summary = false, device, raw = false, timeoutMs } = options;
+    const screenSpace: ScreenSpaceMetrics = options.screenSpace ?? { platform: "ios", topInset: 0 };
     const maxDepth = 5000;
     const componentsOnly = true;
     const shortPath = true;
@@ -607,6 +611,7 @@ export async function getScreenLayout(
             // Get viewport dimensions from the first root view measurement
             // Accept elements starting at x=0 even with negative y (safe area extensions)
             var viewportW = 9999, viewportH = 9999;
+            var viewportRootIdx = -1;
             for (var v = 0; v < measurements.length; v++) {
                 if (measurements[v] && measurements[v].x === 0 && measurements[v].y <= 0 &&
                     measurements[v].width > 0 && measurements[v].height > 0) {
@@ -614,7 +619,36 @@ export async function getScreenLayout(
                     // For wrappers extending behind safe area, the visible viewport height
                     // is the total height minus the negative offset
                     viewportH = measurements[v].height + measurements[v].y;
+                    viewportRootIdx = v;
                     break;
+                }
+            }
+
+            // Lift into screen space, so a frame read here means the same thing as one from
+            // get_screen_state, inspect_at_point or a screenshot. Applied AFTER the viewport
+            // probe above, which identifies the root by y <= 0 and would stop matching once
+            // the root has been shifted down by the inset.
+            //
+            // Roots are exempt for the same reason as in inspector.ts: the band rule holds for
+            // leaves, but a full-screen root legitimately starts at y=0 and shifting it pushes
+            // it off the bottom of the screen.
+            ${SCREEN_SPACE_HELPER_JS}
+            var SCREEN_SPACE = ${JSON.stringify(screenSpace)};
+            if (SCREEN_SPACE.topInset > 0) {
+                var rootMinH = viewportH < 9999 ? viewportH * 0.9 : Infinity;
+                for (var sm = 0; sm < measurements.length; sm++) {
+                    var mS = measurements[sm];
+                    if (!mS) continue;
+                    if (mS.y === 0 && mS.height >= rootMinH) continue;
+                    mS.y = toScreenSpaceY(mS.y, SCREEN_SPACE);
+                }
+                // Recompute the fold from the same root now that it has moved. The probe above
+                // ran in raw space, where the Android root starts at -statusBar; leaving that
+                // bound in place while every element moved down by the inset would push the
+                // bottom band of the screen below the fold and drop it from the tree.
+                if (viewportRootIdx >= 0 && measurements[viewportRootIdx]) {
+                    var rM = measurements[viewportRootIdx];
+                    viewportH = rM.height + rM.y;
                 }
             }
 

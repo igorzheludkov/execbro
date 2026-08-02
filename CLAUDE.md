@@ -140,13 +140,13 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `ocr_screenshot`: Screenshot with OCR text recognition and tap-ready coordinates
 - `get_images`: Access shared image buffer containing screenshots from all tools. Returns metadata by default; use `id` or `groupId`+`frameIndex` to retrieve specific images. Tap burst frames are stored here.
 
-**Component Inspection (recommended workflow: get_screen_layout → find_components → inspect_component):**
-- `get_screen_state`: **Orientation snapshot — call after any tap/navigation.** Screenshot-free view of the screen: active route + params, overlays, and every element merged top-to-bottom within reachability groups. Each line is tap-ready `(x, y)` + frame, typed by a marker — `🔘` pressable (component tag, label, testID, onPress hint), `📝` text, `🖼` image (`src`/`alt`). Overlay-covered elements are grouped under `🚫 Blocked`. Reads screen content (prices, labels, which image loaded) without screenshot+OCR. `pressablesOnly=true` for the lean tappable-only list; `fullText=true` to disable the 80-char text truncation. Note: text frames are container-level (Fabric RCTText isn't directly measurable)
-- `get_screen_layout`: **Start here.** Screen map — indented tree of visible components with real screen positions (measureInWindow), text content, and identifiers. Shows only what's on screen, filters out off-screen and internal components. Use `extended=true` for layout styles (padding, flex, backgroundColor, etc.). Coordinates are in points (iOS) / dp (Android)
+**Component Inspection (recommended workflow: get_screen_state → find_components → inspect_component):**
+- `get_screen_state`: **Orientation snapshot — call after any tap/navigation.** Screenshot-free view of the screen: active route + params, overlays, and every element merged top-to-bottom within reachability groups. Each line is tap-ready `(x, y)` + frame, typed by a marker — `🔘` pressable (component tag, label, testID, onPress hint), `📝` text, `🖼` image (`src`/`alt`). Overlay-covered elements are grouped under `🚫 Blocked`. Reads screen content (prices, labels, which image loaded) without screenshot+OCR. `pressablesOnly=true` for the lean tappable-only list; `fullText=true` to disable the 80-char text truncation. Its coordinates are the shared screen space used by every layout tool, the screenshot summaries, and `tap` — pass them straight through, no conversion
+- `get_screen_layout`: **Start here.** Screen map — indented tree of visible components with real screen positions (measureInWindow), text content, and identifiers. Shows only what's on screen, filters out off-screen and internal components. Use `extended=true` for layout styles (padding, flex, backgroundColor, etc.). Coordinates are in the shared screen space — interchangeable with `get_screen_state`, `measure`, `inspect_at_point`, screenshots, and `tap`
 - `find_components`: Fast regex search across the fiber tree by component name pattern. Returns all matching instances with path and depth. Use after `get_screen_layout` to locate specific components
 - `inspect_component`: Deep dive into a specific component's props, state (hooks), and optionally children tree. Use after finding a component name via `get_screen_layout` or `find_components`
 - `get_component_tree`: React fiber tree including all providers, navigation wrappers, and internal components. Use when you need to understand the complete React architecture, not just what's visible. Returns compact names-only output by default; pass `structureOnly=false` for the full detailed tree (very large — prefer `inspect_component` for a specific node)
-- `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in dp) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
+- `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in the shared screen space) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
 
 **Device Management:**
 - `list_devices`: Find available simulators, emulators, and physical devices in one call
@@ -155,7 +155,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `ios_terminate_app`: Terminate app on iOS simulator
 - `android_list_packages`: List installed packages on Android device
 
-For React Native UI inspection, prefer the cross-platform tools: `get_screen_layout` (visible component tree), `inspect_at_point` (component at coordinates), `find_components` (regex search by component name), and `tap(text=...)` (tap by visible text).
+For React Native UI inspection, prefer the cross-platform tools: `get_screen_state` (route + tap-ready elements, no screenshot), `get_screen_layout` (visible component tree), `inspect_at_point` (component at coordinates), `find_components` (regex search by component name), and `tap(text=...)` (tap by visible text).
 
 **Bundle & Errors:**
 - `get_bundle_status`: Check Metro build state
@@ -183,7 +183,7 @@ When debugging React Native apps through this MCP server:
     1. `tap(testID="login-btn")` — **most reliable**: matches by testID prop via fiber (both platforms) and accessibility (Android via resource-id)
     2. `tap(text="Submit")` — matches visible text, tries fiber tree → accessibility → OCR automatically
     3. `tap(component="HamburgerIcon")` — matches by React component name, walks up fiber tree to find nearest pressable parent
-    4. `tap(x=300, y=600)` — taps at pixel coordinates from screenshot (auto-converts to points)
+    4. `tap(x=300, y=600)` — taps at coordinates taken from a screenshot or any layout tool (same coordinate space, no conversion)
     5. `tap(x=300, y=600, native=true)` — taps directly via ADB/simctl without React Native connection (for system dialogs, non-RN apps, or pre-connection UI)
     6. Use `strategy` param to skip strategies you know will fail: `tap(text="≡", strategy="ocr")`
     7. On failure, follow the `suggestion` field in the response — it tells you exactly what to try next

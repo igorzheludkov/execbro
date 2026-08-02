@@ -1,11 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
-import { iconLabel } from "../core/iconSemantics.js";
 import {
     getComponentTree,
     getScreenLayout,
-    getPressableElements,
     getScreenState,
     formatScreenStateSummary,
     inspectComponent,
@@ -14,21 +12,34 @@ import {
     enrichWithSource,
     inspectAtPoint,
     measureComponent,
-    iosScreenshot,
-    androidScreenshot,
-    androidGetDensity,
-    getDevicePixelRatio,
-    getIOSSafeAreaTop,
-    inferIOSDevicePixelRatio,
     metroMissingHintIfAbsent,
     hasMetro,
     getConnectedAppByDevice,
     getFirstConnectedApp,
 } from "../core/index.js";
+import { screenStateToScreenSpace, toScreenSpaceY, type ScreenSpaceMetrics } from "../core/screenSpace.js";
+import { resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
 import type { ExecutionResult } from "../core/types.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
+
+/**
+ * Top inset for whichever device a layout tool is about to answer for.
+ *
+ * A zero inset is the safe default: {@link toScreenSpaceY} treats it as "leave coordinates
+ * alone", so an unresolvable device degrades to the previous raw-fiber behaviour rather
+ * than to a wrongly shifted one.
+ */
+async function resolveScreenSpaceMetricsFor(device?: string): Promise<ScreenSpaceMetrics> {
+    const app = (device ? getConnectedAppByDevice(device) : getFirstConnectedApp()) ?? getFirstConnectedApp();
+    if (!app) return { platform: "ios", topInset: 0 };
+    return resolveScreenSpaceMetrics({
+        platform: app.platform,
+        udid: app.simulatorUdid,
+        deviceId: app.adbSerial
+    });
+}
 
 function collectMetaNotes(r: ExecutionResult): string[] {
     const out: string[] = [];
@@ -48,7 +59,7 @@ export function registerComponentTools(server: McpServer): void {
         "get_screen_layout",
         {
             description:
-                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are in **points** (iOS) or **dp** (Android) — NOT screenshot pixels. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
+                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are screen space — the same space screenshots, get_screen_state and tap() use, so pass them through unchanged. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
                 primaryInteractionBanner() + "\n" +
                 "PURPOSE: Quickest textual map of what is actually on screen right now — component names, positions, and text — so you can plan taps and inspections without guessing.\n" +
                 "WHEN TO USE: First step whenever the user asks \"what's on screen\", \"why is X covering Y\", or before tapping a visually ambiguous element.\n" +
@@ -87,7 +98,13 @@ export function registerComponentTools(server: McpServer): void {
             }
 
             const effectiveTimeoutMs = timeoutMs ?? (extended ? 15000 : 5000);
-            const result = await getScreenLayout({ extended, summary, device, timeoutMs: effectiveTimeoutMs });
+            const result = await getScreenLayout({
+                extended,
+                summary,
+                device,
+                timeoutMs: effectiveTimeoutMs,
+                screenSpace: await resolveScreenSpaceMetricsFor(device)
+            });
 
             const metaNotes = collectMetaNotes(result);
 
@@ -204,134 +221,6 @@ export function registerComponentTools(server: McpServer): void {
         }
     );
     
-    // Tool: Get all pressable elements on screen
-    registerToolWithTelemetry(
-        server,
-        "get_pressable_elements",
-        {
-            description:
-                "Prefer get_screen_state after navigation (route + overlays + pressables in one call).\n\n" +
-                "Find all pressable (onPress) and input (TextInput) elements currently visible on screen. Returns component names, ready-to-tap center coordinates in SCREENSHOT PIXELS (same space as ios_screenshot/android_screenshot — pass directly to tap(x, y)), text labels, testID, accessibilityLabel, and a spatial nearbyText hint for icon-only buttons. Each element includes hasLabel (true if it contains text) and isInput (true for TextInput fields).\n" +
-                "HELPER — call before `tap` when you need to enumerate candidate elements before committing to a target; not a replacement for tap itself.\n" +
-                "PURPOSE: Produce a ready-to-tap inventory of every interactive element on screen with screenshot-pixel coordinates that tap(x, y) accepts directly.\n" +
-                "WHEN TO USE: Before tapping icon-only buttons, when text-based tap keeps failing, or to enumerate what the user can actually interact with.\n" +
-                "WORKFLOW: ios_screenshot / android_screenshot -> get_pressable_elements -> tap(testID=\"...\") or tap(x, y) using the center coordinates.\n" +
-                "LIMITATIONS: Visible-only (off-screen pressables are excluded). Requires a live React connection. Coordinates are in screenshot pixels — the tap tool converts to points internally.\n" +
-                "GOOD: get_pressable_elements()\n" +
-                "BAD: Calling when tap(testID=\"...\") already works — testID matching is faster and more stable.\n",
-            inputSchema: {
-                device: z.string().optional().describe(DEVICE_ARG_DESC)
-            }
-        },
-        async ({ device }) => {
-            const result = await getPressableElements({ device });
-    
-            if (!result.success) {
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Error: ${result.error}`
-                        }
-                    ],
-                    isError: true
-                };
-            }
-    
-            const elements = result.parsedElements;
-            if (!elements || elements.length === 0) {
-                return {
-                    content: [{ type: "text", text: result.result || "No pressable elements found." }]
-                };
-            }
-    
-            // Resolve target app so we can pick the right simulator / android device
-            const targetApp = device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
-            if (!targetApp) {
-                // No connected app — return raw (points) output; better than nothing
-                return {
-                    content: [{ type: "text", text: result.result || "No pressable elements found." }]
-                };
-            }
-    
-            // Capture a lightweight screenshot to learn scaleFactor (downscale) and dimensions.
-            // Conversion: screenshot_px = native_coord * devicePixelRatio / screenshotScale
-            let lines: string[] = [];
-            try {
-                if (targetApp.platform === "ios") {
-                    const udid = targetApp.simulatorUdid;
-                    const shot = await iosScreenshot(undefined, udid);
-                    const screenshotScale = shot.scaleFactor || 1;
-                    const devicePixelRatio =
-                        (shot.originalWidth && shot.originalHeight
-                            ? inferIOSDevicePixelRatio(shot.originalWidth, shot.originalHeight)
-                            : null) ?? (await getDevicePixelRatio(udid)) ?? 3;
-                    // Fallback to 59pt (iPhone typical) when the UI driver preflight can't
-                    // resolve the true inset — matches ios_screenshot's default. Without this
-                    // shift, react-native-screens modal-presented screens report y relative
-                    // to content origin and taps land in the status bar instead of the button.
-                    const safeAreaTop = (await getIOSSafeAreaTop(udid).catch(() => 0)) || 59;
-                    // Keep the app's lastScreenshot metadata in sync so tap(x, y) uses the
-                    // same scaleFactor when converting our pixel coords back to points.
-                    if (shot.originalWidth && shot.originalHeight) {
-                        targetApp.lastScreenshot = {
-                            originalWidth: shot.originalWidth,
-                            originalHeight: shot.originalHeight,
-                            scaleFactor: screenshotScale
-                        };
-                    }
-                    lines = formatPressablesInPixels(elements, {
-                        platform: "ios",
-                        devicePixelRatio,
-                        screenshotScale,
-                        safeAreaTop
-                    });
-                } else {
-                    // Metro's `deviceName` is the device model (e.g. "sdk_gphone16k_arm64"),
-                    // not the adb serial (e.g. "emulator-5554"), so passing it as -s makes
-                    // adb miss the device and androidScreenshot/androidGetDensity silently
-                    // return defaults (scale=1, density=160). That leaves coords in raw
-                    // device pixels — off by ~1.2× from the screenshot/JPEG space the tool
-                    // description promises. Pass undefined to let adb auto-pick (matches
-                    // how android_screenshot works when called without deviceId). Multi-
-                    // Android-device support tracks separately under the multi-device
-                    // refactor; this path is a single-Android-device fix.
-                    const shot = await androidScreenshot(undefined, undefined);
-                    const screenshotScale = shot.scaleFactor || 1;
-                    const density = await androidGetDensity(undefined).catch(() => ({ density: 160 }));
-                    const devicePixelRatio = (density.density || 160) / 160;
-                    if (shot.originalWidth && shot.originalHeight) {
-                        targetApp.lastScreenshot = {
-                            originalWidth: shot.originalWidth,
-                            originalHeight: shot.originalHeight,
-                            scaleFactor: screenshotScale
-                        };
-                    }
-                    lines = formatPressablesInPixels(elements, {
-                        platform: "android",
-                        devicePixelRatio,
-                        screenshotScale,
-                        safeAreaTop: 0
-                    });
-                }
-            } catch {
-                // Fallback to points if screenshot/metadata unavailable
-                return {
-                    content: [{ type: "text", text: result.result || "No pressable elements found." }]
-                };
-            }
-    
-            const iconCount = elements.filter((e) => !e.hasLabel).length;
-            const labeledCount = elements.length - iconCount;
-            const summary = `Found ${elements.length} pressable elements (${iconCount} icon-only, ${labeledCount} with text labels)`;
-            const text = [summary, "", ...lines].join("\n");
-    
-            return {
-                content: [{ type: "text", text }]
-            };
-        }
-    );
-
     // Tool: Get current screen state — route, overlays, pressables (post-navigation checkpoint)
     registerToolWithTelemetry(
         server,
@@ -342,7 +231,7 @@ export function registerComponentTools(server: McpServer): void {
                 "Each line carries an (x, y) center + frame bounds (so anything is a tap(x, y) target), typed by a leading marker: 🔘 pressable (with component JSX tag, label, testID, onPress hint), 📝 text, 🖼 image (with src/alt). " +
                 "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
-                "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection. Coordinates in points (iOS) / dp (Android); text frames are container-level (climb to nearest measurable host).\n" +
+                "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection.\n" +
                 "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call inspect_at_point(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
             inputSchema: {
@@ -380,7 +269,12 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
-            const ss = result.screenState;
+            // Normalise to screen space so a coordinate read here can be handed straight to
+            // tap()/inspect_at_point/a screenshot. Raw measureInWindow is not screen-relative
+            // (Android excludes the status bar; iOS modals measure from their own container),
+            // which is why point-space output used to disagree with screenshot pixels.
+            const rawSs = result.screenState;
+            const ss = rawSs ? screenStateToScreenSpace(rawSs, await resolveScreenSpaceMetricsFor(device)) : rawSs;
             const summary = ss ? formatScreenStateSummary(ss, undefined, { pressablesOnly, fullText, keyboard }) : (result.result ?? "{}");
             const body = metaNotes.length > 0
                 ? `${summary}\n\n${metaNotes.join("\n")}`
@@ -389,72 +283,6 @@ export function registerComponentTools(server: McpServer): void {
         }
     );
 
-    function formatPressablesInPixels(
-        elements: NonNullable<Awaited<ReturnType<typeof getPressableElements>>["parsedElements"]>,
-        opts: {
-            platform: "ios" | "android";
-            devicePixelRatio: number;
-            screenshotScale: number;
-            safeAreaTop: number;
-        }
-    ): string[] {
-        const { platform, devicePixelRatio, screenshotScale, safeAreaTop } = opts;
-        const out: string[] = [];
-        for (let i = 0; i < elements.length; i++) {
-            const el = elements[i];
-            // react-native-screens modal presentations report y relative to content origin;
-            // shift into the window frame when the element's center sits inside the safe-area
-            // band. The shift MUST be applied to center and frame atomically — independent
-            // checks (cy<inset, fy<inset) drift apart on iPad-style insets where a header's
-            // center is just below the inset but its frame top is just above, producing
-            // center/frame.y values that don't satisfy center = frame.y + frame.h/2.
-            let cy = el.center.y;
-            let fy = el.frame.y;
-            if (platform === "ios" && safeAreaTop > 0 && cy < safeAreaTop) {
-                cy += safeAreaTop;
-                fy += safeAreaTop;
-            }
-            // iOS: fiber returns points → convert points × DPR / screenshotScale = JPEG px.
-            // Android: getPressableElements reconciles fiber DP against uiautomator device-pixel
-            // bounds (executor.ts, 2026-05-17). After reconciliation, coords are already in
-            // device pixels — only the JPEG downscale needs to be applied. Multiplying by DPR
-            // here would re-inflate them by ~density/160 (~2.6× on a 420dpi device), reproducing
-            // the original out-of-bounds bug.
-            const toPx = (v: number) =>
-                platform === "android"
-                    ? Math.round(v / screenshotScale)
-                    : Math.round((v * devicePixelRatio) / screenshotScale);
-            const cx = toPx(el.center.x);
-            const cyPx = toPx(cy);
-            const fx = toPx(el.frame.x);
-            const fyPx = toPx(fy);
-            const fw = toPx(el.frame.width);
-            const fh = toPx(el.frame.height);
-    
-            const num = i + 1;
-            const iconHint = !el.hasLabel ? iconLabel(el.component, el.icon) : null;
-            const label = el.hasLabel
-                ? `"${el.text}"`
-                : iconHint
-                  ? `(${iconHint})`
-                  : el.intent
-                    ? `(${el.intent} icon)`
-                    : "(icon/image)";
-            const ids: string[] = [];
-            if (el.testID) ids.push(`testID="${el.testID}"`);
-            if (el.accessibilityLabel) ids.push(`a11y="${el.accessibilityLabel}"`);
-            const idStr = ids.length > 0 ? ` [${ids.join(", ")}]` : "";
-            const inputStr = el.isInput ? " (input)" : "";
-            const wrapperStr = el.isWrapper ? " [wrapper — skip unless dismissing keyboard]" : "";
-            const nearPart = el.nearbyText ? ` near "${el.nearbyText}"` : "";
-            out.push(
-                `${num}. ${el.component} ${label}${nearPart} — center:(${cx},${cyPx}) frame:(${fx},${fyPx} ${fw}x${fh})${idStr}${inputStr}${wrapperStr}`
-            );
-            if (el.path) out.push(`   path: ${el.path}`);
-        }
-        return out;
-    }
-    
     // Tool: Inspect a specific component by name
     registerToolWithTelemetry(
         server,
@@ -626,19 +454,19 @@ export function registerComponentTools(server: McpServer): void {
                 "Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point) + the innermost component's PROPS (handlers as [Function], refs, custom props like onPress/data/testID). Pure JS hit-test via fiber + measureInWindow — no overlay toggled, zero visual side effect. Works on Paper and Fabric.\n" +
                 "PURPOSE: Layout/props diagnosis — \"where is each ancestor positioned, and what props does the touched component expose?\"\n" +
                 "WHEN TO USE: A button is clipped, hit area is wrong, animated frame is unexpected — or you need handler/ref/non-style props. Also preferred for tight loops (no overlay flicker).\n" +
-                "WORKFLOW: screenshot → suspect pixel → divide by pixel ratio → inspect_at_point(x, y).\n" +
-                "LIMITATIONS: Coordinates MUST be in dp, not screenshot pixels — wrong unit = wrong node. Style is the node's own style object, not the merged cascade.\n" +
+                "WORKFLOW: screenshot or get_screen_state → take the coordinate as-is → inspect_at_point(x, y).\n" +
+                "LIMITATIONS: Style is the node's own style object, not the merged cascade. `frame` is the element's own box; `hitFrame` (when present) is the innermost node actually under the point.\n" +
                 "SOURCE: also returns `source: {file, line, column}` for the component at the point, plus the owner chain as `Source ancestors` (set source=false to skip in tight loops).\n",
             inputSchema: {
                 x: z
                     .number()
                     .describe(
-                        "X coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."
+                        "X coordinate in screen space — take it straight from a screenshot, get_screen_state or get_screen_layout. No conversion."
                     ),
                 y: z
                     .number()
                     .describe(
-                        "Y coordinate in dp (logical pixels). Convert from screenshot pixels by dividing by the device pixel ratio."
+                        "Y coordinate in screen space — take it straight from a screenshot, get_screen_state or get_screen_layout. No conversion."
                     ),
                 includeProps: z
                     .boolean()
@@ -659,7 +487,12 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ x, y, includeProps, includeFrame, device, source = true }) => {
-            const result = await inspectAtPoint(x, y, { includeProps, includeFrame, device });
+            const result = await inspectAtPoint(x, y, {
+                includeProps,
+                includeFrame,
+                device,
+                screenSpace: await resolveScreenSpaceMetricsFor(device)
+            });
     
             if (!result.success) {
                 return {
@@ -737,7 +570,7 @@ export function registerComponentTools(server: McpServer): void {
         "measure",
         {
             description:
-                "Get on-screen geometry {x, y, width, height} for a named React component instance. Calls measureInWindow on the matched fiber (or its nearest host descendant for composite components). Coordinates are in points (iOS) / dp (Android), same space as get_screen_layout and inspect_at_point.\n" +
+                "Get on-screen geometry {x, y, width, height} for a named React component instance. Calls measureInWindow on the matched fiber (or its nearest host descendant for composite components). Coordinates are screen space, the same space as get_screen_layout, get_screen_state, inspect_at_point and tap().\n" +
                 "PURPOSE: One-shot, name-based component measurement — avoids hand-rolling fiber walks and Promise-wrapping measureInWindow callbacks in execute_in_app.\n" +
                 "WHEN TO USE: You already know the component's display name (from get_screen_layout or find_components) and just need its current bounds — e.g. to verify a layout change, compute a tap target, or compare against design specs.\n" +
                 "WORKFLOW: find_components(pattern=\"...\") -> measure(componentName=\"...\", index=N) -> tap(x, y) at the center, or inspect_at_point at the center to verify identity.\n" +
@@ -779,10 +612,17 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
+            // measure returns a single leaf box, so the band rule applies directly — there is
+            // no root container here to exempt. Without this the tool's own promise of "the
+            // same space as get_screen_layout and inspect_at_point" would be false: off by the
+            // status bar on every Android screen, and by the safe area inside an iOS modal.
+            const measureMetrics = await resolveScreenSpaceMetricsFor(device);
+            const measuredY = toScreenSpaceY(result.y, measureMetrics);
+
             const lines = [
                 `Component: ${result.name}`,
-                `Frame: (${result.x.toFixed(1)}, ${result.y.toFixed(1)}) ${result.width.toFixed(1)}x${result.height.toFixed(1)}`,
-                `Center: (${(result.x + result.width / 2).toFixed(1)}, ${(result.y + result.height / 2).toFixed(1)})`,
+                `Frame: (${result.x.toFixed(1)}, ${measuredY.toFixed(1)}) ${result.width.toFixed(1)}x${result.height.toFixed(1)}`,
+                `Center: (${(result.x + result.width / 2).toFixed(1)}, ${(measuredY + result.height / 2).toFixed(1)})`,
             ];
             if (typeof result.nativeTag === "number") {
                 lines.push(`nativeTag: ${result.nativeTag}`);

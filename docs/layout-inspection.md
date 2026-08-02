@@ -8,12 +8,32 @@ Tools for understanding the structure and layout of your React Native screens. U
 
 | Tool                       | Purpose                                                                              |
 | -------------------------- | ------------------------------------------------------------------------------------ |
+| `get_screen_state`         | Screenshot-free orientation snapshot — active route, overlays, and every on-screen element with a tap-ready centre |
 | `get_screen_layout`        | Screen map of visible components with positions, sizes, and text content             |
 | `get_component_tree`       | React fiber tree (providers, navigation, internals). Compact names-only by default    |
 | `find_components`          | Search for components by name pattern across the entire tree                         |
 | `inspect_component`        | Deep dive into a specific component's props, state, and hooks                        |
 | `inspect_at_point`         | Per-ancestor frames + props + style + source file:line at (x, y) — pure JS, no flicker |
 | `get_images`               | Access the shared image buffer (screenshots from all tools, tap verification frames) |
+
+## Coordinates
+
+All of these tools speak one screen-space coordinate system — `get_screen_state`, `get_screen_layout`, `measure`, `inspect_at_point`, the screenshot summaries, and `tap`. Take a coordinate from any one of them and pass it to any other unchanged. There is no conversion step.
+
+## get_screen_state
+
+Screenshot-free snapshot of the current screen. Returns the active route and its params, the navigation stack, any open overlays, and every on-screen element merged top-to-bottom — pressables (component tag, label, testID, `onPress` hint), text, and images — each with a tap-ready `(x, y)` centre and its frame. Elements sitting behind an open overlay or a raised keyboard are grouped separately, so you can see at a glance which ones a tap will not reach.
+
+```
+get_screen_state
+```
+
+**Key parameters:**
+
+- `pressablesOnly=true` — return just the tappable elements
+- `fullText=true` — disable text truncation
+
+Call this after any tap or navigation to confirm where you landed before reaching for a screenshot.
 
 ## get_screen_layout
 
@@ -23,7 +43,7 @@ Returns visible components as an indented tree with actual screen positions. Use
 get_screen_layout
 ```
 
-Returns meaningful component names with text content and frame data (`x, y width x height`). Coordinates are in **points** (iOS) or **dp** (Android) — not screenshot pixels.
+Returns meaningful component names with text content and frame data (`x, y width x height`). Coordinates are in the shared screen space used by every layout tool — see [Coordinates](#coordinates).
 
 **Key parameters:**
 
@@ -77,13 +97,13 @@ inspect_component with name="ProductCard"
 
 ## inspect_at_point
 
-Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point) plus the innermost component's PROPS (handlers as `[Function]`, refs, testID, custom props). Pure JS hit test via fiber tree + `measureInWindow` — no on-device overlay toggled, zero visual side effect.
+Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size for every ancestor that hit-tested the point) plus the innermost component's PROPS (handlers as `[Function]`, refs, testID, custom props). Pure JS hit test via fiber tree + `measureInWindow` — no on-device overlay toggled, zero visual side effect.
 
 ```
 inspect_at_point with x=150 y=300
 ```
 
-Coordinates are in dp (density-independent pixels). Convert from screenshot pixels by dividing by the device pixel ratio (e.g., 540px / 2.625 = 205dp).
+Coordinates are in the shared screen space — feed it a point straight from `get_screen_state`, `get_screen_layout`, `measure`, or a screenshot summary. No conversion (see [Coordinates](#coordinates)).
 
 Works on Paper, Fabric, and Bridgeless / new arch. Skips RN primitives and common library wrappers to surface meaningful components.
 
@@ -107,9 +127,10 @@ Returns metadata only by default. Use `id` or `groupId` + `frameIndex` to retrie
 
 ### Understand What's on Screen
 
-1. `get_screen_layout` — see all visible components with positions
-2. `find_components(pattern="...")` — find specific components by name
-3. `inspect_component(componentName="...")` — get full props, state, hooks for a component
+1. `get_screen_state` — active route, overlays, and every element with a tap-ready centre
+2. `get_screen_layout` — see all visible components with positions
+3. `find_components(pattern="...")` — find specific components by name
+4. `inspect_component(componentName="...")` — get full props, state, hooks for a component
 
 ### Identify a Component from a Screenshot
 

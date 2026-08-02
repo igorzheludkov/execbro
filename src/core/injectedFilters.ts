@@ -21,6 +21,14 @@
 export const RN_PRIMITIVES_SRC =
     "/^(Animated\\(.*|withAnimated.*|AnimatedComponent.*|ForwardRef.*|memo\\(.*|Context\\.Consumer|Context\\.Provider|ScrollViewContext(Base)?|VirtualizedListContext(Resetter)?|TextInputContext|KeyboardAvoidingViewContext|RCT.*|RNS.*|RNC.*|ViewManagerAdapter_.*|VirtualizedList.*|CellRenderer.*|FrameSizeProvider.*|MaybeScreenContainer|MaybeScreen|Navigation.*|Screen$|ScreenStack|ScreenContainer|ScreenContentWrapper|SceneView|DelayedFreeze|Freeze|Suspender|DebugContainer|StaticContainer|SafeAreaProvider.*|SafeAreaFrameContext|SafeAreaInsetsContext|ExpoRoot|ExpoRootComponent|GestureHandler.*|NativeViewGestureHandler|GestureDetector|PanGestureHandler|Reanimated.*|BottomTabNavigator|TabLayout|RouteNode|Route$|KeyboardProvider|PortalProviderComponent|BottomSheetModalProviderWrapper|ThemeContext|ThemeProvider|TextAncestorContext|PressabilityDebugView|TouchableHighlightImpl|StatusBarOverlay|BottomSheetHostingContainerComponent|BottomSheetGestureHandlersProvider|BottomSheetBackdropContainerComponent|BottomSheetContainerComponent|BottomSheetDraggableViewComponent|BottomSheetHandleContainerComponent|BottomSheetBackgroundContainerComponent|DebuggingOverlay|InspectorDeferred|Inspector|InspectorOverlay|InspectorPanel|StyleInspector|BoxInspector|BoxContainer|ElementBox|BorderBox|InspectorPanelButton)$/";
 
-/** Names too generic to identify anything — keep climbing past these. */
+/** Names too generic to identify anything — keep climbing past these.
+ *
+ *  Scroll/list containers belong here: they are layout, not identity. Without them a
+ *  climb out of a plain `<Pressable>` inside a `<ScrollView>` stopped on the scroll
+ *  container, so every button on such a screen was reported as `<ScrollView />`
+ *  ("Submit", "Cancel", "Отправить" all came back with that tag). Callers that find
+ *  nothing meaningful above a pressable must fall back to naming the pressable itself
+ *  rather than climbing further — the next non-generic ancestor is typically the whole
+ *  screen component, which is a worse answer than "Pressable". */
 export const GENERIC_COMPONENT_SRC =
-    "/^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText|Unknown)$/";
+    "/^(View|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|Pressable|TouchableNativeFeedback|Text|RCTView|RCTText|ScrollView|FlatList|SectionList|VirtualizedList|KeyboardAvoidingView|SafeAreaView|Unknown)$/";

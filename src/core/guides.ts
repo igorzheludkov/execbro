@@ -56,7 +56,7 @@ const guides: Guide[] = [
 ## Recommended Workflow: Identify a Component on Screen
 1. Take a screenshot (ios_screenshot / android_screenshot) or use ocr_screenshot
 2. Identify the target element visually, estimate its coordinates
-3. Convert screenshot pixels to points: divide by device pixel ratio (e.g. pixel_x / 3 for @3x iPhones)
+3. Pass those coordinates straight through — every layout tool, tap() and the screenshots share one screen-space coordinate system, so no conversion is needed
 4. Pick the right tool (see decision below) and call it with (x, y)
 
 ### inspect_at_point(x, y)
@@ -87,13 +87,26 @@ looks wrong and isn't on the node itself, walk the ancestors it returns.
 
 ## Tips
 - Works on Paper, Fabric, and Bridgeless / new arch.
-- Coordinates are dp — divide screenshot pixels by the device pixel ratio.`
+- Coordinates are screen space: the same space screenshots, get_screen_state and tap() use. Do not convert.`
     },
     {
         id: "layout",
         title: "Layout Debugging",
         summary: "Capture screenshots, verify UI changes, inspect layout frames and styles",
         content: `# Layout Debugging
+
+## Orient First
+- get_screen_state — start here after any tap or navigation. Screenshot-free: active route,
+  open overlays, and every on-screen element with a tap-ready (x, y) and frame. Reads screen
+  content (prices, labels, which image loaded) without a screenshot+OCR round-trip.
+  - pressablesOnly=true for just the tappable list.
+  - Elements under an open overlay or a raised keyboard are grouped separately — taps will
+    not reach them until it closes.
+
+## Coordinates
+All layout tools, tap() and the screenshots share ONE screen-space coordinate system. A frame
+read from get_screen_state, get_screen_layout, measure or inspect_at_point can be passed to
+tap(x, y) unchanged. Do not divide by the device pixel ratio.
 
 ## Verify UI Changes
 1. ios_screenshot / android_screenshot — capture current screen
@@ -112,6 +125,7 @@ looks wrong and isn't on the node itself, walk the ancestors it returns.
 - find_components with includeLayout=true for targeted layout info
 
 ## Key Tools
+- get_screen_state: route + overlays + every element, screenshot-free (start here)
 - ios_screenshot / android_screenshot: visual capture
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - ocr_screenshot: screenshot with text recognition and tap coordinates
@@ -382,14 +396,14 @@ Suggested prompt the user can paste to trigger this:
  * `instructions`. Keep this as the single source of truth.
  */
 export const DECISION_TREE: string = [
-    "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_pressable_elements, get_screen_layout.",
+    "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_screen_state, get_screen_layout.",
     "Platform-specific ios_* / android_* tools (ios_button, android_input_text, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs        — console debugging (get_logs, search_logs)",
     "  interact    — device interaction (tap, swipe, screenshots, android_input_text, dismiss_keyboard)",
-    "  layout      — on-screen layout check (get_screen_layout, get_pressable_elements)",
+    "  layout      — on-screen layout check (get_screen_state, get_screen_layout)",
     "  inspect     — component inspection (find_components, inspect_component, inspect_at_point)",
     "  network     — network request inspection (get_network_requests, search_network)",
     "  state       — app state & JS execution (execute_in_app, list_debug_globals)",

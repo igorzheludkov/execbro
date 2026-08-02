@@ -2,7 +2,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
-import { iconLabel } from "../core/iconSemantics.js";
 import { recordScreenMetrics } from "../core/projectMemory.js";
 import {
     iosScreenshot,
@@ -11,12 +10,10 @@ import {
     formatLogBoxWarning,
     recognizeText,
     inferIOSDevicePixelRatio,
-    getPressableElements,
     getScreenState,
     formatScreenStateSummary,
     imageBuffer,
     getActiveOrBootedSimulatorUdid,
-    enrichScreenshotWithLayout,
     connectedApps,
     getConnectedAppBySimulatorUdid,
     getConnectedAppByAndroidDeviceId,
@@ -26,7 +23,7 @@ import {
     androidGetStatusBarHeight,
     androidGetDensity,
 } from "../core/index.js";
-import { getJpegDimensions, estimateImageTokens } from "../core/toolHelpers.js";
+import { screenStateToScreenSpace } from "../core/screenSpace.js";
 
 export function registerScreenshotTools(server: McpServer): void {
     // Tool: iOS screenshot
@@ -183,57 +180,38 @@ export function registerScreenshotTools(server: McpServer): void {
                         if (ssResult && ssResult.success && ssResult.screenState) {
                             const screenshotScale = result.scaleFactor || 1;
                             const toPx = (v: number) => Math.round((v * scaleFactor) / screenshotScale);
-                            pressablesText = formatScreenStateSummary(ssResult.screenState, (p) => {
-                                // See enrichScreenshotWithLayout: shift y when fiber reports the
-                                // element inside the safe-area band (react-native-screens modals).
-                                const yShift = safeAreaTop > 0 && p.center.y < safeAreaTop ? safeAreaTop : 0;
-                                return {
-                                    center: { x: toPx(p.center.x), y: toPx(p.center.y + yShift) },
-                                    frame: {
-                                        x: toPx(p.bounds.x),
-                                        y: toPx(p.bounds.y + yShift),
-                                        width: toPx(p.bounds.width),
-                                        height: toPx(p.bounds.height),
-                                    },
-                                };
+                            // Normalise once, then scale. The y-shift used to live inline here
+                            // (and in a second copy for the flat pressables path), which is how
+                            // the pixel output ended up correct while the point-space tools were
+                            // an inset off — see core/screenSpace.ts.
+                            const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
+                                platform: "ios",
+                                topInset: safeAreaTop
                             });
+                            pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
+                                center: { x: toPx(p.center.x), y: toPx(p.center.y) },
+                                frame: {
+                                    x: toPx(p.bounds.x),
+                                    y: toPx(p.bounds.y),
+                                    width: toPx(p.bounds.width),
+                                    height: toPx(p.bounds.height),
+                                },
+                            }));
                             pressablesIsScreenState = true;
                         }
                     } catch {
                         // Non-fatal: fall through to the flat pressables list below
                     }
                 }
-                if (!pressablesText) {
-                    try {
-                        const pressables = await getPressableElements({
-                            device: targetDeviceName,
-                            platform: "ios",
-                            udid: resolvedUdid ?? undefined
-                        });
-                        if (pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
-                            const screenshotScale = result.scaleFactor || 1;
-                            pressablesText = pressables.parsedElements.map((el) => {
-                                // See enrichScreenshotWithLayout: shift y when fiber reports the element
-                                // inside the safe-area band (a react-native-screens modal artifact).
-                                let centerYPoints = el.center.y;
-                                if (safeAreaTop > 0 && centerYPoints < safeAreaTop) {
-                                    centerYPoints += safeAreaTop;
-                                }
-                                const px = Math.round((el.center.x * scaleFactor) / screenshotScale);
-                                const py = Math.round((centerYPoints * scaleFactor) / screenshotScale);
-                                const label = el.accessibilityLabel || el.text || el.testID || iconLabel(el.component, el.icon) || (el.intent ? `${el.intent} icon` : el.component);
-                                const idPart = el.testID ? ` testID="${el.testID}"` : "";
-                                const kindPart = el.isInput ? " [input]" : "";
-                                const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
-                                const nearPart = !el.text && !el.accessibilityLabel && el.nearbyText ? ` near "${el.nearbyText}"` : "";
-                                return `  (${px}, ${py}) ${el.component}: "${label}"${nearPart}${idPart}${kindPart}${wrapPart}`;
-                            }).join("\n");
-                        }
-                    } catch {
-                        // Non-fatal: screenshot works without pressables enrichment
-                    }
-                }
-    
+                // No second rendering path on purpose. This used to fall back to a flat
+                // getPressableElements list, which is what let the two renderings drift:
+                // the screenState path groups overlay/keyboard-blocked elements, the flat
+                // one did not, so an Android screenshot with the keyboard up advertised 12
+                // blocked elements as tappable. The flat path also mis-mapped Android
+                // coordinates (five distinct rows sharing one 11x57 frame). screenState is
+                // the single source of truth; if it fails the screenshot ships without
+                // enrichment rather than with a worse answer.
+
                 const deliveredWidth = result.scaleFactor && result.scaleFactor > 1
                     ? Math.round(pixelWidth / result.scaleFactor)
                     : pixelWidth;
@@ -495,12 +473,18 @@ export function registerScreenshotTools(server: McpServer): void {
                             const screenshotScale = result.scaleFactor || 1;
                             const densityScale = densityDpi / 160;
                             const toPx = (v: number) => Math.round((v * densityScale) / screenshotScale);
-                            const toPxY = (v: number) => Math.round((v * densityScale + statusBarPixels) / screenshotScale);
-                            pressablesText = formatScreenStateSummary(ssResult.screenState, (p) => ({
-                                center: { x: toPx(p.center.x), y: toPxY(p.center.y) },
+                            // Same normalise-then-scale as iOS. Android's inset is the status bar,
+                            // which measureInWindow excludes because it reports app-window
+                            // coordinates — see core/screenSpace.ts.
+                            const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
+                                platform: "android",
+                                topInset: statusBarDp
+                            });
+                            pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
+                                center: { x: toPx(p.center.x), y: toPx(p.center.y) },
                                 frame: {
                                     x: toPx(p.bounds.x),
-                                    y: toPxY(p.bounds.y),
+                                    y: toPx(p.bounds.y),
                                     width: toPx(p.bounds.width),
                                     height: toPx(p.bounds.height),
                                 },
@@ -512,28 +496,8 @@ export function registerScreenshotTools(server: McpServer): void {
                     }
                 }
 
-                // Fallback: flat pressable elements. With targetApp present this uses the
-                // fiber path (uiautomator-reconciled coords). Without targetApp it degrades
-                // to the Android accessibility (uiautomator) tree (E1).
-                try {
-                    const pressables = pressablesText ? null : await getPressableElements({ device: targetDeviceName, platform: "android" });
-                    if (pressables && pressables.success && pressables.parsedElements && pressables.parsedElements.length > 0) {
-                        const screenshotScale = result.scaleFactor || 1;
-                        pressablesText = pressables.parsedElements.map((el) => {
-                            const px = Math.round(el.center.x / screenshotScale);
-                            const py = Math.round(el.center.y / screenshotScale);
-                            const label = el.accessibilityLabel || el.text || el.testID || iconLabel(el.component, el.icon) || (el.intent ? `${el.intent} icon` : el.component);
-                            const idPart = el.testID ? ` testID="${el.testID}"` : "";
-                            const kindPart = el.isInput ? " [input]" : "";
-                            const wrapPart = el.isWrapper ? " [wrapper — skip]" : "";
-                            const nearPart = !el.text && !el.accessibilityLabel && el.nearbyText ? ` near "${el.nearbyText}"` : "";
-                            return `  (${px}, ${py}) ${el.component}: "${label}"${nearPart}${idPart}${kindPart}${wrapPart}`;
-                        }).join("\n");
-                    }
-                } catch {
-                    // Non-fatal: screenshot works without pressables enrichment
-                }
-    
+                // No flat-pressables fallback here either — see the iOS branch for why.
+
                 infoText += `\n📱 Android uses PIXELS for all coordinates`;
     
                 if (result.scaleFactor && result.scaleFactor > 1) {

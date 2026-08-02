@@ -148,7 +148,6 @@ export {
   getComponentTree,
   getScreenLayout,
   formatScreenLayoutTree,
-  getPressableElements,
   getScreenState,
   enrichScreenshotWithLayout,
   inspectComponent,

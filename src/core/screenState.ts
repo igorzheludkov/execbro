@@ -656,6 +656,35 @@ export async function getScreenState(
             navState = findNavStateByShape(roots[0].current, 0);
         }
 
+        // Last resort: React Navigation exposes the root state on a context provider's
+        // value, not on a hook's memoizedState. With createStaticNavigation the container
+        // fiber is anonymous (no displayName) and nothing nav-shaped ever reaches
+        // memoizedState, so every strategy above misses and the tool reports "no React
+        // Navigation detected" on an app that plainly has it.
+        //
+        // Measured across three apps: this provider is present in all of them (depth 20-40),
+        // while the memoizedState shape exists only under dynamic config / expo-router.
+        // That makes it the one location covering static config, dynamic config and
+        // expo-router alike. Kept last so the cheaper strategies still win when they work.
+        if (!navState) {
+            function findNavStateByProviderValue(fiber, depth) {
+                if (!fiber || depth > 400) return null;
+                var p = fiber.memoizedProps;
+                if (p && p.value && typeof p.value === 'object') {
+                    try {
+                        if (typeof p.value.getRootState === 'function') {
+                            var rs = p.value.getRootState();
+                            if (isNavState(rs)) return rs;
+                        }
+                    } catch (e) {}
+                }
+                var result = findNavStateByProviderValue(fiber.child, depth + 1);
+                if (result) return result;
+                return findNavStateByProviderValue(fiber.sibling, depth + 1);
+            }
+            navState = findNavStateByProviderValue(roots[0].current, 0);
+        }
+
         if (navState && navState.routes) {
             var fiberStack = [];
             var fiberLeafParams = null;
@@ -811,6 +840,9 @@ export async function getScreenState(
 
     var PAGE_COMPONENT = /^(.*Screen|.*Page|.*View$|.*Container$|.*Layout$|.*Root$|ExpoRoot|App$)/;
 
+    // Scroll/list containers end the search for a pressable's owning component.
+    var SCROLL_BOUNDARY = /^(ScrollView|FlatList|SectionList|VirtualizedList|VirtualizedSectionList|RCTScrollView|RCTScrollContentView)$/;
+
     // Layout-only and touch-wrapper components skipped when scanning a pressable's
     // children for a meaningful icon component name (e.g. SvgChevronBack).
     var SKIP_IN_CHILD_SCAN = /^(View|Text|Image|ImageBackground|ScrollView|FlatList|SectionList|KeyboardAvoidingView|SafeAreaView|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback|TouchableNativeFeedback|Pressable|TextInput|ActivityIndicator|Switch|Modal|StatusBar|VirtualizedList|RefreshControl|Animated\\(.*|withAnimated.*|AnimatedComponent.*)$/;
@@ -863,6 +895,11 @@ export async function getScreenState(
             if (typeof an.type !== 'string' && an.type !== null) {
                 var n = getComponentName(an);
                 if (n) {
+                    // Stop at a scroll/list boundary. A pressable's owning component lives
+                    // inside the same scroll container; past it the next non-generic ancestor
+                    // is the screen itself, and "<TapTargetsScreen />" on a Submit button is a
+                    // worse answer than the "<Pressable />" the caller falls back to.
+                    if (SCROLL_BOUNDARY.test(n)) return null;
                     composites++;
                     if (!RN_PRIMITIVES.test(n) && !GENERIC_COMPONENT.test(n)) return an;
                 }
@@ -875,7 +912,13 @@ export async function getScreenState(
 
     function resolveComponentName(fiber) {
         var cf = resolveComponentFiber(fiber);
-        return cf ? getComponentName(cf) : null;
+        if (cf) return getComponentName(cf);
+        // Nothing meaningful above this pressable: name the pressable itself. Climbing
+        // further reaches the screen component, and "<TapTargetsScreen />" on a Submit
+        // button is a worse answer than "<Pressable />".
+        var own = getComponentName(fiber);
+        if (own && typeof fiber.type !== 'string' && !RN_PRIMITIVES.test(own)) return own;
+        return null;
     }
 
     // Event-handler props (onBack, onSelect, ...) of the custom component — context
@@ -939,6 +982,19 @@ export async function getScreenState(
         return isHiddenNavigationScene(name, props);
     }
 
+    // A pressable whose own rendered box is invisible must not be listed.
+    //
+    // Checking the composite alone is not enough: react-navigation's drawer scrim keeps
+    // opacity on the host View it renders, while the Overlay composite above it carries
+    // only a backgroundColor. The composite therefore looks visible, and by the time the
+    // walk descends to the host that says opacity:0 the pressable has already been
+    // collected — surfacing a full-screen tappable <Overlay /> over the middle of every
+    // screen on any app with a drawer.
+    function isHostHidden(hostFiber) {
+        if (!hostFiber) return false;
+        return isScreenHidden(getComponentName(hostFiber), hostFiber.memoizedProps);
+    }
+
     function walkPressabilityDebugViews(fiber, depth, hidden, ovIdx) {
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
@@ -993,7 +1049,7 @@ export async function getScreenState(
         if (!nextHidden && props && typeof props.onPress === 'function') {
             var hosts3 = [];
             findHostsInSubtree(fiber, 0, hosts3, 8);
-            if (hosts3.length > 0) {
+            if (hosts3.length > 0 && !isHostHidden(hosts3[0])) {
                 var p2 = fiber.memoizedProps || {};
                 var text2 = collectText(fiber, 0);
                 var a11y2 = p2.accessibilityLabel || null;
@@ -1095,15 +1151,32 @@ export async function getScreenState(
         var nextInside = insidePressable || !!hasOnPress || !!isInputHere;
 
         // Record standalone text when outside any pressable — its own text already
-        // labels the pressable it belongs to. Climb to the nearest measurable host
-        // for proxy bounds (Fabric RCTText has no publicInstance).
+        // labels the pressable it belongs to.
         if (!insidePressable && !nextHidden && name !== 'RCTText' && typeof fiber.type !== 'string') {
             var str = extractTextString(fiber);
             if (str && str.length > 0 && str.length <= 300) {
+                // Measure the text's OWN host first.
+                //
+                // This used to climb to the nearest measurable ancestor, on the premise that a
+                // Fabric RCTText has no publicInstance. getMeasurable has since grown a
+                // nativeFabricUIManager branch that measures exactly those leaves, so the tight
+                // glyph bounds are available — and climbing instead reported the enclosing
+                // scroll container. That put "Taps: 0" and "Last: none" at one identical
+                // full-width frame, hundreds of points from either string, and any centre
+                // computed from it landed on unrelated UI.
+                var measurableT = null;
+                (function down(f, d) {
+                    if (measurableT || !f || d > 6) return;
+                    if (typeof f.type === 'string' && getMeasurable(f)) { measurableT = f; return; }
+                    var c = f.child;
+                    while (c && !measurableT) { down(c, d + 1); c = c.sibling; }
+                })(fiber, 0);
+
+                // Fall back to the old upward climb when the text renders no measurable host
+                // of its own — a container proxy still beats dropping the text entirely.
                 var up = fiber;
                 var upDepth = 0;
-                var measurableT = null;
-                while (up && upDepth < 20) {
+                while (!measurableT && up && upDepth < 20) {
                     if (typeof up.type === 'string' && getMeasurable(up)) {
                         measurableT = up;
                         break;
@@ -1584,10 +1657,37 @@ export async function getScreenState(
         });
     };
     screenState.texts = dedupBy(screenState.texts, (t) => t.text);
-    screenState.images = dedupBy(screenState.images, (i) => i.src ?? "");
+
+    // Images need geometry-only dedup, not center+src.
+    //
+    // RN's <Image> and the <ExpoImage> it renders both match IMG_NAME and climb to the
+    // same measurable host, but their sources stringify differently — "asset#77" for the
+    // required asset, the resolved "http://127.0.0.1:8083/assets/…?unstable_path=…" URL
+    // for the inner one. Keying on src therefore treated one picture as two, and every
+    // local asset on screen was listed twice at identical coordinates.
+    //
+    // Keep the more informative source: "asset#N" is an opaque registry index, while the
+    // resolved URL carries the actual filename.
+    const OPAQUE_ASSET_REF = /^asset#\d+$/;
+    const dedupImages = <T extends ScreenStateImage>(list: T[]): T[] => {
+        const byBox = new Map<string, T>();
+        for (const img of list) {
+            const key = `${img.center.x},${img.center.y}|${img.bounds.width}x${img.bounds.height}`;
+            const prev = byBox.get(key);
+            if (!prev) {
+                byBox.set(key, img);
+                continue;
+            }
+            if (OPAQUE_ASSET_REF.test(prev.src ?? "") && !OPAQUE_ASSET_REF.test(img.src ?? "")) {
+                byBox.set(key, img);
+            }
+        }
+        return [...byBox.values()];
+    };
+    screenState.images = dedupImages(screenState.images);
     for (const overlay of screenState.overlays) {
         if (overlay.texts) overlay.texts = dedupBy(overlay.texts, (t) => t.text);
-        if (overlay.images) overlay.images = dedupBy(overlay.images, (i) => i.src ?? "");
+        if (overlay.images) overlay.images = dedupImages(overlay.images);
     }
 
     // Semantic icon hints + onPress handler hints

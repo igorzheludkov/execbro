@@ -29,6 +29,7 @@ Before interacting, understand the current screen:
 - Use `mcp__execbro__ios_screenshot` or `mcp__execbro__android_screenshot` for visual reference
 
 **Component tree approach (for finding React Native elements without screenshots):**
+- Use `mcp__execbro__get_screen_state` — the fastest orientation pass. Returns the active route + navigation stack, groups elements behind an open overlay or raised keyboard (taps will NOT reach those until it closes), and lists every on-screen element — pressables (component tag, label, testID, onPress hint), text, images — each with a tap-ready `(x, y)` centre and frame. Pass `pressablesOnly=true` for just the tappable list
 - Use `mcp__execbro__get_screen_layout` for an indented tree of visible components with positions, text, and identifiers
 - Use `mcp__execbro__find_components` to regex-search the fiber tree for a specific component by name
 
@@ -58,9 +59,9 @@ tap(testID="login-btn")    # exact match
 tap(component="MenuIcon")  # case-insensitive substring match
 ```
 
-**By pixel coordinates (from screenshot):**
+**By coordinates (from a screenshot, `get_screen_state`, or `get_screen_layout`):**
 ```
-tap(x=300, y=600)                      # auto-converts pixels to points on iOS
+tap(x=300, y=600)                          # same coordinate system as every layout tool — pass it through unchanged
 tap(x=300, y=600, device="emulator-5554")  # pin the device when both platforms are connected
 ```
 
@@ -139,12 +140,15 @@ When calculating swipe distances or tap positions on an unfamiliar device:
 ### 6. Wait for UI Updates
 
 After navigation or interactions that change the screen, poll the UI by re-calling
-`mcp__execbro__get_screen_layout` (or `find_components`) in a short retry
-loop until the expected component shows up.
+`mcp__execbro__get_screen_state` in a short retry loop until the expected route or
+element shows up. It is the best poll — screenshot-free, shows the active route, and
+flags an overlay or keyboard that would swallow the next tap. Fall back to
+`get_screen_layout` (or `find_components`) when you need the full component tree.
 
 ### 7. Verify Results
 
 After interactions, verify the result:
+- Call `mcp__execbro__get_screen_state` to confirm the expected route and on-screen elements
 - Take a screenshot to confirm the expected screen
 - Check logs for any errors triggered by the interaction
 
@@ -167,6 +171,7 @@ After interactions, verify the result:
 - `mcp__execbro__find_components`
 - `mcp__execbro__list_devices`
 - `mcp__execbro__ios_screenshot` / `android_screenshot`
+- `mcp__execbro__get_screen_state`
 - `mcp__execbro__get_screen_layout`
 - `mcp__execbro__inspect_at_point`
 - `mcp__execbro__android_long_press`
@@ -179,9 +184,10 @@ After interactions, verify the result:
 
 - Requires the ExecBro MCP server to be running
 - iOS simulator interactions require IDB (`brew install idb-companion`) or AXe CLI (`brew install cameroncooke/axe/axe`). Set `IOS_DRIVER=axe` env var to use AXe.
-- **Always use `tap` for tapping** — it handles platform detection, coordinate conversion, and fallback strategies automatically. Use `native=true` for system UI or non-RN apps
+- **Always use `tap` for tapping** — it handles platform detection, device resolution, and fallback strategies automatically. Use `native=true` for system UI or non-RN apps
+- All layout tools share one screen-space coordinate system — `get_screen_state`, `get_screen_layout`, `measure`, `inspect_at_point`, screenshots and `tap` speak the same coordinates. Pass a coordinate from any of them to any other unchanged; there is no pixel→point conversion to do.
 - On failure, follow the `suggestion` field in the tap response — it tells you exactly what to try next
-- Poll with `get_screen_layout` (or `find_components`) after navigation to ensure the next screen is ready before interacting
+- Poll with `get_screen_state` after navigation to ensure the next screen is ready before interacting — it also tells you whether an overlay or the keyboard is blocking your target
 - For Android, the Back button is available via `android_key_event` with key "BACK"
 - `ios_open_url` works for both custom scheme deep links (`myapp://`) and universal links (`https://`)
 - Read the resolution from `android_screenshot` before computing swipe coordinates on physical devices where screen resolution varies
