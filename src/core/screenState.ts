@@ -1151,15 +1151,32 @@ export async function getScreenState(
         var nextInside = insidePressable || !!hasOnPress || !!isInputHere;
 
         // Record standalone text when outside any pressable — its own text already
-        // labels the pressable it belongs to. Climb to the nearest measurable host
-        // for proxy bounds (Fabric RCTText has no publicInstance).
+        // labels the pressable it belongs to.
         if (!insidePressable && !nextHidden && name !== 'RCTText' && typeof fiber.type !== 'string') {
             var str = extractTextString(fiber);
             if (str && str.length > 0 && str.length <= 300) {
+                // Measure the text's OWN host first.
+                //
+                // This used to climb to the nearest measurable ancestor, on the premise that a
+                // Fabric RCTText has no publicInstance. getMeasurable has since grown a
+                // nativeFabricUIManager branch that measures exactly those leaves, so the tight
+                // glyph bounds are available — and climbing instead reported the enclosing
+                // scroll container. That put "Taps: 0" and "Last: none" at one identical
+                // full-width frame, hundreds of points from either string, and any centre
+                // computed from it landed on unrelated UI.
+                var measurableT = null;
+                (function down(f, d) {
+                    if (measurableT || !f || d > 6) return;
+                    if (typeof f.type === 'string' && getMeasurable(f)) { measurableT = f; return; }
+                    var c = f.child;
+                    while (c && !measurableT) { down(c, d + 1); c = c.sibling; }
+                })(fiber, 0);
+
+                // Fall back to the old upward climb when the text renders no measurable host
+                // of its own — a container proxy still beats dropping the text entirely.
                 var up = fiber;
                 var upDepth = 0;
-                var measurableT = null;
-                while (up && upDepth < 20) {
+                while (!measurableT && up && upDepth < 20) {
                     if (typeof up.type === 'string' && getMeasurable(up)) {
                         measurableT = up;
                         break;
@@ -1640,10 +1657,37 @@ export async function getScreenState(
         });
     };
     screenState.texts = dedupBy(screenState.texts, (t) => t.text);
-    screenState.images = dedupBy(screenState.images, (i) => i.src ?? "");
+
+    // Images need geometry-only dedup, not center+src.
+    //
+    // RN's <Image> and the <ExpoImage> it renders both match IMG_NAME and climb to the
+    // same measurable host, but their sources stringify differently — "asset#77" for the
+    // required asset, the resolved "http://127.0.0.1:8083/assets/…?unstable_path=…" URL
+    // for the inner one. Keying on src therefore treated one picture as two, and every
+    // local asset on screen was listed twice at identical coordinates.
+    //
+    // Keep the more informative source: "asset#N" is an opaque registry index, while the
+    // resolved URL carries the actual filename.
+    const OPAQUE_ASSET_REF = /^asset#\d+$/;
+    const dedupImages = <T extends ScreenStateImage>(list: T[]): T[] => {
+        const byBox = new Map<string, T>();
+        for (const img of list) {
+            const key = `${img.center.x},${img.center.y}|${img.bounds.width}x${img.bounds.height}`;
+            const prev = byBox.get(key);
+            if (!prev) {
+                byBox.set(key, img);
+                continue;
+            }
+            if (OPAQUE_ASSET_REF.test(prev.src ?? "") && !OPAQUE_ASSET_REF.test(img.src ?? "")) {
+                byBox.set(key, img);
+            }
+        }
+        return [...byBox.values()];
+    };
+    screenState.images = dedupImages(screenState.images);
     for (const overlay of screenState.overlays) {
         if (overlay.texts) overlay.texts = dedupBy(overlay.texts, (t) => t.text);
-        if (overlay.images) overlay.images = dedupBy(overlay.images, (i) => i.src ?? "");
+        if (overlay.images) overlay.images = dedupImages(overlay.images);
     }
 
     // Semantic icon hints + onPress handler hints

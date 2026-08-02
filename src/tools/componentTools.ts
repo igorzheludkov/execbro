@@ -17,7 +17,7 @@ import {
     getConnectedAppByDevice,
     getFirstConnectedApp,
 } from "../core/index.js";
-import { screenStateToScreenSpace, type ScreenSpaceMetrics } from "../core/screenSpace.js";
+import { screenStateToScreenSpace, toScreenSpaceY, type ScreenSpaceMetrics } from "../core/screenSpace.js";
 import { resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
@@ -98,7 +98,13 @@ export function registerComponentTools(server: McpServer): void {
             }
 
             const effectiveTimeoutMs = timeoutMs ?? (extended ? 15000 : 5000);
-            const result = await getScreenLayout({ extended, summary, device, timeoutMs: effectiveTimeoutMs });
+            const result = await getScreenLayout({
+                extended,
+                summary,
+                device,
+                timeoutMs: effectiveTimeoutMs,
+                screenSpace: await resolveScreenSpaceMetricsFor(device)
+            });
 
             const metaNotes = collectMetaNotes(result);
 
@@ -606,10 +612,17 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
+            // measure returns a single leaf box, so the band rule applies directly — there is
+            // no root container here to exempt. Without this the tool's own promise of "the
+            // same space as get_screen_layout and inspect_at_point" would be false: off by the
+            // status bar on every Android screen, and by the safe area inside an iOS modal.
+            const measureMetrics = await resolveScreenSpaceMetricsFor(device);
+            const measuredY = toScreenSpaceY(result.y, measureMetrics);
+
             const lines = [
                 `Component: ${result.name}`,
-                `Frame: (${result.x.toFixed(1)}, ${result.y.toFixed(1)}) ${result.width.toFixed(1)}x${result.height.toFixed(1)}`,
-                `Center: (${(result.x + result.width / 2).toFixed(1)}, ${(result.y + result.height / 2).toFixed(1)})`,
+                `Frame: (${result.x.toFixed(1)}, ${measuredY.toFixed(1)}) ${result.width.toFixed(1)}x${result.height.toFixed(1)}`,
+                `Center: (${(result.x + result.width / 2).toFixed(1)}, ${(measuredY + result.height / 2).toFixed(1)})`,
             ];
             if (typeof result.nativeTag === "number") {
                 lines.push(`nativeTag: ${result.nativeTag}`);
