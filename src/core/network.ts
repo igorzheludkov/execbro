@@ -1,5 +1,10 @@
 import { NetworkRequest } from "./types.js";
 import { getEpoch } from "./state.js";
+import {
+    operationSuffix,
+    operationDetailLine,
+    operationSearchText
+} from "./graphqlOperation.js";
 
 // Circular buffer for storing network requests
 export class NetworkBuffer {
@@ -77,7 +82,11 @@ export class NetworkBuffer {
 
         if (urlPattern && urlPattern.trim()) {
             const pattern = urlPattern.toLowerCase();
-            results = results.filter((r) => r.url.toLowerCase().includes(pattern));
+            results = results.filter(
+                (r) =>
+                    r.url.toLowerCase().includes(pattern) ||
+                    (operationSearchText(r.postData)?.includes(pattern) ?? false)
+            );
         }
 
         if (status != null && typeof status === "number") {
@@ -99,7 +108,11 @@ export class NetworkBuffer {
     search(urlPattern: string, maxResults: number = 50): NetworkRequest[] {
         const pattern = urlPattern.toLowerCase();
         const results = Array.from(this.requests.values())
-            .filter((r) => r.url.toLowerCase().includes(pattern))
+            .filter(
+                (r) =>
+                    r.url.toLowerCase().includes(pattern) ||
+                    (operationSearchText(r.postData)?.includes(pattern) ?? false)
+            )
             .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
         if (maxResults > 0) {
@@ -132,7 +145,9 @@ export function formatRequest(request: NetworkRequest): string {
     const status = request.status ?? "pending";
     const duration = request.timing?.duration ? `${request.timing.duration}ms` : "-";
 
-    let line = `[${request.requestId}] ${time} ${request.method} ${status} ${duration} ${request.url}`;
+    // GraphQL calls all share one URL, so the operation name is the only thing
+    // that tells two rows apart.
+    let line = `[${request.requestId}] ${time} ${request.method} ${status} ${duration} ${request.url}${operationSuffix(request.postData)}`;
 
     if (request.error) {
         line += ` [ERROR: ${request.error}]`;
@@ -168,6 +183,11 @@ export function formatRequestDetails(
     lines.push(`Request ID: ${request.requestId}`);
     lines.push(`Time: ${request.timestamp.toISOString()}`);
     lines.push(`Status: ${request.status ?? "pending"} ${request.statusText ?? ""}`);
+
+    const opLine = operationDetailLine(request.postData, request.url);
+    if (opLine) {
+        lines.push(opLine);
+    }
 
     if (request.timing?.duration) {
         lines.push(`Duration: ${request.timing.duration}ms`);

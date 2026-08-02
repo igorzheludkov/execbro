@@ -1,5 +1,11 @@
 import { describe, it, expect } from "@jest/globals";
-import { parseGraphQLOperation, formatOperationLabel } from "../../core/graphqlOperation.js";
+import {
+    parseGraphQLOperation,
+    formatOperationLabel,
+    operationSuffix,
+    operationDetailLine,
+    operationSearchText
+} from "../../core/graphqlOperation.js";
 
 const body = (o: unknown) => JSON.stringify(o);
 
@@ -83,5 +89,49 @@ describe("formatOperationLabel", () => {
 
     it("notes additional batched operations", () => {
         expect(formatOperationLabel({ name: "A", type: "query", batchSize: 3 })).toBe("A +2 more");
+    });
+});
+
+const GQL = JSON.stringify({
+    operationName: "GetCharacters",
+    variables: { page: 1 },
+    query: "query GetCharacters($page: Int!) { characters(page: $page) { id } }"
+});
+
+describe("operationSuffix", () => {
+    it("renders a parenthesised label for a GraphQL body", () => {
+        expect(operationSuffix(GQL)).toBe(" (GetCharacters)");
+    });
+
+    it("is empty for a non-GraphQL body, leaving the summary line unchanged", () => {
+        expect(operationSuffix('{"a":1}')).toBe("");
+        expect(operationSuffix(undefined)).toBe("");
+    });
+});
+
+describe("operationDetailLine", () => {
+    it("names the operation and its type", () => {
+        expect(operationDetailLine(GQL, "https://api.example.com/graphql"))
+            .toBe("Operation: GetCharacters (query)");
+    });
+
+    // A degraded mode should announce itself rather than look like absent data.
+    it("states when a GraphQL endpoint has no captured body", () => {
+        expect(operationDetailLine(undefined, "https://api.example.com/graphql"))
+            .toBe("Operation: unavailable — no request body captured");
+    });
+
+    it("stays silent for a non-GraphQL request", () => {
+        expect(operationDetailLine('{"a":1}', "https://api.example.com/users")).toBeNull();
+    });
+});
+
+describe("operationSearchText", () => {
+    it("exposes a lowercased label so search can match it", () => {
+        expect(operationSearchText(GQL)).toBe("getcharacters");
+    });
+
+    it("returns null for a non-GraphQL request", () => {
+        expect(operationSearchText('{"a":1}')).toBeNull();
     });
 });

@@ -92,3 +92,41 @@ export function formatOperationLabel(op: GraphQLOperation): string {
     if (op.batchSize && op.batchSize > 1) return `${base} +${op.batchSize - 1} more`;
     return base;
 }
+
+/** A GraphQL endpoint by URL shape — used only to explain a missing body. */
+export function looksLikeGraphQLEndpoint(url: string): boolean {
+    return /\/graphql\b/i.test(url);
+}
+
+/**
+ * Suffix for a one-line request summary: " (GetCharacters)", or "" when the
+ * request is not GraphQL. Kept here rather than in the network formatter so it
+ * stays independently testable.
+ */
+export function operationSuffix(postData: string | undefined): string {
+    const op = parseGraphQLOperation(postData);
+    return op ? ` (${formatOperationLabel(op)})` : "";
+}
+
+/**
+ * The `Operation:` line for the details view, or null when the request has
+ * nothing to say about operations.
+ *
+ * A GraphQL URL whose body was never captured reports that explicitly — an
+ * absent capability should announce itself rather than look like absent data.
+ */
+export function operationDetailLine(postData: string | undefined, url: string): string | null {
+    const op = parseGraphQLOperation(postData);
+    if (op) return `Operation: ${formatOperationLabel(op)} (${op.type})`;
+    if (looksLikeGraphQLEndpoint(url) && !postData) {
+        return "Operation: unavailable — no request body captured";
+    }
+    return null;
+}
+
+/** Lowercased text a search should match a request against, beyond its URL. */
+export function operationSearchText(postData: string | undefined): string | null {
+    const op = parseGraphQLOperation(postData);
+    if (!op) return null;
+    return formatOperationLabel(op).toLowerCase();
+}
