@@ -6,7 +6,7 @@ Control iOS Simulators and Android devices/emulators — screenshots, tap, swipe
 
 ## Unified `tap` Tool (Recommended)
 
-The `tap` tool is the simplest way to interact with UI elements. It automatically tries multiple strategies and handles platform detection and coordinate conversion:
+The `tap` tool is the simplest way to interact with UI elements. It automatically tries multiple strategies and handles platform detection. Coordinates need no conversion — `tap` shares one screen-space coordinate system with `get_screen_state`, `get_screen_layout`, `measure`, `inspect_at_point`, and the screenshot summaries, so a coordinate from any of them can be passed straight in:
 
 ```
 # By visible text — tries fiber tree, accessibility, then OCR
@@ -18,7 +18,7 @@ tap with testID="login-btn"
 # By React component name (fiber tree only)
 tap with component="HamburgerIcon"
 
-# By pixel coordinates from screenshot (auto-converts to points on iOS)
+# By coordinates from a screenshot or any layout tool — passed through unchanged
 tap with x=300 y=600
 
 # Force a specific strategy

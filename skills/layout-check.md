@@ -23,7 +23,15 @@ First, check what devices are available:
 
 - Use `mcp__execbro__list_devices` to find running simulators, emulators, and connected devices
 
-### 2. Take Screenshots
+### 2. Read the Screen State First
+
+Before capturing anything, get a screenshot-free read of what's on screen:
+
+- Use `mcp__execbro__get_screen_state` — returns the active route + navigation stack, groups elements behind an open overlay or raised keyboard (taps will NOT reach those until it closes), and lists every on-screen element — pressables (component tag, label, testID, onPress hint), text, images — each with a tap-ready `(x, y)` centre and frame
+- This answers "which screen am I on, what text/prices are rendered, which image loaded" without a screenshot + OCR round trip, and it is the right call after any tap or navigation to orient
+- Use `pressablesOnly=true` for the lean tappable-only list, `fullText=true` to disable the 80-char text truncation
+
+### 3. Take Screenshots
 
 Based on what's running, capture screenshots:
 
@@ -38,21 +46,22 @@ Based on what's running, capture screenshots:
 - Use `mcp__execbro__ocr_screenshot` to capture a screenshot and extract all visible text with tap-ready coordinates
 - Recommended when you need to identify tappable elements — returns ready-to-use tapX/tapY coordinates
 
-### 3. Present Results
+### 4. Present Results
 
 - Display all captured screenshots to the user
 - If multiple devices are captured, clearly label each (e.g., "iPhone 16 Pro", "iPad Pro 13-inch")
 - Point out any visible layout issues or differences between device sizes
 
-### 4. Optional: Inspect Layout Details
+### 5. Optional: Inspect Layout Details
 
 If a screenshot reveals a layout issue and you need precise measurements:
 - Pick by question:
   - **Layout/measurement question** ("why is this clipped?", "what's the actual size?", "what handler fires here?") → `mcp__execbro__inspect_at_point(x, y)`. Returns FRAME PER ANCESTOR plus PROPS (handlers, refs, testID). Pure JS hit test — no overlay flicker, fast.
   - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__execbro__inspect_at_point(x, y)`. Returns the node's own style object plus every ancestor's frame, and `source: {file, line, column}` so you can open the owning file directly rather than searching for the component. Style is not a merged cascade — when a value isn't on the node itself, walk the ancestors it returns.
 - Both tools work on Bridgeless / new arch and on Paper/Fabric.
+- Coordinates need no conversion: `get_screen_state`, `get_screen_layout`, `measure`, `inspect_at_point`, screenshots and `tap` all share one screen-space coordinate system, so a coordinate from any of them goes to any other unchanged.
 
-### 5. Optional: Compare with Design
+### 6. Optional: Compare with Design
 
 If the user provides a Figma URL or design reference:
 - Use the Figma MCP tools to fetch the design
@@ -73,6 +82,7 @@ If the user provides a Figma URL or design reference:
 ## MCP Tools Used
 
 - `mcp__execbro__list_devices`
+- `mcp__execbro__get_screen_state` (screenshot-free route + element read — start here)
 - `mcp__execbro__ios_screenshot`
 - `mcp__execbro__android_screenshot`
 - `mcp__execbro__inspect_at_point` (optional: per-ancestor frames + props at coordinates)

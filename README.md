@@ -42,8 +42,8 @@ Linking your installation here is also **required to unlock [ExecBro Pro](#prici
 
 - **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
 - **Android Devices** - Screenshots, app install/launch, package management (via ADB)
-- **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts pixels from screenshots. Returns post-tap screenshot and verifies visual change by default
-- **Unified Swipe** - Single `swipe` tool that auto-routes to iOS or Android based on the connected device. Accepts screenshot pixel coordinates, handles per-platform conversion, and returns a `verification.meaningful` signal so agents detect end-of-list, non-scrollable surfaces, and missed coordinates. Essential for scrolling virtualized lists (FlatList/SectionList) where off-screen items aren't in the fiber tree
+- **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts coordinates from screenshots and layout tools unchanged. Returns post-tap screenshot and verifies visual change by default
+- **Unified Swipe** - Single `swipe` tool that auto-routes to iOS or Android based on the connected device. Takes coordinates in the same screen space as the layout tools and screenshots — no conversion — and returns a `verification.meaningful` signal so agents detect end-of-list, non-scrollable surfaces, and missed coordinates. Essential for scrolling virtualized lists (FlatList/SectionList) where off-screen items aren't in the fiber tree
 - **UI Automation** - Swipe, long press, key events, and text input on both platforms. On Bridgeless/Fabric apps, `dismiss_keyboard` operates on whatever has focus, and `ios_input_text` / `android_input_text` accept `replace:true` to overwrite pre-filled values — updating React state through `onChangeText` so controlled components (Formik, react-hook-form, useState) stay consistent
 - **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
 - **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
@@ -110,6 +110,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `scan_metro`                            | **Start here** — scan for Metro servers and auto-connect                                 |
 | `get_logs` / `search_logs`              | Capture and search console logs with filtering and summaries                             |
 | `get_network_requests`                  | Monitor HTTP requests with method/status filtering                                       |
+| `get_screen_state`                      | **Orientation snapshot** — active route, overlays, and every element with a tap-ready `(x, y)` |
 | `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
 | `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
 | `ios_input_text` / `android_input_text` | Type text into the focused field. `replace:true` clears pre-filled values first (Fabric) |
@@ -163,7 +164,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | [Device Interaction](docs/device-interaction.md)           | Unified `tap`, platform-specific gestures, text input, key events               |
 | [OCR Text Extraction](docs/ocr.md)                         | Cloud Vision OCR, offline fallback, language config, workflows                  |
 | [Claude Code Skills](docs/skills.md)                       | Pre-built skills for session setup, debugging, and automation                   |
-| [Full Tool Reference](docs/tools.md)                       | Complete list of all 40+ tools with descriptions                                |
+| [Full Tool Reference](docs/tools.md)                       | Complete list of all 58 tools with descriptions                                 |
 
 ## How It Works
 

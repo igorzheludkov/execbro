@@ -11,7 +11,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 | `/network-inspect` | Inspect HTTP requests | Debugging API calls, auth issues, failed/slow requests |
 | `/app-state` | Inspect runtime state | Reading Redux store, executing JS, checking globals |
 | `/component-inspect` | Inspect component tree | Exploring hierarchy, props, state, hooks of components |
-| `/layout-check` | Capture device screenshots | Verifying UI changes, comparing across devices/Figma |
+| `/layout-check` | Read screen state + capture screenshots | Verifying UI changes, comparing across devices/Figma |
 | `/device-interact` | Tap, swipe, type on device | Automating UI interactions, reproducing bugs |
 | `/bundle-check` | Check Metro bundler health | Red screens, compilation errors, reload issues |
 | `/native-rebuild` | Rebuild after native installs | After adding native Expo packages that need dev client |
@@ -25,7 +25,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 - See network activity → `/network-inspect`
 - See app/Redux state → `/app-state`
 - See component tree/props → `/component-inspect`
-- See the screen visually → `/layout-check`
+- See the screen (route, elements, or a screenshot) → `/layout-check`
 
 **"I made code changes and need to verify"**
 - JS/style changes → `/layout-check` (auto-triggered after UI edits)

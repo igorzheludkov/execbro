@@ -1,6 +1,6 @@
 # Available Tools
 
-Complete reference for all MCP tools provided by React Native AI DevTools.
+Reference for the MCP tools provided by React Native AI DevTools. For the exact tool list your installed version exposes, ask the agent — the server advertises them on connection.
 
 ## Usage Guide
 
@@ -49,12 +49,15 @@ The server also sends instructions on connection, so MCP clients automatically l
 
 | Tool                       | Description                                                                                                     |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `get_screen_state`         | Screenshot-free orientation snapshot — active route + navigation stack, overlays, and every on-screen pressable, text, and image with a tap-ready `(x, y)`. Use `pressablesOnly=true` for just the tappable list |
 | `get_screen_layout`        | Screen map of visible components with positions, sizes, and text content. Use `extended=true` for layout styles |
 | `get_component_tree`       | React fiber tree. Compact names-only by default; pass `structureOnly=false` for the full detailed tree          |
 | `find_components`          | Find components by name pattern. Use `includeLayout=true` for styles                                            |
 | `inspect_component`        | Inspect a component's props, state (hooks), and children                                                        |
 | `inspect_at_point`         | Per-ancestor frames + props + style + `source: {file, line, column}` at (x, y) — pure JS, no overlay flicker    |
 | `get_images`               | Access shared image buffer (screenshots, tap verification frames)                                               |
+
+All of these tools — plus the screenshot summaries and `tap` — speak one screen-space coordinate system. A coordinate from any of them can be passed to any other unchanged, with no conversion.
 
 See [Layout & Component Inspection guide](layout-inspection.md) for detailed workflows.
 
@@ -70,7 +73,7 @@ See [Layout & Component Inspection guide](layout-inspection.md) for detailed wor
 | Tool                          | Description                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `navigate`   | Navigate the router directly and verify the route actually changed. Expo Router takes paths, React Navigation takes route names; unknown names are rejected before dispatch with nearest-match suggestions |
-| `tap`                         | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or pixel coordinates from screenshots. Returns a post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `device` (substring match) or `udid` (iOS, exact) to pin to a specific device when multiple are connected |
+| `tap`                         | **Unified tap** — auto-detects platform, tries fiber tree → accessibility → OCR → coordinates. Accepts text, testID, component name, or coordinates from any layout tool or screenshot summary. Returns a post-tap screenshot by default and verifies visual change via before/after diff. Use `native=true` for coordinate taps without React Native connection (system dialogs, non-RN apps). Use `device` (substring match) or `udid` (iOS, exact) to pin to a specific device when multiple are connected |
 | `swipe`                       | **Unified swipe** — auto-detects platform (iOS/Android), dispatches to the native driver, and returns a `verification` block. `verification.meaningful` is false when the swipe produced no visual change (end-of-list, non-scrollable surface, or missed coordinates). Set `burst:true` to surface transient overscroll/bounce feedback. Set `verify:false, screenshot:false` for the fastest path. |
 | `ocr_screenshot`              | Extract all visible text with tap-ready coordinates (works on iOS/Android)                                                                                                                                                                                                                                                                                                 |
 
@@ -80,7 +83,7 @@ See [Layout & Component Inspection guide](layout-inspection.md) for detailed wor
 tap with text="Submit"                    # Finds and taps by visible text
 tap with testID="login-btn"               # Finds by testID prop
 tap with component="HamburgerIcon"        # Finds by React component name
-tap with x=300 y=600                      # Taps at pixel coordinates (auto-converts)
+tap with x=300 y=600                      # Taps at coordinates from any layout tool or screenshot
 tap with text="Menu" strategy="ocr"       # Forces OCR strategy only
 tap with x=300 y=600 native=true          # Taps directly via ADB/simctl (no RN connection needed)
 swipe with startX=200 startY=600 endX=200 endY=200            # Scroll up; reads verification.meaningful
