@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 59,
+    "count": 58,
     "tools": [
         "activate_license",
         "android_input_text",
@@ -29,7 +29,6 @@
         "get_log_details",
         "get_logs",
         "get_network_requests",
-        "get_pressable_elements",
         "get_refresh_status",
         "get_request_details",
         "get_screen_layout",
@@ -207,9 +206,6 @@
             "status",
             "summary",
             "urlPattern"
-        ],
-        "get_pressable_elements": [
-            "device"
         ],
         "get_refresh_status": [
             "device",
