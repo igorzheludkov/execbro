@@ -19,7 +19,7 @@
         "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
         "test:tap": "node --experimental-vm-modules node_modules/.bin/jest --testPathPatterns='tap-strategies' --no-coverage --testTimeout=30000",
         "tools:json": "npm run build && node scripts/generate-tools-json.mjs",
-        "postbuild": "node scripts/generate-tools-json.mjs"
+        "postbuild": "node scripts/generate-tools-json.mjs && node scripts/check-build-hygiene.mjs"
     },
     "keywords": [
         "mcp",

@@ -11,7 +11,11 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    // Source comments are internal notes, not product surface. `files` ships
+    // build/, so without this every comment in src/ is published — which is how
+    // an internal note about a third party once reached the npm tarball.
+    "removeComments": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "build"]
