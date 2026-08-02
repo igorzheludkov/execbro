@@ -3,6 +3,9 @@ import {
     toScreenSpaceY,
     fromScreenSpaceY,
     SCREEN_SPACE_HELPER_JS,
+    computeDeliveredDownscale,
+    computePixelScale,
+    unresolvedScaleNote,
     type ScreenSpaceMetrics
 } from "../../core/screenSpace.js";
 
@@ -66,5 +69,44 @@ describe("SCREEN_SPACE_HELPER_JS", () => {
         expect(fn(29, IOS)).toBe(88);
         expect(fn(75, IOS)).toBe(75);
         expect(fn(7, ANDROID)).toBe(61);
+    });
+});
+
+describe("delivered-pixel scale", () => {
+    it("leaves a capture that fits the API limit alone", () => {
+        expect(computeDeliveredDownscale(1170, 1000)).toBe(1);
+    });
+
+    it("derives the iPhone Air factor observed on device", () => {
+        // 420x912pt @3x = 1260x2736px, downscaled to fit 2000 => 2.193x point->pixel.
+        // submit-btn at 67pt must land on the 147px the screenshot reports.
+        const scale = computePixelScale(3, 420, 912);
+        expect(scale).toBeCloseTo(2.193, 3);
+        expect(Math.round(67 * scale)).toBe(147);
+        expect(Math.round(425 * scale)).toBe(932);
+    });
+
+    it("collapses to the device scale when no downscale applies", () => {
+        expect(computePixelScale(2, 375, 667)).toBe(2);
+    });
+
+    it("degrades to 1 rather than guessing on bad input", () => {
+        expect(computePixelScale(0, 420, 912)).toBe(1);
+        expect(computePixelScale(3, 0, 0)).toBe(1);
+    });
+});
+
+describe("unresolvedScaleNote", () => {
+    it("is silent once a scale is resolved", () => {
+        expect(unresolvedScaleNote({ platform: "ios", topInset: 59, pixelScale: 2.193 })).toBe("");
+    });
+
+    // The silent version of this was the hazard: point-space output handed to tap(),
+    // which speaks pixels, taps the wrong place with no signal.
+    it("warns, and names the unit, when the scale is unknown", () => {
+        const ios = unresolvedScaleNote({ platform: "ios", topInset: 59 });
+        expect(ios).toContain("points");
+        expect(ios).toContain("Do not pass them to tap()");
+        expect(unresolvedScaleNote({ platform: "android", topInset: 24 })).toContain("dp");
     });
 });

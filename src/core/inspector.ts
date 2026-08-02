@@ -198,8 +198,15 @@ export async function inspectAtPoint(
             setTimeout(function() { timedOut = true; done(); }, measureBudgetMs);
 
             function buildResult(fibers, measurements) {
-                var targetX = ${x};
-                var targetY = ${y};
+                // The caller speaks canonical delivered pixels; measureInWindow speaks
+                // points/dp. Hit-testing stays in point space (that is where the
+                // measurements and the inset correction live) and only the emitted frames
+                // are scaled back out, so the probe cannot drift from the geometry.
+                var PX = scaleOf(SCREEN_SPACE);
+                var inputX = ${x};
+                var inputY = ${y};
+                var targetX = inputX / PX;
+                var targetY = inputY / PX;
 
             // Lift measurements into screen space once, before anything reads them, so the
             // hit-test, the element frame, hitFrame and the hierarchy all share the caller's
@@ -239,7 +246,7 @@ export async function inspectAtPoint(
             }
 
             if (hits.length === 0) {
-                return { point: { x: targetX, y: targetY }, error: 'No component found at this point. Coordinates may be outside the app bounds or over a native-only element.' };
+                return { point: { x: inputX, y: inputY }, error: 'No component found at this point. Coordinates may be outside the app bounds or over a native-only element.' };
             }
 
             // Smallest area = innermost (most specific) component
@@ -366,7 +373,7 @@ export async function inspectAtPoint(
             // node, and starting at .return made that unreachable.
             var named = pickElement(best.fiber);
             var result = {
-                point: { x: targetX, y: targetY },
+                point: { x: inputX, y: inputY },
                 element: named ? named.name : best.fiber.type,
                 nativeElement: best.fiber.type,
                 path: buildPath(best.fiber)
@@ -441,6 +448,22 @@ export async function inspectAtPoint(
                 hcur = hcur.return;
             }
             if (hierarchy.length > 1) result.hierarchy = hierarchy;
+
+            // Point space -> canonical delivered pixels, once, on the way out. Every frame
+            // the caller sees goes through here, so frame, hitFrame and each ancestor in
+            // hierarchy stay in the same space as get_screen_state and tap().
+            if (PX !== 1) {
+                var scaleFrame = function(f) {
+                    if (!f) return;
+                    f.x = Math.round(f.x * PX);
+                    f.y = Math.round(f.y * PX);
+                    f.width = Math.round(f.width * PX);
+                    f.height = Math.round(f.height * PX);
+                };
+                scaleFrame(result.frame);
+                scaleFrame(result.hitFrame);
+                for (var hi = 0; hi < hierarchy.length; hi++) scaleFrame(hierarchy[hi].frame);
+            }
 
             return result;
             }

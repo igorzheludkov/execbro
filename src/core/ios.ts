@@ -1230,14 +1230,26 @@ function formatAccessibilityTree(
  * mid-session costs at most one stale correction until the entry expires).
  */
 const SAFE_AREA_CACHE_TTL_MS = 30_000;
-const safeAreaTopCache = new Map<string, { value: number; expires: number }>();
+const safeAreaTopCache = new Map<
+  string,
+  { value: number; screen: { width: number; height: number } | null; expires: number }
+>();
 
-export async function getIOSSafeAreaTop(udid?: string): Promise<number> {
+/**
+ * The root element's frame carries both the inset and the screen's point size, so the
+ * one describe-ui call answers both. Splitting them into two probes would double the
+ * ~200ms cost for callers (the layout tools) that need the size to derive the
+ * point -> delivered-pixel scale.
+ */
+async function probeIOSRootFrame(
+  udid?: string,
+): Promise<{ value: number; screen: { width: number; height: number } | null }> {
   const cacheKey = udid || "__default__";
   const cached = safeAreaTopCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return cached.value;
+  if (cached && cached.expires > Date.now()) return cached;
 
   let value = 0;
+  let screen: { width: number; height: number } | null = null;
   try {
     const preflight = await ensureUiDriverReady(udid);
     if (preflight.ready) {
@@ -1253,13 +1265,30 @@ export async function getIOSSafeAreaTop(udid?: string): Promise<number> {
       const root = Array.isArray(data) ? data[0] : data;
       const y = root?.frame?.y;
       if (typeof y === "number" && y > 0) value = Math.round(y);
+      const w = root?.frame?.width;
+      const h = root?.frame?.height;
+      if (typeof w === "number" && w > 0 && typeof h === "number" && h > 0) {
+        screen = { width: w, height: h };
+      }
     }
   } catch {
     // Fall through: value stays 0 (no correction)
   }
 
-  safeAreaTopCache.set(cacheKey, { value, expires: Date.now() + SAFE_AREA_CACHE_TTL_MS });
-  return value;
+  const entry = { value, screen, expires: Date.now() + SAFE_AREA_CACHE_TTL_MS };
+  safeAreaTopCache.set(cacheKey, entry);
+  return entry;
+}
+
+export async function getIOSSafeAreaTop(udid?: string): Promise<number> {
+  return (await probeIOSRootFrame(udid)).value;
+}
+
+/** Screen size in points, or null when the UI driver could not be reached. */
+export async function getIOSScreenPointSize(
+  udid?: string,
+): Promise<{ width: number; height: number } | null> {
+  return (await probeIOSRootFrame(udid)).screen;
 }
 
 /**
@@ -2021,6 +2050,12 @@ export async function iosFindElement(
 
 // DPR cache: UDID → device pixel ratio (never changes during session)
 const dprCache = new Map<string, number>();
+/**
+ * Screen size in device pixels, recorded on the same cold pass that resolves the DPR.
+ * The layout tools need it to predict the delivery downscale, and re-deriving it later
+ * would mean a second screenshot for a number this call already had in hand.
+ */
+const pixelSizeCache = new Map<string, { width: number; height: number }>();
 
 /**
  * Pure calculation: DPR = screenshotPixelWidth / screenPointWidth.
@@ -2078,6 +2113,10 @@ export async function getDevicePixelRatio(
     pixelHeight = metadata.height!;
   }
 
+  if (pixelWidth > 0 && pixelHeight > 0) {
+    pixelSizeCache.set(cacheKey, { width: pixelWidth, height: pixelHeight });
+  }
+
   // Try accessibility tree for exact DPR, fall back to inference
   const driver = getIosDriver();
   const driverOk =
@@ -2118,9 +2157,27 @@ export async function getDevicePixelRatio(
   return dpr;
 }
 
+/**
+ * Screen size in device pixels, or null when no simulator could be measured.
+ * Piggybacks on the DPR probe's cache, so this is free once either has run.
+ */
+export async function getIOSScreenPixelSize(
+  udid?: string,
+  pixelDims?: { width: number; height: number },
+): Promise<{ width: number; height: number } | null> {
+  const cacheKey = udid || "__default__";
+  const cached = pixelSizeCache.get(cacheKey);
+  if (cached) return cached;
+  // Resolving the DPR is what populates the size cache; its own failure modes
+  // (no simulator, no UI driver) are not this caller's problem — it degrades to null.
+  await getDevicePixelRatio(udid, pixelDims).catch(() => undefined);
+  return pixelSizeCache.get(cacheKey) ?? null;
+}
+
 /** Clear DPR cache (for testing or when devices change) */
 export function clearDPRCache(): void {
   dprCache.clear();
+  pixelSizeCache.clear();
 }
 
 /**

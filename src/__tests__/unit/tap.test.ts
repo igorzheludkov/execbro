@@ -329,7 +329,7 @@ describe("formatTapSuccess with screenshot and verification", () => {
                 changeRate: 0.12,
                 changedPixels: 48210,
                 totalPixels: 2961720,
-                explanation: "Tap caused a visible UI change (12.0% pixel diff). The screen updated as expected.",
+                explanation: "Tap caused a visible UI change (12.0% pixel diff). Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.",
             },
             screenshot: {
                 image: "data:image/jpeg;base64,abc123",
@@ -343,7 +343,7 @@ describe("formatTapSuccess with screenshot and verification", () => {
             changeRate: 0.12,
             changedPixels: 48210,
             totalPixels: 2961720,
-            explanation: "Tap caused a visible UI change (12.0% pixel diff). The screen updated as expected.",
+            explanation: "Tap caused a visible UI change (12.0% pixel diff). Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.",
         });
         expect(result.screenshot).toBeDefined();
     });

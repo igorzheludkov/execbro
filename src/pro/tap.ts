@@ -121,7 +121,7 @@ export function buildVerificationExplanation(v: {
 
     // Burst path with typed verdict
     if (v.kind === "settled_elsewhere") {
-        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). The screen updated as expected.`;
+        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.`;
     }
     if (v.kind === "snap_back") {
         if (action === "swipe") {
@@ -145,7 +145,7 @@ export function buildVerificationExplanation(v: {
 
     // Legacy non-burst path
     if (v.meaningful) {
-        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). The screen updated as expected.`;
+        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.`;
     }
     return (
         `No visual change detected between before and after screenshots. ` +
@@ -1346,6 +1346,12 @@ async function tryCoordinateStrategy(
 
 const TAP_TIMEOUT_MS = 25000;
 const MIN_STRATEGY_BUDGET_MS = 500;
+/**
+ * Ceiling for the pre-dispatch overlay check. It shares the tap's deadline with the
+ * strategies that follow, so it must not be able to spend the whole budget on a fiber
+ * read — a screen big enough to make this slow is exactly when the tap still needs time.
+ */
+const OVERLAY_GUARD_BUDGET_MS = 3000;
 // Per-strategy budget. OCR cap on Android is bumped via maxStrategyMs() because
 // the ADB screencap+pull leg has ~2s variance on real devices; iOS stays at 5s
 // where xcrun simctl screenshot is consistent.
@@ -1528,11 +1534,18 @@ export function resetCoordArtifactDedup(): void {
 /**
  * Turn an unmeaningful coordinate tap into an explanation.
  *
- * The tricky part is coordinate spaces. The caller works in screenshot pixels;
- * the tap was executed in points (iOS) or device pixels (Android); the screen
- * state reports points/dp. We map the tapped point INTO screen-state space to
- * do the hit test, and map the answer BACK into the caller's screenshot pixels
- * so any suggested coordinates can be passed straight to another tap().
+ * Coordinate spaces used to be the hard part here, and the old approach — recovering a
+ * scale by dividing the caller's input by the executed tap point, then multiplying the
+ * raw screen state by it — was wrong in a way that mattered. That ratio carries no inset
+ * term, but the caller's coordinate comes from a space where `topInset` has been applied,
+ * so on Android and inside iOS modal presentations the probe landed roughly
+ * `topInset x factor` off. An offset probe can hit-test a neighbouring element, and
+ * because `explainCoordinateMiss` checks reachable pressables before blocked ones, the
+ * usual result was a confident "the coordinates were correct, check your onPress handler"
+ * about an element that was in fact covered.
+ *
+ * Now that every tool shares one space, there is nothing to recover: normalise the state
+ * the same way the layout tools do and hit-test the caller's own coordinate against it.
  */
 async function diagnoseCoordinateMiss(args: {
     point: { x: number; y: number };
@@ -1543,34 +1556,28 @@ async function diagnoseCoordinateMiss(args: {
     try {
         const { getScreenState } = await import("../core/screenState.js");
         const { explainCoordinateMiss } = await import("./coordinateMiss.js");
+        const { screenStateToScreenSpace, screenStateToDeliveredPx } = await import("../core/screenSpace.js");
+        const { resolveScreenSpaceMetrics } = await import("../core/screenSpaceDevice.js");
+        const { getConnectedAppByDevice, getFirstConnectedApp } = await import("../core/index.js");
 
         const ss = await getScreenState({ device: args.deviceName });
         if (!ss.success || !ss.screenState) return undefined;
 
-        // Android taps are executed in device pixels; screen state speaks dp.
-        let pointInState = args.point;
-        if (args.pointUnit === "pixels") {
-            const { androidGetDensity } = await import("../core/android.js");
-            const density = await androidGetDensity();
-            const densityScale = (density.density || 420) / 160;
-            pointInState = { x: args.point.x / densityScale, y: args.point.y / densityScale };
-        }
+        const app = (args.deviceName ? getConnectedAppByDevice(args.deviceName) : null) ?? getFirstConnectedApp();
+        const metrics = await resolveScreenSpaceMetrics({
+            platform: app?.platform ?? "ios",
+            udid: app?.simulatorUdid,
+            deviceId: app?.adbSerial
+        });
 
-        // Ratio between screen-state space and the caller's screenshot pixels,
-        // derived from the conversion this very tap already performed. Uses the
-        // larger axis so a near-zero coordinate can't amplify rounding error.
-        const useY = Math.abs(pointInState.y) > Math.abs(pointInState.x);
-        const numerator = useY ? args.inputPoint.y : args.inputPoint.x;
-        const denominator = useY ? pointInState.y : pointInState.x;
-        const factor = denominator !== 0 && Number.isFinite(numerator / denominator)
-            ? numerator / denominator
-            : 1;
+        const normalised = screenStateToDeliveredPx(
+            screenStateToScreenSpace(ss.screenState, metrics),
+            metrics
+        );
 
-        return explainCoordinateMiss(
-            pointInState,
-            ss.screenState,
-            (v) => Math.round(v * factor)
-        ) ?? undefined;
+        // State and probe are both in delivered pixels now, so the reported coordinates
+        // are already the caller's space — no mapping back.
+        return explainCoordinateMiss(args.inputPoint, normalised) ?? undefined;
     } catch {
         // Diagnosis is best-effort — never let it turn a successful tap into an error.
         return undefined;
@@ -1979,6 +1986,75 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         };
     }
 
+    // Refuse before dispatch when the target is under an overlay. Every strategy resolves
+    // to a coordinate tap, so the OS would deliver the touch to the overlay — firing it
+    // would press the wrong element and mutate state the caller never asked to change.
+    //
+    // Bounded, and failure-open by construction: the guard costs one fiber read, and if
+    // that read is slow, errors, or cannot reach a verdict, the tap proceeds exactly as it
+    // did before. Blocking a legitimate tap because a diagnostic timed out would be a far
+    // worse regression than the mis-delivery this prevents — tap is the tool everything
+    // else is built on.
+    // Set when the tap is dispatched onto an overlay control that shadows a covered
+    // element; attached to the successful result so the caller learns what actually
+    // received the touch.
+    let shadowWarning: string | undefined;
+    if (hasMetro) {
+        const guardBudget = Math.min(remainingMs(), OVERLAY_GUARD_BUDGET_MS);
+        if (guardBudget >= MIN_STRATEGY_BUDGET_MS) {
+            let blockedBy: Awaited<ReturnType<typeof import("./overlayGuard.js")["checkOverlayBlocking"]>> = null;
+            try {
+                const { checkOverlayBlocking } = await import("./overlayGuard.js");
+                blockedBy = await withTimeout(
+                    checkOverlayBlocking({
+                        query,
+                        platform,
+                        udid: targetUdid,
+                        deviceId: resolved.target.androidSerial,
+                        deviceName
+                    }),
+                    guardBudget,
+                    "overlay-guard"
+                );
+            } catch {
+                blockedBy = null;
+            }
+            if (blockedBy?.kind === "blocked") {
+                // Recorded as an attempt so the refusal is distinguishable in telemetry
+                // (_errorContext) from a tap that tried and failed. Without it every
+                // declined tap looks like a tap-tool regression on the failure dashboard.
+                attempted.push({
+                    strategy: "overlay-guard",
+                    reason: `refused — target covered by ${blockedBy.overlay}`,
+                    outcome: "skipped"
+                });
+                return {
+                    success: false,
+                    query,
+                    attempted,
+                    device: deviceName,
+                    platform,
+                    error:
+                        `Refused: ${blockedBy.element} is covered by ${blockedBy.overlay}. ` +
+                        `A tap here would be delivered to the overlay, not to the target, ` +
+                        `so it was not dispatched.`,
+                    suggestion:
+                        `Dismiss or close the overlay first, then retry. ` +
+                        `get_screen_state lists the overlay's own controls, and everything behind it under "🚫 Blocked by overlay". ` +
+                        `To tap the overlay itself, use coordinates from its own group.`
+                };
+            }
+            if (blockedBy?.kind === "shadowed") {
+                // Dispatch, but name the element that will actually receive the touch.
+                // Staying silent here is the reported bug in miniature.
+                shadowWarning =
+                    `This coordinate is occupied by ${blockedBy.hit}, part of ${blockedBy.overlay} — ` +
+                    `that is what received the tap. ${blockedBy.covered} sits underneath it and ` +
+                    `cannot be tapped until the overlay closes.`;
+            }
+        }
+    }
+
     // Determine screenshot and verification behavior.
     // Decoupled (I5, 2026-05-16): verify can run without returning image bytes —
     // capture cost is paid either way; bandwidth cost is what `screenshot` toggles.
@@ -2154,6 +2230,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 screenshot,
                 verification
             });
+            // The guard already resolved what occupies this coordinate. Reporting it turns
+            // "something responded" into "this element responded" for the one case where
+            // the caller most likely meant something else.
+            if (shadowWarning) {
+                successResult.warning = successResult.warning
+                    ? `${successResult.warning}\n${shadowWarning}`
+                    : shadowWarning;
+            }
             // Capture an artifact for "successful but unmeaningful" taps so we can
             // diagnose taps that landed wrong or hit non-responsive elements.
             // Uses the same `meaningful` flag the agent sees so dashboard outcomes

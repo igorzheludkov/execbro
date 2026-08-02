@@ -141,6 +141,13 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `get_images`: Access shared image buffer containing screenshots from all tools. Returns metadata by default; use `id` or `groupId`+`frameIndex` to retrieve specific images. Tap burst frames are stored here.
 
 **Component Inspection (recommended workflow: get_screen_state → find_components → inspect_component):**
+
+> **One coordinate space.** Every tool below, both screenshot tools, `ocr_screenshot`, `swipe` and `tap` speak
+> **delivered-screenshot pixels** — the pixels of the image a screenshot actually returns, after the downscale
+> applied to fit the API limit. The factor is a property of the device (`deviceScale / deliveredDownscale`), not
+> of a particular capture, so it is stable across calls. Pass coordinates between any of these tools unchanged;
+> never multiply or divide by `devicePixelRatio` yourself.
+
 - `get_screen_state`: **Orientation snapshot — call after any tap/navigation.** Screenshot-free view of the screen: active route + params, overlays, and every element merged top-to-bottom within reachability groups. Each line is tap-ready `(x, y)` + frame, typed by a marker — `🔘` pressable (component tag, label, testID, onPress hint), `📝` text, `🖼` image (`src`/`alt`). Overlay-covered elements are grouped under `🚫 Blocked`. Reads screen content (prices, labels, which image loaded) without screenshot+OCR. `pressablesOnly=true` for the lean tappable-only list; `fullText=true` to disable the 80-char text truncation. Its coordinates are the shared screen space used by every layout tool, the screenshot summaries, and `tap` — pass them straight through, no conversion
 - `get_screen_layout`: **Start here.** Screen map — indented tree of visible components with real screen positions (measureInWindow), text content, and identifiers. Shows only what's on screen, filters out off-screen and internal components. Use `extended=true` for layout styles (padding, flex, backgroundColor, etc.). Coordinates are in the shared screen space — interchangeable with `get_screen_state`, `measure`, `inspect_at_point`, screenshots, and `tap`
 - `find_components`: Fast regex search across the fiber tree by component name pattern. Returns all matching instances with path and depth. Use after `get_screen_layout` to locate specific components

@@ -17,7 +17,15 @@ import {
     getConnectedAppByDevice,
     getFirstConnectedApp,
 } from "../core/index.js";
-import { screenStateToScreenSpace, toScreenSpaceY, type ScreenSpaceMetrics } from "../core/screenSpace.js";
+import {
+    screenStateToScreenSpace,
+    toDeliveredPxY,
+    toDeliveredPxX,
+    toDeliveredPxLength,
+    pxScaleConverter,
+    unresolvedScaleNote,
+    type ScreenSpaceMetrics
+} from "../core/screenSpace.js";
 import { resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
@@ -59,7 +67,7 @@ export function registerComponentTools(server: McpServer): void {
         "get_screen_layout",
         {
             description:
-                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are screen space — the same space screenshots, get_screen_state and tap() use, so pass them through unchanged. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
+                "Get a screen map showing visible components as an indented tree with actual screen positions. Uses measureInWindow for real coordinates and filters out off-screen components. Returns meaningful component names with text content and frame data (x,y width x height). Coordinates are delivered-screenshot pixels — the same space screenshots, get_screen_state and tap() use, so pass them through unchanged. Use extended=true to include layout styles (padding, margin, flex, backgroundColor, etc.)." +
                 primaryInteractionBanner() + "\n" +
                 "PURPOSE: Quickest textual map of what is actually on screen right now — component names, positions, and text — so you can plan taps and inspections without guessing.\n" +
                 "WHEN TO USE: First step whenever the user asks \"what's on screen\", \"why is X covering Y\", or before tapping a visually ambiguous element.\n" +
@@ -98,12 +106,13 @@ export function registerComponentTools(server: McpServer): void {
             }
 
             const effectiveTimeoutMs = timeoutMs ?? (extended ? 15000 : 5000);
+            const layoutMetrics = await resolveScreenSpaceMetricsFor(device);
             const result = await getScreenLayout({
                 extended,
                 summary,
                 device,
                 timeoutMs: effectiveTimeoutMs,
-                screenSpace: await resolveScreenSpaceMetricsFor(device)
+                screenSpace: layoutMetrics
             });
 
             const metaNotes = collectMetaNotes(result);
@@ -116,8 +125,10 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
-            const body = metaNotes.length > 0
-                ? `Screen Layout:\n\n${result.result}\n\n${metaNotes.join("\n")}`
+            const layoutScaleNote = unresolvedScaleNote(layoutMetrics);
+            const layoutNotes = layoutScaleNote ? [layoutScaleNote, ...metaNotes] : metaNotes;
+            const body = layoutNotes.length > 0
+                ? `Screen Layout:\n\n${result.result}\n\n${layoutNotes.join("\n")}`
                 : `Screen Layout:\n\n${result.result}`;
             return { content: [{ type: "text", text: body }] };
         }
@@ -231,6 +242,7 @@ export function registerComponentTools(server: McpServer): void {
                 "Each line carries an (x, y) center + frame bounds (so anything is a tap(x, y) target), typed by a leading marker: 🔘 pressable (with component JSX tag, label, testID, onPress hint), 📝 text, 🖼 image (with src/alt). " +
                 "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes. Long text truncates to 80 chars (fullText=true for full strings); pressablesOnly=true returns just the lean tappable list.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
+                "COORDINATES: delivered-screenshot pixels — the same space as ios_screenshot/android_screenshot, get_screen_layout, inspect_at_point, measure and tap(). Pass them through unchanged; never scale by devicePixelRatio yourself.\n" +
                 "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection.\n" +
                 "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call inspect_at_point(x, y).\n" +
                 "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
@@ -269,15 +281,25 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
-            // Normalise to screen space so a coordinate read here can be handed straight to
-            // tap()/inspect_at_point/a screenshot. Raw measureInWindow is not screen-relative
-            // (Android excludes the status bar; iOS modals measure from their own container),
-            // which is why point-space output used to disagree with screenshot pixels.
+            // Normalise to screen space, then into delivered-screenshot pixels — the one
+            // unit every tool speaks, so a coordinate read here goes straight to tap().
+            // Raw measureInWindow is neither: it is not screen-relative (Android excludes
+            // the status bar; iOS modals measure from their own container) *and* it is in
+            // points. Emitting it unconverted, which this call used to do by passing no
+            // converter at all, is what made these coordinates disagree with every
+            // screenshot by the device scale.
+            const metrics = await resolveScreenSpaceMetricsFor(device);
             const rawSs = result.screenState;
-            const ss = rawSs ? screenStateToScreenSpace(rawSs, await resolveScreenSpaceMetricsFor(device)) : rawSs;
-            const summary = ss ? formatScreenStateSummary(ss, undefined, { pressablesOnly, fullText, keyboard }) : (result.result ?? "{}");
-            const body = metaNotes.length > 0
-                ? `${summary}\n\n${metaNotes.join("\n")}`
+            const ss = rawSs ? screenStateToScreenSpace(rawSs, metrics) : rawSs;
+            const summary = ss
+                ? formatScreenStateSummary(ss, pxScaleConverter(metrics), {
+                    pressablesOnly, fullText, keyboard, pixelScale: metrics.pixelScale
+                })
+                : (result.result ?? "{}");
+            const scaleNote = unresolvedScaleNote(metrics);
+            const allNotes = scaleNote ? [scaleNote, ...metaNotes] : metaNotes;
+            const body = allNotes.length > 0
+                ? `${summary}\n\n${allNotes.join("\n")}`
                 : summary;
             return { content: [{ type: "text", text: body }] };
         }
@@ -451,7 +473,7 @@ export function registerComponentTools(server: McpServer): void {
         "inspect_at_point",
         {
             description:
-                "Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point) + the innermost component's PROPS (handlers as [Function], refs, custom props like onPress/data/testID). Pure JS hit-test via fiber + measureInWindow — no overlay toggled, zero visual side effect. Works on Paper and Fabric.\n" +
+                "Inspect layout AND props at (x, y). Returns FRAME PER ANCESTOR (position/size in delivered-screenshot pixels, the same space as screenshots/get_screen_state/tap, for every ancestor that hit-tested the point) + the innermost component's PROPS (handlers as [Function], refs, custom props like onPress/data/testID). Pure JS hit-test via fiber + measureInWindow — no overlay toggled, zero visual side effect. Works on Paper and Fabric.\n" +
                 "PURPOSE: Layout/props diagnosis — \"where is each ancestor positioned, and what props does the touched component expose?\"\n" +
                 "WHEN TO USE: A button is clipped, hit area is wrong, animated frame is unexpected — or you need handler/ref/non-style props. Also preferred for tight loops (no overlay flicker).\n" +
                 "WORKFLOW: screenshot or get_screen_state → take the coordinate as-is → inspect_at_point(x, y).\n" +
@@ -570,7 +592,7 @@ export function registerComponentTools(server: McpServer): void {
         "measure",
         {
             description:
-                "Get on-screen geometry {x, y, width, height} for a named React component instance. Calls measureInWindow on the matched fiber (or its nearest host descendant for composite components). Coordinates are screen space, the same space as get_screen_layout, get_screen_state, inspect_at_point and tap().\n" +
+                "Get on-screen geometry {x, y, width, height} for a named React component instance. Calls measureInWindow on the matched fiber (or its nearest host descendant for composite components). Coordinates are delivered-screenshot pixels, the same space as screenshots, get_screen_layout, get_screen_state, inspect_at_point and tap().\n" +
                 "PURPOSE: One-shot, name-based component measurement — avoids hand-rolling fiber walks and Promise-wrapping measureInWindow callbacks in execute_in_app.\n" +
                 "WHEN TO USE: You already know the component's display name (from get_screen_layout or find_components) and just need its current bounds — e.g. to verify a layout change, compute a tap target, or compare against design specs.\n" +
                 "WORKFLOW: find_components(pattern=\"...\") -> measure(componentName=\"...\", index=N) -> tap(x, y) at the center, or inspect_at_point at the center to verify identity.\n" +
@@ -617,16 +639,23 @@ export function registerComponentTools(server: McpServer): void {
             // same space as get_screen_layout and inspect_at_point" would be false: off by the
             // status bar on every Android screen, and by the safe area inside an iOS modal.
             const measureMetrics = await resolveScreenSpaceMetricsFor(device);
-            const measuredY = toScreenSpaceY(result.y, measureMetrics);
+            // Inset shift *and* scale, since measureComponent hands back raw fiber-space
+            // points — unlike the screen-state path, nothing has normalised them yet.
+            const mx = toDeliveredPxX(result.x, measureMetrics);
+            const my = toDeliveredPxY(result.y, measureMetrics);
+            const mw = toDeliveredPxLength(result.width, measureMetrics);
+            const mh = toDeliveredPxLength(result.height, measureMetrics);
 
             const lines = [
                 `Component: ${result.name}`,
-                `Frame: (${result.x.toFixed(1)}, ${measuredY.toFixed(1)}) ${result.width.toFixed(1)}x${result.height.toFixed(1)}`,
-                `Center: (${(result.x + result.width / 2).toFixed(1)}, ${(measuredY + result.height / 2).toFixed(1)})`,
+                `Frame: (${mx.toFixed(1)}, ${my.toFixed(1)}) ${mw.toFixed(1)}x${mh.toFixed(1)}`,
+                `Center: (${(mx + mw / 2).toFixed(1)}, ${(my + mh / 2).toFixed(1)})`,
             ];
             if (typeof result.nativeTag === "number") {
                 lines.push(`nativeTag: ${result.nativeTag}`);
             }
+            const measureScaleNote = unresolvedScaleNote(measureMetrics);
+            if (measureScaleNote) lines.push(measureScaleNote);
 
             return {
                 content: [{ type: "text", text: lines.join("\n") }]

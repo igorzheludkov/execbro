@@ -201,14 +201,20 @@ const IMAGE_CAP = 40;
  * and that is exactly when bottom-anchored UI misbehaves. Reporting the height
  * and the remaining content area makes that inspectable without a screenshot.
  */
-export function formatKeyboardLine(k: KeyboardState): string {
+export function formatKeyboardLine(k: KeyboardState, pixelScale: number = 1): string {
     if (k.error) return `⌨️ Keyboard: unknown (${k.error})`;
     if (!k.visible || k.height == null || k.screenY == null) return "";
-    // Android reports fractional dp (288.3809509277344); whole points are what
-    // a reader can act on, and the sub-pixel tail only obscures the number.
-    const r = (n: number) => Math.round(n);
+    // Reported in the same delivered-pixel space as every coordinate around it. The
+    // keyboard's screenY is a y a reader compares against element positions, so leaving
+    // it in points while the element list moved to pixels would invite exactly the
+    // cross-space comparison this unification exists to remove.
+    const s = pixelScale > 0 ? pixelScale : 1;
+    // Android reports fractional dp (288.3809509277344); whole units are what a reader
+    // can act on, and the sub-pixel tail only obscures the number.
+    const r = (n: number) => Math.round(n * s);
+    const unit = s === 1 ? "pt" : "px";
     const width = k.width != null ? `${r(k.width)}x` : "";
-    return `⌨️ Keyboard: visible, ${r(k.height)}pt — content area above it ${width}${r(k.screenY)}pt`;
+    return `⌨️ Keyboard: visible, ${r(k.height)}${unit} — content area above it ${width}${r(k.screenY)}${unit}`;
 }
 
 /**
@@ -250,7 +256,7 @@ export function formatInputState(p: ScreenStatePressable): string {
 export function formatScreenStateSummary(
     ss: ScreenState,
     convert: ItemCoordConverter = identityCoords,
-    opts: { pressablesOnly?: boolean; fullText?: boolean; keyboard?: KeyboardState } = {}
+    opts: { pressablesOnly?: boolean; fullText?: boolean; keyboard?: KeyboardState; pixelScale?: number } = {}
 ): string {
     const lines: string[] = [];
     if (ss.route) {
@@ -263,7 +269,7 @@ export function formatScreenStateSummary(
         lines.push("📍 Currently focused screen: unknown (no React Navigation / Expo Router detected)");
     }
     if (opts.keyboard) {
-        const kbLine = formatKeyboardLine(opts.keyboard);
+        const kbLine = formatKeyboardLine(opts.keyboard, opts.pixelScale);
         if (kbLine) lines.push(kbLine);
     }
     if (ss.nativeOverlay) {
@@ -738,6 +744,83 @@ export async function getScreenState(
         return 'Unknown';
     }
 
+    // style can be an object, a nested array, or null. Only the flattened result can be
+    // asked about position/backgroundColor, and the previous heuristic read the raw prop —
+    // so any component passing style={[base, override]} was silently skipped.
+    function flattenStyle(s) {
+        if (!s) return null;
+        if (Array.isArray(s)) {
+            var out = null;
+            for (var fi = 0; fi < s.length; fi++) {
+                var f = flattenStyle(s[fi]);
+                if (!f) continue;
+                if (!out) out = {};
+                for (var k in f) out[k] = f[k];
+            }
+            return out;
+        }
+        return typeof s === 'object' ? s : null;
+    }
+
+    // "Opaque enough to hide what is behind it." Colours reach the fiber either as CSS
+    // strings or, on Fabric, as processed ARGB integers; both carry the alpha that decides
+    // whether this is a cover or just a tint. A translucent scrim is deliberately NOT a
+    // cover — the screen shows through it and its elements stay readable.
+    function isOpaqueBackground(st) {
+        if (st.opacity != null && st.opacity < 0.95) return false;
+        var bg = st.backgroundColor;
+        if (bg == null) return false;
+        if (typeof bg === 'number') return ((bg >>> 24) & 255) >= 242;
+        if (typeof bg !== 'string') return false;
+        var v = bg.replace(/\\s/g, '').toLowerCase();
+        if (v === 'transparent') return false;
+        var m = v.match(/^rgba\\(([^)]*)\\)$/);
+        if (m) {
+            var parts = m[1].split(',');
+            if (parts.length === 4 && parseFloat(parts[3]) < 0.95) return false;
+        }
+        if (v.charAt(0) === '#' && (v.length === 9 || v.length === 5)) {
+            var hex = v.length === 9 ? v.slice(7, 9) : (v.charAt(4) + v.charAt(4));
+            var alpha = parseInt(hex, 16);
+            if (!isNaN(alpha) && alpha < 242) return false;
+        }
+        return true;
+    }
+
+    // The opaque surface is usually NOT on the positioned node. The common shape is a
+    // transparent absolutely-positioned wrapper whose child paints the panel — Buoy's
+    // sheet is exactly that: an absolute View wrapping an Animated View with
+    // backgroundColor #1A1A1A. Inspecting only the wrapper's own style (the first version
+    // of this rule) therefore recognises almost no real sheet.
+    function hasOpaqueSurface(fiber, ownStyle) {
+        // A wrapper that is itself faded out is not covering anything, whatever its
+        // children declare.
+        if (ownStyle && ownStyle.opacity != null && ownStyle.opacity < 0.95) return false;
+        if (ownStyle && isOpaqueBackground(ownStyle)) return true;
+        var found = false;
+        (function scan(n, d) {
+            if (!n || d > 4 || found) return;
+            if (typeof n.type === 'string') {
+                var st = flattenStyle(n.memoizedProps && n.memoizedProps.style);
+                if (st && isOpaqueBackground(st)) { found = true; return; }
+            }
+            scan(n.child, d + 1);
+            if (!found) scan(n.sibling, d);
+        })(fiber.child, 0);
+        return found;
+    }
+
+    function hasPressableDescendant(f) {
+        var found = false;
+        (function scan(n, d) {
+            if (!n || d > 12 || found) return;
+            if (n.memoizedProps && typeof n.memoizedProps.onPress === 'function') { found = true; return; }
+            scan(n.child, d + 1);
+            if (!found) scan(n.sibling, d);
+        })(f.child, 0);
+        return found;
+    }
+
     // Walk to find viewport dimensions (reused for heuristic overlay detection)
     var viewportW = 9999, viewportH = 9999;
     var rootHostFiber = findFirstHost(roots[0].current, 0);
@@ -780,35 +863,35 @@ export async function getScreenState(
             }
         }
 
-        // Heuristic: absolute-positioned node with high zIndex covering > 40% screen
-        // Only fires if it has at least one pressable child
-        if (typeof fiber.type === 'string') {
-            var style = props.style;
-            if (style && typeof style === 'object' && !Array.isArray(style)) {
-                if ((style.zIndex > 999 || style.position === 'absolute') &&
-                    typeof style.width === 'number' && typeof style.height === 'number') {
-                    if (viewportW < 9999) {
-                        var area = style.width * style.height;
-                        var vArea = viewportW * viewportH;
-                        if (area > vArea * 0.4) {
-                            // Check if it has a pressable child
-                            var hasPressable = false;
-                            (function checkPress(f, d) {
-                                if (!f || d > 10 || hasPressable) return;
-                                if (f.memoizedProps && typeof f.memoizedProps.onPress === 'function') { hasPressable = true; return; }
-                                checkPress(f.child, d + 1);
-                                if (!hasPressable) checkPress(f.sibling, d);
-                            })(fiber.child, 0);
-                            if (hasPressable) {
-                                var hosts2 = [];
-                                findHostsInSubtree(fiber, 0, hosts2, 64);
-                                if (hosts2.length > 0) {
-                                    overlayFiberMeta.push({ type: 'Unknown', fiber: fiber, hostFibers: hosts2 });
-                                }
-                                return;
-                            }
-                        }
-                    }
+        // Geometric occluder: an opaque, absolutely-positioned host view holding at least
+        // one pressable. This is the branch that catches a sheet mounted as an ordinary
+        // view rather than as a Modal, a BottomSheet or a native presentation — a
+        // third-party in-app devtool panel, a hand-rolled dialog — which none of the
+        // name/prop classifiers above can recognise. Without it every element underneath
+        // such a sheet is reported as reachable and taps on them silently hit the sheet.
+        //
+        // Two deliberate changes from the rule this replaces:
+        //   - the size test moves to the resolve pass, which works on MEASURED frames.
+        //     Requiring literal numeric style.width/height here missed every sheet sized
+        //     by flex, percentages or an animated value, which is nearly all of them.
+        //   - opacity is required. A translucent scrim leaves the screen visible and its
+        //     elements legitimately reachable, so it must not count as a cover.
+        // react-native-screens wraps every route in an absolutely-positioned, opaque
+        // container full of pressables — structurally identical to a sheet and, measured,
+        // 78% of the viewport. It is a route container, never an overlay: a screen
+        // presented ON TOP of another is caught by the stackPresentation branch above,
+        // which runs first. Excluding the family here is what keeps the whole visible
+        // screen from being filed under an overlay group.
+        var NAV_CONTAINER_HOST = /^RNS/;
+        if (typeof fiber.type === 'string' && !NAV_CONTAINER_HOST.test(fiber.type)) {
+            var style = flattenStyle(props.style);
+            if (style && (style.zIndex > 999 || style.position === 'absolute') &&
+                hasOpaqueSurface(fiber, style) && hasPressableDescendant(fiber)) {
+                var hosts2 = [];
+                findHostsInSubtree(fiber, 0, hosts2, 64);
+                if (hosts2.length > 0) {
+                    overlayFiberMeta.push({ type: 'Unknown', fiber: fiber, hostFibers: hosts2, geometric: true });
+                    return;
                 }
             }
         }
@@ -828,6 +911,8 @@ export async function getScreenState(
 
     var hostFibers = [];
     var fiberMeta = [];
+    // overlayFiberMeta index -> fiberMeta index at which that overlay's subtree was entered.
+    var overlayEnterIdx = [];
     // A count badge ("1", "99+") is the only text on icon buttons like a cart — treat it
     // as no-own-label so the icon child still surfaces (the count is kept as nearby text).
     var COUNT_BADGE = /^\\d{1,3}\\+?$/;
@@ -1006,7 +1091,17 @@ export async function getScreenState(
         // geometric containment wrongly swallows the underlying screen's pressables.
         if (ovIdx == null) {
             for (var ofi = 0; ofi < overlayFiberMeta.length; ofi++) {
-                if (overlayFiberMeta[ofi].fiber === fiber) { ovIdx = ofi; break; }
+                if (overlayFiberMeta[ofi].fiber === fiber) {
+                    ovIdx = ofi;
+                    // Paint position of the overlay, expressed on the same counter as the
+                    // pressables. This walk is DFS pre-order over siblings in order, which
+                    // is RN's paint order, so "collected earlier" == "painted underneath".
+                    // Anything collected AFTER the overlay is drawn on top of it and must
+                    // not be reported as blocked by it — a LogBox banner over a sheet, a
+                    // toast over a dialog.
+                    if (overlayEnterIdx[ofi] == null) overlayEnterIdx[ofi] = fiberMeta.length;
+                    break;
+                }
             }
         }
 
@@ -1275,7 +1370,7 @@ export async function getScreenState(
 
     // Store overlay host fibers separately
     var overlayHostFibers = [];
-    var overlayMetaList = overlayFiberMeta.map(function(om) {
+    var overlayMetaList = overlayFiberMeta.map(function(om, omIdx) {
         var startIdx = overlayHostFibers.length;
         for (var hi = 0; hi < om.hostFibers.length; hi++) {
             overlayHostFibers.push(om.hostFibers[hi]);
@@ -1286,7 +1381,11 @@ export async function getScreenState(
             title: (title && title.length > 2) ? title.slice(0, 60) : null,
             hostStart: startIdx,
             hostEnd: overlayHostFibers.length,
-            fullCover: !!om.fullCover
+            fullCover: !!om.fullCover,
+            geometric: !!om.geometric,
+            // null means "never entered during the pressable walk" — treat as painted last
+            // (Infinity) so a subtree with no pressables of its own cannot block anything.
+            enterIdx: overlayEnterIdx[omIdx] == null ? -1 : overlayEnterIdx[omIdx]
         };
     });
 
@@ -1432,6 +1531,26 @@ export async function getScreenState(
             if (mm.y + mm.height > cMaxY) cMaxY = mm.y + mm.height;
         }
         if (!bValid) continue;
+        // Size gate for geometric candidates, applied here because this is the first
+        // point where a measured frame exists.
+        //
+        // The upper bound is the important half. A candidate covering essentially the
+        // whole viewport is far more likely to be a screen container (react-native-screens
+        // wraps routes in absoluteFill views, which are opaque and full of pressables)
+        // than a sheet, and promoting one to "overlay" would file the entire visible
+        // screen under an overlay group. Genuine full-screen covers arrive as Modal or as
+        // a covering stackPresentation and are classified above, before this branch runs.
+        if (om.geometric) {
+            var gArea = (bMaxX - bMinX) * (bMaxY - bMinY);
+            if (!(vArea > 0) || gArea < vArea * 0.15 || gArea > vArea * 0.92) continue;
+            // A closed drawer is an opaque, absolutely-positioned, pressable-filled panel
+            // that happens to be parked off-screen (measured at x = -width). It covers
+            // nothing until it slides in, so candidacy has to be judged on the visible
+            // intersection rather than the panel's own size.
+            var visW = Math.min(bMaxX, viewportW) - Math.max(bMinX, 0);
+            var visH = Math.min(bMaxY, viewportH) - Math.max(bMinY, 0);
+            if (visW <= 0 || visH <= 0 || (visW * visH) < gArea * 0.6) continue;
+        }
         // Native covering modals occlude the whole screen — expand their block region to
         // the full viewport so elements that extend past the modal's measured content
         // frame (e.g. the bottom tab bar) are still flagged as blocked, not reachable.
@@ -1444,7 +1563,14 @@ export async function getScreenState(
         var contentBounds = cValid
             ? { x: Math.round(cMinX), y: Math.round(cMinY), width: Math.round(cMaxX - cMinX), height: Math.round(cMaxY - cMinY) }
             : blockBounds;
-        overlays.push({ origIdx: oi, type: om.type, title: om.title, blockBounds: blockBounds, contentBounds: contentBounds, hasContent: cValid, pressables: [] });
+        // Geometric overlays never adopt by geometry. A classified overlay may portal its
+        // content elsewhere in the tree, so containment is a needed fallback for it; a
+        // geometric candidate is a plain in-tree view whose content is exactly its fiber
+        // descendants. Letting it claim everything inside its rect would file the bottom
+        // tab bar as part of the sheet drawn over it, when the truth is the opposite —
+        // the tab bar is behind it and blocked.
+        var geometric = !!om.geometric;
+        overlays.push({ origIdx: oi, type: om.type, title: om.title, blockBounds: blockBounds, contentBounds: contentBounds, hasContent: cValid && !geometric, geometric: geometric, enterIdx: om.enterIdx, pressables: [] });
     }
 
     // Build pressable list
@@ -1456,6 +1582,9 @@ export async function getScreenState(
         if (m.x + m.width < 0 || m.y + m.height < 0) continue;
         if (m.x > viewportW || m.y > viewportH) continue;
         allPressables.push({
+            // Position in the DFS collection order == paint order. Kept so occlusion can
+            // ask "was this drawn before the overlay?" rather than only "is it inside it?".
+            paintIdx: i,
             label: meta[i].label,
             component: meta[i].component || null,
             center: { x: Math.round(m.x + m.width / 2), y: Math.round(m.y + m.height / 2) },
@@ -1523,6 +1652,37 @@ export async function getScreenState(
             b.x + b.width <= ob.x + ob.width &&
             b.y + b.height <= ob.y + ob.height;
     }
+
+    // A geometric candidate has to earn its place: it must either own pressable content or
+    // actually cover something. The name-based classifiers describe a real widget whether
+    // or not it currently holds a button, but "opaque absolute view" is a guess, and a
+    // guess that occludes nothing buys no information — it only adds an empty overlay
+    // group to the output and invites the reader to treat a plain view as a sheet.
+    // True when this overlay is painted over that pressable: the pressable is inside its
+    // rect, is not part of its own subtree, and was collected before it.
+    function occludes(o, p) {
+        return p.overlayIdx !== o.origIdx &&
+            o.enterIdx >= 0 && p.paintIdx < o.enterIdx &&
+            inside(p.bounds, o.blockBounds);
+    }
+
+    var keptOverlays = [];
+    for (var fo = 0; fo < overlays.length; fo++) {
+        var cand = overlays[fo];
+        if (!cand.geometric) { keptOverlays.push(cand); continue; }
+        // A geometric candidate must actually cover something that is not its own content.
+        // Owning pressables is NOT enough: react-native-screens wraps every route in an
+        // absolutely-positioned container that paints an opaque background and is full of
+        // pressables, and promoting one to "overlay" files the whole visible screen under
+        // an overlay group and empties the reachable list. Occluding a foreign element is
+        // what distinguishes a sheet from a screen container.
+        var earns = false;
+        for (var cp = 0; cp < allPressables.length && !earns; cp++) {
+            if (occludes(cand, allPressables[cp])) earns = true;
+        }
+        if (earns) keptOverlays.push(cand);
+    }
+    overlays = keptOverlays;
     for (var pi = 0; pi < allPressables.length; pi++) {
         var p = allPressables[pi];
         var assignedToOverlay = false;
@@ -1538,7 +1698,14 @@ export async function getScreenState(
             // Covered pressables stay in the list but are flagged — agents see what's
             // behind the sheet while knowing taps won't reach it until it closes.
             for (var ov2 = 0; ov2 < overlays.length; ov2++) {
-                if (inside(p.bounds, overlays[ov2].blockBounds)) { p.blockedByOverlay = true; break; }
+                // Geometric overlays respect paint order, so a banner drawn on top of a
+                // sheet is not reported as hidden by it. The name-classified overlays keep
+                // the original containment-only rule: a Modal or a native sheet occludes
+                // what is behind it regardless of where its subtree sits in the walk.
+                var blocks = overlays[ov2].geometric
+                    ? occludes(overlays[ov2], p)
+                    : inside(p.bounds, overlays[ov2].blockBounds);
+                if (blocks) { p.blockedByOverlay = true; break; }
             }
             rootPressables.push(p);
         }
@@ -1546,6 +1713,7 @@ export async function getScreenState(
     for (var si = 0; si < allPressables.length; si++) {
         delete allPressables[si].overlayIdx;
         delete allPressables[si].hasOwnLabel;
+        delete allPressables[si].paintIdx;
     }
 
     // Build typed text/image lists (pair each measurement with its meta by index,

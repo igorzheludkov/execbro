@@ -828,8 +828,30 @@ export async function getScreenLayout(
                 };
             }
 
+            // Last step, deliberately: every filter above (off-screen culling, the
+            // full-screen-wrapper test with its 2-unit tolerance) is tuned in point space,
+            // so scaling earlier would silently retune all of them. Converting only the
+            // emitted frames leaves the logic untouched and still hands the caller the
+            // canonical delivered-pixel coordinates.
+            var PX = scaleOf(SCREEN_SPACE);
+            if (PX !== 1) {
+                for (var px = 0; px < elements.length; px++) {
+                    var pf = elements[px].frame;
+                    if (!pf) continue;
+                    pf.x = Math.round(pf.x * PX);
+                    pf.y = Math.round(pf.y * PX);
+                    pf.width = Math.round(pf.width * PX);
+                    pf.height = Math.round(pf.height * PX);
+                }
+            }
+
             return {
-                viewport: { width: viewportW, height: viewportH },
+                // 9999 is the "never measured" sentinel, not a length — scaling it would
+                // turn a recognisable marker into a plausible-looking 21930.
+                viewport: {
+                    width: viewportW < 9999 ? Math.round(viewportW * PX) : viewportW,
+                    height: viewportH < 9999 ? Math.round(viewportH * PX) : viewportH
+                },
                 totalElements: elements.length,
                 elements: elements,
                 offScreenBelow: (function() {
