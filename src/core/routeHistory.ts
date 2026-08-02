@@ -210,10 +210,11 @@ export async function readRouteHistory(device?: string): Promise<RouteHistoryRes
         }
 
         if (payload && payload.mode === "listener" && Array.isArray(payload.entries)) {
-            return {
-                mode: "listener",
-                visits: payload.entries.map((e) => ({ ...e, epoch }))
-            };
+            // The in-app buffer only ever holds the current run — it dies with the
+            // JS runtime. Merging it into the node-side trail is what lets history
+            // span a reload, and therefore what makes the restart divider reachable.
+            mergeListenerEntries(deviceKey, payload.entries, epoch);
+            return { mode: "listener", visits: sampledVisits(deviceKey) };
         }
     } catch {
         // Fall through to the sampled trail.
@@ -237,6 +238,34 @@ export function resetSampledRoutes(): void {
 
 export function sampledVisits(deviceKey: string): RouteVisit[] {
     return sampled.get(deviceKey) ?? [];
+}
+
+/**
+ * Fold the in-app buffer's entries into the durable node-side trail.
+ *
+ * The in-app buffer is authoritative for the current run and nothing else, so
+ * entries for `epoch` are replaced wholesale while older runs are left intact.
+ * Idempotent — re-reading the same buffer yields the same trail.
+ */
+export function mergeListenerEntries(
+    deviceKey: string,
+    entries: Array<Omit<RouteVisit, "epoch">>,
+    epoch: number
+): void {
+    const previousRuns = (sampled.get(deviceKey) ?? []).filter((v) => v.epoch !== epoch);
+    const thisRun = entries.map((e) => ({ ...e, epoch }));
+
+    // The last visit of an earlier run ended when that run did. Leaving it open
+    // would make a reload read as one long uninterrupted dwell.
+    const lastPrevious = previousRuns[previousRuns.length - 1];
+    const firstOfRun = thisRun[0];
+    if (lastPrevious && lastPrevious.leftAt === null && firstOfRun) {
+        lastPrevious.leftAt = firstOfRun.enteredAt;
+    }
+
+    const merged = [...previousRuns, ...thisRun];
+    const cap = routeHistorySize();
+    sampled.set(deviceKey, merged.length > cap ? merged.slice(merged.length - cap) : merged);
 }
 
 export function recordSampledRoute(

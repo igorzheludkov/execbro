@@ -3,6 +3,7 @@ import {
     formatDwell,
     formatRouteTrail,
     recordSampledRoute,
+    mergeListenerEntries,
     sampledVisits,
     resetSampledRoutes,
     type RouteHistoryResult
@@ -122,5 +123,44 @@ describe("sampled route recording", () => {
     it("ignores an empty route name", () => {
         recordSampledRoute("dev1", "", 1, 1000);
         expect(sampledVisits("dev1")).toHaveLength(0);
+    });
+});
+
+describe("mergeListenerEntries", () => {
+    beforeEach(() => resetSampledRoutes());
+
+    it("keeps earlier runs so the trail survives a reload", () => {
+        mergeListenerEntries("dev1", [
+            { route: "Apollo", from: null, enteredAt: 1000, leftAt: 2000 },
+            { route: "Redux", from: "Apollo", enteredAt: 2000, leftAt: null }
+        ], 1);
+        // The runtime restarted: a fresh in-app buffer holding only the new run.
+        mergeListenerEntries("dev1", [
+            { route: "Tanstack", from: null, enteredAt: 9000, leftAt: null }
+        ], 2);
+
+        const v = sampledVisits("dev1");
+        expect(v.map((x) => x.route)).toEqual(["Apollo", "Redux", "Tanstack"]);
+        expect(v.map((x) => x.epoch)).toEqual([1, 1, 2]);
+    });
+
+    it("closes the last visit of the previous run at the restart", () => {
+        mergeListenerEntries("dev1", [{ route: "Redux", from: null, enteredAt: 2000, leftAt: null }], 1);
+        mergeListenerEntries("dev1", [{ route: "Tanstack", from: null, enteredAt: 9000, leftAt: null }], 2);
+        expect(sampledVisits("dev1")[0].leftAt).toBe(9000);
+    });
+
+    it("is idempotent — re-reading the same buffer does not duplicate", () => {
+        const entries = [{ route: "Apollo", from: null, enteredAt: 1000, leftAt: null }];
+        mergeListenerEntries("dev1", entries, 1);
+        mergeListenerEntries("dev1", entries, 1);
+        expect(sampledVisits("dev1")).toHaveLength(1);
+    });
+
+    it("produces a trail that renders a restart divider", () => {
+        mergeListenerEntries("dev1", [{ route: "Redux", from: null, enteredAt: 2000, leftAt: null }], 1);
+        mergeListenerEntries("dev1", [{ route: "Tanstack", from: null, enteredAt: 9000, leftAt: null }], 2);
+        const out = formatRouteTrail({ mode: "listener", visits: sampledVisits("dev1") }, 10_000);
+        expect(out).toContain("app restarted (epoch 2)");
     });
 });
