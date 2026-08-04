@@ -47,6 +47,23 @@ describe("pinch tool registration", () => {
         expect(desc).toMatch(/emulator/i);
     });
 
+    it("leaves span without a schema default so direction can decide it", () => {
+        // A schema-level .default() would make "caller passed 1" and "nothing
+        // passed" indistinguishable, and the handler could not pick a smaller
+        // default for direction="in".
+        const schema = registered.find((t) => t.name === "pinch")!.config
+            .inputSchema as Record<string, { isOptional?: () => boolean; _def?: unknown }>;
+        const span = schema.span as unknown as { _def?: { typeName?: string } };
+        expect(JSON.stringify(span?._def ?? {})).not.toMatch(/ZodDefault/);
+    });
+
+    it("documents both span defaults", () => {
+        const schema = registered.find((t) => t.name === "pinch")!.config.inputSchema;
+        const text = JSON.stringify(schema);
+        expect(text).toMatch(/0\.5/);
+        expect(text).toMatch(/direction/);
+    });
+
     it("documents the screenshot-pixel coordinate space", () => {
         const schema = registered.find((t) => t.name === "pinch")!.config.inputSchema as Record<
             string,

@@ -86,3 +86,18 @@ export const SETTLE_MS = 250;
  * extrapolating past the evidence.
  */
 export const MAX_RATIO_PER_GESTURE = 16;
+
+/**
+ * Default `span` for a pinch-IN when the caller does not set one.
+ *
+ * A pinch-in starts with the fingers at their widest, so at span 1 its first
+ * contacts land at the screen extremes — on a status bar, a search field, or
+ * a bottom sheet, any of which takes the gesture before the zoomable surface
+ * sees it. Measured: a vertical `direction:"in"` on Google Maps and on a
+ * gesture-handler lightbox both did nothing at span 1 and zoomed at span 0.5.
+ *
+ * A pinch-OUT has the opposite geometry — its contacts start near the focal
+ * point and travel outward — so it keeps the full span and the widest
+ * possible zoom range.
+ */
+export const PINCH_IN_DEFAULT_SPAN = 0.5;

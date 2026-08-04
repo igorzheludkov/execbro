@@ -164,8 +164,8 @@ pinch sends REAL two-finger touch events through the Android emulator's multi-to
 
 Read verification.meaningful, exactly like swipe: false means nothing zoomed (surface is not zoomable, already at a zoom limit, or the focal point missed it).
 
-### When direction="in" appears to do nothing
-Lower span (try 0.5). A pinch-in STARTS with the fingers far apart, so at the default span=1 the contacts land at the screen extremes — where a top bar or a bottom sheet can take the gesture before the zoomable surface sees it. span shrinks the gesture's footprint without changing the zoom ratio (that is scale).
+### Controlling the gesture's footprint with span
+span is the fraction of the available screen the gesture occupies. It defaults to 1 for direction="out" and 0.5 for direction="in", because a pinch-in STARTS with the fingers far apart — a full span would land its contacts at the screen extremes, where a top bar or a bottom sheet takes the gesture before the zoomable surface sees it. Lower span further if a gesture still lands on surrounding UI; raise it to zoom out further in one gesture. It does not change the zoom ratio (that is scale).
 
 ### Platform support
 Android emulators only. Physical Android devices have no gRPC bridge, and iOS needs a multi-touch HID helper that no released idb ships — both return an explicit error rather than a partial result. pinch never fakes a zoom by calling app code: success means real fingers moved.

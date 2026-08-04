@@ -125,7 +125,7 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 - `scale` is the finger-separation ratio; values too large for one gesture chain automatically
 - `angle=90` puts the fingers on the vertical axis
 - Read `verification.meaningful` exactly as with `swipe`
-- **If `direction="in"` does nothing, lower `span` (try 0.5).** A pinch-in starts with the fingers far apart, so at the default span they land at the screen extremes where a top bar or bottom sheet can take the gesture
+- `span` is how much of the screen the gesture occupies — 1 by default for `"out"`, 0.5 for `"in"`, because a pinch-in starts with the fingers far apart and a full span would land them on a top bar or bottom sheet. Lower it further if a gesture still lands on surrounding UI
 - It sends real kernel touch events, so it drives native views, WebViews, and maps — not only React Native. Physical Android devices and iOS return an explicit error rather than a partial result
 
 **Type text:**

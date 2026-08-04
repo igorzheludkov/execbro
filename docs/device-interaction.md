@@ -45,7 +45,7 @@ swipe with startX=540 startY=1500 endX=540 endY=500
 pinch with direction="out"                       # zoom in at screen centre
 pinch with direction="in"                        # zoom out
 pinch with direction="out" x=250 y=650 scale=6   # zoom pivoting on a point
-pinch with direction="in" span=0.5               # smaller footprint — use when direction="in" does nothing
+pinch with direction="in" span=0.3               # even smaller footprint, if a gesture lands on surrounding UI
 
 # Text input on Android (tap input field first)
 tap with text="Email"

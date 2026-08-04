@@ -28,6 +28,7 @@ import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readNativeFields } from "../core/nativeInputValue.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
+import { PINCH_IN_DEFAULT_SPAN } from "../core/pinchThresholds.js";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import type { ConnectedApp } from "../core/types.js";
 
@@ -518,7 +519,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "HOW IT WORKS: Two independent contacts sent through the emulator's multi-touch bridge as real kernel touch events. It works below the app, so it drives React Native, native views, WebViews — anything on screen.\n" +
                 "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means nothing zoomed (not zoomable, already at a zoom limit, or the focal point missed).\n" +
                 "WORKFLOW: pinch({ direction: \"out\" }) -> read verification.meaningful. Take x/y from get_screen_state or a screenshot; no conversion needed.\n" +
-                "IF direction=\"in\" DOES NOTHING: lower `span` (try 0.5). A pinch-in starts with the fingers far apart, so at span 1 they land at the screen extremes where a top bar or bottom sheet can take the gesture.\n" +
+                "IF A GESTURE DOES NOTHING: lower `span` — the contacts may be landing on surrounding UI (a top bar, a bottom sheet) rather than the zoomable surface. direction=\"in\" already defaults to a reduced span for this reason.\n" +
                 "LIMITATIONS: Physical Android devices and iOS have no multi-touch channel and return an explicit error, never a partial result. Success means real fingers moved — this never fakes zoom by calling app code.\n",
             inputSchema: {
                 direction: z
@@ -556,13 +557,12 @@ export function registerInteractionTools(server: McpServer): void {
                     .min(0.05)
                     .max(1)
                     .optional()
-                    .default(1)
                     .describe(
-                        "How much of the screen the gesture occupies, as a fraction 0-1 (default 1 = as wide as fits). " +
-                        "Lower it when direction=\"in\" fails: a pinch-in STARTS with the fingers far apart, so at span 1 " +
-                        "they land at the screen extremes and a top bar or bottom sheet can take the gesture instead of " +
-                        "the zoomable surface. span 0.5 keeps both contacts near the focal point. Does not change the " +
-                        "zoom ratio — that is `scale`."
+                        "How much of the screen the gesture occupies, as a fraction 0-1. Defaults to 1 for " +
+                        "direction=\"out\" and 0.5 for direction=\"in\", because a pinch-in starts with the fingers " +
+                        "far apart and at span 1 they land at the screen extremes, where a top bar or bottom sheet " +
+                        "takes the gesture. Raise it to zoom out further per gesture; lower it if a gesture still " +
+                        "lands on surrounding UI. Does not change the zoom ratio — that is `scale`."
                     ),
                 durationMs: z.coerce
                     .number()
@@ -670,6 +670,12 @@ export function registerInteractionTools(server: McpServer): void {
                 pinchScaleFactor
             );
 
+            // A pinch-in's contacts START at the widest separation, so the
+            // full span puts them on whatever frames the screen. Pinch-out
+            // starts them near the focal point and keeps the full range.
+            const effectiveSpan =
+                span ?? ((direction ?? "out") === "in" ? PINCH_IN_DEFAULT_SPAN : 1);
+
             const driverResult = await androidPinch({
                 focalX: focal.x,
                 focalY: focal.y,
@@ -677,7 +683,7 @@ export function registerInteractionTools(server: McpServer): void {
                 scale: scale ?? 3,
                 angleDeg: angle ?? 0,
                 durationMs: durationMs ?? SWIPE_DEFAULT_DURATION_MS,
-                span: span ?? 1,
+                span: effectiveSpan,
                 serial: resolved.target.androidSerial,
             });
 
@@ -718,7 +724,7 @@ export function registerInteractionTools(server: McpServer): void {
                 platform: "android",
                 direction: direction ?? "out",
                 focal: { x: focalScreenshotX, y: focalScreenshotY },
-                span: span ?? 1,
+                span: effectiveSpan,
                 separation: { start: driverResult.startHalf, end: driverResult.endHalf },
                 gestureCount: driverResult.gestureCount,
                 frameCount: driverResult.frameCount,
