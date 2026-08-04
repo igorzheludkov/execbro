@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 58,
+    "count": 59,
     "tools": [
         "activate_license",
         "android_input_text",
@@ -51,6 +51,7 @@
         "measure",
         "navigate",
         "ocr_screenshot",
+        "pinch",
         "redux_dispatch",
         "redux_get_state",
         "reload_app",
@@ -328,6 +329,18 @@
         "ocr_screenshot": [
             "deviceId",
             "platform"
+        ],
+        "pinch": [
+            "angle",
+            "burst",
+            "device",
+            "direction",
+            "durationMs",
+            "scale",
+            "screenshot",
+            "verify",
+            "x",
+            "y"
         ],
         "redux_dispatch": [
             "action",
