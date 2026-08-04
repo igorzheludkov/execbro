@@ -387,11 +387,19 @@ export function registerInteractionTools(server: McpServer): void {
                         isError: true,
                     };
                 }
+                // captureScreenshot reports originalWidth/originalHeight — the
+                // DEVICE dimensions before the downscale that fits the API limit —
+                // while this tool's coordinates (and `distance`) are delivered-
+                // screenshot pixels. Without dividing here, the computed gesture
+                // gets scaled a second time below and lands off-target: on a
+                // 1080x2424 device it swiped at (654, 1954) while reporting
+                // (540, 1612).
+                const shotScale = dims.scaleFactor || 1;
                 const computed = computeSwipeFromDirection(
                     (direction ?? "up") as SwipeDirection,
                     distance,
-                    dims.width,
-                    dims.height
+                    dims.width / shotScale,
+                    dims.height / shotScale
                 );
                 startX = computed.startX;
                 startY = computed.startY;
