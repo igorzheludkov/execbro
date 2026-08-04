@@ -1,0 +1,74 @@
+/**
+ * Pinch geometry thresholds, measured on our own hardware.
+ *
+ * Every value here comes from scripts/measure-pinch-thresholds.mjs run against
+ * a Pixel 9 emulator (emulator 37.1.11, API 36, 1080x2424) driving Google Maps.
+ * Do not adjust one without re-running that experiment and updating both the
+ * number and the comment. Full measurement record:
+ * docs/devtools-core/notes/2026-08-04-pinch-threshold-measurements.md
+ */
+
+/**
+ * Gap between frames. Every gesture in every experiment used a 16ms cadence
+ * and was recognised, so this is the measured-good value rather than a
+ * derived one. Recognizers read velocity from the frame sequence, so a much
+ * coarser cadence would read as a jump.
+ */
+export const FRAME_INTERVAL_MS = 16;
+
+/** Non-zero pressure means "contact down". The proto's range maxes at 1024. */
+export const PRESSURE_DOWN = 1024;
+
+/**
+ * MEASURED: injected contacts stay separate no matter how close they are —
+ * a 4px half-separation was still recognised as a two-finger pinch. Unlike
+ * real fingers they cannot merge, because each is its own kernel MT slot with
+ * its own tracking id. 8px is 4px doubled for rounding headroom, not a
+ * recognizer limit.
+ */
+export const MIN_HALF_SEPARATION_PX = 8;
+
+/**
+ * MEASURED: the recognizer floor. A 68px total separation change produced
+ * BYTE-IDENTICAL screenshots — literally nothing moved — while 72px zoomed
+ * the map. Below this a gesture is a guaranteed no-op, so we report it rather
+ * than emitting motion nothing will act on.
+ */
+export const MIN_TRAVEL_PX = 72;
+
+/**
+ * MEASURED: no guard is needed to protect against the OS stealing the
+ * gesture. Contacts starting at x=0 and x=screenWidth were recognised as a
+ * pinch under BOTH three-button and gesture navigation, and the focused
+ * window never changed — Android's back-gesture handler bails as soon as a
+ * second pointer is down, and both of ours land in the same frame.
+ *
+ * The 4px that remains exists only to keep rounded coordinates on-screen.
+ */
+export const EDGE_GUARD_PX = { left: 4, right: 4, top: 4, bottom: 4 };
+
+/**
+ * MEASURED: full-span gestures (contacts at the very screen edge) were
+ * recognised, so there is no need to sacrifice zoom range for safety. This
+ * trims 2% purely as rounding headroom.
+ */
+export const EDGE_UTILIZATION = 0.98;
+
+/**
+ * MEASURED: three chained gestures reached street level with a 250ms pause
+ * and only city level with no pause, so the pause is doing real work — the
+ * third gesture merges into the second without it. 100ms came close to 250ms;
+ * 250ms produced the deepest zoom, and it only applies between chained
+ * sub-gestures, which are rare.
+ */
+export const SETTLE_MS = 250;
+
+/**
+ * MEASURED: single-gesture ratios of 2, 3, 4, 6, 8, 12 and 16 all zoomed the
+ * map — no recognizer ceiling was found. The real limit is geometric (the
+ * narrow end cannot go below MIN_HALF_SEPARATION_PX and the wide end cannot
+ * leave the screen), and planPinch enforces that separately. 16 is the
+ * largest ratio actually verified, so we chain beyond it rather than
+ * extrapolating past the evidence.
+ */
+export const MAX_RATIO_PER_GESTURE = 16;
