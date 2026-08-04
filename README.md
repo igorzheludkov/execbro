@@ -92,7 +92,7 @@ It's one `npm install` plus a single `init()` call in your app's entry file. See
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20.9+
 - React Native app running with Metro bundler
 - **Recommended**: [`execbro-sdk`](#install-the-sdk-recommended) in your app — wires stores and the network layer into the agent for dramatically better debugging (optional; ExecBro works without it)
 - **iOS UI automation**: [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`, default) or [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`, opt in via `IOS_DRIVER=idb`) — required for tap, swipe, text input, accessibility on iOS Simulator
