@@ -12,7 +12,7 @@ This repository includes pre-built [Claude Code skills](https://docs.anthropic.c
 | `app-state` | Inspect Redux/Apollo/context state, navigate the app, and execute code in the runtime |
 | `component-inspect` | Inspect React component tree, props, state, and layout |
 | `layout-check` | Verify UI layout against design specs using screenshots and component data |
-| `device-interact` | Automate device interaction: tap, swipe, text input, and element finding |
+| `device-interact` | Automate device interaction: tap, swipe, pinch (Android emulator only), text input, and element finding |
 | `bundle-check` | Detect and diagnose Metro bundler errors and compilation failures |
 | `native-rebuild` | Rebuild and verify the app after installing native Expo packages |
 

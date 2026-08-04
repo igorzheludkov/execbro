@@ -205,9 +205,12 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
 | URL opening                       | Yes (simctl)    | Yes          |
 | Boot simulator                    | Yes (simctl)    | Yes          |
 | **Tap / swipe / gestures**        | **No**          | Yes          |
+| **Pinch to zoom (multi-touch)**   | **No**          | **No** \*    |
 | **Text input**                    | **No**          | Yes          |
 | **Accessibility tree queries**    | **No**          | Yes          |
 | **Element finding / waiting**     | **No**          | Yes          |
 | **Hardware buttons (Home, Lock)** | **No**          | Yes          |
+
+\* `pinch` is **Android emulator only** — iOS support is in progress. Neither AXe nor IDB exposes multi-touch: both drivers are strictly single-pointer, so installing one does not enable pinch on the simulator.
 
 > **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"AXe is not installed"` in tap results, install the appropriate driver with the commands above and retry.

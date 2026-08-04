@@ -512,13 +512,14 @@ export function registerInteractionTools(server: McpServer): void {
         "pinch",
         {
             description:
-                "Pinch-to-zoom using REAL two-finger touch events, with pixel-diff verification." +
+                "Pinch-to-zoom using REAL two-finger touch events, with pixel-diff verification. ANDROID EMULATOR ONLY (iOS in progress)." +
                 primaryInteractionBanner() + "\n" +
                 "PURPOSE: Zoom a map, image gallery, photo viewer, or any zoomable surface. Easiest form: pinch({ direction: \"out\" }) zooms in at screen centre; \"in\" zooms out. Pass x/y to zoom around a specific point.\n" +
                 "HOW IT WORKS: Sends two independent contacts through the Android emulator's multi-touch bridge, which delivers them as real kernel touch events. It works below the app, so it drives React Native, native views, WebViews — anything on screen.\n" +
                 "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means nothing zoomed (surface is not zoomable, already at a zoom limit, or the focal point missed it). burst=true catches transient rubber-band animation.\n" +
                 "WORKFLOW: pinch({ direction: \"out\" }) -> read response.verification.meaningful. Take x/y from get_screen_state or a screenshot; no conversion needed.\n" +
-                "LIMITATIONS: Android emulators only. Physical Android devices and iOS simulators have no multi-touch channel and return an explicit error rather than a partial result. This tool never simulates zoom by calling app code — a success means real fingers moved.\n",
+                "IF direction=\"in\" DOES NOTHING: lower `span` (try 0.5). A pinch-in starts with the fingers far apart, so at the default span 1 they land at the screen extremes, where a top bar or bottom sheet can take the gesture before the zoomable surface sees it.\n" +
+                "LIMITATIONS: ANDROID EMULATORS ONLY — iOS support is in progress. Physical Android devices and iOS simulators have no multi-touch channel and return an explicit error rather than a partial result. This tool never simulates zoom by calling app code — a success means real fingers moved.\n",
             inputSchema: {
                 direction: z
                     .enum(["in", "out"])
@@ -550,6 +551,19 @@ export function registerInteractionTools(server: McpServer): void {
                     .optional()
                     .default(0)
                     .describe("Axis the two fingers sit on, in degrees. 0 = horizontal (default), 90 = vertical."),
+                span: z.coerce
+                    .number()
+                    .min(0.05)
+                    .max(1)
+                    .optional()
+                    .default(1)
+                    .describe(
+                        "How much of the screen the gesture occupies, as a fraction 0-1 (default 1 = as wide as fits). " +
+                        "Lower it when direction=\"in\" fails: a pinch-in STARTS with the fingers far apart, so at span 1 " +
+                        "they land at the screen extremes and a top bar or bottom sheet can take the gesture instead of " +
+                        "the zoomable surface. span 0.5 keeps both contacts near the focal point. Does not change the " +
+                        "zoom ratio — that is `scale`."
+                    ),
                 durationMs: z.coerce
                     .number()
                     .optional()
@@ -590,7 +604,7 @@ export function registerInteractionTools(server: McpServer): void {
                     ),
             }
         },
-        async ({ direction, scale, x, y, angle, durationMs, device, verify, screenshot, burst }) => {
+        async ({ direction, scale, x, y, angle, span, durationMs, device, verify, screenshot, burst }) => {
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
                 return {
@@ -663,6 +677,7 @@ export function registerInteractionTools(server: McpServer): void {
                 scale: scale ?? 3,
                 angleDeg: angle ?? 0,
                 durationMs: durationMs ?? SWIPE_DEFAULT_DURATION_MS,
+                span: span ?? 1,
                 serial: resolved.target.androidSerial,
             });
 
@@ -703,6 +718,7 @@ export function registerInteractionTools(server: McpServer): void {
                 platform: "android",
                 direction: direction ?? "out",
                 focal: { x: focalScreenshotX, y: focalScreenshotY },
+                span: span ?? 1,
                 separation: { start: driverResult.startHalf, end: driverResult.endHalf },
                 gestureCount: driverResult.gestureCount,
                 frameCount: driverResult.frameCount,
