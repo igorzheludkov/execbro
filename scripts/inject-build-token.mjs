@@ -9,13 +9,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const PLACEHOLDER = "__BUILD_TOKEN__";
-// BUILD_TOKEN_TARGET overridable for tests; defaults to the compiled telemetry
+// BUILD_TOKEN_TARGET overridable for tests; defaults to the compiled build-info
 // module where the placeholder literal lands. tsc emits a mirrored src/ tree
-// (not a single bundle), so the placeholder lives in build/core/telemetry.js,
+// (not a single bundle), so the placeholder lives in build/core/buildInfo.js,
 // not build/index.js.
 const target =
     process.env.BUILD_TOKEN_TARGET ||
-    new URL("../build/core/telemetry.js", import.meta.url).pathname;
+    new URL("../build/core/buildInfo.js", import.meta.url).pathname;
 
 const token = process.env.BUILD_TOKEN;
 if (!token || token.trim() === "") {

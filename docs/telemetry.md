@@ -65,3 +65,5 @@ To opt out while keeping the rest of the package working:
 ## Build attestation
 
 Official npm builds are stamped with a secret build token at publish time (via `npm run inject-token` in CI, which requires the `BUILD_TOKEN` secret). Builds from a source checkout carry an inert placeholder and are labeled "fork" in our telemetry dashboard. The token is never committed to source.
+
+The token lives in `src/core/buildInfo.ts` (the injector's target is the compiled `build/core/buildInfo.js`), and it does double duty: `isPublishedBuild()` reads the same stamp to refuse the development `--http` transport in published builds. Keep the placeholder to exactly one occurrence in that file — a second one would be rewritten alongside the constant and silently disable the gate.

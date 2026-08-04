@@ -7,6 +7,7 @@ import { connectedApps } from "./state.js";
 import { getPostHogClient } from "./posthog.js";
 import { CONFIG_DIR } from "./paths.js";
 import { API_BASE_URL, ACCOUNTS_API_KEY } from "./config.js";
+import { BUILD_TOKEN } from "./buildInfo.js";
 
 // ============================================================================
 // Configuration
@@ -15,11 +16,8 @@ import { API_BASE_URL, ACCOUNTS_API_KEY } from "./config.js";
 const TELEMETRY_ENDPOINT = "https://rn-debugger-telemetry.500griven.workers.dev";
 const TELEMETRY_API_KEY = "6a630181cb391ed5c42a188428cc2d2623dfe9333ec048193bb711ab58afe85e";
 
-// Replaced at npm-publish time by scripts/inject-build-token.mjs, which
-// rewrites the compiled build/index.js. A source checkout (any fork) keeps
-// this literal — the telemetry Worker compares it to its own secret and
-// resolves a non-match to a fork. Never store/commit the real value here.
-const BUILD_TOKEN = "__BUILD_TOKEN__";
+// The build token lives in ./buildInfo.js — a single small injector target,
+// shared with the transport gate in index.ts.
 
 export function getTelemetryEndpoint(): string { return TELEMETRY_ENDPOINT; }
 export function getTelemetryApiKey(): string { return TELEMETRY_API_KEY; }

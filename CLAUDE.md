@@ -61,7 +61,16 @@ Iteration loop: save a file → nodemon rebuilds and restarts the server (~5-15 
 
 To run the dev server manually instead: `npm run dev:mcp` (port 8600, override with `MCP_HTTP_PORT`).
 
-Production users are unaffected — the default transport remains stdio.
+Production users are unaffected — the default transport remains stdio, and `--http` is refused outright in published builds (see below).
+
+**The HTTP transport is checkout-only.** It is unauthenticated and registers the `dev` meta-tool, which proxies calls to every tool in the registry, so it must never be reachable from an npm install. Two guards enforce that:
+
+- `isPublishedBuild()` (`src/core/buildInfo.ts`) compares the injected `BUILD_TOKEN` against its placeholder. A published artifact is stamped, so `--http` exits non-zero with an explanatory message and the `dev` tool is never registered. A source checkout or fork built from source keeps the placeholder and works normally.
+- The listener binds `127.0.0.1` explicitly. `listen(port)` with no host binds `0.0.0.0`, which would put device control, JS eval, and screenshots on the LAN.
+
+`StreamableHTTPServerTransport` is constructed **per request**, not once at boot. Current SDKs treat the streamable-HTTP transport as single-use: a hoisted instance answers `initialize` and then fails every later request with a bare 500 and no log line, which looks exactly like a dead server. If the dev loop ever starts 500ing after one successful call, check that this is still per-request.
+
+This is a release-channel gate, not a security boundary — `build/*.js` is editable. It exists so ordinary users cannot expose the dev surface by accident.
 
 ### Dev Tool (`dev`)
 

@@ -17,6 +17,7 @@ import {
     disconnectMetroBuildEvents,
 } from "./core/index.js";
 import { installToolRegistryInterceptor, toolRegistry } from "./core/register.js";
+import { isPublishedBuild } from "./core/buildInfo.js";
 
 import { registerAccountTools } from "./tools/accountTools.js";
 import { registerMetaTools } from "./tools/metaTools.js";
@@ -36,6 +37,14 @@ import { registerComponentTools } from "./tools/componentTools.js";
 // Re-export so tests (src/__tests__/unit/toolDescriptions.test.ts) can enumerate
 // registered tools without booting the server.
 export { toolRegistry };
+
+// The HTTP transport is a development-only convenience: it is unauthenticated,
+// and it registers the `dev` meta-tool, which proxies calls to every tool in the
+// registry. Published builds must never expose either, so --http is honoured
+// only in a source checkout. main() exits non-zero when a published build is
+// launched with the flag, rather than silently falling back to stdio.
+const httpRequested = process.argv.includes("--http");
+const httpAllowed = httpRequested && !isPublishedBuild();
 
 const server = new McpServer(
     {
@@ -57,7 +66,7 @@ installToolRegistryInterceptor(server);
 registerAccountTools(server);
 registerMetaTools(server, {
     devMode: isDevMode(),
-    httpMode: process.argv.includes("--http"),
+    httpMode: httpAllowed,
 });
 registerReduxTools(server);
 registerExecutionTools(server);
@@ -84,22 +93,38 @@ async function main() {
     // Trade-off: the per-tool usage gate has no usage data on the very first tool
     // call of a session and fails open for that single call — acceptable.
 
-    const useHttp = process.argv.includes("--http");
+    if (httpRequested && !httpAllowed) {
+        console.error(
+            "[execbro] --http is a development transport (unauthenticated, exposes the `dev` meta-tool) " +
+                "and is disabled in published builds. Use the default stdio transport."
+        );
+        process.exit(1);
+    }
+
     const httpPort = parseInt(process.env.MCP_HTTP_PORT || "8600", 10);
 
-    if (useHttp) {
+    if (httpAllowed) {
         // HTTP transport mode — stateless for dev hot-reload
         // Stateless = no session IDs, so server restarts don't break Claude Code's connection
-        const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: undefined,
-        });
-
-        await server.connect(transport);
-
         const httpServer = createHttpServer(async (req, res) => {
             const url = new URL(req.url || "", `http://localhost:${httpPort}`);
 
             if (url.pathname === "/mcp") {
+                // A transport PER REQUEST, not one for the process lifetime.
+                // The streamable-HTTP transport is single-use in current SDKs:
+                // a hoisted instance answers the first request and then fails
+                // every later one with a 500 and no log line. Verified against
+                // @modelcontextprotocol/sdk 1.30.0 — initialize succeeded,
+                // every subsequent call 500'd until the process restarted.
+                const transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: undefined,
+                });
+                res.on("close", () => {
+                    void Promise.resolve(transport.close()).catch(() => {
+                        /* connection already gone */
+                    });
+                });
+                await server.connect(transport);
                 await transport.handleRequest(req, res);
                 return;
             }
@@ -108,7 +133,9 @@ async function main() {
             res.end("Not found");
         });
 
-        httpServer.listen(httpPort, () => {
+        // Bind loopback explicitly: listen(port) with no host binds 0.0.0.0,
+        // which puts an unauthenticated device-control surface on the LAN.
+        httpServer.listen(httpPort, "127.0.0.1", () => {
             console.error(`[execbro] MCP HTTP server listening on http://localhost:${httpPort}/mcp`);
         });
     } else {
