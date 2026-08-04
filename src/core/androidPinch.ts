@@ -1,8 +1,9 @@
 import { resolveEmulatorBridge } from "./emulatorBridge.js";
 import { sendTouchFrames, type TouchPoint } from "./emulatorGrpc.js";
 import { planPinch } from "./pinchGeometry.js";
-import { FRAME_INTERVAL_MS, SETTLE_MS } from "./pinchThresholds.js";
+import { EDGE_GUARD_PX, FRAME_INTERVAL_MS, SETTLE_MS } from "./pinchThresholds.js";
 import { androidGetScreenSize, getDefaultAndroidDevice } from "./android.js";
+import { androidSystemBarInsets } from "./androidSystemBars.js";
 
 export interface AndroidPinchOptions {
     /** Focal point in DEVICE pixels. */
@@ -66,6 +67,16 @@ export async function androidPinch(options: AndroidPinchOptions): Promise<Androi
         };
     }
 
+    // The status and navigation bars are separate windows: a contact that goes
+    // down inside one is delivered to SystemUI and the app never sees it (a
+    // vertical pinch starting at y=4 pulled the notification shade instead of
+    // zooming). Their heights vary by device, so query rather than assume, and
+    // fall back to the conservative defaults if the query fails.
+    const bars = await androidSystemBarInsets(serial);
+    const guards = bars
+        ? { left: EDGE_GUARD_PX.left, right: EDGE_GUARD_PX.right, top: bars.top, bottom: bars.bottom }
+        : EDGE_GUARD_PX;
+
     const plan = planPinch({
         focalX: options.focalX,
         focalY: options.focalY,
@@ -75,6 +86,7 @@ export async function androidPinch(options: AndroidPinchOptions): Promise<Androi
         durationMs: options.durationMs,
         screenWidth: size.width,
         screenHeight: size.height,
+        guards,
     });
 
     if (!plan.viable) {
