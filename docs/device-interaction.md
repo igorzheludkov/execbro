@@ -41,6 +41,12 @@ For gestures beyond tapping:
 # Swipe (auto-routes to iOS/Android; returns verification.meaningful)
 swipe with startX=540 startY=1500 endX=540 endY=500
 
+# Pinch to zoom — ANDROID EMULATOR ONLY (iOS in progress)
+pinch with direction="out"                       # zoom in at screen centre
+pinch with direction="in"                        # zoom out
+pinch with direction="out" x=250 y=650 scale=6   # zoom pivoting on a point
+pinch with direction="in" span=0.5               # smaller footprint — use when direction="in" does nothing
+
 # Text input on Android (tap input field first)
 tap with text="Email"
 android_input_text with text="hello@example.com"

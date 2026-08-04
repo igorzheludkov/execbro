@@ -338,6 +338,7 @@
             "durationMs",
             "scale",
             "screenshot",
+            "span",
             "verify",
             "x",
             "y"

@@ -13,6 +13,8 @@ export interface AndroidPinchOptions {
     scale: number;
     angleDeg: number;
     durationMs: number;
+    /** Fraction of the available span the gesture may occupy, 0-1 (default 1). */
+    span?: number;
     serial?: string;
 }
 
@@ -87,6 +89,7 @@ export async function androidPinch(options: AndroidPinchOptions): Promise<Androi
         screenWidth: size.width,
         screenHeight: size.height,
         guards,
+        span: options.span,
     });
 
     if (!plan.viable) {

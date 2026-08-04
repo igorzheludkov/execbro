@@ -32,6 +32,19 @@ export interface PinchRequest {
      * EDGE_GUARD_PX when the device cannot be queried.
      */
     guards?: EdgeGuards;
+    /**
+     * Fraction of the available span the gesture may occupy, 0-1. Defaults to
+     * 1 (use as much of the screen as fits).
+     *
+     * This exists because the wide end of a gesture is otherwise always
+     * maximal, which is fine for a pinch-out — its contacts START near the
+     * focal point — but not for a pinch-in, whose contacts start at the
+     * widest separation and so land at the screen extremes. On a screen with
+     * a top bar or bottom sheet those views take the gesture and the target
+     * never sees it. Shrinking the span keeps both contacts over the surface
+     * being zoomed.
+     */
+    span?: number;
 }
 
 export interface PinchPlan {
@@ -149,10 +162,26 @@ export function planPinch(request: PinchRequest): PinchPlan {
 
     const { count, per } = decompose(ratio);
 
-    // The wide end uses the full available span; the narrow end is the wide
-    // end divided by the per-gesture ratio, floored so the contacts stay
-    // distinguishable as two fingers.
-    const wide = maxHalf;
+    // The wide end uses the requested fraction of the available span; the
+    // narrow end is the wide end divided by the per-gesture ratio, floored so
+    // the contacts stay distinguishable as two fingers.
+    const spanFraction = clamp(
+        Number.isFinite(request.span as number) ? (request.span as number) : 1,
+        0,
+        1
+    );
+    const wide = maxHalf * spanFraction;
+    if (wide < MIN_HALF_SEPARATION_PX) {
+        return {
+            gestures: [],
+            startHalf: 0,
+            endHalf: 0,
+            viable: false,
+            note:
+                `span ${spanFraction} leaves only ${Math.round(wide)}px between the contacts, ` +
+                `below the ${MIN_HALF_SEPARATION_PX}px needed for two distinct fingers. Increase span.`,
+        };
+    }
     const narrow = Math.max(MIN_HALF_SEPARATION_PX, wide / per);
 
     const gestures: TouchPoint[][][] = [];

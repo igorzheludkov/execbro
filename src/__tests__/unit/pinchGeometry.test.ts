@@ -107,6 +107,48 @@ describe("planPinch", () => {
         expect(short).toBeGreaterThanOrEqual(3);
     });
 
+    it("shrinks the gesture footprint when span is reduced", () => {
+        const spread = (plan: ReturnType<typeof planPinch>) => {
+            const frames = plan.gestures[0];
+            return Math.max(...frames.map((f) => Math.abs(f[1].x - f[0].x)));
+        };
+        const full = spread(planPinch({ ...base, span: 1 }));
+        const half = spread(planPinch({ ...base, span: 0.5 }));
+        expect(half).toBeLessThan(full);
+        expect(half).toBeCloseTo(full / 2, -1);
+    });
+
+    it("keeps a reduced-span pinch-in away from the screen extremes", () => {
+        // The case the demo hit: at span 1 a pinch-in starts with its contacts
+        // at the very top and bottom, where a status bar or bottom sheet takes
+        // the gesture before the zoomable surface sees it.
+        const guards = { left: 4, right: 4, top: 200, bottom: 200 };
+        const wide = planPinch({ ...base, direction: "in", angleDeg: 90, span: 1, guards });
+        const narrow = planPinch({ ...base, direction: "in", angleDeg: 90, span: 0.4, guards });
+        const topContact = (plan: ReturnType<typeof planPinch>) => plan.gestures[0][0][0].y;
+        expect(topContact(narrow)).toBeGreaterThan(topContact(wide));
+    });
+
+    it("keeps the zoom ratio unchanged when span shrinks", () => {
+        const ratio = (plan: ReturnType<typeof planPinch>) => plan.endHalf / plan.startHalf;
+        expect(ratio(planPinch({ ...base, span: 0.4 }))).toBeCloseTo(
+            ratio(planPinch({ ...base, span: 1 })),
+            5
+        );
+    });
+
+    it("refuses a span too small to hold two distinct contacts", () => {
+        const plan = planPinch({ ...base, span: 0.001 });
+        expect(plan.viable).toBe(false);
+        expect(plan.note).toMatch(/span/);
+    });
+
+    it("defaults to the full span when span is omitted", () => {
+        const omitted = planPinch(base);
+        const explicit = planPinch({ ...base, span: 1 });
+        expect(omitted.endHalf).toBeCloseTo(explicit.endHalf, 5);
+    });
+
     it("marks a scale of 1 as not viable", () => {
         const plan = planPinch({ ...base, scale: 1 });
         expect(plan.viable).toBe(false);

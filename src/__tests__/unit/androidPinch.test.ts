@@ -121,6 +121,19 @@ describe("androidPinch", () => {
         expect(res.success).toBe(true);
     });
 
+    it("forwards span to the geometry", async () => {
+        await androidPinch({ ...OPTS, span: 0.5 });
+        const wideFrames = sendTouchFramesMock.mock.calls.flatMap((c) => c[1]);
+        const wideSpread = Math.max(...wideFrames.map((f) => Math.abs(f[1].x - f[0].x)));
+
+        sendTouchFramesMock.mockClear();
+        await androidPinch({ ...OPTS, span: 1 });
+        const fullFrames = sendTouchFramesMock.mock.calls.flatMap((c) => c[1]);
+        const fullSpread = Math.max(...fullFrames.map((f) => Math.abs(f[1].x - f[0].x)));
+
+        expect(wideSpread).toBeLessThan(fullSpread);
+    });
+
     it("pauses between chained sub-gestures", async () => {
         const res = await androidPinch({ ...OPTS, scale: 40 });
         expect(res.gestureCount).toBeGreaterThan(1);

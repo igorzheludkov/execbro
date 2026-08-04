@@ -12,7 +12,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 | `/app-state` | Inspect runtime state | Reading Redux store, executing JS, checking globals |
 | `/component-inspect` | Inspect component tree | Exploring hierarchy, props, state, hooks of components |
 | `/layout-check` | Read screen state + capture screenshots | Verifying UI changes, comparing across devices/Figma |
-| `/device-interact` | Tap, swipe, type on device | Automating UI interactions, reproducing bugs |
+| `/device-interact` | Tap, swipe, pinch, type on device | Automating UI interactions, reproducing bugs |
 | `/bundle-check` | Check Metro bundler health | Red screens, compilation errors, reload issues |
 | `/native-rebuild` | Rebuild after native installs | After adding native Expo packages that need dev client |
 
