@@ -9,6 +9,13 @@ import {
     PRESSURE_DOWN,
 } from "./pinchThresholds.js";
 
+export interface EdgeGuards {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+}
+
 export interface PinchRequest {
     focalX: number;
     focalY: number;
@@ -18,6 +25,13 @@ export interface PinchRequest {
     durationMs: number;
     screenWidth: number;
     screenHeight: number;
+    /**
+     * Per-device no-go margins. The top and bottom ones are the real status
+     * and navigation bar heights, which vary by device — a contact that goes
+     * down inside either is delivered to SystemUI, not the app. Defaults to
+     * EDGE_GUARD_PX when the device cannot be queried.
+     */
+    guards?: EdgeGuards;
 }
 
 export interface PinchPlan {
@@ -35,11 +49,17 @@ const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi 
  * Largest half-separation that keeps both contacts on screen, given a focal
  * point and a finger axis.
  *
- * Measurement showed the OS never claims a two-pointer gesture, so the guards
- * involved here are only about staying within the display — see
- * pinchThresholds.EDGE_GUARD_PX.
+ * The left/right guards are only about staying on screen — measurement showed
+ * the back-gesture strips never claim a two-pointer gesture. The top/bottom
+ * ones are real: the status and navigation bars are separate windows that
+ * swallow any contact going down inside them. See pinchThresholds.EDGE_GUARD_PX.
  */
-function maxHalfSeparation(req: PinchRequest, fx: number, fy: number): number {
+function maxHalfSeparation(
+    req: PinchRequest,
+    fx: number,
+    fy: number,
+    guards: EdgeGuards
+): number {
     const rad = (req.angleDeg * Math.PI) / 180;
     const ax = Math.abs(Math.cos(rad));
     const ay = Math.abs(Math.sin(rad));
@@ -49,10 +69,10 @@ function maxHalfSeparation(req: PinchRequest, fx: number, fy: number): number {
     // imposes no limit, hence Infinity when its component is ~0.
     const limitX = ax < 1e-6
         ? Infinity
-        : Math.min(fx - EDGE_GUARD_PX.left, req.screenWidth - EDGE_GUARD_PX.right - fx) / ax;
+        : Math.min(fx - guards.left, req.screenWidth - guards.right - fx) / ax;
     const limitY = ay < 1e-6
         ? Infinity
-        : Math.min(fy - EDGE_GUARD_PX.top, req.screenHeight - EDGE_GUARD_PX.bottom - fy) / ay;
+        : Math.min(fy - guards.top, req.screenHeight - guards.bottom - fy) / ay;
 
     return Math.max(0, Math.min(limitX, limitY) * EDGE_UTILIZATION);
 }
@@ -99,18 +119,11 @@ function buildFrames(
  * large for one gesture are chained.
  */
 export function planPinch(request: PinchRequest): PinchPlan {
-    const fx = clamp(
-        request.focalX,
-        EDGE_GUARD_PX.left,
-        request.screenWidth - EDGE_GUARD_PX.right
-    );
-    const fy = clamp(
-        request.focalY,
-        EDGE_GUARD_PX.top,
-        request.screenHeight - EDGE_GUARD_PX.bottom
-    );
+    const guards = request.guards ?? EDGE_GUARD_PX;
+    const fx = clamp(request.focalX, guards.left, request.screenWidth - guards.right);
+    const fy = clamp(request.focalY, guards.top, request.screenHeight - guards.bottom);
 
-    const maxHalf = maxHalfSeparation(request, fx, fy);
+    const maxHalf = maxHalfSeparation(request, fx, fy, guards);
     if (maxHalf < MIN_HALF_SEPARATION_PX) {
         return {
             gestures: [],

@@ -37,15 +37,29 @@ export const MIN_HALF_SEPARATION_PX = 8;
 export const MIN_TRAVEL_PX = 72;
 
 /**
- * MEASURED: no guard is needed to protect against the OS stealing the
- * gesture. Contacts starting at x=0 and x=screenWidth were recognised as a
- * pinch under BOTH three-button and gesture navigation, and the focused
- * window never changed — Android's back-gesture handler bails as soon as a
- * second pointer is down, and both of ours land in the same frame.
+ * Fallback guards, used only when the device's real system bar heights cannot
+ * be queried (see androidSystemBars.ts). The two axes differ, and the reason
+ * matters:
  *
- * The 4px that remains exists only to keep rounded coordinates on-screen.
+ * LEFT/RIGHT — MEASURED as safe. Contacts starting at x=0 and x=screenWidth
+ * were recognised as a pinch under BOTH three-button and gesture navigation,
+ * and the focused window never changed. Android's back-gesture handler bails
+ * as soon as a second pointer is down, and both of ours land in the same
+ * frame. 4px is only to keep rounded coordinates on screen.
+ *
+ * TOP/BOTTOM — MEASURED as NOT safe, which a first round of measurement
+ * missed. The status and navigation bars are separate windows, not gesture
+ * zones: a contact that goes DOWN inside one is delivered to SystemUI and the
+ * app never sees it. A vertical pinch whose first contact landed at y=4
+ * pulled the notification shade down instead of zooming. The initial vertical
+ * experiment only tested pinch-OUT, whose contacts land near the centre, so
+ * it never put a touch-down in the status bar.
+ *
+ * 220/200 covers the Pixel 9 emulator's measured need (a contact had to start
+ * below y=176 to reach the app, against a 142px status bar) with headroom.
+ * Real values are queried per device at plan time.
  */
-export const EDGE_GUARD_PX = { left: 4, right: 4, top: 4, bottom: 4 };
+export const EDGE_GUARD_PX = { left: 4, right: 4, top: 220, bottom: 200 };
 
 /**
  * MEASURED: full-span gestures (contacts at the very screen edge) were

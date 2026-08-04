@@ -633,15 +633,20 @@ export function registerInteractionTools(server: McpServer): void {
                 };
             }
 
-            const focalScreenshotX = x ?? beforeCapture!.width / 2;
-            const focalScreenshotY = y ?? beforeCapture!.height / 2;
-
             // Same staleness guard swipe carries: prefer the scale factor of the
             // frame captured for THIS device this turn.
             const pinchScaleFactor =
                 beforeCapture?.scaleFactor
                 ?? (connectedApps.values().next().value as ConnectedApp | undefined)?.lastScreenshot?.scaleFactor
                 ?? 1;
+
+            // captureScreenshot reports originalWidth/originalHeight — the DEVICE
+            // dimensions before the downscale that fits the API limit — while this
+            // tool's x/y are delivered-screenshot pixels. Dividing by the scale
+            // factor puts the default focal in the same space as an explicit x/y,
+            // so it survives the conversion below instead of being scaled twice.
+            const focalScreenshotX = x ?? beforeCapture!.width / pinchScaleFactor / 2;
+            const focalScreenshotY = y ?? beforeCapture!.height / pinchScaleFactor / 2;
 
             const focal = convertScreenshotToTapCoords(
                 focalScreenshotX,
