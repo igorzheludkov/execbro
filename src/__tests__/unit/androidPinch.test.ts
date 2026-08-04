@@ -6,6 +6,7 @@ const sendTouchFramesMock =
     jest.fn<(bridge: unknown, frames: TouchPoint[][], delay: number) => Promise<{ success: boolean; error?: string }>>();
 const androidGetScreenSizeMock = jest.fn<(id?: string) => Promise<any>>();
 const getDefaultAndroidDeviceMock = jest.fn<() => Promise<string | null>>();
+const androidSystemBarInsetsMock = jest.fn<(id?: string) => Promise<{ top: number; bottom: number } | null>>();
 
 jest.unstable_mockModule("../../core/emulatorBridge.js", () => ({
     resolveEmulatorBridge: resolveEmulatorBridgeMock,
@@ -16,6 +17,9 @@ jest.unstable_mockModule("../../core/emulatorGrpc.js", () => ({
 jest.unstable_mockModule("../../core/android.js", () => ({
     androidGetScreenSize: androidGetScreenSizeMock,
     getDefaultAndroidDevice: getDefaultAndroidDeviceMock,
+}));
+jest.unstable_mockModule("../../core/androidSystemBars.js", () => ({
+    androidSystemBarInsets: androidSystemBarInsetsMock,
 }));
 
 const { androidPinch } = await import("../../core/androidPinch.js");
@@ -36,6 +40,8 @@ describe("androidPinch", () => {
         sendTouchFramesMock.mockReset();
         androidGetScreenSizeMock.mockReset();
         getDefaultAndroidDeviceMock.mockReset();
+        androidSystemBarInsetsMock.mockReset();
+        androidSystemBarInsetsMock.mockResolvedValue({ top: 142, bottom: 126 });
 
         resolveEmulatorBridgeMock.mockResolvedValue({
             ok: true,
@@ -93,6 +99,26 @@ describe("androidPinch", () => {
         const res = await androidPinch({ ...OPTS, serial: undefined });
         expect(res.success).toBe(false);
         expect(res.error).toContain("No Android device");
+    });
+
+    it("keeps contacts clear of the queried system bars", async () => {
+        // A vertical pinch is the case that matters: without the guard the
+        // first contact lands in the status bar and SystemUI pulls the
+        // notification shade instead of the app zooming.
+        await androidPinch({ ...OPTS, angleDeg: 90, direction: "in", scale: 6 });
+        const frames = sendTouchFramesMock.mock.calls.flatMap((c) => c[1]);
+        for (const frame of frames) {
+            for (const p of frame) {
+                expect(p.y).toBeGreaterThanOrEqual(142);
+                expect(p.y).toBeLessThanOrEqual(2424 - 126);
+            }
+        }
+    });
+
+    it("falls back to default guards when the system bars cannot be read", async () => {
+        androidSystemBarInsetsMock.mockResolvedValue(null);
+        const res = await androidPinch({ ...OPTS, angleDeg: 90 });
+        expect(res.success).toBe(true);
     });
 
     it("pauses between chained sub-gestures", async () => {
