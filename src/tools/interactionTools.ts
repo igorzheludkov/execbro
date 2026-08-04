@@ -4,6 +4,7 @@ import { registerToolWithTelemetry } from "../core/register.js";
 import {
     androidLongPress,
     androidSwipe,
+    androidPinch,
     androidInputText,
     androidKeyEvent,
     ANDROID_KEY_EVENTS,
@@ -478,6 +479,228 @@ export function registerInteractionTools(server: McpServer): void {
                 platform: resolvedPlatform,
                 from: { x: startX, y: startY },
                 to: { x: endX, y: endY },
+                driverMessage: driverResult.result,
+                ...(verification && { verification }),
+                ...(warning && { warning }),
+                deviceNote: resolved.note,
+            };
+
+            const content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [
+                { type: "text" as const, text: JSON.stringify(responseBody, null, 2) },
+            ];
+
+            if (shouldScreenshot && screenshotData) {
+                content.push({
+                    type: "image" as const,
+                    data: screenshotData.image,
+                    mimeType: "image/jpeg",
+                });
+            }
+
+            return {
+                content,
+                isError: false,
+                _meaningful: verification && !verification.skipped ? verification.meaningful : undefined,
+                _changeRate: verification && !verification.skipped ? verification.changeRate : undefined,
+            };
+        }
+    );
+
+    // Tool: Pinch — real two-finger gesture via the emulator's multi-touch bridge
+    registerToolWithTelemetry(
+        server,
+        "pinch",
+        {
+            description:
+                "Pinch-to-zoom using REAL two-finger touch events, with pixel-diff verification." +
+                primaryInteractionBanner() + "\n" +
+                "PURPOSE: Zoom a map, image gallery, photo viewer, or any zoomable surface. Easiest form: pinch({ direction: \"out\" }) zooms in at screen centre; \"in\" zooms out. Pass x/y to zoom around a specific point.\n" +
+                "HOW IT WORKS: Sends two independent contacts through the Android emulator's multi-touch bridge, which delivers them as real kernel touch events. It works below the app, so it drives React Native, native views, WebViews — anything on screen.\n" +
+                "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means nothing zoomed (surface is not zoomable, already at a zoom limit, or the focal point missed it). burst=true catches transient rubber-band animation.\n" +
+                "WORKFLOW: pinch({ direction: \"out\" }) -> read response.verification.meaningful. Take x/y from get_screen_state or a screenshot; no conversion needed.\n" +
+                "LIMITATIONS: Android emulators only. Physical Android devices and iOS simulators have no multi-touch channel and return an explicit error rather than a partial result. This tool never simulates zoom by calling app code — a success means real fingers moved.\n",
+            inputSchema: {
+                direction: z
+                    .enum(["in", "out"])
+                    .optional()
+                    .default("out")
+                    .describe(
+                        "\"out\" spreads the fingers apart and zooms IN (default). " +
+                        "\"in\" brings them together and zooms OUT."
+                    ),
+                scale: z.coerce
+                    .number()
+                    .positive()
+                    .optional()
+                    .default(3)
+                    .describe(
+                        "How far the fingers travel, as a ratio between their start and end separation. " +
+                        "Default 3. Large values are split automatically into several chained gestures."
+                    ),
+                x: z.coerce
+                    .number()
+                    .optional()
+                    .describe("Focal point X in screenshot pixels — the point the zoom centres on. Default: screen centre."),
+                y: z.coerce
+                    .number()
+                    .optional()
+                    .describe("Focal point Y in screenshot pixels — the point the zoom centres on. Default: screen centre."),
+                angle: z.coerce
+                    .number()
+                    .optional()
+                    .default(0)
+                    .describe("Axis the two fingers sit on, in degrees. 0 = horizontal (default), 90 = vertical."),
+                durationMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe(`Gesture duration in milliseconds (default: ${SWIPE_DEFAULT_DURATION_MS}).`),
+                device: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Target device. Accepts (a) an Android adb serial like 'emulator-5554', " +
+                        "(b) the emulator name (substring match), or " +
+                        "(c) a connected RN app's deviceName (substring match against get_apps output). " +
+                        "Omit when exactly one device is available. Call list_devices to enumerate."
+                    ),
+                verify: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe(
+                        "Compare before/after screenshots to detect whether the pinch produced a visual change. " +
+                        "Set false to skip. When skipped, the response contains `verification: { skipped: true, skippedReason }`."
+                    ),
+                screenshot: z
+                    .boolean()
+                    .optional()
+                    .default(true)
+                    .describe(
+                        "Return the post-pinch image bytes in the response. Default true. Set to false to drop the PNG bytes — " +
+                        "verification still runs (set verify=false to skip that too)."
+                    ),
+                burst: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe(
+                        "Capture rapid sequential frames after the pinch to catch transient feedback (rubber-band " +
+                        "snap-back at a zoom limit) even when the final state is unchanged. Frames land in the image " +
+                        "buffer; retrieve with get_images(groupId=verification.burstGroupId)."
+                    ),
+            }
+        },
+        async ({ direction, scale, x, y, angle, durationMs, device, verify, screenshot, burst }) => {
+            const resolved = await resolveDeviceTarget(device);
+            if (!resolved.ok) {
+                return {
+                    content: [{ type: "text", text: `Error: ${formatResolverError(resolved.error)}` }],
+                    isError: true
+                };
+            }
+
+            if (resolved.target.platform !== "android") {
+                return {
+                    content: [{
+                        type: "text",
+                        text:
+                            "Error: pinch is not available on iOS yet. Multi-touch on the iOS simulator needs an " +
+                            "Indigo HID helper that does not ship in any released idb build; it is planned as a " +
+                            "follow-up. Android emulators are supported today.",
+                    }],
+                    isError: true,
+                };
+            }
+
+            const shouldVerify = verify !== false;
+            const shouldScreenshot = screenshot !== false;
+            const shouldBurst = burst === true;
+
+            // A before-frame is needed for verification, for burst, and to size
+            // a default focal point.
+            const wantBefore = shouldVerify || shouldBurst || x === undefined || y === undefined;
+            const beforeCapture = wantBefore
+                ? await captureScreenshot("android", undefined)
+                : null;
+
+            if ((x === undefined || y === undefined) && (!beforeCapture || !beforeCapture.width || !beforeCapture.height)) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: "Error: could not read screen dimensions to place the pinch. Pass explicit x and y instead.",
+                    }],
+                    isError: true,
+                };
+            }
+
+            const focalScreenshotX = x ?? beforeCapture!.width / 2;
+            const focalScreenshotY = y ?? beforeCapture!.height / 2;
+
+            // Same staleness guard swipe carries: prefer the scale factor of the
+            // frame captured for THIS device this turn.
+            const pinchScaleFactor =
+                beforeCapture?.scaleFactor
+                ?? (connectedApps.values().next().value as ConnectedApp | undefined)?.lastScreenshot?.scaleFactor
+                ?? 1;
+
+            const focal = convertScreenshotToTapCoords(
+                focalScreenshotX,
+                focalScreenshotY,
+                "android",
+                1,
+                pinchScaleFactor
+            );
+
+            const driverResult = await androidPinch({
+                focalX: focal.x,
+                focalY: focal.y,
+                direction: (direction ?? "out") as "in" | "out",
+                scale: scale ?? 3,
+                angleDeg: angle ?? 0,
+                durationMs: durationMs ?? SWIPE_DEFAULT_DURATION_MS,
+                serial: resolved.target.androidSerial,
+            });
+
+            if (!driverResult.success) {
+                return {
+                    content: [{ type: "text", text: `Error: ${driverResult.error}` }],
+                    isError: true
+                };
+            }
+
+            const verifyResult = shouldBurst
+                ? await burstCaptureAndVerify({
+                    platform: "android",
+                    beforeBuffer: beforeCapture?.buffer ?? null,
+                    udid: undefined,
+                    beforeScaleFactor: beforeCapture?.scaleFactor,
+                    source: "pinch-burst",
+                })
+                : await verifyAndCapture({
+                    platform: "android",
+                    shouldVerify,
+                    shouldScreenshot,
+                    beforeBuffer: beforeCapture?.buffer ?? null,
+                    udid: undefined,
+                    beforeScaleFactor: beforeCapture?.scaleFactor,
+                    source: "pinch-verify",
+                });
+
+            const { screenshot: screenshotData, verification } = verifyResult;
+
+            const warning =
+                verification && !verification.skipped && verification.meaningful === false
+                    ? "Pinch executed but no visual change detected — the surface may not be zoomable, may already be at its zoom limit, or the focal point may have missed the zoomable view. Inspect the screenshot and retry with a different focal point if needed."
+                    : undefined;
+
+            const responseBody: Record<string, unknown> = {
+                success: true,
+                platform: "android",
+                direction: direction ?? "out",
+                focal: { x: focalScreenshotX, y: focalScreenshotY },
+                separation: { start: driverResult.startHalf, end: driverResult.endHalf },
+                gestureCount: driverResult.gestureCount,
+                frameCount: driverResult.frameCount,
                 driverMessage: driverResult.result,
                 ...(verification && { verification }),
                 ...(warning && { warning }),
