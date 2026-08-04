@@ -1,6 +1,6 @@
 # Device Interact Skill
 
-Interact with running iOS simulators and Android emulators/devices: tap, swipe, type text, press buttons, and navigate the app UI.
+Interact with running iOS simulators and Android emulators/devices: tap, swipe, pinch to zoom (Android emulator only — iOS in progress), type text, press buttons, and navigate the app UI.
 
 ## When to Trigger
 
@@ -118,6 +118,15 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 **Swipe/scroll:**
 - Android: `mcp__execbro__android_swipe` with start/end coordinates
 - iOS: no dedicated swipe tool — use `tap(x=, y=)` for interactions and scroll by tapping scroll targets, or rely on the app's own navigation
+
+**Pinch to zoom** — `mcp__execbro__pinch`. **Android emulator only; iOS in progress.**
+- `pinch(direction="out")` zooms in at screen centre, `direction="in"` zooms out
+- `pinch(direction="out", x=..., y=...)` pivots the zoom on a point (screenshot pixels — the same space as `tap`)
+- `scale` is the finger-separation ratio; values too large for one gesture chain automatically
+- `angle=90` puts the fingers on the vertical axis
+- Read `verification.meaningful` exactly as with `swipe`
+- **If `direction="in"` does nothing, lower `span` (try 0.5).** A pinch-in starts with the fingers far apart, so at the default span they land at the screen extremes where a top bar or bottom sheet can take the gesture
+- It sends real kernel touch events, so it drives native views, WebViews, and maps — not only React Native. Physical Android devices and iOS return an explicit error rather than a partial result
 
 **Type text:**
 - iOS: use `mcp__execbro__tap` with `text=` or `testID=` on the `TextInput` — the fiber tree strategy focuses the input natively. For the value itself, set it via state (e.g., `execute_in_app`) or rely on existing focus + native keyboard

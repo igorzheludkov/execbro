@@ -134,7 +134,7 @@ tap(x, y) unchanged. Do not divide by the device pixel ratio.
     {
         id: "interact",
         title: "Device Interaction",
-        summary: "Tap buttons, swipe, type text, and navigate the app UI",
+        summary: "Tap buttons, swipe, pinch to zoom, type text, and navigate the app UI",
         content: `# Device Interaction
 
 ## Prerequisites
@@ -153,6 +153,22 @@ Use tap — it tries multiple strategies automatically and returns a post-tap sc
 
 tap returns a screenshot after every action (screenshot=true by default) — no need to call ios_screenshot/android_screenshot after tapping.
 For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visual change (verify=true by default). Set screenshot=false for fastest execution.
+
+## Pinch to Zoom (Android emulator only — iOS in progress)
+pinch sends REAL two-finger touch events through the Android emulator's multi-touch bridge, so it drives anything on screen — React Native, native views, WebViews, maps:
+1. pinch(direction="out") — fingers spread apart, zooms IN at screen centre
+2. pinch(direction="in") — fingers converge, zooms OUT
+3. pinch(direction="out", x=..., y=...) — zoom pivots on that point (screenshot pixels, same space as tap and get_screen_state)
+4. pinch(direction="out", scale=8) — bigger ratio; values too large for one gesture chain automatically
+5. pinch(angle=90) — fingers on the vertical axis instead of horizontal
+
+Read verification.meaningful, exactly like swipe: false means nothing zoomed (surface is not zoomable, already at a zoom limit, or the focal point missed it).
+
+### When direction="in" appears to do nothing
+Lower span (try 0.5). A pinch-in STARTS with the fingers far apart, so at the default span=1 the contacts land at the screen extremes — where a top bar or a bottom sheet can take the gesture before the zoomable surface sees it. span shrinks the gesture's footprint without changing the zoom ratio (that is scale).
+
+### Platform support
+Android emulators only. Physical Android devices have no gRPC bridge, and iOS needs a multi-touch HID helper that no released idb ships — both return an explicit error rather than a partial result. pinch never fakes a zoom by calling app code: success means real fingers moved.
 
 ## Best Practice: Use testID
 Set testID on all interactive elements (buttons, inputs, links) for reliable tapping:
@@ -402,7 +418,7 @@ export const DECISION_TREE: string = [
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs        — console debugging (get_logs, search_logs)",
-    "  interact    — device interaction (tap, swipe, screenshots, android_input_text, dismiss_keyboard)",
+    "  interact    — device interaction (tap, swipe, pinch, screenshots, android_input_text, dismiss_keyboard)",
     "  layout      — on-screen layout check (get_screen_state, get_screen_layout)",
     "  inspect     — component inspection (find_components, inspect_component, inspect_at_point)",
     "  network     — network request inspection (get_network_requests, search_network)",

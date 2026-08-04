@@ -36,7 +36,7 @@ describe("pinch tool registration", () => {
     it("exposes the documented parameters", () => {
         const pinch = registered.find((t) => t.name === "pinch");
         const keys = Object.keys(pinch!.config.inputSchema);
-        for (const k of ["direction", "scale", "x", "y", "angle", "durationMs", "device", "verify", "screenshot", "burst"]) {
+        for (const k of ["direction", "scale", "x", "y", "angle", "span", "durationMs", "device", "verify", "screenshot", "burst"]) {
             expect(keys).toContain(k);
         }
     });
