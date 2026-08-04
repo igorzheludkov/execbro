@@ -108,7 +108,7 @@ the one part that needs a step.
   `git diff <previous-tag>..HEAD -- tools.json`
 - If it is unchanged, skip the rest of this step — say so and stop.
 - If it changed, wait for the publish workflow to finish, then in `../web`:
-    - `npm run sync:tools` (pulls `tools.json` from the newly published package;
+    - `npm run tools:sync` (pulls `tools.json` from the newly published package;
       add `-- --local` only to preview against the sibling checkout before release)
     - `npm test` — the catalogue test **will fail** until `src/lib/tools/catalog.ts`
       describes each added tool and drops each removed one. That failure is the
