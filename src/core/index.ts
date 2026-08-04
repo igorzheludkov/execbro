@@ -189,6 +189,10 @@ export {
   androidWaitForElement,
 } from "./android.js";
 
+// Android multi-touch (emulator gRPC bridge)
+export { androidPinch } from "./androidPinch.js";
+export type { AndroidPinchOptions, AndroidPinchResult } from "./androidPinch.js";
+
 // Android types
 export type {
   AndroidAccessibilityElement,
