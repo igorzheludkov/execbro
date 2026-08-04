@@ -1,4 +1,4 @@
-import { execAsync } from "./exec.js";
+import { execFileAsync } from "./exec.js";
 
 /**
  * Reading a field's text through the platform accessibility tree.
@@ -90,18 +90,18 @@ export const readNativeFields: NativeFieldsReader = async (platform, deviceId) =
     try {
         if (platform === "ios") {
             if (!deviceId) return { fields: [], error: "no simulator UDID" };
-            const { stdout } = await execAsync(`axe describe-ui --udid ${deviceId}`, { timeout: 20_000 });
+            const { stdout } = await execFileAsync("axe", ["describe-ui", "--udid", deviceId], { timeout: 20_000 });
             return { fields: parseIosFields(stdout) };
         }
-        const target = deviceId ? `-s ${deviceId}` : "";
+        const target = deviceId ? ["-s", deviceId] : [];
         const path = "/sdcard/execbro-ui.xml";
         // Delete before dumping. `uiautomator dump` fails outright when the UI
         // never reaches idle — a blinking caret in a focused field is enough —
         // and `cat` would then return the PREVIOUS dump. Reading stale text as
         // if it were current is worse than reporting nothing.
-        await execAsync(`adb ${target} shell rm -f ${path}`, { timeout: 10_000 }).catch(() => undefined);
-        const dump = await execAsync(`adb ${target} shell uiautomator dump ${path}`, { timeout: 20_000 });
-        const { stdout } = await execAsync(`adb ${target} shell cat ${path}`, { timeout: 20_000 });
+        await execFileAsync("adb", [...target, "shell", `rm -f ${path}`], { timeout: 10_000 }).catch(() => undefined);
+        const dump = await execFileAsync("adb", [...target, "shell", `uiautomator dump ${path}`], { timeout: 20_000 });
+        const { stdout } = await execFileAsync("adb", [...target, "shell", `cat ${path}`], { timeout: 20_000 });
         if (!stdout.includes("<node")) {
             const why = `${dump.stdout} ${dump.stderr}`.trim().replace(/\s+/g, " ").slice(0, 160);
             return { fields: [], error: `uiautomator dump produced no hierarchy${why ? `: ${why}` : ""}` };

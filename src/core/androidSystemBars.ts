@@ -1,4 +1,4 @@
-import { execAsync } from "./exec.js";
+import { execFileAsync } from "./exec.js";
 
 /**
  * Extra clearance added to each system bar's reported height — see the note in
@@ -32,10 +32,11 @@ export interface SystemBarInsets {
 export async function androidSystemBarInsets(
     deviceId?: string
 ): Promise<SystemBarInsets | null> {
-    const deviceArg = deviceId ? `-s ${deviceId}` : "";
+    const deviceArgs = deviceId ? ["-s", deviceId] : [];
     try {
-        const { stdout } = await execAsync(
-            `adb ${deviceArg} shell "dumpsys window | grep -E 'InsetsSource.*(statusBars|navigationBars)'"`,
+        const { stdout } = await execFileAsync(
+            "adb",
+            [...deviceArgs, "shell", "dumpsys window | grep -E 'InsetsSource.*(statusBars|navigationBars)'"],
             { timeout: 10000 }
         );
 

@@ -11,7 +11,7 @@ const realOs = await import("node:os");
 const mockExecSync = jest.fn();
 jest.unstable_mockModule("child_process", () => ({
     ...realChildProcess,
-    execSync: mockExecSync,
+    execFileSync: mockExecSync,
 }));
 
 const mockReadFileSync = jest.fn();
@@ -48,7 +48,7 @@ describe("fingerprint", () => {
 
             const id = getMachineId();
             expect(id).toBe("ABC123-DEF456-GHI789");
-            expect(mockExecSync).toHaveBeenCalledWith("system_profiler SPHardwareDataType", expect.any(Object));
+            expect(mockExecSync).toHaveBeenCalledWith("system_profiler", ["SPHardwareDataType"], expect.any(Object));
         });
 
         it("reads /etc/machine-id on Linux", () => {

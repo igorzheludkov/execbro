@@ -5,28 +5,30 @@ describe("buildLogcatArgs", () => {
     it("always reads the crash buffer alongside main", () => {
         // -b crash is tiny (121 lines) and near-100% signal; it is also the
         // only place a tombstone lands.
-        expect(buildLogcatArgs({ serial: "emulator-5554" })).toContain("-b crash,main");
+        expect(buildLogcatArgs({ serial: "emulator-5554" }).join(" ")).toContain("-b crash,main");
     });
 
     it("uses epoch, not year, for timestamps", () => {
         // -v year prints device-local wall time with NO utc offset, so a device
         // in another timezone silently shifts every entry.
-        const args = buildLogcatArgs({ serial: "emulator-5554" });
+        const args = buildLogcatArgs({ serial: "emulator-5554" }).join(" ");
         expect(args).toContain("-v epoch");
         expect(args).not.toContain("-v year");
     });
 
     it("passes the device serial", () => {
-        expect(buildLogcatArgs({ serial: "emulator-5554" })).toContain("-s emulator-5554");
+        expect(buildLogcatArgs({ serial: "emulator-5554" }).join(" ")).toContain("-s emulator-5554");
     });
 
     it("windows on the watermark when given", () => {
         const args = buildLogcatArgs({ sinceTs: new Date("2026-07-29T22:12:00.000Z") });
-        expect(args).toMatch(/-T ['"]?1785[0-9]{6}\.000/);
+        // argv form: the stamp is its own element and carries no quotes, which
+        // logcat would otherwise read as part of the timestamp.
+        expect(args[args.indexOf("-T") + 1]).toMatch(/^1785[0-9]{6}\.000$/);
     });
 
     it("omits --pid when the app is dead", () => {
-        expect(buildLogcatArgs({})).not.toContain("--pid");
+        expect(buildLogcatArgs({}).join(" ")).not.toContain("--pid");
     });
 });
 

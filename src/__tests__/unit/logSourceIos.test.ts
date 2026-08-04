@@ -3,19 +3,22 @@ import { buildLogShowCommand, parseLogShowNdjson } from "../../core/logSourceIos
 
 const UDID = "F93612A3-0042-4BDC-855F-8CAB1BDD76C6";
 
+// The builder returns argv for `xcrun` — no shell, so values that contain
+// spaces (the predicate, the --start stamp) are single elements and carry no
+// quoting of their own.
 describe("buildLogShowCommand", () => {
     it("spawns against the given simulator", () => {
-        expect(buildLogShowCommand({ udid: UDID })).toContain(`simctl spawn ${UDID}`);
+        expect(buildLogShowCommand({ udid: UDID }).join(" ")).toContain(`simctl spawn ${UDID}`);
     });
 
     it("requests ndjson", () => {
-        expect(buildLogShowCommand({ udid: UDID })).toContain("--style ndjson");
+        expect(buildLogShowCommand({ udid: UDID }).join(" ")).toContain("--style ndjson");
     });
 
     it("pushes the process filter into the predicate", () => {
         // 30m app-scoped is 42KB; unfiltered is orders of magnitude more.
-        const cmd = buildLogShowCommand({ udid: UDID, processName: "RnDebuggerTestApp" });
-        expect(cmd).toContain(`process == "RnDebuggerTestApp"`);
+        const args = buildLogShowCommand({ udid: UDID, processName: "RnDebuggerTestApp" });
+        expect(args).toContain(`process == "RnDebuggerTestApp"`);
     });
 
     it("emits --start in device-local time, not UTC", () => {
@@ -23,8 +26,13 @@ describe("buildLogShowCommand", () => {
         // offset, so a UTC stamp shifts the window by the host's offset —
         // over-fetching east of UTC, silently missing crashes west of it.
         const when = new Date(2026, 6, 29, 22, 15, 30);
-        expect(buildLogShowCommand({ udid: "U", sinceTs: when }))
-            .toContain("--start '2026-07-29 22:15:30'");
+        const args = buildLogShowCommand({ udid: "U", sinceTs: when });
+        expect(args[args.indexOf("--start") + 1]).toBe("2026-07-29 22:15:30");
+    });
+
+    it("keeps a hostile process name as one argument, not shell syntax", () => {
+        const args = buildLogShowCommand({ udid: UDID, processName: 'App"; touch /tmp/pwned; #' });
+        expect(args).toContain(`process == "App"; touch /tmp/pwned; #"`);
     });
 });
 

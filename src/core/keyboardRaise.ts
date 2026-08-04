@@ -1,4 +1,4 @@
-import { execAsync } from "./exec.js";
+import { execFileAsync } from "./exec.js";
 import { readKeyboardState, type KeyboardState } from "./keyboardMetrics.js";
 
 export type RaiseResult = {
@@ -39,9 +39,15 @@ const SETTLE_MS = 900;
 function defaultDeps(device?: string): RaiseDeps {
     return {
         readState: () => readKeyboardState(device),
+        // -e per line instead of a heredoc: the heredoc needed a shell, and a
+        // shell is the thing worth not having in the loop.
         runOsascript: async (script) =>
-            (await execAsync(`osascript <<'EOF'\n${script}\nEOF`, { timeout: 15_000 })).stdout,
-        runAdb: async (args) => (await execAsync(`adb ${args.join(" ")}`, { timeout: 10_000 })).stdout,
+            (await execFileAsync(
+                "osascript",
+                script.split("\n").flatMap((line) => ["-e", line]),
+                { timeout: 15_000 }
+            )).stdout,
+        runAdb: async (args) => (await execFileAsync("adb", args, { timeout: 10_000 })).stdout,
         delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
     };
 }

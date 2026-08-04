@@ -22,9 +22,10 @@ jest.unstable_mockModule("../../core/deviceDiscovery.js", () => ({
     listAllDevices: listAllDevicesMock,
 }));
 
-const execAsyncMock = jest.fn<(cmd: string) => Promise<{ stdout: string; stderr: string }>>();
+const execAsyncMock = jest.fn<(file: string, args: string[]) => Promise<{ stdout: string; stderr: string }>>();
 jest.unstable_mockModule("../../core/exec.js", () => ({
-    execAsync: execAsyncMock,
+    execFileAsync: execAsyncMock,
+    quoteForDeviceShell: (v: string) => `'${v.replace(/'/g, `'"'"'`)}'`,
     // logSourceAndroid.js / logSourceIos.js import this too — unused by these
     // tests (fetchForTarget is never exercised here) but must exist so the
     // module graph resolves.
@@ -230,7 +231,12 @@ describe("resolveLogTargets", () => {
 
         const targets = await resolveLogTargets();
 
-        expect(execAsyncMock).toHaveBeenCalledWith("adb -s emulator-5554 shell getprop ro.product.model");
+        expect(execAsyncMock).toHaveBeenCalledWith("adb", [
+            "-s",
+            "emulator-5554",
+            "shell",
+            "getprop ro.product.model"
+        ]);
         expect(targets).toHaveLength(1);
         expect(targets[0].identitySource).toBe("live");
         expect(targets[0].identity).toEqual({

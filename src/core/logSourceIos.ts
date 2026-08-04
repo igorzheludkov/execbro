@@ -1,4 +1,4 @@
-import { execAsync, withCancelableTimeout } from "./exec.js";
+import { execFileAsync, withCancelableTimeout } from "./exec.js";
 import type { EventLevel, RawLogLine } from "./logEvents.js";
 
 const MAX_BUFFER = 32 * 1024 * 1024;
@@ -39,7 +39,7 @@ export function buildLogShowCommand(opts: {
     sinceTs?: Date;
     /** "error" keeps error+fault; "fault" keeps fault only. */
     minMessageType?: "error" | "fault";
-}): string {
+}): string[] {
     const predicates: string[] = [];
     if (opts.processName) predicates.push(`process == "${opts.processName}"`);
     // Enumerated explicitly — the predicate language has no ordering over
@@ -50,16 +50,18 @@ export function buildLogShowCommand(opts: {
         predicates.push("(messageType == error OR messageType == fault)");
     }
 
-    const parts = [`xcrun simctl spawn ${opts.udid} log show --style ndjson`];
+    // argv form: no shell parses this, so the predicate and timestamp carry
+    // their spaces and quotes as literal argument bytes.
+    const parts = ["simctl", "spawn", opts.udid, "log", "show", "--style", "ndjson"];
     if (opts.sinceTs) {
-        parts.push(`--start '${localStamp(opts.sinceTs)}'`);
+        parts.push("--start", localStamp(opts.sinceTs));
     } else {
-        parts.push("--last 30m");
+        parts.push("--last", "30m");
     }
     if (predicates.length > 0) {
-        parts.push(`--predicate '${predicates.join(" AND ")}'`);
+        parts.push("--predicate", predicates.join(" AND "));
     }
-    return parts.join(" ");
+    return parts;
 }
 
 export function parseLogShowNdjson(stdout: string): RawLogLine[] {
@@ -102,9 +104,9 @@ export async function fetchIosLines(opts: {
     minMessageType?: "error" | "fault";
     signal?: AbortSignal;
 }): Promise<RawLogLine[]> {
-    const cmd = buildLogShowCommand(opts);
+    const args = buildLogShowCommand(opts);
     const { stdout } = await withCancelableTimeout(
-        (signal) => execAsync(cmd, { signal, maxBuffer: MAX_BUFFER }),
+        (signal) => execFileAsync("xcrun", args, { signal, maxBuffer: MAX_BUFFER }),
         FETCH_TIMEOUT_MS,
         `log show (${opts.udid})`
     );
@@ -128,8 +130,9 @@ export async function resolveIosProcessName(
     const cached = processNameCache.get(key);
     if (cached) return cached;
     try {
-        const { stdout } = await execAsync(
-            `xcrun simctl get_app_container ${udid} ${bundleId} app`,
+        const { stdout } = await execFileAsync(
+            "xcrun",
+            ["simctl", "get_app_container", udid, bundleId, "app"],
             { signal }
         );
         const name = stdout.trim().split("/").pop()?.replace(/\.app$/, "");

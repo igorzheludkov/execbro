@@ -304,7 +304,14 @@ export function registerDeviceTools(server: McpServer): void {
             }
         },
         async ({ udid }) => {
-            const result = await iosBootSimulator(udid);
+            // The only iOS handler that used to pass its identifier straight to
+            // simctl. Resolving it against the real device inventory matches the
+            // rest of the surface and turns a typo into a useful error instead
+            // of a raw simctl failure. The inventory includes shut-down
+            // simulators, which is exactly what this tool targets.
+            const r = await resolveIosUdid(udid);
+            if (!r.ok) return r.response;
+            const result = await iosBootSimulator(r.udid ?? udid);
     
             return {
                 content: [

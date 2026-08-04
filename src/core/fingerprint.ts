@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { userInfo, cpus, platform } from "os";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
 
 const FINGERPRINT_VERSION = 1;
@@ -10,7 +10,7 @@ export function getMachineId(): string {
 
     try {
         if (os === "darwin") {
-            const output = execSync("system_profiler SPHardwareDataType", {
+            const output = execFileSync("system_profiler", ["SPHardwareDataType"], {
                 encoding: "utf-8",
                 timeout: 5000,
             });
@@ -26,8 +26,9 @@ export function getMachineId(): string {
         }
 
         if (os === "win32") {
-            const output = execSync(
-                'reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
+            const output = execFileSync(
+                "reg",
+                ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"],
                 { encoding: "utf-8", timeout: 5000 },
             );
             const match = output.match(/MachineGuid\s+REG_SZ\s+(.+)/);

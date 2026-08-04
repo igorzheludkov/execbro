@@ -1,4 +1,4 @@
-import { execAsync, withCancelableTimeout } from "./exec.js";
+import { execFileAsync, quoteForDeviceShell, withCancelableTimeout } from "./exec.js";
 import type { EventLevel, RawLogLine } from "./logEvents.js";
 
 /** A full dump is 13.8 MB; node's exec default is 1 MiB. */
@@ -44,17 +44,19 @@ export function buildLogcatArgs(opts: {
     minPriority?: string;
     /** Read ONLY the crash buffer — used when app identity is unknown. */
     crashOnly?: boolean;
-}): string {
-    const parts = ["adb"];
+}): string[] {
+    const parts: string[] = [];
     if (opts.serial) parts.push("-s", opts.serial);
     // crash first: it is small, and it is where tombstones land.
     parts.push("logcat", "-d", "-b", opts.crashOnly ? "crash" : "crash,main", "-v", "epoch");
+    // argv form — the quotes these values used to carry were there to survive
+    // the shell, and would now be taken literally by logcat itself.
     if (opts.sinceTs) {
-        parts.push("-T", `'${(opts.sinceTs.getTime() / 1000).toFixed(3)}'`);
+        parts.push("-T", (opts.sinceTs.getTime() / 1000).toFixed(3));
     }
     if (opts.pid !== undefined) parts.push(`--pid=${opts.pid}`);
-    if (opts.minPriority) parts.push(`'*:${opts.minPriority}'`);
-    return parts.join(" ");
+    if (opts.minPriority) parts.push(`*:${opts.minPriority}`);
+    return parts;
 }
 
 export function parseLogcatEpoch(stdout: string): RawLogLine[] {
@@ -86,9 +88,9 @@ export async function fetchAndroidLines(opts: {
     crashOnly?: boolean;
     signal?: AbortSignal;
 }): Promise<RawLogLine[]> {
-    const cmd = buildLogcatArgs(opts);
+    const args = buildLogcatArgs(opts);
     const { stdout } = await withCancelableTimeout(
-        (signal) => execAsync(cmd, { signal, maxBuffer: MAX_BUFFER }),
+        (signal) => execFileAsync("adb", args, { signal, maxBuffer: MAX_BUFFER }),
         FETCH_TIMEOUT_MS,
         `logcat (${opts.serial ?? "default device"})`
     );
@@ -101,9 +103,13 @@ export async function resolveAndroidPid(
     serial?: string,
     signal?: AbortSignal
 ): Promise<number | undefined> {
-    const target = serial ? `-s ${serial}` : "";
+    const target = serial ? ["-s", serial] : [];
     try {
-        const { stdout } = await execAsync(`adb ${target} shell pidof -s ${packageName}`, { signal });
+        const { stdout } = await execFileAsync(
+            "adb",
+            [...target, "shell", `pidof -s ${quoteForDeviceShell(packageName)}`],
+            { signal }
+        );
         const pid = Number(stdout.trim());
         return Number.isFinite(pid) && pid > 0 ? pid : undefined;
     } catch {

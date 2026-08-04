@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import sharp from "sharp";
 import { notifyDriverMissing } from "./logbox.js";
-import { execAsync } from "./exec.js";
+import { execFileAsync, quoteForDeviceShell } from "./exec.js";
 
 // XML parsing for uiautomator dump
 import { XMLParser } from "fast-xml-parser";
@@ -82,7 +82,7 @@ export async function isAdbAvailable(): Promise<boolean> {
     if (adbAvailableCache !== null) return adbAvailableCache;
 
     try {
-        await execAsync("adb version", { timeout: 5000 });
+        await execFileAsync("adb", ["version"], { timeout: 5000 });
         adbAvailableCache = true;
         return true;
     } catch {
@@ -97,7 +97,7 @@ export async function isAdbAvailable(): Promise<boolean> {
             process.env.PATH = `${dir}${sep}${process.env.PATH ?? ""}`;
             adbPathFixApplied = true;
             try {
-                await execAsync("adb version", { timeout: 5000 });
+                await execFileAsync("adb", ["version"], { timeout: 5000 });
                 adbAvailableCache = true;
                 return true;
             } catch {
@@ -139,7 +139,7 @@ export async function listAndroidDevices(): Promise<AdbResult> {
         const adbMissing = await requireAdb();
         if (adbMissing) return adbMissing;
 
-        const { stdout } = await execAsync("adb devices -l", { timeout: ADB_TIMEOUT });
+        const { stdout } = await execFileAsync("adb", ["devices", "-l"], { timeout: ADB_TIMEOUT });
 
         const lines = stdout.trim().split("\n");
         // Skip the "List of devices attached" header
@@ -198,7 +198,7 @@ export async function listAndroidDevices(): Promise<AdbResult> {
  */
 export async function getDefaultAndroidDevice(): Promise<string | null> {
     try {
-        const { stdout } = await execAsync("adb devices", { timeout: ADB_TIMEOUT });
+        const { stdout } = await execFileAsync("adb", ["devices"], { timeout: ADB_TIMEOUT });
         const lines = stdout.trim().split("\n");
         const deviceLines = lines.slice(1).filter((line) => line.trim().length > 0);
 
@@ -223,7 +223,7 @@ export async function getDefaultAndroidDevice(): Promise<string | null> {
  */
 async function findEmulatorBinary(): Promise<string | null> {
     try {
-        await execAsync("emulator -help", { timeout: 3000 });
+        await execFileAsync("emulator", ["-help"], { timeout: 3000 });
         return "emulator";
     } catch {
         // not on PATH — try standard install locations
@@ -237,7 +237,7 @@ async function findEmulatorBinary(): Promise<string | null> {
 
     for (const candidate of candidates) {
         try {
-            await execAsync(`"${candidate}" -help`, { timeout: 3000 });
+            await execFileAsync(candidate, ["-help"], { timeout: 3000 });
             return `"${candidate}"`;
         } catch {
             // try next
@@ -263,7 +263,7 @@ export async function getAndroidEmulatorAvds(): Promise<string[]> {
     if (!emulatorBin) return [];
 
     try {
-        const { stdout } = await execAsync(`${emulatorBin} -list-avds`, { timeout: ADB_TIMEOUT });
+        const { stdout } = await execFileAsync(emulatorBin, ["-list-avds"], { timeout: ADB_TIMEOUT });
         return stdout
             .split("\n")
             .map((line) => line.trim())
@@ -287,7 +287,7 @@ export async function getAdbIdForAvd(avdName: string): Promise<string | null> {
     if (adbMissing) return null;
 
     try {
-        const { stdout: devicesOut } = await execAsync("adb devices", { timeout: ADB_TIMEOUT });
+        const { stdout: devicesOut } = await execFileAsync("adb", ["devices"], { timeout: ADB_TIMEOUT });
         const lines = devicesOut.trim().split("\n").slice(1); // skip "List of devices attached" header
         const emulatorSerials = lines
             .map((line) => line.trim().split(/\s+/)[0])
@@ -296,7 +296,7 @@ export async function getAdbIdForAvd(avdName: string): Promise<string | null> {
         const target = avdName.trim();
         for (const serial of emulatorSerials) {
             try {
-                const { stdout } = await execAsync(`adb -s ${serial} emu avd name`, {
+                const { stdout } = await execFileAsync("adb", ["-s", serial, "emu", "avd", "name"], {
                     timeout: ADB_TIMEOUT
                 });
                 const reported = stdout.split("\n")[0]?.trim() ?? "";
@@ -314,8 +314,8 @@ export async function getAdbIdForAvd(avdName: string): Promise<string | null> {
 /**
  * Build device selector for ADB command
  */
-function buildDeviceArg(deviceId?: string): string {
-    return deviceId ? `-s ${deviceId}` : "";
+function buildDeviceArgs(deviceId?: string): string[] {
+    return deviceId ? ["-s", deviceId] : [];
 }
 
 /**
@@ -339,7 +339,7 @@ export async function androidScreenshot(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         // Generate output path if not provided
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -348,19 +348,19 @@ export async function androidScreenshot(
 
         // Capture screenshot on device
         const remotePath = "/sdcard/screenshot-temp.png";
-        await execAsync(`adb ${deviceArg} shell screencap -p ${remotePath}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `screencap -p ${remotePath}`], {
             timeout: ADB_TIMEOUT,
             signal
         });
 
         // Pull screenshot to local machine
-        await execAsync(`adb ${deviceArg} pull ${remotePath} "${finalOutputPath}"`, {
+        await execFileAsync("adb", [...deviceArgs, "pull", remotePath, finalOutputPath], {
             timeout: ADB_TIMEOUT,
             signal
         });
 
         // Clean up remote file
-        await execAsync(`adb ${deviceArg} shell rm ${remotePath}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `rm ${remotePath}`], {
             timeout: ADB_TIMEOUT,
             signal
         }).catch(() => {
@@ -440,16 +440,15 @@ export async function androidInstallApp(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         // Build install flags
         const flags: string[] = [];
         if (options?.replace) flags.push("-r");
         if (options?.grantPermissions) flags.push("-g");
-        const flagsStr = flags.length > 0 ? flags.join(" ") + " " : "";
-
-        const { stdout, stderr } = await execAsync(
-            `adb ${deviceArg} install ${flagsStr}"${apkPath}"`,
+        const { stdout, stderr } = await execFileAsync(
+            "adb",
+            [...deviceArgs, "install", ...flags, apkPath],
             { timeout: 120000 } // 2 minute timeout for install
         );
 
@@ -495,19 +494,19 @@ export async function androidLaunchApp(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
-        let command: string;
+        // packageName/activityName come straight from tool arguments, so they are
+        // quoted for the device-side shell that `adb shell` hands the string to.
+        const deviceCommand = activityName
+            ? `am start -n ${quoteForDeviceShell(`${packageName}/${activityName}`)}`
+            : `monkey -p ${quoteForDeviceShell(packageName)} -c android.intent.category.LAUNCHER 1`;
 
-        if (activityName) {
-            // Launch specific activity
-            command = `adb ${deviceArg} shell am start -n ${packageName}/${activityName}`;
-        } else {
-            // Launch main/launcher activity
-            command = `adb ${deviceArg} shell monkey -p ${packageName} -c android.intent.category.LAUNCHER 1`;
-        }
-
-        const { stdout, stderr } = await execAsync(command, { timeout: ADB_TIMEOUT });
+        const { stdout, stderr } = await execFileAsync(
+            "adb",
+            [...deviceArgs, "shell", deviceCommand],
+            { timeout: ADB_TIMEOUT }
+        );
         const output = stdout + stderr;
 
         // Check for errors
@@ -550,9 +549,9 @@ export async function androidListPackages(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
-        const { stdout } = await execAsync(`adb ${deviceArg} shell pm list packages`, {
+        const { stdout } = await execFileAsync("adb", [...deviceArgs, "shell", "pm list packages"], {
             timeout: ADB_TIMEOUT
         });
 
@@ -639,9 +638,9 @@ export async function androidTap(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
-        await execAsync(`adb ${deviceArg} shell input tap ${Math.round(x)} ${Math.round(y)}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `input tap ${Math.round(x)} ${Math.round(y)}`], {
             timeout: ADB_TIMEOUT
         });
 
@@ -679,14 +678,15 @@ export async function androidLongPress(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         // Long press is implemented as a swipe from the same point to the same point
         const xRounded = Math.round(x);
         const yRounded = Math.round(y);
 
-        await execAsync(
-            `adb ${deviceArg} shell input swipe ${xRounded} ${yRounded} ${xRounded} ${yRounded} ${durationMs}`,
+        await execFileAsync(
+            "adb",
+            [...deviceArgs, "shell", `input swipe ${xRounded} ${yRounded} ${xRounded} ${yRounded} ${durationMs}`],
             { timeout: ADB_TIMEOUT + durationMs }
         );
 
@@ -726,15 +726,16 @@ export async function androidSwipe(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         const x1 = Math.round(startX);
         const y1 = Math.round(startY);
         const x2 = Math.round(endX);
         const y2 = Math.round(endY);
 
-        await execAsync(
-            `adb ${deviceArg} shell input swipe ${x1} ${y1} ${x2} ${y2} ${durationMs}`,
+        await execFileAsync(
+            "adb",
+            [...deviceArgs, "shell", `input swipe ${x1} ${y1} ${x2} ${y2} ${durationMs}`],
             { timeout: ADB_TIMEOUT + durationMs }
         );
 
@@ -773,7 +774,7 @@ export async function androidInputText(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         // For complex strings with special characters, type character by character
         // using key events for reliability
@@ -782,63 +783,22 @@ export async function androidInputText(
         if (hasComplexChars) {
             // Use character-by-character input for strings with special chars
             // This is slower but more reliable for URLs, emails, etc.
+            //
+            // Every character is single-quoted for the device-side shell rather
+            // than backslash-escaped per character. The old per-character switch
+            // relied on the HOST shell stripping one layer of quoting before adb
+            // saw the argument; with argv there is no host shell, so a literal
+            // backtick or $ would reach the device shell bare. Single-quoting is
+            // both simpler and the only form that is correct for every character.
+            // `%s` is not shell syntax — it is how `input text` itself spells a
+            // space, so it stays outside the quoting.
             for (const char of text) {
-                let keyCmd: string;
+                const deviceCommand =
+                    char === " " ? "input text %s" : `input text ${quoteForDeviceShell(char)}`;
 
-                // Map special characters to their escaped form or use direct input
-                switch (char) {
-                    case " ":
-                        keyCmd = `adb ${deviceArg} shell input text "%s"`;
-                        break;
-                    case "'":
-                        // Single quote needs special handling
-                        keyCmd = `adb ${deviceArg} shell input text "\\'"`;
-                        break;
-                    case '"':
-                        keyCmd = `adb ${deviceArg} shell input text '\\"'`;
-                        break;
-                    case "\\":
-                        keyCmd = `adb ${deviceArg} shell input text "\\\\"`;
-                        break;
-                    case "&":
-                        keyCmd = `adb ${deviceArg} shell input text "\\&"`;
-                        break;
-                    case "|":
-                        keyCmd = `adb ${deviceArg} shell input text "\\|"`;
-                        break;
-                    case ";":
-                        keyCmd = `adb ${deviceArg} shell input text "\\;"`;
-                        break;
-                    case "<":
-                        keyCmd = `adb ${deviceArg} shell input text "\\<"`;
-                        break;
-                    case ">":
-                        keyCmd = `adb ${deviceArg} shell input text "\\>"`;
-                        break;
-                    case "(":
-                        keyCmd = `adb ${deviceArg} shell input text "\\("`;
-                        break;
-                    case ")":
-                        keyCmd = `adb ${deviceArg} shell input text "\\)"`;
-                        break;
-                    case "$":
-                        keyCmd = `adb ${deviceArg} shell input text "\\$"`;
-                        break;
-                    case "`":
-                        keyCmd = `adb ${deviceArg} shell input text "\\\`"`;
-                        break;
-                    case "#":
-                        // # is a shell comment character — single quotes don't prevent interpretation
-                        // on some Android shell versions, so use backslash escaping in double quotes
-                        keyCmd = `adb ${deviceArg} shell input text "\\#"`;
-                        break;
-                    default:
-                        // For most characters, wrap in single quotes to prevent shell interpretation
-                        // Single quotes preserve literal meaning of all characters except single quote itself
-                        keyCmd = `adb ${deviceArg} shell input text '${char}'`;
-                }
-
-                await execAsync(keyCmd, { timeout: 5000 });
+                await execFileAsync("adb", [...deviceArgs, "shell", deviceCommand], {
+                    timeout: 5000
+                });
             }
 
             return {
@@ -847,19 +807,16 @@ export async function androidInputText(
             };
         }
 
-        // For simple alphanumeric strings, use the faster bulk input
-        // Escape basic special characters
-        const escapedText = text
-            .replace(/\\/g, "\\\\")
-            .replace(/"/g, '\\"')
-            .replace(/'/g, "\\'")
-            .replace(/`/g, "\\`")
-            .replace(/\$/g, "\\$")
-            .replace(/ /g, "%s");
+        // For simple alphanumeric strings, use the faster bulk input.
+        // Only the `input text` convention needs handling here (%s for space);
+        // shell metacharacters are neutralised by quoting for the device shell.
+        const forInput = text.replace(/ /g, "%s");
 
-        await execAsync(`adb ${deviceArg} shell input text "${escapedText}"`, {
-            timeout: ADB_TIMEOUT
-        });
+        await execFileAsync(
+            "adb",
+            [...deviceArgs, "shell", `input text ${quoteForDeviceShell(forInput)}`],
+            { timeout: ADB_TIMEOUT }
+        );
 
         return {
             success: true,
@@ -893,7 +850,7 @@ export async function androidKeyEvent(
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         // Resolve key code from name if needed
         const resolvedKeyCode =
@@ -906,7 +863,7 @@ export async function androidKeyEvent(
             };
         }
 
-        await execAsync(`adb ${deviceArg} shell input keyevent ${resolvedKeyCode}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `input keyevent ${resolvedKeyCode}`], {
             timeout: ADB_TIMEOUT
         });
 
@@ -1126,26 +1083,26 @@ export async function androidGetUITree(deviceId?: string, signal?: AbortSignal):
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         // Dump UI hierarchy to device. The `signal` is passed so a strategy-level
         // timeout in tap.ts can SIGKILL the host adb process — the device-side
         // uiautomator dump is independent and finishes silently, but we stop
         // waiting on the ADB channel so the next strategy can use it.
         const remotePath = "/sdcard/ui_dump.xml";
-        await execAsync(`adb ${deviceArg} shell uiautomator dump ${remotePath}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `uiautomator dump ${remotePath}`], {
             timeout: ADB_TIMEOUT,
             signal
         });
 
         // Read the XML content
-        const { stdout } = await execAsync(`adb ${deviceArg} shell cat ${remotePath}`, {
+        const { stdout } = await execFileAsync("adb", [...deviceArgs, "shell", `cat ${remotePath}`], {
             timeout: ADB_TIMEOUT,
             signal
         });
 
         // Clean up remote file
-        await execAsync(`adb ${deviceArg} shell rm ${remotePath}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `rm ${remotePath}`], {
             timeout: ADB_TIMEOUT,
             signal
         }).catch(() => {});
@@ -1332,9 +1289,9 @@ export async function androidGetScreenSize(deviceId?: string): Promise<{
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
-        const { stdout } = await execAsync(`adb ${deviceArg} shell wm size`, {
+        const { stdout } = await execFileAsync("adb", [...deviceArgs, "shell", "wm size"], {
             timeout: ADB_TIMEOUT
         });
 
@@ -1381,9 +1338,9 @@ export async function androidGetDensity(deviceId?: string): Promise<{
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
-        const { stdout } = await execAsync(`adb ${deviceArg} shell wm density`, {
+        const { stdout } = await execFileAsync("adb", [...deviceArgs, "shell", "wm density"], {
             timeout: ADB_TIMEOUT
         });
 
@@ -1434,11 +1391,12 @@ export async function androidGetStatusBarHeight(deviceId?: string): Promise<{
         const densityScale = density / 160; // Android baseline is 160dpi
 
         // Try to get actual status bar height from resources
-        const deviceArg = buildDeviceArg(deviceId);
+        const deviceArgs = buildDeviceArgs(deviceId);
 
         try {
-            const { stdout } = await execAsync(
-                `adb ${deviceArg} shell "dumpsys window | grep -E 'statusBars|mStatusBarLayer|InsetsSource.*statusBars'"`,
+            const { stdout } = await execFileAsync(
+                "adb",
+                [...deviceArgs, "shell", "dumpsys window | grep -E 'statusBars|mStatusBarLayer|InsetsSource.*statusBars'"],
                 { timeout: ADB_TIMEOUT }
             );
 
@@ -1702,21 +1660,21 @@ export async function androidDescribeAll(deviceId?: string): Promise<AndroidDesc
             };
         }
 
-        const deviceArg = buildDeviceArg(device);
+        const deviceArgs = buildDeviceArgs(device);
 
         // Use file-based approach (most reliable across devices)
         // /dev/tty doesn't work on most emulators/devices
         const remotePath = "/sdcard/ui_dump.xml";
-        await execAsync(`adb ${deviceArg} shell uiautomator dump ${remotePath}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `uiautomator dump ${remotePath}`], {
             timeout: ADB_TIMEOUT
         });
-        const { stdout } = await execAsync(`adb ${deviceArg} shell cat ${remotePath}`, {
+        const { stdout } = await execFileAsync("adb", [...deviceArgs, "shell", `cat ${remotePath}`], {
             timeout: ADB_TIMEOUT,
             maxBuffer: 10 * 1024 * 1024
         });
         const xmlContent = stdout.trim();
         // Clean up
-        await execAsync(`adb ${deviceArg} shell rm ${remotePath}`, {
+        await execFileAsync("adb", [...deviceArgs, "shell", `rm ${remotePath}`], {
             timeout: 5000
         }).catch(() => {});
 

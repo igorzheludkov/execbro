@@ -1,7 +1,7 @@
 import { connectedApps } from "./state.js";
 import { listDevices, recordDevice } from "./projectMemory.js";
 import { listAllDevices } from "./deviceDiscovery.js";
-import { execAsync } from "./exec.js";
+import { execFileAsync } from "./exec.js";
 import {
     getNativeLogBuffer,
     type AppIdentity,
@@ -127,7 +127,7 @@ async function matchAndroidAppBySerial(
     const candidates = apps.filter((a) => a.platform === "android");
     if (candidates.length === 0) return undefined;
     try {
-        const { stdout } = await execAsync(`adb -s ${serial} shell getprop ro.product.model`);
+        const { stdout } = await execFileAsync("adb", ["-s", serial, "shell", "getprop ro.product.model"]);
         const model = stdout.trim();
         if (!model) return undefined;
         return candidates.find((a) => (a.deviceInfo.deviceName ?? "").startsWith(model));

@@ -1,9 +1,12 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 
-// Mock execAsync before importing the module under test
-const execAsyncMock = jest.fn<(cmd: string, opts?: unknown) => Promise<{ stdout: string; stderr: string }>>();
+// Mock execFileAsync before importing the module under test. The argv form is
+// what the module actually calls now — commands are never assembled into a
+// shell string, so the mock takes (file, args).
+const execAsyncMock = jest.fn<(file: string, args: string[], opts?: unknown) => Promise<{ stdout: string; stderr: string }>>();
 jest.unstable_mockModule("../../core/exec.js", () => ({
-    execAsync: execAsyncMock
+    execFileAsync: execAsyncMock,
+    quoteForDeviceShell: (v: string) => `'${v.replace(/'/g, `'"'"'`)}'`
 }));
 
 const { getAndroidEmulatorAvds, getAdbIdForAvd, resetAdbAvailabilityCache } =

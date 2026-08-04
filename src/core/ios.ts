@@ -1,14 +1,10 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
 import { existsSync } from "fs";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
 import { getActiveSimulatorUdid } from "./state.js";
 import { notifyDriverMissing } from "./logbox.js";
-import { execAsync } from "./exec.js";
-
-const execFileAsync = promisify(execFile);
+import { execFileAsync } from "./exec.js";
 
 // simctl command timeout in milliseconds
 const SIMCTL_TIMEOUT = 30000;
@@ -302,7 +298,7 @@ export async function isSimctlAvailable(): Promise<boolean> {
   if (simctlAvailableCache) return simctlAvailableCache;
   simctlAvailableCache = (async () => {
     try {
-      await execAsync("xcrun simctl help", { timeout: 5000 });
+      await execFileAsync("xcrun", ["simctl", "help"], { timeout: 5000 });
       return true;
     } catch {
       return false;
@@ -334,7 +330,7 @@ export async function listIOSSimulators(
       };
     }
 
-    const { stdout } = await execAsync("xcrun simctl list devices -j", {
+    const { stdout } = await execFileAsync("xcrun", ["simctl", "list", "devices", "-j"], {
       timeout: SIMCTL_TIMEOUT,
     });
 
@@ -420,7 +416,7 @@ export async function buildNoSimulatorError(): Promise<string> {
     "Boot one with `ios_boot_simulator` (pass udid or name), " +
     "or run `xcrun simctl boot <udid>` directly.";
   try {
-    const { stdout } = await execAsync("xcrun simctl list devices -j", {
+    const { stdout } = await execFileAsync("xcrun", ["simctl", "list", "devices", "-j"], {
       timeout: SIMCTL_TIMEOUT,
     });
     const data = JSON.parse(stdout) as {
@@ -448,7 +444,7 @@ export async function buildNoSimulatorError(): Promise<string> {
  */
 export async function getBootedSimulatorUdid(): Promise<string | null> {
   try {
-    const { stdout } = await execAsync("xcrun simctl list devices booted -j", {
+    const { stdout } = await execFileAsync("xcrun", ["simctl", "list", "devices", "booted", "-j"], {
       timeout: SIMCTL_TIMEOUT,
     });
 
@@ -478,7 +474,7 @@ export async function findSimulatorByName(
   deviceName: string,
 ): Promise<string | null> {
   try {
-    const { stdout } = await execAsync("xcrun simctl list devices booted -j", {
+    const { stdout } = await execFileAsync("xcrun", ["simctl", "list", "devices", "booted", "-j"], {
       timeout: SIMCTL_TIMEOUT,
     });
 
@@ -571,8 +567,9 @@ export async function iosScreenshot(
     const finalOutputPath =
       outputPath || path.join(os.tmpdir(), `ios-screenshot-${timestamp}.png`);
 
-    await execAsync(
-      `xcrun simctl io ${targetUdid} screenshot "${finalOutputPath}"`,
+    await execFileAsync(
+      "xcrun",
+      ["simctl", "io", targetUdid, "screenshot", finalOutputPath],
       {
         timeout: SIMCTL_TIMEOUT,
       },
@@ -654,7 +651,7 @@ export async function iosInstallApp(
       };
     }
 
-    await execAsync(`xcrun simctl install ${targetUdid} "${appPath}"`, {
+    await execFileAsync("xcrun", ["simctl", "install", targetUdid, appPath], {
       timeout: 120000, // 2 minute timeout for install
     });
 
@@ -696,7 +693,7 @@ export async function iosLaunchApp(
       };
     }
 
-    await execAsync(`xcrun simctl launch ${targetUdid} ${bundleId}`, {
+    await execFileAsync("xcrun", ["simctl", "launch", targetUdid, bundleId], {
       timeout: SIMCTL_TIMEOUT,
     });
 
@@ -744,7 +741,7 @@ export async function iosOpenUrl(
       };
     }
 
-    await execAsync(`xcrun simctl openurl ${targetUdid} "${url}"`, {
+    await execFileAsync("xcrun", ["simctl", "openurl", targetUdid, url], {
       timeout: SIMCTL_TIMEOUT,
     });
 
@@ -795,7 +792,7 @@ export async function iosTerminateApp(
       };
     }
 
-    await execAsync(`xcrun simctl terminate ${targetUdid} ${bundleId}`, {
+    await execFileAsync("xcrun", ["simctl", "terminate", targetUdid, bundleId], {
       timeout: SIMCTL_TIMEOUT,
     });
 
@@ -825,12 +822,12 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
       };
     }
 
-    await execAsync(`xcrun simctl boot ${udid}`, {
+    await execFileAsync("xcrun", ["simctl", "boot", udid], {
       timeout: 60000, // 1 minute timeout for boot
     });
 
     // Open Simulator app
-    await execAsync("open -a Simulator", { timeout: 10000 }).catch(() => {
+    await execFileAsync("open", ["-a", "Simulator"], { timeout: 10000 }).catch(() => {
       // Ignore if Simulator app doesn't open
     });
 
@@ -2102,8 +2099,9 @@ export async function getDevicePixelRatio(
       os.tmpdir(),
       `ios-dpr-screenshot-${timestamp}.png`,
     );
-    await execAsync(
-      `xcrun simctl io ${resolvedUdid} screenshot "${screenshotPath}"`,
+    await execFileAsync(
+      "xcrun",
+      ["simctl", "io", resolvedUdid, "screenshot", screenshotPath],
       {
         timeout: SIMCTL_TIMEOUT,
       },
