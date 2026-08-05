@@ -92,6 +92,27 @@ describe("enterText", () => {
         expect(r.candidates).toEqual(candidates);
     });
 
+    // The screen can re-render between the resolve and the focus (a keyboard
+    // raise is enough), so the second resolve misses where the first hit. That
+    // path used to return the bare reason, leaving the caller with nothing to
+    // re-target from — it then guessed again, which is the failure loop this
+    // reproduces. Telemetry: 80% of "no TextInput matched" on 2.6.1 arrived
+    // with no candidate list.
+    it("keeps candidates when the target disappears between resolve and focus", async () => {
+        const candidates = [
+            { index: 0, component: "FormInput", label: "Email", placeholder: null, value: null, testID: "email" }
+        ];
+        const d = deps([
+            found({ focused: false }),
+            { found: false, reason: "no TextInput matched that target (1 input(s) mounted)", candidates, totalInputs: 1 }
+        ]);
+        const r = await enterText({ text: "x", testID: "email" }, d);
+        expect(r.success).toBe(false);
+        expect(r.error).toContain("no TextInput matched that target");
+        expect(r.candidates).toEqual(candidates);
+        expect(r.totalInputs).toBe(1);
+    });
+
     it("focuses the target itself when it is not already focused", async () => {
         const d = deps([
             found({ focused: false }),
@@ -237,6 +258,60 @@ describe("enterText", () => {
         const r = await enterText({ text: "Alice" }, d);
         expect(r.sent).toBeUndefined();
         expect(r.landed).toBeUndefined();
+    });
+});
+
+// A currency or similar masked field decorates the value it was given. The
+// requested text IS in the field; reporting that as a failure sent the caller
+// retrying a write that had already landed. 4 of the 5 mismatches on 2.6.1
+// were exactly this ("10" -> "$10").
+describe("fields that decorate the value they were given", () => {
+    // A masked field reports its decorated value on every read, including the
+    // one after the retry — so the read-back is fixed, not queued.
+    const landing = (landed: string): TextEntryDeps => {
+        let first = true;
+        return deps([], {
+            runOp: jest.fn(async () => {
+                if (first) {
+                    first = false;
+                    return found();
+                }
+                return found({ value: landed });
+            })
+        });
+    };
+
+    it.each([
+        ["10", "$10"],
+        ["5.00", "$5.00"],
+        ["55.55", "$55.55"],
+        ["1.00", "$1.00"],
+        ["1234", "1234%"]
+    ])("accepts %s landing as %s", async (sent, landed) => {
+        const r = await enterText({ text: sent }, landing(landed));
+        expect(r.success).toBe(true);
+        expect(r.value).toBe(landed);
+        expect(r.error).toBeUndefined();
+    });
+
+    // The dangerous direction. A field that inserts a decimal turns 100 into
+    // 1.00 — a different NUMBER, not a decoration. Stripping punctuation
+    // wholesale would call that equal and report a false success, which is
+    // strictly worse than the false failure being fixed here.
+    it("still fails when interior punctuation changes the value", async () => {
+        const r = await enterText({ text: "100" }, landing("1.00"));
+        expect(r.success).toBe(false);
+        expect(r.landed).toBe("1.00");
+    });
+
+    it("still fails on the HID reorder that motivated the exact comparison", async () => {
+        const r = await enterText({ text: "CASEB" }, landing("CSEBA"));
+        expect(r.success).toBe(false);
+    });
+
+    it("still fails when nothing landed", async () => {
+        const r = await enterText({ text: "5.90" }, landing(""));
+        expect(r.success).toBe(false);
     });
 });
 

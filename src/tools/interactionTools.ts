@@ -1073,9 +1073,14 @@ export function formatTextEntryResponse(r: TextEntryResult): {
 
     if (r.success) {
         lines.push(
-            r.verified
-                ? `Set to ${JSON.stringify(r.value)} (${r.path}, verified${r.retried ? ", retried once" : ""}).`
-                : `Wrote via ${r.path} but UNVERIFIED — ${r.error ?? "the value could not be read back"}.`
+            r.formatted
+                // Name the decoration explicitly. Without it the caller reads
+                // back a value it never sent and re-writes the field.
+                ? `Set to ${JSON.stringify(r.value)} (${r.path}, verified` +
+                  `${r.retried ? ", retried once" : ""}) — the field added its own formatting to the text you sent.`
+                : r.verified
+                    ? `Set to ${JSON.stringify(r.value)} (${r.path}, verified${r.retried ? ", retried once" : ""}).`
+                    : `Wrote via ${r.path} but UNVERIFIED — ${r.error ?? "the value could not be read back"}.`
         );
     } else {
         lines.push(`Error: ${r.error ?? "text entry failed"}`);

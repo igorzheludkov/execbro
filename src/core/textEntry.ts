@@ -23,8 +23,16 @@ export type TextEntryResult = {
     success: boolean;
     value?: string;
     path?: WritePath;
-    /** True only when the landed text was read back and matched exactly. */
+    /**
+     * True only when the landed text was read back and matched — exactly, or
+     * modulo the field's own decoration, in which case `formatted` is set too.
+     */
     verified?: boolean;
+    /**
+     * The field decorated the requested text (a currency symbol, a unit). The
+     * write landed; `value` carries the field's rendering of it.
+     */
+    formatted?: boolean;
     retried?: boolean;
     keyboard?: RaiseResult;
     error?: string;
@@ -48,6 +56,25 @@ export type TextEntryDeps = {
     /** Injected so the native read-back's settle poll is testable without waiting. */
     delay?: (ms: number) => Promise<void>;
 };
+
+/**
+ * Whether `landed` is `sent` wearing the field's own decoration — a currency
+ * symbol, a unit, a trailing percent — rather than a different value.
+ *
+ * ONLY leading and trailing non-alphanumerics are ignored. Interior
+ * punctuation is load-bearing: a field that renders "100" as "1.00" holds a
+ * different NUMBER, and stripping punctuation wholesale would report that as a
+ * clean write. A false success there is strictly worse than the false failure
+ * this exists to prevent, so the rule stays narrow — an interior change is
+ * still a mismatch.
+ */
+export function isDecoratedValue(sent: string, landed: string | null): boolean {
+    if (landed === null || sent.length === 0) return false;
+    const bare = landed
+        .replace(/^[^\p{L}\p{N}]+/u, "")
+        .replace(/[^\p{L}\p{N}]+$/u, "");
+    return bare !== landed && bare === sent;
+}
 
 /**
  * Names the likely cause of a mismatch. The field's own keyboard settings
@@ -122,7 +149,20 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     //    guarantee React focus — reproduced on device.
     if (!target.focused) {
         const focused = await deps.runOp({ kind: "focus" }, q, args.device);
-        if (!focused.found) return { success: false, error: focused.reason };
+        // Forward the candidate list exactly as the resolve path does. A
+        // re-render between the two resolves (a keyboard raise is enough) makes
+        // this miss where the first hit, and returning the bare reason leaves
+        // the caller with nothing to re-target from — it guesses again, misses
+        // again. On 2.6.1 that was 80% of all "no TextInput matched" errors.
+        if (!focused.found) {
+            return {
+                success: false,
+                error: focused.reason,
+                ...(focused.ambiguous && { ambiguous: true }),
+                ...(focused.candidates && { candidates: focused.candidates }),
+                ...(focused.totalInputs !== undefined && { totalInputs: focused.totalInputs })
+            };
+        }
         if (!focused.ok) return { success: false, error: focused.via ?? "could not focus the input" };
     }
 
@@ -247,7 +287,10 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     }
 
     let retried = false;
-    if (landed !== desired) {
+    // A decorated value is the write having landed, not having gone wrong, so
+    // it must not burn the retry either — rewriting only makes the field
+    // decorate it again.
+    if (landed !== desired && !isDecoratedValue(desired, landed)) {
         retried = true;
         // Clear only for HID, which appends at the caret. The other paths set
         // the whole value, so a clear is redundant — and actively harmful:
@@ -269,6 +312,22 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
             return { success: false, path: second.path, retried, error: second.error ?? "rewrite failed" };
         }
         landed = await readBack();
+    }
+
+    // The field holds what it was asked to hold, plus its own formatting. The
+    // exact comparison above is deliberately strict, but reporting this as a
+    // failure sent callers retrying a write that had already landed.
+    if (landed !== undefined && landed !== desired && isDecoratedValue(desired, landed)) {
+        const keyboard = await deps.raise();
+        return {
+            success: true,
+            value: landed ?? undefined,
+            path: first.path,
+            verified: true,
+            formatted: true,
+            ...(retried && { retried }),
+            keyboard
+        };
     }
 
     if (landed !== desired) {
