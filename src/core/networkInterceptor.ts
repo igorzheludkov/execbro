@@ -50,6 +50,15 @@ export function getInterceptorScript(): string {
       // flips this flag via Runtime.evaluate once it detects __RN_AI_DEVTOOLS__,
       // so the wrapper stops emitting debug lines and CDP traffic.
       if (globalThis.__RN_NET_DISABLED__) return;
+      _reportAlways(evt);
+    }
+
+    // Mock events bypass the SDK suppression gate. That flag exists so two
+    // capture layers do not both report the same request; a mock is not
+    // captured traffic, and the SDK knows nothing about it. Suppressing it
+    // would hide altered traffic from the agent and freeze every server-side
+    // hit counter at zero — the one thing a mock must never do.
+    function _reportAlways(evt) {
       try {
         console.debug('__RN_NET__:' + JSON.stringify(evt));
       } catch(e) {}
@@ -143,6 +152,160 @@ export function getInterceptorScript(): string {
       } catch(e) {}
     }
 
+    // ---- mock layer ------------------------------------------------------
+    // Rules are pushed from the server (buildMockPushScript). Never reset here:
+    // a re-injection into a live context must not drop them.
+    if (!globalThis.__RN_NET_MOCKS__) globalThis.__RN_NET_MOCKS__ = [];
+
+    function _ruleMatches(rule, method, url) {
+      try {
+        if (rule.method && String(rule.method).toUpperCase() !== method) return false;
+        var pat = String(rule.url === undefined || rule.url === null ? '' : rule.url);
+        if (pat.length > 1 && pat.charAt(0) === '/' && pat.charAt(pat.length - 1) === '/') {
+          // Slash-wrapped means regex. Compiled per call rather than cached:
+          // the rule list is short and re-pushed on every context creation.
+          // The server rejects catastrophic patterns before they get here.
+          return new RegExp(pat.slice(1, -1)).test(url);
+        }
+        return url.indexOf(pat) !== -1;
+      } catch (e) { return false; }
+    }
+
+    function _matchRule(method, url) {
+      var rules = globalThis.__RN_NET_MOCKS__;
+      if (!rules || !rules.length) return null;
+      for (var i = 0; i < rules.length; i++) {
+        var r = rules[i];
+        if (!r || r.__spent) continue;
+        if (_ruleMatches(r, method, url)) {
+          if (typeof r.times === 'number') {
+            r.__used = (r.__used || 0) + 1;
+            if (r.__used >= r.times) r.__spent = true;
+          }
+          return r;
+        }
+      }
+      return null;
+    }
+
+    // A plain assignment is silently dropped when the prototype exposes a
+    // getter with no setter — which is exactly how React Native's
+    // XMLHttpRequest defines responseText and response. Verify the write took
+    // and fall back to an own data property, which shadows the accessor.
+    function _setProp(obj, name, value) {
+      try {
+        obj[name] = value;
+        if (obj[name] === value) return;
+      } catch (e) {}
+      try {
+        Object.defineProperty(obj, name, {
+          configurable: true, enumerable: true, writable: true, value: value
+        });
+      } catch (e) {}
+    }
+
+    function _headersToText(headers) {
+      var out = '';
+      if (!headers || typeof headers !== 'object') return out;
+      try {
+        for (var k in headers) {
+          if (Object.prototype.hasOwnProperty.call(headers, k)) {
+            out += String(k).toLowerCase() + ': ' + String(headers[k]) + '\\r\\n';
+          }
+        }
+      } catch (e) {}
+      return out;
+    }
+
+    // getAllResponseHeaders / getResponseHeader are methods, not properties, so
+    // _setProp cannot reach them. Shadow them per instance for this response.
+    function _installMockHeaders(xhr, headersText) {
+      try {
+        var text = headersText || '';
+        Object.defineProperty(xhr, 'getAllResponseHeaders', {
+          configurable: true, enumerable: false, writable: true,
+          value: function () { return text; }
+        });
+        Object.defineProperty(xhr, 'getResponseHeader', {
+          configurable: true, enumerable: false, writable: true,
+          value: function (name) {
+            var v = _parseHeaders(text)[String(name).toLowerCase()];
+            return (v === undefined) ? null : v;
+          }
+        });
+      } catch (e) {}
+    }
+
+    // Fires the on<event> property handler and every addEventListener listener,
+    // which is what a real XHR does. dispatchEvent is deliberately not used:
+    // RN's EventTarget rejects a plain object, and the listener list below is
+    // complete because addEventListener is patched on the prototype.
+    function _fire(xhr, type) {
+      try {
+        var evt = { type: type, target: xhr, currentTarget: xhr };
+        var prop = xhr['on' + type];
+        if (typeof prop === 'function') { try { prop.call(xhr, evt); } catch (e) {} }
+        var ls = xhr.__rn_net_listeners__ && xhr.__rn_net_listeners__[type];
+        if (ls) {
+          var copy = ls.slice();
+          for (var i = 0; i < copy.length; i++) {
+            try { copy[i].call(xhr, evt); } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+
+    /**
+     * Writes a synthetic response onto the app's own XHR and fires its
+     * handlers, so the app reads mocked values through the normal API.
+     * Also emits the terminal capture event — without it the request would sit
+     * in the buffer as pending forever.
+     */
+    function _deliverMock(xhr, rule, s, bodyText, statusOverride, headersText, warning) {
+      var go = function () {
+        try {
+          var duration = Date.now() - s.start;
+          s.done = true;
+          if (rule.networkError) {
+            _setProp(xhr, 'readyState', 4);
+            _setProp(xhr, 'status', 0);
+            _setProp(xhr, 'statusText', '');
+            _reportAlways({ type: 'mock', id: s.id, ruleId: rule.id, warning: warning });
+            _report({ type: 'error', id: s.id, error: String(rule.networkError), duration: duration });
+            _fire(xhr, 'readystatechange');
+            _fire(xhr, 'error');
+            _fire(xhr, 'loadend');
+            return;
+          }
+          var text = (bodyText === null || bodyText === undefined) ? '' : String(bodyText);
+          var status = (typeof statusOverride === 'number') ? statusOverride : 200;
+          var text2 = headersText || '';
+          _setProp(xhr, 'readyState', 4);
+          _setProp(xhr, 'status', status);
+          _setProp(xhr, 'statusText', '');
+          _setProp(xhr, 'responseText', text);
+          _setProp(xhr, 'response', text);
+          _installMockHeaders(xhr, text2);
+          _reportAlways({ type: 'mock', id: s.id, ruleId: rule.id, warning: warning });
+          var evt = {
+            type: 'response', id: s.id, status: status, statusText: '',
+            duration: duration, responseHeaders: _parseHeaders(text2),
+            body: _cap(text, _RES_CAP)
+          };
+          if (evt.responseHeaders['content-type']) evt.mimeType = evt.responseHeaders['content-type'];
+          _report(evt);
+          _fire(xhr, 'readystatechange');
+          _fire(xhr, 'load');
+          _fire(xhr, 'loadend');
+        } catch (e) {}
+      };
+      // Always deferred, never synchronous: a real XHR response never arrives
+      // inside send(), and code that assumes it does breaks in surprising ways.
+      var delay = (typeof rule.delayMs === 'number' && rule.delayMs > 0) ? rule.delayMs : 0;
+      setTimeout(go, delay);
+    }
+    // ---- end mock layer --------------------------------------------------
+
     function _patchXHR() {
       try {
         if (typeof XMLHttpRequest === 'undefined') return false;
@@ -193,6 +356,25 @@ export function getInterceptorScript(): string {
           };
         }
 
+        // Recorded so _fire can reach the app's handlers when a mock replaces
+        // the response. There is no other way to enumerate them.
+        var origAddEventListener = proto.addEventListener;
+        if (typeof origAddEventListener === 'function') {
+          proto.addEventListener = function(type, fn) {
+            try {
+              if (!this.__rn_net_listeners__) this.__rn_net_listeners__ = {};
+              if (!this.__rn_net_listeners__[type]) this.__rn_net_listeners__[type] = [];
+              this.__rn_net_listeners__[type].push(fn);
+            } catch(e) {}
+            return origAddEventListener.apply(this, arguments);
+          };
+        }
+
+        // Replaced with the real implementation by the tamper task below.
+        var _shadowFetch = function(appXhr, s, rule, body) {
+          _deliverMock(appXhr, rule, s, rule.body, rule.status, _headersToText(rule.headers), undefined);
+        };
+
         proto.send = function(body) {
           var self = this;
           try {
@@ -208,6 +390,21 @@ export function getInterceptorScript(): string {
                 headers: s.headers,
                 body: _cap(_bodyToString(body), _REQ_CAP)
               });
+
+              var _rule = _matchRule(s.method, s.url);
+              if (_rule) {
+                s.mocked = true;
+                if (_rule.mode === 'tamper') {
+                  _shadowFetch(self, s, _rule, body);
+                } else {
+                  _deliverMock(self, _rule, s, _rule.body, _rule.status,
+                    _headersToText(_rule.headers), undefined);
+                }
+                // The app's request never reaches the wire: returning here is
+                // what makes the mock authoritative rather than a race with
+                // the real response.
+                return;
+              }
 
               var _finish = function(kind, errText) {
                 if (s.done) return;
@@ -355,6 +552,51 @@ export function getInterceptorScript(): string {
     }, 0);
 
   } catch(e) {} })();`;
+}
+
+/**
+ * Script that replaces the app's rule list wholesale. Wholesale rather than
+ * incremental because the server is authoritative — a diff protocol would let
+ * the two drift with no way to notice.
+ *
+ * The one thing carried across a push is each rule's `times` budget, keyed by
+ * id. Rules are re-pushed on every mutation, so without this, adding a second
+ * rule would silently rearm a spent `times: 1` rule and break the retry test it
+ * exists for. A brand new JS context starts with no previous list, so a reload
+ * legitimately rearms every budget — a reload is a new app run.
+ */
+export function buildMockPushScript(rulesJson: string): string {
+    return `(function(){ try {
+  var __eb_prev = globalThis.__RN_NET_MOCKS__ || [];
+  var __eb_next = ${rulesJson};
+  var __eb_byId = {};
+  for (var __eb_i = 0; __eb_i < __eb_prev.length; __eb_i++) {
+    if (__eb_prev[__eb_i] && __eb_prev[__eb_i].id) __eb_byId[__eb_prev[__eb_i].id] = __eb_prev[__eb_i];
+  }
+  for (var __eb_j = 0; __eb_j < __eb_next.length; __eb_j++) {
+    var __eb_old = __eb_byId[__eb_next[__eb_j].id];
+    if (__eb_old) {
+      __eb_next[__eb_j].__used = __eb_old.__used;
+      __eb_next[__eb_j].__spent = __eb_old.__spent;
+    }
+  }
+  globalThis.__RN_NET_MOCKS__ = __eb_next;
+} catch(e) { try { globalThis.__RN_NET_MOCKS__ = ${rulesJson}; } catch(e2) {} } })();`;
+}
+
+/**
+ * Pushes the current rule list to the app. Fire-and-forget — the server stays
+ * authoritative, so a dropped push is corrected by the next mutation or by the
+ * re-push on the next execution context.
+ */
+export function pushMockRules(ws: WebSocket, rulesJson: string): void {
+    ws.send(
+        JSON.stringify({
+            id: getNextMessageId(),
+            method: "Runtime.evaluate",
+            params: { expression: buildMockPushScript(rulesJson), silent: true },
+        })
+    );
 }
 
 /**
