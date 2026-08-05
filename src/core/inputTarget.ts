@@ -214,6 +214,42 @@ function prelude(query: InputQuery | undefined): string {
     return cf ? __eb_name(cf.type) : null;
   }
 
+  // EVERY authored name on the path from the host up to the field wrapper.
+  //
+  // Display resolves a field to one name (the wrapper), but get_screen_state
+  // names the same field by its INNERMOST composite — so a caller reading the
+  // screen can legitimately hold either name. Matching against the display name
+  // alone made one of the two names printed on screen fail to resolve, and the
+  // resulting "no TextInput matched that target" is indistinguishable from the
+  // field genuinely not being there.
+  //
+  // Bounded the same way the display climb is: at the wrapper when there is
+  // one, else the 4-composite budget — never further, or a target would match
+  // on the name of the screen the field happens to sit in.
+  function __eb_componentNames(hostFiber) {
+    var names = [];
+    var stop = __eb_fieldFiber(hostFiber);
+    var p = hostFiber;
+    var d = 0;
+    var composites = 0;
+    while (p && d < 30) {
+      if (typeof p.type !== "string" && p.type !== null) {
+        var n = __eb_name(p.type);
+        if (n) {
+          composites++;
+          if (!RN_PRIMITIVES.test(n) && !GENERIC_COMPONENT.test(n) && names.indexOf(n) === -1) {
+            names.push(n);
+          }
+        }
+      }
+      if (stop) { if (p === stop) break; }
+      else if (composites >= 4) break;
+      p = p.return;
+      d++;
+    }
+    return names;
+  }
+
   // The field's visible label — the text the wrapper renders beside the input
   // ("First Name"), which is how a human identifies a field and how
   // get_screen_state prints it. Host input subtrees are skipped so a field's
@@ -276,8 +312,12 @@ function prelude(query: InputQuery | undefined): string {
   } else if (wantComponent !== null) {
     var wc = String(wantComponent).toLowerCase();
     for (i = 0; i < __eb_inputs.length; i++) {
-      var cn = __eb_componentOf(__eb_inputs[i]);
-      if (cn && cn.toLowerCase().indexOf(wc) !== -1) __eb_matches.push(__eb_inputs[i]);
+      var cns = __eb_componentNames(__eb_inputs[i]);
+      var hit = false;
+      for (var ci = 0; ci < cns.length; ci++) {
+        if (cns[ci].toLowerCase().indexOf(wc) !== -1) { hit = true; break; }
+      }
+      if (hit) __eb_matches.push(__eb_inputs[i]);
     }
   } else if (wantText !== null) {
     var wt = String(wantText).toLowerCase();

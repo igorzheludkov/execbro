@@ -166,3 +166,68 @@ describe("targeting keys", () => {
         expect(expr).toMatch(/parts\.push\(mp\.children\.trim\(\)\);[\s\S]{0,80}return;/);
     });
 });
+
+/**
+ * These EXECUTE the injected walker against a synthetic fiber tree instead of
+ * asserting on its source. The divergence below is invisible to a string
+ * check: both walkers read the same filters, so the bug lives in how each one
+ * picks from the ancestor chain, not in what the source says.
+ *
+ * Tree mirrors the shipping-address form the mismatch was found on:
+ *   InputField           app wrapper, forwards onChangeText  <- outermost carrier
+ *     View               layout
+ *       BottomSheetTextInput   library input, carries onChangeText
+ *         RCTSinglelineTextInputView   host
+ */
+describe("component targeting across the field's ancestor chain", () => {
+    const buildTree = () => {
+        const onChangeText = () => {};
+        const node = (name: string, props: object, host = false) => ({
+            type: host ? name : { displayName: name },
+            memoizedProps: props,
+            stateNode: host ? { isFocused: () => false, __nativeTag: 1 } : null,
+            return: null as unknown,
+            child: null as unknown,
+            sibling: null
+        });
+        const host = node("RCTSinglelineTextInputView", { placeholder: "Robert" }, true);
+        const inner = node("BottomSheetTextInput", { onChangeText, value: "Home" });
+        const view = node("View", {});
+        const wrapper = node("InputField", { onChangeText, value: "Home" });
+        host.return = inner; inner.child = host;
+        inner.return = view; view.child = inner;
+        view.return = wrapper; wrapper.child = view;
+        return wrapper;
+    };
+
+    const run = (expr: string) => {
+        const g = globalThis as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: unknown; global?: unknown };
+        g.global = globalThis;
+        g.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+            renderers: new Map([[1, {}]]),
+            getFiberRoots: () => new Set([{ current: buildTree() }])
+        };
+        // eslint-disable-next-line no-eval
+        return eval(expr) as { found: boolean; candidates?: Array<{ component: string | null }> };
+    };
+
+    it("still reports the wrapper as the field's name", () => {
+        const r = run(buildInputExpression({ kind: "find" }));
+        expect(r.candidates?.[0].component).toBe("InputField");
+    });
+
+    it("matches the wrapper name", () => {
+        expect(run(buildInputExpression({ kind: "find" }, { component: "InputField" })).found).toBe(true);
+    });
+
+    // get_screen_state prints this name for the same field, so an agent can
+    // legitimately hold it. Matching only the display name made one of the two
+    // names shown on screen unusable as a target.
+    it("matches the inner component name get_screen_state prints", () => {
+        expect(run(buildInputExpression({ kind: "find" }, { component: "BottomSheetTextInput" })).found).toBe(true);
+    });
+
+    it("does not match a component that is nowhere in the chain", () => {
+        expect(run(buildInputExpression({ kind: "find" }, { component: "NotOnThisScreen" })).found).toBe(false);
+    });
+});

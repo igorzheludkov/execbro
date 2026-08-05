@@ -156,7 +156,10 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
     // App-state / environment problems: the tooling is fine, the app or device
     // is not in a usable state. Grouped with 'connection' rather than earning a
     // new category so the existing dashboard blob6 mapping stays valid.
-    if (lower.includes('react devtools hook') || lower.includes('no android device connected') ||
+    // 'devtools hook' rather than 'react devtools hook': the injected-path error
+    // is the bare "no devtools hook", which the longer literal missed — those
+    // events sat in 'unknown' alongside the agent-input guards below.
+    if (lower.includes('devtools hook') || lower.includes('no android device connected') ||
         lower.includes('no ios device connected') || lower.includes('app is not available')) {
         return 'connection';
     }
@@ -176,9 +179,15 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
     // devices *are* connected and the name simply did not match — when nothing
     // is connected the message carries the scan_metro hint and is a connection
     // problem instead.
+    // input_text's targeting guards belong here too. The tool refused before
+    // writing anything and returned the fields that ARE on screen, so the next
+    // call can name one — a two-step protocol, not a fault. Left uncategorised
+    // they were 29 of 35 input_text failures on 2.6.1, which hid the real ones.
     if (lower.includes('no focused textinput') || lower.includes('must provide at least one') ||
         lower.includes('not visible on screen') || lower.includes('no component found') ||
-        lower.includes('no connected device matches') || lower.includes('redux-shaped store')) {
+        lower.includes('no connected device matches') || lower.includes('redux-shaped store') ||
+        lower.includes('matched that target') || lower.includes('match this target') ||
+        lower.includes('is out of range') || lower.includes('no textinput found on screen')) {
         return 'validation';
     }
     if (lower.includes('invalid') || lower.includes('required') || lower.includes('missing')) {

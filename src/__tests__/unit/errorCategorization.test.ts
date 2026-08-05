@@ -28,6 +28,31 @@ describe("categorizeError", () => {
         });
     });
 
+    /**
+     * input_text's targeting guards. The tool refused before writing because
+     * the request did not name a reachable field, and it returned the list of
+     * fields that ARE there — a two-step protocol, not a fault. Only "no
+     * focused TextInput" was listed, so on 2.6.1 (3d window ending 2026-08-05)
+     * 29 of 35 input_text failures landed in `unknown`, burying the 2 real
+     * devtools-hook faults.
+     */
+    describe("input targeting guards are validation", () => {
+        it.each([
+            "Error: no TextInput matched that target (4 input(s) mounted)",
+            "Error: 2 inputs match this target — pass index to choose one, or target more precisely",
+            "Error: index 1 is out of range — 1 input(s) matched",
+            "Error: no TextInput found on screen",
+            "Error: no focused TextInput. Pass testID (or component) so this tool can focus a field itself",
+        ])("%s", (message) => {
+            expect(categorizeError(message)).toBe("validation");
+        });
+
+        // The guards must not swallow a genuinely broken app state.
+        it("leaves a missing devtools hook as a connection problem", () => {
+            expect(categorizeError("Error: no devtools hook")).toBe("connection");
+        });
+    });
+
     describe("genuine JS runtime faults are execution", () => {
         it.each([
             "Error: TypeError: undefined is not a function",
