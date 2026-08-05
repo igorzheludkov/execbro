@@ -495,17 +495,6 @@ describe("getIOSDevicePixelRatio", () => {
 });
 
 describe("tap orchestrator", () => {
-    it("attempts strategies when no app is connected", async () => {
-        const { tap } = await import("../../pro/tap.js");
-        const { connectedApps } = await import("../../core/state.js");
-        connectedApps.clear();
-        const result = await tap({ text: "Submit" });
-        // With Metro decoupling, tap may succeed via accessibility/OCR even without
-        // a Metro connection, or it may fail if no devices are available.
-        // Either way, the result should be a valid TapResult.
-        expect(result.error || result.method).toBeTruthy();
-    }, 15000);
-
     it("validates that at least one search param is provided", async () => {
         const { tap } = await import("../../pro/tap.js");
         const result = await tap({});

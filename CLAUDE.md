@@ -65,6 +65,17 @@ When adding a test, if it needs a real device, it does not belong here — write
 it as an agent-driven verification step in the relevant plan instead, the way
 `docs/devtools-core/plans/` records device verification.
 
+Run **specific files**, not the whole suite, while iterating:
+
+```bash
+NODE_OPTIONS='--experimental-vm-modules' npx jest --testPathPatterns='unit/tap.test'
+```
+
+To prove a change did not reintroduce device contact, put stub `adb` and `xcrun`
+on PATH that log their arguments, and run the suite against them. A clean run
+logs nothing. That is the only trustworthy check — reading the code is not
+enough, because the calls arrive through helpers several layers down.
+
 Do not "fix" this by guarding at the exec layer. That was tried: making `adb`
 fail under test convinced production code that ADB was uninstalled, which then
 pushed "ADB Not Installed" LogBox errors into the developer's running app. A
