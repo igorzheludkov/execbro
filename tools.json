@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 60,
+    "count": 61,
     "tools": [
         "activate_license",
         "android_input_text",
@@ -50,6 +50,7 @@
         "logbox",
         "measure",
         "navigate",
+        "network_condition",
         "network_mock",
         "ocr_screenshot",
         "pinch",
@@ -326,6 +327,11 @@
             "params",
             "routeTable",
             "to"
+        ],
+        "network_condition": [
+            "device",
+            "latencyMs",
+            "mode"
         ],
         "network_mock": [
             "action",

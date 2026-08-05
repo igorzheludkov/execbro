@@ -25,11 +25,18 @@ import {
     addRule,
     removeRule,
     clearRules,
+    clearConditionRules,
     listRules,
     serializeRules,
     formatRuleList,
     activeMockBanner,
 } from "../core/mockRules.js";
+import {
+    buildNetInfoPatchScript,
+    parseNetInfoResult,
+    describeNetInfoOutcome,
+} from "../core/netInfoPatch.js";
+import { executeInApp } from "../core/jsExecute.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 
 /**
@@ -489,6 +496,97 @@ export function registerNetworkTools(server: McpServer): void {
                     }
                 ]
             };
+        }
+    );
+
+    // Tool: Simulate network conditions
+    registerToolWithTelemetry(
+        server,
+        "network_condition",
+        {
+            description:
+                "Simulate offline or slow network for the running app.\n" +
+                "PURPOSE: Reach the offline / timeout branches through the app's real code.\n" +
+                "WHEN TO USE: 'what does this screen do with no network', 'is there a loading state', 'does the retry banner appear'.\n" +
+                "WORKFLOW: network_condition({mode:\"offline\"}) -> reproduce -> network_condition({mode:\"normal\"}).\n" +
+                "OFFLINE also patches NetInfo when installed, because many apps gate their offline UI on useNetInfo() rather than on a failed request. The result reports netInfo as patched / reads-patched-only / not-installed. Request failure works regardless.\n" +
+                "LIMITATIONS: JS-originated HTTP only. Does not change the device's real connectivity. Leaves network_mock rules untouched.\n" +
+                "GOOD: network_condition({mode:\"slow\", latencyMs:3000})\n" +
+                "BAD: forgetting network_condition({mode:\"normal\"}) afterwards — it survives reload_app.",
+            inputSchema: {
+                mode: z
+                    .enum(["offline", "slow", "normal"])
+                    .describe("offline fails every request; slow delays them; normal clears."),
+                latencyMs: z
+                    .number()
+                    .optional()
+                    .default(2000)
+                    .describe("Delay per request in slow mode."),
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
+            }
+        },
+        async (args) => {
+            const { ws, deviceName } = resolveMockTarget(args.device);
+
+            // Only this tool's own rule is removed. Clearing the device would
+            // destroy the agent's network_mock rules as a side effect of asking
+            // for "offline", which is never what was meant.
+            const replaced = clearConditionRules(deviceName);
+
+            let summary: string;
+            if (args.mode === "offline") {
+                addRule(deviceName, {
+                    url: "",
+                    mode: "replace",
+                    networkError: "Network request failed",
+                    source: "condition"
+                });
+                summary = "Offline: every JS-originated request now fails with 'Network request failed'.";
+            } else if (args.mode === "slow") {
+                const latencyMs = args.latencyMs ?? 2000;
+                // tamper, not replace: the real response still has to arrive,
+                // it just arrives late. A replace rule would return nothing.
+                addRule(deviceName, {
+                    url: "",
+                    mode: "tamper",
+                    delayMs: latencyMs,
+                    source: "condition"
+                });
+                summary = `Slow: every JS-originated request is delayed by ${latencyMs}ms; responses are otherwise unchanged.`;
+            } else {
+                summary =
+                    replaced > 0
+                        ? "Normal: the network condition has been removed."
+                        : "Normal: no network condition was active.";
+            }
+
+            pushMockRules(ws, serializeRules(deviceName));
+
+            // NetInfo only matters at the two ends of the range. "slow" leaves
+            // the device reporting connected, which is the truth.
+            const parts = [`${summary} (${deviceName})`];
+            if (args.mode !== "slow") {
+                const result = await executeInApp(
+                    buildNetInfoPatchScript(args.mode === "offline"),
+                    false,
+                    { timeoutMs: 10000, originatingToolName: "network_condition" },
+                    args.device
+                );
+                parts.push(
+                    result.success
+                        ? describeNetInfoOutcome(parseNetInfoResult(result.result))
+                        : `NetInfo: unknown — the in-app check could not run (${result.error ?? "no error given"}). Assume NetInfo was NOT patched.`
+                );
+            }
+            const remaining = listRules(deviceName).filter((r) => r.source !== "condition").length;
+            if (remaining > 0) {
+                parts.push(`${remaining} network_mock rule(s) left untouched on this device.`);
+            }
+            if (args.mode !== "normal") {
+                parts.push("Survives reload_app. Undo with network_condition({mode:\"normal\"}).");
+            }
+
+            return { content: [{ type: "text" as const, text: parts.join("\n") }] };
         }
     );
 
