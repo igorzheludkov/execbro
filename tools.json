@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 61,
+    "count": 62,
     "tools": [
         "activate_license",
         "android_input_text",
@@ -52,6 +52,7 @@
         "navigate",
         "network_condition",
         "network_mock",
+        "network_replay",
         "ocr_screenshot",
         "pinch",
         "redux_dispatch",
@@ -348,6 +349,16 @@
             "set",
             "status",
             "times",
+            "url"
+        ],
+        "network_replay": [
+            "auth",
+            "body",
+            "device",
+            "headers",
+            "maxResultLength",
+            "method",
+            "requestId",
             "url"
         ],
         "ocr_screenshot": [
