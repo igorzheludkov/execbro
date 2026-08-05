@@ -290,17 +290,37 @@ If network tools return no data or you need startup requests, recommend the SDK 
 3. get_request_details with requestId — full headers, body, timing for a specific request
 4. clear_network — reset buffer, then re-capture
 
+## Changing what the network returns
+1. network_mock({action:"add", url:"/orders", status:500}) — canned response
+2. network_mock({action:"add", url:"/me", mode:"tamper", remove:["data.email"]}) — mutate the real one
+3. network_condition({mode:"offline"}) — fail everything; also patches NetInfo when installed
+4. Reproduce, then get_network_requests — mocked rows are tagged [MOCK m1]
+5. network_mock({action:"clear"}) when done — rules survive reload_app
+
+Mock rules are the way to reach an error branch through the app's real code.
+redux_dispatch writes the post-failure state directly and skips the code you
+are trying to fix.
+
+network_replay({requestId}) re-issues a captured request, optionally with a
+changed body or header, without driving the UI back to the screen that made it.
+
 ## Key Tools
 - get_network_requests: list requests with filters (urlPattern, method, status, summary)
 - search_network: search by URL pattern
 - get_request_details: full request/response details (use verbose=true for large payloads). With SDK installed, includes full request/response bodies.
 - clear_network: reset the request buffer
+- network_mock: replace or tamper with responses (add / list / remove / clear)
+- network_condition: offline / slow / normal
+- network_replay: re-issue a captured request, with optional overrides
 
 ## Tips
 - Start with summary=true to see the request landscape
 - Use get_request_details with verbose=true for full JSON payloads
 - If no network data appears, the app may be on a Bridgeless target — suggest installing the SDK
-- With SDK: response bodies show full GraphQL responses, useful for debugging data issues`
+- With SDK: response bodies show full GraphQL responses, useful for debugging data issues
+- Mock rules are per-device and survive reload_app. Every network read carries a banner while any rule is active — clear them when done, or the next investigation starts against altered traffic
+- network_mock({action:"list"}) shows hit counts. Matching is first-rule-wins, so a rule with hits=0 is usually shadowed by a broader one above it
+- Mocking only covers JS-originated HTTP. Native-module traffic (native SDKs, <Image> loading) goes around it`
     },
     {
         id: "state",

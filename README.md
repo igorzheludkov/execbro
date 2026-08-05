@@ -33,6 +33,7 @@ Linking your installation here is also **required to unlock [ExecBro Pro](#prici
 
 - **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. Note: on a cold start (first app launch), logs emitted before the MCP server connects are missed — subsequent reloads capture everything. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) to buffer logs from the very first line of app startup
 - **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Like logs, early network requests on cold start may be missed before the connection is established. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for full capture from app startup including request/response bodies
+- **Response Mocking** - Replace or tamper with HTTP responses so error paths are reached through the app's real code — the request builder, the error branch, the retry — instead of being faked by writing state directly. Simulate offline, delay responses, fail only the first attempt to test a retry, or re-issue a captured request with one field changed. Rules survive reload, and altered traffic is always tagged
 - **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
 - **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals. Wire stores and other app internals straight into the agent with the optional [SDK](#install-the-sdk-recommended) for direct, reliable state access
 - **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
@@ -176,7 +177,8 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 4. Network capture via two paths:
     - **With SDK**: Reads from the SDK's in-app buffer via `Runtime.evaluate` — captures all requests from startup with full headers and bodies, including cold-start events that CDP would miss
     - **Without SDK**: Enables CDP `Network.enable` (on supported targets) or injects a JS fetch interceptor as fallback. On cold start, events emitted before the CDP connection is established are lost; subsequent reloads capture everything
-5. Stores logs and network requests in circular buffers for retrieval
+5. Response mocking runs in that same injected interceptor: rules are matched before the request reaches the wire, and are re-pushed to every new JS context so they survive a reload
+6. Stores logs and network requests in circular buffers for retrieval
 
 ## Connection Management
 

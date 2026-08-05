@@ -14,6 +14,19 @@ ExecBro ("the Tool"), shipped as the npm package `execbro` (formerly `react-nati
 | **OCR screenshots** | Screenshot image for text recognition | Only when `ocr_screenshot` tool is called | Don't use the tool, or use local fallback |
 | **Tap failure artifacts** | JSON bundle + up to 3 downscaled PNG screenshots | On `tap` failure or unmeaningful tap (`changeRate < 0.1%`) | `RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS=1` |
 | **Installation ID** | Random UUID (not linked to your identity) | With telemetry, registration, and OCR requests | Delete `~/.execbro/` |
+| **Network mock rules** | Nothing — never transmitted | n/a | n/a |
+
+## 0. Network Mock Rules
+
+Rules created by `network_mock` and `network_condition` are authored by you,
+held in the MCP server's memory for the lifetime of the process, and pushed only
+to the app being debugged on your own machine. They are never persisted to disk
+and never transmitted anywhere.
+
+Response bodies you supply, and responses the `tamper` mode reads in order to
+modify them, stay entirely between the server process and your app. They are not
+included in telemetry, which records only tool names, success/failure and
+duration.
 
 ## 1. Anonymous Telemetry
 

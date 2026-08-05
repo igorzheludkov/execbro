@@ -32,6 +32,9 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `search_network`       | Search requests by URL pattern                                |
 | `get_request_details`  | Get full details of a request (headers, body with truncation) |
 | `clear_network`        | Clear the network request buffer                              |
+| `network_mock`         | Replace or tamper with responses (add / list / remove / clear) |
+| `network_condition`    | Simulate offline / slow / normal network                      |
+| `network_replay`       | Re-issue a captured request, with optional overrides          |
 
 ## App Inspection & Execution
 
