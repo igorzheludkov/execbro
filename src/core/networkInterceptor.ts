@@ -2,6 +2,7 @@ import WebSocket from "ws";
 import { NetworkRequest } from "./types.js";
 import { NetworkBuffer } from "./network.js";
 import { getNextMessageId, getEpoch } from "./state.js";
+import { recordHit } from "./mockRules.js";
 
 /** Request bodies are capped before serialization — see REQUEST_BODY_CAP usage. */
 export const REQUEST_BODY_CAP = 8 * 1024;
@@ -840,6 +841,19 @@ export function applyInterceptedEvent(
             existing.url = event.url;
         }
 
+        networkBuffer.set(id, existing);
+    } else if (type === "mock") {
+        // The hit count is server-owned and keyed only by rule id, so it is
+        // recorded even when the request itself is not in this buffer — under
+        // the SDK the buffer is mirrored and carries SDK ids, but the rule
+        // still fired and a silently-zero counter would read as "never matched".
+        if (typeof event.ruleId === "string") recordHit(deviceName, event.ruleId);
+
+        const existing = networkBuffer.get(id);
+        if (!existing) return;
+        existing.mocked = true;
+        if (typeof event.ruleId === "string") existing.mockId = event.ruleId;
+        if (typeof event.warning === "string") existing.mockWarning = event.warning;
         networkBuffer.set(id, existing);
     } else if (type === "body") {
         // Out-of-band response body — RN's fetch polyfill delivers JSON as a

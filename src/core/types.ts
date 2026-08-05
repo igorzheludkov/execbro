@@ -191,6 +191,12 @@ export interface NetworkRequest {
     // interceptor's XHR layer (capped at 32 KB in-app before serialization).
     // The CDP path does not capture response bodies.
     responseBody?: string;
+    // Set when a mock rule replaced or tampered with this response. Rendered on
+    // the row so altered traffic is never mistaken for real traffic — an agent
+    // debugging a phantom is the one failure a mock layer must not cause.
+    mocked?: boolean;
+    mockId?: string;
+    mockWarning?: string;
 }
 
 // Connection state tracking for auto-reconnection
