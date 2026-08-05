@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 59,
+    "count": 60,
     "tools": [
         "activate_license",
         "android_input_text",
@@ -50,6 +50,7 @@
         "logbox",
         "measure",
         "navigate",
+        "network_mock",
         "ocr_screenshot",
         "pinch",
         "redux_dispatch",
@@ -325,6 +326,23 @@
             "params",
             "routeTable",
             "to"
+        ],
+        "network_mock": [
+            "action",
+            "body",
+            "bodyReplace",
+            "delayMs",
+            "device",
+            "headers",
+            "id",
+            "method",
+            "mode",
+            "networkError",
+            "remove",
+            "set",
+            "status",
+            "times",
+            "url"
         ],
         "ocr_screenshot": [
             "deviceId",

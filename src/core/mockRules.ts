@@ -261,11 +261,51 @@ export function serializeRules(device: string): string {
 }
 
 /**
+ * Renders the rule list for `network_mock({action:"list"})`.
+ *
+ * `hits` is the load-bearing column: matching is first-rule-wins, so a broad
+ * rule silently shadows a later specific one, and hits=0 next to a rule the
+ * agent expected to fire is the only visible symptom.
+ */
+export function formatRuleList(device: string): string {
+    const rules = listRules(device);
+    if (rules.length === 0) return "No mock rules active.";
+
+    const lines = rules.map((r) => {
+        const status = r.status ? ` ${r.status}` : "";
+        const times = r.times ? ` (times:${r.times}${r.hits >= r.times ? ", spent" : ""})` : "";
+        const owner = r.source === "condition" ? "  [owned by network_condition]" : "";
+        return `[${r.id}] ${r.method ?? "ANY"} ${r.url || "<any url>"} -> ${r.mode}${status}${times}  hits=${r.hits}${owner}`;
+    });
+
+    return (
+        lines.join("\n") +
+        "\n\nRules match in this order; a rule with hits=0 may be shadowed by one above it."
+    );
+}
+
+/**
  * One-line banner appended to every network read while rules exist, so an agent
  * cannot forget it is looking at altered traffic.
+ *
+ * Omit `device` to cover every device at once — that is what network reads do,
+ * because they merge buffers across devices and their `device` argument is an
+ * unresolved substring filter, not a device name.
  */
-export function activeMockBanner(device: string): string {
-    const n = listRules(device).length;
-    if (n === 0) return "";
-    return `\n\n[${n} mock rule(s) active on ${device} — network_mock({action:"list"}) to inspect, {action:"clear"} to remove]`;
+export function activeMockBanner(device?: string): string {
+    if (device !== undefined) {
+        const n = listRules(device).length;
+        if (n === 0) return "";
+        return `\n\n[${n} mock rule(s) active on ${device} — network_mock({action:"list"}) to inspect, {action:"clear"} to remove]`;
+    }
+
+    const parts: string[] = [];
+    let total = 0;
+    for (const [name, list] of rulesByDevice.entries()) {
+        if (list.length === 0) continue;
+        total += list.length;
+        parts.push(`${list.length} on ${name}`);
+    }
+    if (total === 0) return "";
+    return `\n\n[${total} mock rule(s) active (${parts.join(", ")}) — responses below may be altered. network_mock({action:"list"}) to inspect, {action:"clear"} to remove]`;
 }

@@ -20,7 +20,36 @@ import { isSDKInstalled, clearSDKNetwork } from "../core/sdkBridge.js";
 import { refreshMirror } from "../core/sdkMirrorPoller.js";
 import { withRestartDividers, evictionNotice, resolveEpochFilter } from "../core/epochRender.js";
 import { formatRequest } from "../core/network.js";
+import { pushMockRules } from "../core/networkInterceptor.js";
+import {
+    addRule,
+    removeRule,
+    clearRules,
+    listRules,
+    serializeRules,
+    formatRuleList,
+    activeMockBanner,
+} from "../core/mockRules.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
+
+/**
+ * Resolves the single device a mock rule applies to. Rules are per-device — a
+ * rule added while an iPhone and an emulator are both connected must not fire
+ * on both — so unlike the read tools this one never merges.
+ */
+function resolveMockTarget(device?: string): { ws: import("ws").WebSocket; deviceName: string } {
+    const app = getConnectedAppByDevice(device);
+    if (!app) {
+        throw new UserInputError(
+            "No connected app. Run scan_metro first — mock rules are stored per device and need one to attach to.",
+            "no_devices_connected"
+        );
+    }
+    return {
+        ws: app.ws,
+        deviceName: app.deviceInfo.deviceName || app.deviceInfo.title || "unknown"
+    };
+}
 
 // Network capture has no end-to-end probe equivalent to verifyLogPipeline, so
 // the "connected but nothing captured" verdict is always unverified: a silently
@@ -107,7 +136,7 @@ export function registerNetworkTools(server: McpServer): void {
                     content: [
                         {
                             type: "text",
-                            text: `Network Summary:\n\n${stats}${evictionNotice(buffer.droppedCount, "EXECBRO_NET_BUFFER_SIZE")}${connectionWarning}`
+                            text: `Network Summary:\n\n${stats}${evictionNotice(buffer.droppedCount, "EXECBRO_NET_BUFFER_SIZE")}${connectionWarning}${activeMockBanner()}`
                         }
                     ]
                 };
@@ -182,7 +211,7 @@ export function registerNetworkTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: `Network Requests (${count} entries):\n\n${formatted}${evictionNotice(networkBuffer.droppedCount, "EXECBRO_NET_BUFFER_SIZE")}${gapWarning}${connectionWarning}`
+                        text: `Network Requests (${count} entries):\n\n${formatted}${evictionNotice(networkBuffer.droppedCount, "EXECBRO_NET_BUFFER_SIZE")}${gapWarning}${connectionWarning}${activeMockBanner()}`
                     }
                 ]
             };
@@ -237,7 +266,7 @@ export function registerNetworkTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: `Network search results for "${urlPattern}" (${count} matches):\n\n${formatted}${connectionWarning}`
+                        text: `Network search results for "${urlPattern}" (${count} matches):\n\n${formatted}${connectionWarning}${activeMockBanner()}`
                     }
                 ]
             };
@@ -319,13 +348,150 @@ export function registerNetworkTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: formatRequestDetails(request, { maxBodyLength, verbose })
+                        text: formatRequestDetails(request, { maxBodyLength, verbose }) + activeMockBanner()
                     }
                 ]
             };
         }
     );
     
+    // Tool: Mock network responses
+    registerToolWithTelemetry(
+        server,
+        "network_mock",
+        {
+            description:
+                "Intercept the app's HTTP requests and replace or modify the response.\n" +
+                "PURPOSE: Drive the app down an error path through its REAL code — the request builder, the error branch, the retry, the toast. redux_dispatch writes the post-failure state directly and skips all of it.\n" +
+                "WHEN TO USE: 'what does this screen do on a 500', 'what if this field is null', 'does the retry work'.\n" +
+                "WORKFLOW: network_mock({action:\"add\", url:\"/orders\", status:500}) -> reproduce -> get_network_requests (rows show [MOCK m1]) -> network_mock({action:\"clear\"}).\n" +
+                "MODES: replace returns a canned response; tamper fetches the real one and mutates it (set/remove take dotted paths).\n" +
+                "MATCHING: url is a substring by default; wrap it in slashes for a regex (\"/\\\\/orders\\\\/\\\\d+$/\"). First matching rule wins, so add specific rules before broad ones.\n" +
+                "LIMITATIONS: JS-originated HTTP only — native-module traffic (native SDKs, <Image> loading) is not intercepted. Rules are per-device and survive reload_app; clear them when done.\n" +
+                "GOOD: network_mock({action:\"add\", url:\"/orders\", mode:\"tamper\", remove:[\"data.email\"]})\n" +
+                "BAD: leaving a rule active and then debugging why the app 'always fails' — check network_mock({action:\"list\"}) hit counts first.",
+            inputSchema: {
+                action: z.enum(["add", "list", "remove", "clear"]).describe("What to do."),
+                id: z.string().optional().describe("Rule id, for action=\"remove\"."),
+                url: z.string().optional().describe("URL substring, or /regex/ when slash-wrapped."),
+                method: z.string().optional().describe("Restrict to one HTTP method."),
+                mode: z
+                    .enum(["replace", "tamper"])
+                    .optional()
+                    .default("replace")
+                    .describe("replace = canned response; tamper = mutate the real one."),
+                times: z
+                    .number()
+                    .optional()
+                    .describe("Fire at most N times, then pass through. Use times:1 to test retry logic."),
+                delayMs: z.number().optional().describe("Delay before delivering."),
+                status: z
+                    .number()
+                    .optional()
+                    .describe("Response status. In tamper mode, overrides the real status."),
+                headers: z.record(z.string()).optional().describe("Response headers (replace mode)."),
+                body: z.string().optional().describe("Response body (replace mode)."),
+                networkError: z
+                    .string()
+                    .optional()
+                    .describe("Fail the request instead of responding."),
+                set: z
+                    .record(z.unknown())
+                    .optional()
+                    .describe("tamper: dotted path -> value, e.g. {\"data.user.email\": null}."),
+                remove: z.array(z.string()).optional().describe("tamper: dotted paths to delete."),
+                bodyReplace: z.string().optional().describe("tamper: replace the whole body."),
+                device: z.string().optional().describe(DEVICE_ALL_DESC)
+            }
+        },
+        async (args) => {
+            const { ws, deviceName } = resolveMockTarget(args.device);
+
+            if (args.action === "list") {
+                return {
+                    content: [{ type: "text" as const, text: formatRuleList(deviceName) }]
+                };
+            }
+
+            if (args.action === "remove") {
+                if (!args.id) {
+                    throw new UserInputError(
+                        "action=\"remove\" needs an id. Get it from network_mock({action:\"list\"}).",
+                        "missing_rule_id"
+                    );
+                }
+                const removed = removeRule(deviceName, args.id);
+                pushMockRules(ws, serializeRules(deviceName));
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: removed
+                                ? `Removed ${args.id}. ${listRules(deviceName).length} rule(s) remain on ${deviceName}.`
+                                : `No rule ${args.id} on ${deviceName}. ${formatRuleList(deviceName)}`
+                        }
+                    ]
+                };
+            }
+
+            if (args.action === "clear") {
+                const n = clearRules(deviceName);
+                pushMockRules(ws, serializeRules(deviceName));
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: `Cleared ${n} mock rule(s) on ${deviceName}.`
+                        }
+                    ]
+                };
+            }
+
+            if (!args.url) {
+                throw new UserInputError(
+                    "action=\"add\" needs a url to match on. Use a substring (\"/orders\"), or slash-wrap it for a regex.",
+                    "missing_rule_url"
+                );
+            }
+            const rule = addRule(deviceName, {
+                url: args.url,
+                method: args.method,
+                mode: args.mode ?? "replace",
+                times: args.times,
+                delayMs: args.delayMs,
+                status: args.status,
+                headers: args.headers,
+                body: args.body,
+                networkError: args.networkError,
+                set: args.set,
+                remove: args.remove,
+                bodyReplace: args.bodyReplace,
+                source: "mock"
+            });
+            pushMockRules(ws, serializeRules(deviceName));
+
+            // A rule added behind a broader one never fires, and the only
+            // symptom is hits=0 much later. Say so at the point of the mistake.
+            const shadowedBy = listRules(deviceName).find(
+                (r) => r.id !== rule.id && !r.method && r.url !== "" && rule.url.indexOf(r.url) !== -1
+            );
+            const shadowNote = shadowedBy
+                ? `\nWARNING: [${shadowedBy.id}] matches "${shadowedBy.url}" and is listed first, so it will fire instead. Remove it or reorder.`
+                : "";
+
+            return {
+                content: [
+                    {
+                        type: "text" as const,
+                        text:
+                            `Added [${rule.id}] ${rule.method ?? "ANY"} ${rule.url} -> ${rule.mode} on ${deviceName}. ` +
+                            `Survives reload_app. Clear with network_mock({action:"clear"}).${shadowNote}`
+                    }
+                ]
+            };
+        }
+    );
+
     // Tool: Get network stats
     registerToolWithTelemetry(
         server,
