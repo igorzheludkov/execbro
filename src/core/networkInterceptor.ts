@@ -643,17 +643,30 @@ export function getInterceptorScript(): string {
       });
     } catch(e) {}
 
-    // Phase 2: retry XHR and wrap fetch after module init completes (reliable fallback)
-    setTimeout(function() {
-      try {
-        _patchXHR();
-      } catch(e) {}
+    // Phase 2: retry XHR and wrap fetch after module init completes.
+    //
+    // Bounded retry rather than a single tick. On a cold app launch the CDP
+    // connect can land before the JS bundle has defined XMLHttpRequest, and a
+    // one-shot retry loses that race silently: __RN_NET_XHR_ACTIVE__ stays
+    // false, capture and mocking are dead for the whole run, and because
+    // __RN_NET_INJECTED__ is already set no later injection can repair it.
+    // Observed on a freshly launched Android emulator while iOS, connected
+    // earlier, patched fine — the failure is pure timing and leaves no trace.
+    var _retries = 0;
+    var _retry = function() {
+      var patched = false;
+      try { patched = _patchXHR(); } catch(e) {}
       try {
         if (typeof globalThis.fetch === 'function' && !globalThis.fetch.__rn_net_wrapped__) {
           globalThis.fetch = _wrapFetch(globalThis.fetch);
         }
       } catch(e) {}
-    }, 0);
+      if (patched) return;
+      _retries++;
+      if (_retries >= 40) return;   // ~10s, then give up rather than spin forever
+      try { setTimeout(_retry, 250); } catch(e) {}
+    };
+    setTimeout(_retry, 0);
 
   } catch(e) {} })();`;
 }
