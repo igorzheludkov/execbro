@@ -70,6 +70,8 @@ Production users are unaffected — the default transport remains stdio, and `--
 
 `StreamableHTTPServerTransport` is constructed **per request**, not once at boot. Current SDKs treat the streamable-HTTP transport as single-use: a hoisted instance answers `initialize` and then fails every later request with a bare 500 and no log line, which looks exactly like a dead server. If the dev loop ever starts 500ing after one successful call, check that this is still per-request.
 
+`/mcp` requests are also **serialized** through `createSerialQueue()` (`src/core/serialQueue.ts`). The transport is per-request but `server` is not, and `McpServer.connect()` throws `Already connected to a transport` if a second transport attaches before the first detaches — so two overlapping requests crashed the process outright. A fast request like `initialize` will not reproduce it; you need a slow tool call holding the server across an await with a second request landing mid-flight. Serializing costs nothing in a single-developer hot-reload loop and is why the dev server no longer dies when a client pipelines or fires a notification without awaiting it.
+
 This is a release-channel gate, not a security boundary — `build/*.js` is editable. It exists so ordinary users cannot expose the dev surface by accident.
 
 ### Dev Tool (`dev`)

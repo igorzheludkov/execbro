@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpServer, type ServerResponse } from "node:http";
 
 import { DECISION_TREE } from "./core/guides.js";
 import { identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
@@ -18,6 +18,7 @@ import {
 } from "./core/index.js";
 import { installToolRegistryInterceptor, toolRegistry } from "./core/register.js";
 import { isPublishedBuild } from "./core/buildInfo.js";
+import { createSerialQueue } from "./core/serialQueue.js";
 
 import { registerAccountTools } from "./tools/accountTools.js";
 import { registerMetaTools } from "./tools/metaTools.js";
@@ -81,6 +82,25 @@ registerScreenshotTools(server);
 registerInteractionTools(server);
 registerComponentTools(server);
 
+// How long a serialized /mcp request may wait for its response to drain before
+// the queue moves on regardless. Only reached when the SDK leaves the stream
+// open after handleRequest resolves — normally this settles immediately.
+const RESPONSE_DRAIN_TIMEOUT_MS = 30_000;
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        // Never hold the process open for a drain timer.
+        timer.unref?.();
+    });
+}
+
+/** Resolves once the response socket is closed. Already-closed resolves now. */
+function responseClosed(res: ServerResponse): Promise<void> {
+    if (res.closed) return Promise.resolve();
+    return new Promise((resolve) => res.once("close", () => resolve()));
+}
+
 async function main() {
     initTelemetry();
     identifyIfDevMode(getInstallationId());
@@ -103,6 +123,9 @@ async function main() {
 
     const httpPort = parseInt(process.env.MCP_HTTP_PORT || "8600", 10);
 
+    // Only one /mcp request may hold the shared McpServer at a time.
+    const mcpQueue = createSerialQueue();
+
     if (httpAllowed) {
         // HTTP transport mode — stateless for dev hot-reload
         // Stateless = no session IDs, so server restarts don't break Claude Code's connection
@@ -110,22 +133,58 @@ async function main() {
             const url = new URL(req.url || "", `http://localhost:${httpPort}`);
 
             if (url.pathname === "/mcp") {
-                // A transport PER REQUEST, not one for the process lifetime.
-                // The streamable-HTTP transport is single-use in current SDKs:
-                // a hoisted instance answers the first request and then fails
-                // every later one with a 500 and no log line. Verified against
-                // @modelcontextprotocol/sdk 1.30.0 — initialize succeeded,
-                // every subsequent call 500'd until the process restarted.
-                const transport = new StreamableHTTPServerTransport({
-                    sessionIdGenerator: undefined,
-                });
-                res.on("close", () => {
-                    void Promise.resolve(transport.close()).catch(() => {
-                        /* connection already gone */
+                // Serialized: the transport is per-request but `server` is not,
+                // and McpServer.connect() throws "Already connected to a
+                // transport" if a second transport attaches before the first
+                // detaches. Two overlapping /mcp requests used to crash the
+                // process. Clients that issue one request at a time never
+                // noticed; a client that pipelines (or fires a notification
+                // without awaiting it) hit it immediately.
+                await mcpQueue
+                    .run(async () => {
+                        // A transport PER REQUEST, not one for the process
+                        // lifetime. The streamable-HTTP transport is single-use
+                        // in current SDKs: a hoisted instance answers the first
+                        // request and then fails every later one with a 500 and
+                        // no log line. Verified against
+                        // @modelcontextprotocol/sdk 1.30.0 — initialize
+                        // succeeded, every subsequent call 500'd until the
+                        // process restarted.
+                        const transport = new StreamableHTTPServerTransport({
+                            sessionIdGenerator: undefined,
+                        });
+                        // Registered before handleRequest so a client that
+                        // disconnects mid-response cannot be missed.
+                        const closed = responseClosed(res);
+                        try {
+                            await server.connect(transport);
+                            await transport.handleRequest(req, res);
+                            // Detaching while the SDK is still streaming would
+                            // truncate the reply, so wait for the response to
+                            // finish — but bounded, because a tool that never
+                            // answers must not wedge every later request.
+                            await Promise.race([closed, delay(RESPONSE_DRAIN_TIMEOUT_MS)]);
+                        } finally {
+                            await Promise.resolve(transport.close()).catch(() => {
+                                /* connection already gone */
+                            });
+                        }
+                    })
+                    .catch((err: unknown) => {
+                        console.error(`[execbro] /mcp request failed: ${String(err)}`);
+                        if (!res.headersSent) {
+                            res.writeHead(500, { "Content-Type": "application/json" });
+                            res.end(
+                                JSON.stringify({
+                                    jsonrpc: "2.0",
+                                    error: { code: -32603, message: "Internal server error" },
+                                    id: null,
+                                })
+                            );
+                        } else if (!res.writableEnded) {
+                            res.end();
+                        }
                     });
-                });
-                await server.connect(transport);
-                await transport.handleRequest(req, res);
                 return;
             }
 
