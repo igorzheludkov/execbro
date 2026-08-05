@@ -1,5 +1,7 @@
 # ExecBro
 
+[![MCP Toplist](https://mcptoplist.com/badge/com.execbro%2Fexecbro.svg)](https://mcptoplist.com/server/com.execbro%2Fexecbro)
+
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-com.execbro%2Fexecbro-6E56CF)](https://registry.modelcontextprotocol.io/?q=com.execbro%2Fexecbro)
 
 **Give your AI assistant eyes and hands into your running React Native app.** Like Chrome DevTools — but for AI agents.
