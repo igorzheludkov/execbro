@@ -2,7 +2,8 @@ import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
 import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
-import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
+import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules } from "./networkInterceptor.js";
+import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
 import { getAdbIdForAvd } from "./android.js";
@@ -947,6 +948,12 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             const ctxApp = connectedApps.get(appKey);
             if (ctxApp?.ws?.readyState === WebSocket.OPEN) {
                 injectNetworkInterceptor(ctxApp.ws);
+                // Re-apply mock rules to the new JS context. The server is
+                // authoritative; without this every reload_app would silently
+                // drop the agent's mocks — precisely when reproducing a
+                // startup-path bug. Ordered after the injection because the
+                // interceptor initialises the list it writes into.
+                pushMockRules(ctxApp.ws, serializeRules(device.deviceName || device.title || "unknown"));
                 const nEnableId = sendNetworkEnable(ctxApp.ws);
                 pendingNetworkEnableIds.add(nEnableId);
                 // The context was just recreated (e.g. reload). Re-probe the SDK
@@ -1223,6 +1230,11 @@ export async function connectToDevice(
 
             // Inject JS network interceptor (immediate capture, may fail if context not ready)
             injectNetworkInterceptor(ws);
+            // Rules for this device may already exist — from a previous session
+            // of the same server process, or a reconnect after the app was
+            // killed. Runtime.executionContextCreated is not guaranteed to
+            // follow a connect, so this cannot rely on the re-push alone.
+            pushMockRules(ws, serializeRules(device.deviceName || device.title || "unknown"));
 
             // Route history accrues from connect, so the first includeHistory read
             // is not an empty trail. Non-fatal by contract: a failure here just

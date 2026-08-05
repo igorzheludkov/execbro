@@ -96,6 +96,8 @@ export interface MockHarness {
     /** The most recently constructed XHR — the shadow, during a tamper. */
     lastXhr: () => FakeXHR;
     push: (rules: unknown[]) => void;
+    /** Re-runs the interceptor script, as a new execution context would. */
+    reinject: () => void;
 }
 
 export function runWithMocks(rules: unknown[]): MockHarness {
@@ -136,5 +138,9 @@ export function runWithMocks(rules: unknown[]): MockHarness {
                 buildMockPushScript(JSON.stringify(next)),
                 sandbox as unknown as vm.Context
             ),
+        reinject: () => {
+            vm.runInContext(getInterceptorScript(), sandbox as unknown as vm.Context);
+            timers.splice(0).forEach((f) => f());
+        },
     };
 }
