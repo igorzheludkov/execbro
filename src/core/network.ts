@@ -231,7 +231,7 @@ export function formatRequestDetails(
         }
     }
 
-    // Response body (SDK mirror only — CDP and the JS interceptor do not capture it)
+    // Response body (SDK mirror and the JS interceptor's XHR layer — CDP does not capture it)
     if (request.responseBody) {
         lines.push("\n--- Response Body ---");
         let body = request.responseBody;

@@ -172,8 +172,9 @@ export interface NetworkRequest {
     completed: boolean;
     // See LogEntry.epoch.
     epoch: number;
-    // Response payload. Only populated by the SDK mirror — the CDP and JS
-    // interceptor paths do not capture response bodies.
+    // Response payload. Populated by the SDK mirror and by the injected JS
+    // interceptor's XHR layer (capped at 32 KB in-app before serialization).
+    // The CDP path does not capture response bodies.
     responseBody?: string;
 }
 

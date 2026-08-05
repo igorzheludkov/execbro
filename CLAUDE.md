@@ -100,7 +100,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 5. **Network Tracking**: Three capture strategies (auto-selected):
    - **SDK mode** (best): If `execbro-sdk` is installed in the app, its in-app buffer is *mirrored* into the server-side buffer every 3-10s via `Runtime.evaluate` (see `sdkMirrorPoller` below). Captures all requests from startup with full headers and bodies. Reads go through the server buffer, not a live query, so data survives an app restart.
    - **CDP mode**: `Network.enable` CDP domain — works on RN 0.73-0.75 (Hermes + Bridge) and future RN 0.83+. Not supported on Bridgeless targets (Expo SDK 52-54).
-   - **JS interceptor fallback**: Injects a fetch patch via `Runtime.evaluate` on Bridgeless targets. May miss early startup requests due to injection timing.
+   - **JS interceptor fallback**: Injects an `XMLHttpRequest` + `fetch` patch via `Runtime.evaluate` on Bridgeless targets. XHR is the source of truth (RN's `fetch` is a polyfill on top of it, so reporting from both layers would double-count every request); the fetch wrapper reports only in a JS context with no `XMLHttpRequest`. Captures request headers, request body, response headers, response body, content type and post-redirect URL, with bodies capped in-app at 8 KB / 32 KB. May miss early startup requests due to injection timing.
 6. **Code Execution**: Uses `Runtime.evaluate` CDP method for REPL-style JavaScript execution
 
 ### Key Components
