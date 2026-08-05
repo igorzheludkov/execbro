@@ -8,7 +8,7 @@ This repository includes pre-built [Claude Code skills](https://docs.anthropic.c
 | ----- | ----------- |
 | `session-setup` | Bootstrap a debugging session: discover devices, boot simulators, connect to Metro |
 | `debug-logs` | Capture, filter, and analyze console logs to find errors and warnings |
-| `network-inspect` | Monitor and inspect HTTP requests, filter by status/method, and analyze failures |
+| `network-inspect` | Monitor and inspect HTTP requests, filter by status/method, analyze failures — and mock, delay or replay responses to reach error paths |
 | `app-state` | Inspect Redux/Apollo/context state, navigate the app, and execute code in the runtime |
 | `component-inspect` | Inspect React component tree, props, state, and layout |
 | `layout-check` | Verify UI layout against design specs using screenshots and component data |

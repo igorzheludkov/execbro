@@ -128,6 +128,8 @@ By Domain:
 
 ## Changing responses
 
+> Prefer worked examples? See the [Network Mocking tutorial](network-mocking.md).
+
 Inspection tells you what the app asked for. These three tools change what it
 gets back, so an error branch is reached through the app's real code — the
 request builder, the error handler, the retry, the toast — instead of being

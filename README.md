@@ -33,7 +33,7 @@ Linking your installation here is also **required to unlock [ExecBro Pro](#prici
 
 - **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. Note: on a cold start (first app launch), logs emitted before the MCP server connects are missed — subsequent reloads capture everything. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) to buffer logs from the very first line of app startup
 - **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Like logs, early network requests on cold start may be missed before the connection is established. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for full capture from app startup including request/response bodies
-- **Response Mocking** - Replace or tamper with HTTP responses so error paths are reached through the app's real code — the request builder, the error branch, the retry — instead of being faked by writing state directly. Simulate offline, delay responses, fail only the first attempt to test a retry, or re-issue a captured request with one field changed. Rules survive reload, and altered traffic is always tagged
+- **Response Mocking** - Replace or tamper with HTTP responses so error paths are reached through the app's real code — the request builder, the error branch, the retry — instead of being faked by writing state directly. Simulate offline, delay responses, fail only the first attempt to test a retry, or re-issue a captured request with one field changed. Rules survive reload, and altered traffic is always tagged. See the [mocking tutorial](docs/network-mocking.md)
 - **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
 - **Global State Debugging** - Discover and inspect Apollo Client, Redux stores, Expo Router, and custom globals. Wire stores and other app internals straight into the agent with the optional [SDK](#install-the-sdk-recommended) for direct, reliable state access
 - **Bundle Error Detection** - Get Metro bundler errors and compilation issues with file locations
@@ -162,6 +162,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | [SDK Setup](docs/sdk.md)                                   | Install & `init()` the in-app SDK to wire stores + network layer into the agent |
 | [Console Logging](docs/logging.md)                         | `get_logs` parameters, filtering, summary mode, token optimization              |
 | [Network Tracking](docs/network.md)                        | SDK setup for full capture, filtering, request details, statistics              |
+| [Network Mocking](docs/network-mocking.md)                 | Tutorial: force a 500, drop a field, test a retry, go offline, replay a request |
 | [App Inspection](docs/app-inspection.md)                   | Debug globals (Apollo, Redux, Expo Router), `execute_in_app`, limitations       |
 | [Layout & Component Inspection](docs/layout-inspection.md) | `get_screen_layout`, component tree, `inspect_at_point`, `find_components`      |
 | [Device Interaction](docs/device-interaction.md)           | Unified `tap`, platform-specific gestures, text input, key events               |
