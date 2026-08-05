@@ -134,7 +134,7 @@ describe("symbolicateFrames", () => {
             json: async () => ({ stack: [{ file: "/x/a.tsx", lineNumber: 1, column: 2, methodName: "A" }] }),
         });
         const out = await symbolicateFrames([{ file: BUNDLE, lineNumber: 1, column: 2, methodName: "A" }]);
-        expect(out![0].collapse).toBe(false);
+        expect(out![0]!.collapse).toBe(false);
     });
 
     it("serves a repeated frame from cache without a second fetch", async () => {
@@ -150,7 +150,52 @@ describe("symbolicateFrames", () => {
         const second = await symbolicateFrames([frame]);
 
         expect((globalThis.fetch as any).mock.calls.length).toBe(1);
-        expect(second![0].file).toBe("/x/src/Home.tsx");
+        expect(second![0]!.file).toBe("/x/src/Home.tsx");
+    });
+
+    // The log path pairs frame N of the output with frame N of the input. An
+    // earlier version filtered nulls out, which silently shortened the array
+    // and mismapped every frame after the first unresolved one.
+    it("keeps the result index-aligned when Metro resolves only some frames", async () => {
+        (globalThis.fetch as any).mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                stack: [
+                    { file: "/x/src/A.tsx", lineNumber: 1, column: 1, methodName: "A", collapse: true },
+                    null,
+                    { file: "/x/src/C.tsx", lineNumber: 3, column: 3, methodName: "C", collapse: false },
+                ],
+            }),
+        });
+
+        const out = await symbolicateFrames([
+            { file: BUNDLE, lineNumber: 10, column: 1, methodName: "A" },
+            { file: BUNDLE, lineNumber: 20, column: 2, methodName: "B" },
+            { file: BUNDLE, lineNumber: 30, column: 3, methodName: "C" },
+        ]);
+
+        expect(out).toHaveLength(3);
+        expect(out![0]!.file).toBe("/x/src/A.tsx");
+        expect(out![1]).toBeNull();
+        expect(out![2]!.file).toBe("/x/src/C.tsx");
+    });
+
+    it("pads with nulls when Metro returns a shorter stack than requested", async () => {
+        (globalThis.fetch as any).mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                stack: [{ file: "/x/src/A.tsx", lineNumber: 1, column: 1, methodName: "A", collapse: false }],
+            }),
+        });
+
+        const out = await symbolicateFrames([
+            { file: BUNDLE, lineNumber: 10, column: 1, methodName: "A" },
+            { file: BUNDLE, lineNumber: 20, column: 2, methodName: "B" },
+        ]);
+
+        expect(out).toHaveLength(2);
+        expect(out![0]!.file).toBe("/x/src/A.tsx");
+        expect(out![1]).toBeNull();
     });
 
     it("returns null when Metro is unreachable", async () => {

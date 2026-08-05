@@ -310,7 +310,9 @@ export async function resolveStacksToSource(stacks: RawComponentStack[]): Promis
 
     resolved.forEach((frame, i) => {
         const component = needsSymbolication[i]?.component;
-        if (!component || frame.collapse) return;
+        // `frame` is null when Metro could not resolve that offset — the array
+        // stays index-aligned with the input rather than dropping entries.
+        if (!component || !frame || frame.collapse) return;
         ancestors.push({ component, file: frame.file, line: frame.lineNumber });
         if (!best) {
             best = { file: frame.file, line: frame.lineNumber, column: frame.column };

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { LogLevel } from "./types.js";
+import type { CDPStackFrame, LogLevel } from "./types.js";
 
 /**
  * Real severity levels, ordered. Excludes the "all" sentinel that LogLevel
@@ -47,6 +47,12 @@ export interface LogEvent {
     byteSize: number;
     fingerprint: string;
     lines: RawLogLine[];
+    /**
+     * Raw CDP frames, JS events only. Resolved to source locations lazily by
+     * logSymbolication.ts at render time — never at capture, and never inside
+     * a formatter (symbolication is a network call to Metro).
+     */
+    stackTrace?: CDPStackFrame[];
 }
 
 /** An event before the buffer assigns it an id. */

@@ -29,6 +29,8 @@ import type { LogEntry } from "../core/types.js";
 import { findLogEvent, nativeLogBuffers, getNativeLogBuffer, type LogEvent } from "../core/logEvents.js";
 import { jsEventsFromEntries } from "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
+import { resolveListStacks, resolveFullStack } from "../core/logSymbolication.js";
+import type { SymbolicatedFrame } from "../core/symbolicate.js";
 import { collectNativeEvents, deviceKeyOf } from "../core/nativeLogs.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 
@@ -43,7 +45,12 @@ import { DEVICE_ALL_DESC } from "./_deviceArg.js";
 function renderWithRestartDividers(
     events: LogEvent[],
     entries: LogEntry[],
-    options: { showDevice: boolean; maxLength: number; verbose: boolean }
+    options: {
+        showDevice: boolean;
+        maxLength: number;
+        verbose: boolean;
+        frames?: Map<string, SymbolicatedFrame>;
+    }
 ): string {
     if (events.length === 0) return formatEventList(events, options);
 
@@ -449,11 +456,19 @@ export function registerLogTools(server: McpServer): void {
 
             const jsEvents = jsEventsFromEntries(logs, device ?? "all devices");
             const jsFiltered = kind ? jsEvents.filter((e) => e.kind === kind) : jsEvents;
+            // Resolved before formatting: symbolication is a network call to
+            // Metro, and a formatter must stay synchronous. Degrades to an
+            // empty map on any failure, which renders exactly as today.
+            const { byEventId, overBudget } = await resolveListStacks(jsFiltered);
             const jsRendered = renderWithRestartDividers(jsFiltered, logs, {
                 showDevice: logBuffers.size > 1,
                 maxLength: maxMessageLength,
-                verbose
+                verbose,
+                frames: byEventId
             });
+            const budgetNote = overBudget > 0
+                ? `\n\n[${overBudget} more stack${overBudget === 1 ? "" : "s"} unsymbolicated — use get_log_details]`
+                : "";
 
             return {
                 _emptyResult: bufferEmpty,
@@ -461,7 +476,7 @@ export function registerLogTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: `${nativePrefix}React Native Console Logs (${jsFiltered.length} entries)${startNote}:\n\n${jsRendered}${evictionNotice(logBuffer.droppedCount, "EXECBRO_LOG_BUFFER_SIZE")}${gapWarning}${connectionWarning}`
+                        text: `${nativePrefix}React Native Console Logs (${jsFiltered.length} entries)${startNote}:\n\n${jsRendered}${budgetNote}${evictionNotice(logBuffer.droppedCount, "EXECBRO_LOG_BUFFER_SIZE")}${gapWarning}${connectionWarning}`
                     }
                 ]
             };
@@ -626,8 +641,17 @@ export function registerLogTools(server: McpServer): void {
                     `and are valid until that device's buffer rolls over or clear_logs runs. Call get_logs again to refresh them.`
                 );
             }
+            // Full stack, resolved on demand. Empty when the event carries no
+            // frames or Metro is unreachable — never an error.
+            const stackLines = await resolveFullStack(event);
+            const stackBlock = stackLines.length > 0
+                ? `\n\n--- Source Stack ---\n${stackLines.join("\n")}\n(\u2192 your code \u00b7 \u00b7 framework internals)`
+                : "";
             return {
-                content: [{ type: "text" as const, text: formatEventDetails(event, { maxLength, verbose }) }]
+                content: [{
+                    type: "text" as const,
+                    text: formatEventDetails(event, { maxLength, verbose }) + stackBlock
+                }]
             };
         }
     );

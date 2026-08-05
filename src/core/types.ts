@@ -14,6 +14,21 @@ export interface LogEntry {
     // JS runtime is detected (app restart / reload), which is what lets readers
     // draw a restart boundary and keeps ids from colliding across runs.
     epoch: number;
+    // Raw CDP frames, stored unresolved. Symbolication is a network call to
+    // Metro, so it happens lazily at read time — the capture path must never
+    // block or fail on it. Only kept for warn/error/fatal (see logStack.ts).
+    stackTrace?: CDPStackFrame[];
+}
+
+// One frame of a CDP `stackTrace.callFrames` array. Line and column are
+// 0-based here, unlike the 1-based frames parseStackString() produces from JS
+// stack strings — see toStackFrames() in logStack.ts.
+export interface CDPStackFrame {
+    functionName?: string;
+    scriptId?: string;
+    url?: string;
+    lineNumber: number;
+    columnNumber: number;
 }
 
 // Device info from /json endpoint

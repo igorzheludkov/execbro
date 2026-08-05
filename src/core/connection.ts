@@ -4,6 +4,7 @@ import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNe
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent } from "./networkInterceptor.js";
 import { findSimulatorByName } from "./ios.js";
+import { captureStack } from "./logStack.js";
 import { getAdbIdForAvd } from "./android.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
@@ -732,11 +733,15 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             type?: string;
             args?: Array<CDPConsoleArg>;
             timestamp?: number;
+            stackTrace?: unknown;
         };
 
         const type = params.type || "log";
         const level = mapConsoleType(type);
         const args = params.args || [];
+        // Stored raw and resolved lazily at read time — symbolication is a
+        // network call to Metro and must never block or fail log capture.
+        const stackTrace = captureStack(level, params.stackTrace);
 
         // Check for network interceptor events before processing as logs
         const interceptorJson = isInterceptorEvent(args);
@@ -762,7 +767,8 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                     timestamp: new Date(),
                     level,
                     message: messageText || "[console call with empty resolution]",
-                    args: args.map((a) => a.value)
+                    args: args.map((a) => a.value),
+                    stackTrace
                 });
             }).catch(() => {
                 // Fallback to sync formatting on error
@@ -771,7 +777,8 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                     timestamp: new Date(),
                     level,
                     message: messageText || "[console call with unresolvable args]",
-                    args: args.map((a) => a.value)
+                    args: args.map((a) => a.value),
+                    stackTrace
                 });
             });
         } else {
@@ -781,7 +788,8 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                     timestamp: new Date(),
                     level,
                     message: messageText,
-                    args: args.map((a) => a.value)
+                    args: args.map((a) => a.value),
+                    stackTrace
                 });
             }
         }

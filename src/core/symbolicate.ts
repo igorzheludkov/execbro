@@ -48,9 +48,18 @@ export function parseStackString(stack: string, limit = 5): StackFrame[] {
     return out;
 }
 
-export function firstUserFrame(frames: SymbolicatedFrame[]): SymbolicatedFrame | null {
+/**
+ * The topmost frame Metro did not mark `collapse`. On React Native every
+ * console stack starts with four RN/React internals (the console polyfill,
+ * react-devtools' overrideMethod, ExceptionsManager's reactConsoleErrorHandler,
+ * setUpDeveloperTools) — measured 2026-08-05 — so this is what turns a stack
+ * into the one line an agent actually wants. Unresolved frames are skipped.
+ */
+export function firstUserFrame(
+    frames: (SymbolicatedFrame | null)[]
+): SymbolicatedFrame | null {
     for (const frame of frames) {
-        if (!frame.collapse) return frame;
+        if (frame && !frame.collapse) return frame;
     }
     return null;
 }
@@ -71,10 +80,21 @@ function symbolicateEndpoint(file: string): string {
     }
 }
 
+/**
+ * Resolves bundle offsets to source locations via Metro.
+ *
+ * The result is **index-aligned with the input**: it always has `frames.length`
+ * entries, and an entry Metro could not resolve is `null` rather than omitted.
+ * Callers that only want the first user frame can ignore the nulls; callers
+ * that pair frame N of the output with frame N of the input depend on it.
+ *
+ * Returns `null` (not an array) when the symbolicator itself is unreachable,
+ * which callers must treat as "render raw", never as an error.
+ */
 export async function symbolicateFrames(
     frames: StackFrame[],
     timeoutMs = 10000
-): Promise<SymbolicatedFrame[] | null> {
+): Promise<(SymbolicatedFrame | null)[] | null> {
     if (frames.length === 0) return [];
 
     const results: (SymbolicatedFrame | null)[] = frames.map((f) => cache.get(cacheKey(f)) ?? null);
@@ -83,7 +103,7 @@ export async function symbolicateFrames(
         if (r === null) missingIndexes.push(i);
     });
 
-    if (missingIndexes.length === 0) return results as SymbolicatedFrame[];
+    if (missingIndexes.length === 0) return results;
 
     const endpoint = symbolicateEndpoint(frames[missingIndexes[0]].file);
     const payload = {
@@ -126,7 +146,9 @@ export async function symbolicateFrames(
             cache.set(cacheKey(frames[target]), resolved);
         });
 
-        return results.filter((r): r is SymbolicatedFrame => r !== null);
+        // Deliberately NOT filtered: dropping unresolved frames would shorten
+        // the array and destroy index alignment with the input.
+        return results;
     } catch {
         return null;
     } finally {

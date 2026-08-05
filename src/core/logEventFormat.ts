@@ -1,4 +1,6 @@
 import type { LogEvent } from "./logEvents.js";
+import { formatFrame } from "./logSymbolication.js";
+import type { SymbolicatedFrame } from "./symbolicate.js";
 
 /** Only worth showing when the payload is big enough to matter. */
 const SIZE_HINT_THRESHOLD = 4096;
@@ -19,6 +21,12 @@ export interface RowOptions {
     /** Truncation budget for message-kind rows. 0 or verbose disables it. */
     maxLength?: number;
     verbose?: boolean;
+    /**
+     * event id -> first user frame, resolved by logSymbolication.ts before
+     * formatting. Symbolication is a network call, so it cannot happen inside
+     * a synchronous formatter. Absent entries simply render no suffix.
+     */
+    frames?: Map<string, SymbolicatedFrame>;
 }
 
 /**
@@ -58,7 +66,14 @@ export function formatEventRow(event: LogEvent, opts: RowOptions): string {
         ? messageBody(event, opts)
         : event.title + frameHint(event) + sizeHint(event.byteSize);
     cols.push(text);
-    return cols.join("  ");
+    const row = cols.join("  ");
+
+    const frame = opts.frames?.get(event.id);
+    if (!frame) return row;
+    // Indented continuation line: the message above says what broke, this says
+    // where. Aligning under the text column would break on variable-width
+    // device/owner columns, so it is a fixed indent.
+    return `${row}\n       \u21b3 ${formatFrame(frame)}`;
 }
 
 export function formatEventList(events: LogEvent[], opts: RowOptions): string {
