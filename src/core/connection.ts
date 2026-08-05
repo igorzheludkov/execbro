@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
 import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
-import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules } from "./networkInterceptor.js";
+import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent } from "./networkInterceptor.js";
 import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
@@ -752,7 +752,14 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             // Skip when CDP Network domain is the source, OR when the in-app
             // SDK is the source — both would otherwise produce duplicate
             // entries for every request.
-            if (!iApp?.cdpNetworkSupported && !iApp?.sdkPresent) {
+            //
+            // Mock events are exempt: neither of those layers knows the mock
+            // layer exists, so a mock event is never a duplicate. Dropping it
+            // pegged every rule's hit count at zero whenever the SDK was
+            // installed, which reads as "the rule never matched" — the exact
+            // opposite of what had happened.
+            const suppressed = iApp?.cdpNetworkSupported || iApp?.sdkPresent;
+            if (!suppressed || isMockEvent(interceptorJson)) {
                 applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName), deviceName);
             }
             return;

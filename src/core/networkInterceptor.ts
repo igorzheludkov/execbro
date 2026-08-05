@@ -765,6 +765,24 @@ export function isInterceptorEvent(
 }
 
 /**
+ * True for the `type:'mock'` event the interceptor emits when a rule fires.
+ *
+ * Callers use this to exempt mock events from the CDP/SDK dedupe gate. That
+ * gate exists because two capture layers would report the same request twice —
+ * but neither the CDP Network domain nor the in-app SDK knows the mock layer
+ * exists, so a mock event is never a duplicate of anything. Dropping it pegs
+ * every hit counter at zero and leaves altered traffic unmarked.
+ */
+export function isMockEvent(jsonStr: string): boolean {
+    try {
+        const parsed = JSON.parse(jsonStr) as { type?: unknown };
+        return parsed?.type === "mock";
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Coerces a parsed JSON value into a header map. The interceptor builds these
  * from app-controlled input, so a non-object or a non-string value is dropped
  * rather than trusted.
