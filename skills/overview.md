@@ -8,7 +8,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 |---|---|---|
 | `/session-setup` | Bootstrap debugger connection | Starting a session, booting a simulator, connecting to Metro |
 | `/debug-logs` | Read console logs | Checking errors, warnings, tracing runtime behavior |
-| `/network-inspect` | Inspect HTTP requests | Debugging API calls, auth issues, failed/slow requests |
+| `/network-inspect` | Inspect HTTP requests, and change what comes back | Debugging API calls, auth issues, failed/slow requests; forcing an error path with a mocked response |
 | `/app-state` | Inspect runtime state | Reading Redux store, executing JS, checking globals |
 | `/component-inspect` | Inspect component tree | Exploring hierarchy, props, state, hooks of components |
 | `/layout-check` | Read screen state + capture screenshots | Verifying UI changes, comparing across devices/Figma |
@@ -22,7 +22,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 
 **"Something is wrong, I need to investigate"**
 - See console output → `/debug-logs`
-- See network activity → `/network-inspect`
+- See network activity, or mock/replay a response → `/network-inspect`
 - See app/Redux state → `/app-state`
 - See component tree/props → `/component-inspect`
 - See the screen (route, elements, or a screenshot) → `/layout-check`

@@ -125,3 +125,97 @@ By Domain:
   api.example.com: 40
   cdn.example.com: 7
 ```
+
+## Changing responses
+
+Inspection tells you what the app asked for. These three tools change what it
+gets back, so an error branch is reached through the app's real code — the
+request builder, the error handler, the retry, the toast — instead of being
+faked by writing the post-failure state directly.
+
+### `network_mock`
+
+```
+network_mock({action:"add", url:"/orders", status:500})
+network_mock({action:"add", url:"/me", mode:"tamper", remove:["data.email"]})
+network_mock({action:"list"})
+network_mock({action:"clear"})
+```
+
+- **`replace`** returns a canned response and the app's request never reaches
+  the wire. Set `status`, `body`, `headers`, or `networkError` to fail it
+  outright.
+- **`tamper`** fetches the real response on a separate request and mutates it
+  before the app sees it. `set` and `remove` take dotted paths
+  (`{"data.user.email": null}`, `["data.email"]`); `bodyReplace` swaps the whole
+  body; `status` overrides the real status. A response that is not JSON passes
+  through untouched with a warning rather than being mangled.
+- **`url`** is a substring by default. Wrap it in slashes for a regex
+  (`"/\\/orders\\/\\d+$/"`). Patterns are validated server-side and a
+  catastrophically-backtracking one is rejected, because it would run inside
+  the app's JS thread and freeze it.
+- **`times: 1`** fires once and then passes through — how you test retry logic.
+- **`delayMs`** delays delivery.
+
+Matching is **first-rule-wins**, so add specific rules before broad ones.
+`network_mock({action:"list"})` shows a hit count per rule; a rule with `hits=0`
+that you expected to fire is almost always shadowed by a broader one above it.
+
+### `network_condition`
+
+```
+network_condition({mode:"offline"})
+network_condition({mode:"slow", latencyMs:3000})
+network_condition({mode:"normal"})
+```
+
+`offline` fails every JS-originated request; `slow` delays them; `normal`
+clears. It owns exactly one rule per device and replaces it on each call, so it
+never disturbs rules you added with `network_mock`.
+
+`offline` also tries to patch NetInfo, because many apps gate their offline UI
+on `useNetInfo()` rather than on a failed request. The script verifies itself
+and reports `patched`, `reads-patched-only`, `not-installed`, or `unknown` — it
+never claims to have patched something it did not. Request failure works
+regardless of the outcome.
+
+### `network_replay`
+
+```
+network_replay({requestId:"js-x1-7"})
+network_replay({requestId:"js-x1-7", body:"{\"qty\":99}"})
+```
+
+Re-issues a request the app already made, so you can vary one field at a time
+without driving the UI back to the screen that made it. Ids come from
+`get_network_requests`. Overrides replace rather than merge, headers included,
+so a header on the original can be dropped.
+
+It goes through the app's own network stack — the same TLS trust, proxy config
+and credentials as the original — which also means an active mock rule
+intercepts the replay. That is correct, and the response says so when it
+happens.
+
+### Mocks are never invisible
+
+Altered traffic that looks real is the one failure this feature must not cause.
+
+- Mocked rows are tagged `[MOCK m1]`; `get_request_details` names the rule and
+  any tamper warning.
+- Every network read carries a banner while any rule is active, listing the
+  count per device. This is what covers the case where the SDK is installed:
+  the SDK captures rows under its own ids, so individual rows are not tagged,
+  but the banner and the hit counts still are.
+
+### Limits
+
+- **JS-originated HTTP only.** Traffic from native modules — native SDKs,
+  `<Image>` loading, anything that never touches `XMLHttpRequest` — is not
+  intercepted.
+- **Rules are per-device.** A rule added while an iPhone and an emulator are
+  both connected fires only on the one it was added to.
+- **Rules survive `reload_app`.** They live server-side and are re-pushed to
+  every new JS context, which is the point — a mock that vanished on reload
+  would be useless for startup-path bugs. Clear them when you are done.
+- A JS context created before an execbro upgrade keeps the interceptor it
+  started with. If mocking silently does nothing after an upgrade, `reload_app`.

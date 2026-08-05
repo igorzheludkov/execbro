@@ -2,6 +2,15 @@ export interface AppRequestOptions {
     method: string;
     url: string;
     body?: unknown;
+    /**
+     * A body that is already a wire string, sent verbatim.
+     *
+     * `body` is JSON-serialised, which is right for a caller describing a
+     * payload but wrong for a captured one: network_replay's postData is
+     * already encoded, and re-encoding it would send the string "{...}" wrapped
+     * in quotes — a valid request that means something else. Wins over `body`.
+     */
+    rawBody?: string;
     headers?: Record<string, string>;
     auth?: "auto" | "none";
 }
@@ -22,8 +31,12 @@ export function buildRequestExpression(opts: AppRequestOptions): string {
     const method = JSON.stringify(opts.method.toUpperCase());
     const url = JSON.stringify(opts.url);
     const extraHeaders = JSON.stringify(opts.headers ?? {});
-    const hasBody = opts.body !== undefined;
-    const bodyJson = hasBody ? JSON.stringify(JSON.stringify(opts.body)) : "null";
+    const bodyJson =
+        opts.rawBody !== undefined
+            ? JSON.stringify(opts.rawBody)
+            : opts.body !== undefined
+              ? JSON.stringify(JSON.stringify(opts.body))
+              : "null";
     const wantsAuth = (opts.auth ?? "auto") === "auto";
 
     // Token lookup covers the shapes seen in the corpus. `state` comes from the

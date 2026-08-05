@@ -153,6 +153,12 @@ export function formatRequest(request: NetworkRequest): string {
         line += ` [ERROR: ${request.error}]`;
     }
 
+    // Every read of this row must say the response was altered. An agent that
+    // forgets a rule is live will otherwise debug a failure it caused itself.
+    if (request.mocked) {
+        line += ` [MOCK ${request.mockId ?? "?"}]`;
+    }
+
     return line;
 }
 
@@ -203,6 +209,14 @@ export function formatRequestDetails(
 
     if (request.error) {
         lines.push(`Error: ${request.error}`);
+    }
+
+    if (request.mocked) {
+        lines.push(`Mocked by: ${request.mockId ?? "?"}`);
+    }
+
+    if (request.mockWarning) {
+        lines.push(`Mock warning: ${request.mockWarning}`);
     }
 
     // Request headers

@@ -577,3 +577,66 @@ describe("applyInterceptedEvent — XHR fields reach the buffer", () => {
         expect(buffer.get("js-x-5")!.headers).toEqual({});
     });
 });
+
+describe("injected interceptor — late XMLHttpRequest", () => {
+    it("keeps retrying until XMLHttpRequest exists", () => {
+        // On a cold app launch the connect can land before the JS bundle has
+        // defined XMLHttpRequest. A one-shot retry loses that race silently:
+        // capture and mocking stay dead for the whole run, and the
+        // __RN_NET_INJECTED__ guard stops any later injection repairing it.
+        const pending: Array<() => void> = [];
+        const lines: string[] = [];
+        const sandbox: Record<string, unknown> = {
+            console: { debug: (s: string) => lines.push(s) },
+            setTimeout: ((fn: () => void) => {
+                pending.push(fn);
+                return 0;
+            }) as unknown as typeof setTimeout,
+        };
+        vm.createContext(sandbox);
+        vm.runInContext(getInterceptorScript(), sandbox);
+
+        // Two ticks with no XMLHttpRequest at all — the old code gave up here.
+        pending.splice(0).forEach((f) => f());
+        pending.splice(0).forEach((f) => f());
+        expect(sandbox.__RN_NET_XHR_ACTIVE__).toBeUndefined();
+
+        // The bundle finishes evaluating and defines it.
+        sandbox.XMLHttpRequest = makeFakeXhrClass();
+        pending.splice(0).forEach((f) => f());
+
+        expect(sandbox.__RN_NET_XHR_ACTIVE__).toBe(true);
+
+        const xhr = newXhr(sandbox);
+        xhr.open("GET", "https://api.example.com/late");
+        xhr.send();
+        const events = lines
+            .map((l) => isInterceptorEvent([{ type: "string", value: l }]))
+            .filter((j): j is string => j !== null)
+            .map((j) => JSON.parse(j) as Record<string, unknown>);
+        expect(events.find((e) => e.type === "request")!.url).toBe(
+            "https://api.example.com/late"
+        );
+    });
+
+    it("gives up eventually instead of rescheduling forever", () => {
+        const pending: Array<() => void> = [];
+        const sandbox: Record<string, unknown> = {
+            console: { debug: () => {} },
+            setTimeout: ((fn: () => void) => {
+                pending.push(fn);
+                return 0;
+            }) as unknown as typeof setTimeout,
+        };
+        vm.createContext(sandbox);
+        vm.runInContext(getInterceptorScript(), sandbox);
+
+        let ticks = 0;
+        while (pending.length > 0 && ticks < 500) {
+            pending.splice(0).forEach((f) => f());
+            ticks++;
+        }
+        expect(pending).toHaveLength(0);
+        expect(ticks).toBeLessThan(100);
+    });
+});
