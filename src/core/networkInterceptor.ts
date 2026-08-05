@@ -304,6 +304,55 @@ export function getInterceptorScript(): string {
       var delay = (typeof rule.delayMs === 'number' && rule.delayMs > 0) ? rule.delayMs : 0;
       setTimeout(go, delay);
     }
+    function _setPath(obj, path, value) {
+      var parts = String(path).split('.');
+      var cur = obj;
+      for (var i = 0; i < parts.length - 1; i++) {
+        if (cur[parts[i]] === null || typeof cur[parts[i]] !== 'object') cur[parts[i]] = {};
+        cur = cur[parts[i]];
+      }
+      cur[parts[parts.length - 1]] = value;
+    }
+
+    function _removePath(obj, path) {
+      var parts = String(path).split('.');
+      var cur = obj;
+      for (var i = 0; i < parts.length - 1; i++) {
+        if (cur === null || typeof cur !== 'object') return;
+        cur = cur[parts[i]];
+      }
+      if (cur && typeof cur === 'object') delete cur[parts[parts.length - 1]];
+    }
+
+    /**
+     * Returns { body, warning }. A non-JSON body is passed through untouched
+     * with a warning rather than replaced: handing the app a mangled body would
+     * turn a tamper into a parse error the agent then has to debug.
+     */
+    function _applyTamper(rule, bodyText) {
+      if (typeof rule.bodyReplace === 'string') return { body: rule.bodyReplace };
+      var wantsJson = rule.set || rule.remove;
+      if (!wantsJson) return { body: bodyText };
+      var parsed;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch (e) {
+        return { body: bodyText, warning: 'tamper skipped - response was not JSON' };
+      }
+      try {
+        if (rule.remove) {
+          for (var i = 0; i < rule.remove.length; i++) _removePath(parsed, rule.remove[i]);
+        }
+        if (rule.set) {
+          for (var k in rule.set) {
+            if (Object.prototype.hasOwnProperty.call(rule.set, k)) _setPath(parsed, k, rule.set[k]);
+          }
+        }
+        return { body: JSON.stringify(parsed) };
+      } catch (e) {
+        return { body: bodyText, warning: 'tamper failed: ' + String(e && e.message ? e.message : e) };
+      }
+    }
     // ---- end mock layer --------------------------------------------------
 
     function _patchXHR() {
@@ -370,9 +419,63 @@ export function getInterceptorScript(): string {
           };
         }
 
-        // Replaced with the real implementation by the tamper task below.
+        /**
+         * Runs the real request on a second XHR so the app's own request never
+         * reaches the wire, then hands the app a response we synthesized.
+         *
+         * This is what removes the listener-ordering hazard. Letting the app's
+         * request fly and mutating it in a load listener does not work: apps
+         * commonly assign xhr.onload BEFORE send(), and a property handler runs
+         * ahead of any listener added afterwards, so the app would read the
+         * untampered response.
+         *
+         * Lives inside _patchXHR because it must call the ORIGINAL open/send —
+         * a shadow that went through the patched ones would be reported as a
+         * second request and could match a rule itself.
+         */
         var _shadowFetch = function(appXhr, s, rule, body) {
-          _deliverMock(appXhr, rule, s, rule.body, rule.status, _headersToText(rule.headers), undefined);
+          try {
+            var shadow = new XMLHttpRequest();
+            origOpen.call(shadow, s.method, s.url);
+            if (typeof origSetHeader === 'function') {
+              for (var name in s.headers) {
+                if (Object.prototype.hasOwnProperty.call(s.headers, name)) {
+                  try { origSetHeader.call(shadow, name, s.headers[name]); } catch (e) {}
+                }
+              }
+            }
+            var done = false;
+            var onDone = function() {
+              if (done) return;
+              done = true;
+              var real = '';
+              try { real = shadow.responseText || ''; } catch (e) {}
+              var out = _applyTamper(rule, real);
+              var headersText = '';
+              try {
+                headersText = (typeof shadow.getAllResponseHeaders === 'function')
+                  ? shadow.getAllResponseHeaders() : '';
+              } catch (e) {}
+              var status = (typeof rule.status === 'number') ? rule.status : shadow.status;
+              _deliverMock(appXhr, rule, s, out.body, status, headersText, out.warning);
+            };
+            var onFail = function() {
+              if (done) return;
+              done = true;
+              _deliverMock(appXhr, { id: rule.id, networkError: 'Network request failed' },
+                s, null, 0, '', 'shadow request failed');
+            };
+            if (typeof shadow.addEventListener === 'function') {
+              shadow.addEventListener('load', onDone);
+              shadow.addEventListener('error', onFail);
+              shadow.addEventListener('abort', onFail);
+              shadow.addEventListener('timeout', onFail);
+            }
+            origSend.call(shadow, body);
+          } catch (e) {
+            _deliverMock(appXhr, { id: rule.id, networkError: 'Network request failed' },
+              s, null, 0, '', 'shadow request threw');
+          }
         };
 
         proto.send = function(body) {
