@@ -47,6 +47,29 @@ To lint a specific file:
 npx tsc --noEmit src/index.ts
 ```
 
+## Testing policy — automated suite is unit-only
+
+`npx jest` runs **unit tests only**. There is no integration directory, and
+tests must never drive an attached simulator, emulator or phone.
+
+Integration behaviour is verified **by an agent**, interactively, through the
+`mcp__execbro-dev__*` tools against a running app — not by the automated suite.
+
+This is a hard rule, learned the expensive way. The old integration suites were
+gated on nothing but device *presence*, so an ordinary `npx jest` hijacked
+whatever device happened to be attached: typing into the focused field, tapping
+the screen, dumping the UI, repeatedly, for the length of every run. Device
+presence is not consent.
+
+When adding a test, if it needs a real device, it does not belong here — write
+it as an agent-driven verification step in the relevant plan instead, the way
+`docs/devtools-core/plans/` records device verification.
+
+Do not "fix" this by guarding at the exec layer. That was tried: making `adb`
+fail under test convinced production code that ADB was uninstalled, which then
+pushed "ADB Not Installed" LogBox errors into the developer's running app. A
+test harness must not lie to the code it is testing.
+
 ## Development with Hot Reload
 
 For development, the `execbro-dev` MCP server uses HTTP transport so code changes apply without restarting Claude Code sessions. Spec: `~/rn-devtools/docs/devtools-core/specs/2026-06-12-http-dev-loop-activation-design.md`.

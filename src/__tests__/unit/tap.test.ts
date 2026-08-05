@@ -611,61 +611,6 @@ describe("formatTapFailure with all strategies exhausted", () => {
     });
 });
 
-describe("tap without Metro connection", () => {
-    it("does not hard-fail when Metro is unavailable and strategy is accessibility", async () => {
-        const { tap } = await import("../../pro/tap.js");
-        const { connectedApps } = await import("../../core/state.js");
-        connectedApps.clear();
-
-        const result = await tap({
-            text: "Submit",
-            strategy: "accessibility",
-        });
-        // It may still fail (no simulator running in test env), but the error
-        // should NOT be "No connected app"
-        if (!result.success) {
-            expect(result.error).not.toContain("No connected app");
-        }
-    }, 15000);
-
-    it("does not hard-fail when Metro is unavailable and strategy is ocr", async () => {
-        const { tap } = await import("../../pro/tap.js");
-        const { connectedApps } = await import("../../core/state.js");
-        connectedApps.clear();
-
-        const result = await tap({
-            text: "Submit",
-            strategy: "ocr",
-        });
-        if (!result.success) {
-            expect(result.error).not.toContain("No connected app");
-        }
-    }, 15000);
-
-    it("still requires Metro for fiber strategy", async () => {
-        const { tap } = await import("../../pro/tap.js");
-        const { connectedApps } = await import("../../core/state.js");
-        connectedApps.clear();
-
-        const result = await tap({
-            text: "Submit",
-            strategy: "fiber",
-        });
-        // If Metro auto-connect succeeded, fiber may try and fail to find the
-        // query — that's also fine. If auto-connect failed and Metro is still
-        // absent, tap must explain *why* it failed. The device-targeting
-        // refactor lets resolveDeviceTarget reject early with a "no device"
-        // error before any strategy runs, so result.attempted can be absent —
-        // accept either a Metro-mention OR a device-resolution error as a
-        // valid no-Metro explanation. What's NOT acceptable is silent failure.
-        if (!result.success && connectedApps.size === 0) {
-            const errorMentionsMetro = result.error?.includes("Metro") ?? false;
-            const attemptedMentionsMetro = result.attempted?.some((a) => a.reason.includes("Metro")) ?? false;
-            const deviceResolutionError = result.error?.toLowerCase().includes("device") ?? false;
-            expect(errorMentionsMetro || attemptedMentionsMetro || deviceResolutionError).toBe(true);
-        }
-    }, 15000);
-});
 
 describe("isTapTimeout", () => {
     it("returns true when a strategy wrapper fired at its cap", () => {
