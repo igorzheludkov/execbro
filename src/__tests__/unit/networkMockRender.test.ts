@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { NetworkBuffer, formatRequest, formatRequestDetails } from "../../core/network.js";
-import { applyInterceptedEvent } from "../../core/networkInterceptor.js";
+import { applyInterceptedEvent, isMockedTrafficEvent } from "../../core/networkInterceptor.js";
+import { runWithMocks } from "../helpers/mock-harness.js";
 import { addRule, listRules, __resetMockRules } from "../../core/mockRules.js";
 
 /**
@@ -160,5 +161,50 @@ describe("hit counting", () => {
             "android"
         );
         expect(listRules("iPhone")[0].hits).toBe(0);
+    });
+});
+
+describe("mocked traffic is distinguishable from wire traffic", () => {
+    it("marks the request event so the server can exempt it from the CDP gate", () => {
+        // A mocked request never reaches the network, so the CDP Network domain
+        // cannot report it. Without this marker the dedupe gate drops the only
+        // record and the request vanishes from get_network_requests entirely on
+        // every CDP-capture target — verified on iOS before the fix.
+        const t = runWithMocks([{ id: "m1", url: "/orders", mode: "replace", status: 500 }]);
+        const xhr = t.newXhr();
+        xhr.open("GET", "https://api.example.com/orders");
+        xhr.send();
+        t.flush();
+
+        const request = t.events().find((e) => e.type === "request")!;
+        expect(request.mocked).toBe(true);
+        const response = t.events().find((e) => e.type === "response")!;
+        expect(response.mocked).toBe(true);
+    });
+
+    it("leaves an unmocked request unmarked, so it stays subject to the gate", () => {
+        const t = runWithMocks([{ id: "m1", url: "/orders", mode: "replace", status: 500 }]);
+        const xhr = t.newXhr();
+        xhr.open("GET", "https://api.example.com/users");
+        xhr.send();
+        expect(t.events().find((e) => e.type === "request")!.mocked).toBeUndefined();
+    });
+
+    it("marks a mocked network error too", () => {
+        const t = runWithMocks([
+            { id: "m1", url: "/down", mode: "replace", networkError: "Network request failed" },
+        ]);
+        const xhr = t.newXhr();
+        xhr.open("GET", "https://x.example.com/down");
+        xhr.send();
+        t.flush();
+        expect(t.events().find((e) => e.type === "error")!.mocked).toBe(true);
+    });
+
+    it("isMockedTrafficEvent recognises exactly those events", () => {
+        expect(isMockedTrafficEvent(JSON.stringify({ type: "request", mocked: true }))).toBe(true);
+        expect(isMockedTrafficEvent(JSON.stringify({ type: "request" }))).toBe(false);
+        expect(isMockedTrafficEvent(JSON.stringify({ type: "mock", ruleId: "m1" }))).toBe(false);
+        expect(isMockedTrafficEvent("not json")).toBe(false);
     });
 });

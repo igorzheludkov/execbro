@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
 import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
-import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent } from "./networkInterceptor.js";
+import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
 import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
@@ -759,7 +759,14 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             // installed, which reads as "the rule never matched" — the exact
             // opposite of what had happened.
             const suppressed = iApp?.cdpNetworkSupported || iApp?.sdkPresent;
-            if (!suppressed || isMockEvent(interceptorJson)) {
+            // Mocked traffic is exempt from the CDP half of the gate: the
+            // request never reaches the network, so CDP cannot report it and
+            // ours is the only record. Without this a mocked request vanishes
+            // from get_network_requests on every CDP-capture target — the one
+            // thing a mock must never do.
+            const mockedUnderCdp =
+                iApp?.cdpNetworkSupported && !iApp?.sdkPresent && isMockedTrafficEvent(interceptorJson);
+            if (!suppressed || isMockEvent(interceptorJson) || mockedUnderCdp) {
                 applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName), deviceName);
             }
             return;

@@ -272,7 +272,7 @@ export function getInterceptorScript(): string {
             _setProp(xhr, 'status', 0);
             _setProp(xhr, 'statusText', '');
             _reportAlways({ type: 'mock', id: s.id, ruleId: rule.id, warning: warning });
-            _report({ type: 'error', id: s.id, error: String(rule.networkError), duration: duration });
+            _report({ type: 'error', id: s.id, error: String(rule.networkError), duration: duration, mocked: true });
             _fire(xhr, 'readystatechange');
             _fire(xhr, 'error');
             _fire(xhr, 'loadend');
@@ -291,7 +291,7 @@ export function getInterceptorScript(): string {
           var evt = {
             type: 'response', id: s.id, status: status, statusText: '',
             duration: duration, responseHeaders: _parseHeaders(text2),
-            body: _cap(text, _RES_CAP)
+            body: _cap(text, _RES_CAP), mocked: true
           };
           if (evt.responseHeaders['content-type']) evt.mimeType = evt.responseHeaders['content-type'];
           _report(evt);
@@ -485,6 +485,8 @@ export function getInterceptorScript(): string {
             var s = _getState(self);
             if (s && !s.done && s.start === 0) {
               s.start = Date.now();
+              var _rule = _matchRule(s.method, s.url);
+
               _report({
                 type: 'request',
                 id: s.id,
@@ -492,10 +494,14 @@ export function getInterceptorScript(): string {
                 url: s.url,
                 timestamp: s.start,
                 headers: s.headers,
-                body: _cap(_bodyToString(body), _REQ_CAP)
+                body: _cap(_bodyToString(body), _REQ_CAP),
+                // Tells the server this request will never reach the wire, so
+                // the CDP Network domain cannot possibly report it and the
+                // usual dedupe gate must not drop ours. Without it a mocked
+                // request is invisible on every CDP-capture target.
+                mocked: _rule ? true : undefined
               });
 
-              var _rule = _matchRule(s.method, s.url);
               if (_rule) {
                 s.mocked = true;
                 if (_rule.mode === 'tamper') {
@@ -777,6 +783,28 @@ export function isMockEvent(jsonStr: string): boolean {
     try {
         const parsed = JSON.parse(jsonStr) as { type?: unknown };
         return parsed?.type === "mock";
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * True for an interceptor event describing traffic a mock rule handled — the
+ * request, and its synthetic response or error.
+ *
+ * These carry `mocked: true` because such a request never reaches the network,
+ * so the CDP Network domain structurally cannot report it. Applying the normal
+ * dedupe gate to them drops the only record that exists, and a mocked request
+ * disappears from get_network_requests entirely on every CDP-capture target.
+ *
+ * The in-app SDK is a different case and needs no exemption: it wraps fetch
+ * above the XHR layer, so it observes the mocked call itself, and these events
+ * are suppressed app-side before they are ever emitted.
+ */
+export function isMockedTrafficEvent(jsonStr: string): boolean {
+    try {
+        const parsed = JSON.parse(jsonStr) as { mocked?: unknown };
+        return parsed?.mocked === true;
     } catch {
         return false;
     }
