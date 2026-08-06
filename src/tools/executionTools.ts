@@ -3,7 +3,8 @@ import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { executeInApp, listDebugGlobals, inspectGlobal } from "../core/index.js";
 import { getRefreshStatus } from "../core/fastRefreshTools.js";
-import { applyResultBudget } from "../core/truncate.js";
+import { applyResultBudget, DEFAULT_MAX_BYTES } from "../core/truncate.js";
+import { projectJsonText, formatProjectionNote } from "../core/jsonProjection.js";
 import { buildCollectExpression, dropHandle } from "../core/promiseHandles.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
 
@@ -231,16 +232,28 @@ export function registerExecutionTools(server: McpServer): void {
                 "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"__APOLLO_CLIENT__\") -> execute_in_app(\"__APOLLO_CLIENT__.cache.extract()\").\n" +
                 "DOTTED PATHS: Pass dotted paths to drill into the SDK surface, e.g. inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\" }) or \"__RN_AI_DEVTOOLS__.custom.mmkv\". Only identifier paths are accepted — for arbitrary expressions, use execute_in_app.\n" +
                 "LIMITATIONS: Only reads one level deep; nested objects show as a 100-char JSON preview — re-inspect the child path. Returns an error object (not a throw) when the path doesn't resolve.\n" +
-                "GOOD: inspect_global({ objectName: \"__APOLLO_CLIENT__\" }) | inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\" })\n" +
+                "WIDE OBJECTS: a global with hundreds of keys is bounded structurally rather than dumped; use query to pull one entry in full.\n" +
+                "GOOD: inspect_global({ objectName: \"__APOLLO_CLIENT__\" }) | inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\", query: \"cache\" })\n" +
                 "BAD: inspect_global({ objectName: \"store.getState()\" }) — call expressions aren't supported; use execute_in_app.\n",
             inputSchema: {
                 objectName: z
                     .string()
                     .describe("Identifier or dotted path of the global to inspect (e.g., '__APOLLO_CLIENT__', '__RN_AI_DEVTOOLS__.stores.redux', '__RN_AI_DEVTOOLS__.custom.mmkv')"),
+                query: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Dot-path into the property listing, returned in full (e.g. \"cache\" or \"stores.redux\"). A path that matches nothing returns the listing plus what is actually there, not an error."
+                    ),
+                maxResultLength: z.coerce
+                    .number()
+                    .optional()
+                    .default(DEFAULT_MAX_BYTES)
+                    .describe(`Byte target for the rendered listing (default: ${DEFAULT_MAX_BYTES}, 0 for unlimited).`),
                 device: z.string().optional().describe(DEVICE_ARG_DESC)
             }
         },
-        async ({ objectName, device }) => {
+        async ({ objectName, query, maxResultLength, device }) => {
             const result = await inspectGlobal(objectName, device);
     
             if (!result.success) {
@@ -270,11 +283,19 @@ export function registerExecutionTools(server: McpServer): void {
                 };
             }
     
+            const projected = projectJsonText(String(result.result ?? ""), {
+                query,
+                maxBytes: maxResultLength > 0 ? maxResultLength : Number.MAX_SAFE_INTEGER
+            });
+            const note = formatProjectionNote(
+                projected,
+                "Re-inspect a child path, pass a query, or raise maxResultLength."
+            );
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Properties of ${objectName}:\n\n${result.result}`
+                        text: `Properties of ${objectName}:\n\n${projected.text}${note ? `\n\n${note}` : ""}`
                     }
                 ]
             };

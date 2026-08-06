@@ -5,6 +5,7 @@ import {
     operationDetailLine,
     operationSearchText
 } from "./graphqlOperation.js";
+import { projectJsonText, formatProjectionNote } from "./jsonProjection.js";
 
 // Circular buffer for storing network requests
 export class NetworkBuffer {
@@ -171,10 +172,46 @@ export function formatRequests(requests: NetworkRequest[]): string {
     return requests.map(formatRequest).join("\n");
 }
 
+/**
+ * Default byte target for a rendered body.
+ *
+ * Higher than the 500 that preceded it because the unit changed: 500
+ * characters of head-of-string is a couple of keys, but 500 characters of
+ * *structure* is barely the outermost object. 2000 is enough to show the key
+ * paths of a typical GraphQL response, which is what makes the follow-up query
+ * targetable.
+ */
+export const DEFAULT_BODY_BUDGET = 2000;
+
 // Options for formatting request details
 export interface FormatRequestDetailsOptions {
-    maxBodyLength?: number;  // Default: 500, set to 0 for unlimited
-    verbose?: boolean;       // Disable all truncation
+    /** Byte target for a bounded body render. 0 = unlimited. */
+    maxBodyLength?: number;
+    /** Disable all bounding. */
+    verbose?: boolean;
+    /** Dot-path into the JSON body — see jsonProjection. */
+    query?: string;
+}
+
+/**
+ * Render one body.
+ *
+ * JSON goes through the shape-first projection: a 40KB GraphQL response
+ * clipped at 500 characters reads `{"documentId":...,"data":{"approvals":...`
+ * and stops, which does not even reveal whether the field the caller came for
+ * exists. Bounding structurally keeps every key path and states the sizes it
+ * dropped. Non-JSON has no structure to exploit, so it keeps the plain clip.
+ */
+function renderBody(
+    raw: string,
+    opts: { maxBodyLength: number; verbose: boolean; query?: string; hint: string }
+): string {
+    if (opts.verbose && !opts.query) return raw;
+
+    const maxBytes = opts.maxBodyLength > 0 ? opts.maxBodyLength : Number.MAX_SAFE_INTEGER;
+    const projected = projectJsonText(raw, { query: opts.query, maxBytes: opts.verbose ? Number.MAX_SAFE_INTEGER : maxBytes });
+    const note = formatProjectionNote(projected, opts.hint);
+    return note ? `${projected.text}\n\n${note}` : projected.text;
 }
 
 // Format request details (full info)
@@ -182,7 +219,7 @@ export function formatRequestDetails(
     request: NetworkRequest,
     options: FormatRequestDetailsOptions = {}
 ): string {
-    const { maxBodyLength = 500, verbose = false } = options;
+    const { maxBodyLength = DEFAULT_BODY_BUDGET, verbose = false, query } = options;
     const lines: string[] = [];
 
     lines.push(`=== ${request.method} ${request.url} ===`);
@@ -227,14 +264,19 @@ export function formatRequestDetails(
         }
     }
 
-    // Post data (with optional truncation)
+    // Post data. The query targets the response body when there is one — that
+    // is where the bulk lives — and falls back to the request body otherwise,
+    // so a query on a GET that never returned still lands somewhere useful.
+    const queryTarget: "response" | "request" = request.responseBody ? "response" : "request";
+
     if (request.postData) {
         lines.push("\n--- Request Body ---");
-        let body = request.postData;
-        if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
-            body = body.slice(0, maxBodyLength) + `... [truncated: ${request.postData.length} chars]`;
-        }
-        lines.push(body);
+        lines.push(renderBody(request.postData, {
+            maxBodyLength,
+            verbose,
+            query: queryTarget === "request" ? query : undefined,
+            hint: "Raise maxBodyLength, pass verbose:true, or query a narrower path."
+        }));
     }
 
     // Response headers
@@ -248,11 +290,12 @@ export function formatRequestDetails(
     // Response body (SDK mirror and the JS interceptor's XHR layer — CDP does not capture it)
     if (request.responseBody) {
         lines.push("\n--- Response Body ---");
-        let body = request.responseBody;
-        if (!verbose && maxBodyLength > 0 && body.length > maxBodyLength) {
-            body = body.slice(0, maxBodyLength) + `... [truncated: ${request.responseBody.length} chars]`;
-        }
-        lines.push(body);
+        lines.push(renderBody(request.responseBody, {
+            maxBodyLength,
+            verbose,
+            query: queryTarget === "response" ? query : undefined,
+            hint: "Raise maxBodyLength, pass verbose:true, or query a narrower path."
+        }));
     }
 
     return lines.join("\n");

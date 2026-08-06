@@ -219,6 +219,7 @@
         "get_request_details": [
             "device",
             "maxBodyLength",
+            "query",
             "requestId",
             "verbose"
         ],
@@ -269,7 +270,9 @@
         ],
         "inspect_global": [
             "device",
-            "objectName"
+            "maxResultLength",
+            "objectName",
+            "query"
         ],
         "ios_boot_simulator": [
             "udid"
@@ -387,7 +390,9 @@
         ],
         "redux_get_state": [
             "device",
+            "maxResultLength",
             "path",
+            "query",
             "storeIndex"
         ],
         "reload_app": [

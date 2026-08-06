@@ -4,6 +4,7 @@ import { registerToolWithTelemetry } from "../core/register.js";
 import {
     getNetworkStats,
     formatRequestDetails,
+    DEFAULT_BODY_BUDGET,
     getConnectedAppByDevice,
     networkBuffers,
     metroMissingHintIfAbsent,
@@ -286,31 +287,38 @@ export function registerNetworkTools(server: McpServer): void {
         "get_request_details",
         {
             description:
-                "Get full details of a specific network request including headers, body, and timing. With the SDK installed, includes full request/response bodies. Without SDK, bodies are not available on most targets. Use get_network_requests first to find the request ID.\n" +
-                "PURPOSE: Drill into a single network entry — full request/response headers, body, status, and timing breakdown.\n" +
-                "WHEN TO USE: After get_network_requests or search_network returns a suspect ID and you need the payload to diagnose.\n" +
-                "WORKFLOW: get_network_requests / search_network -> copy id -> get_request_details(requestId).\n" +
-                "LIMITATIONS: Bodies require the execbro-sdk in the app; on CDP-only targets response bodies are missing. Large bodies are truncated — raise maxBodyLength.\n" +
-                "GOOD: get_request_details({ requestId: \"42\", maxBodyLength: 4000 })\n" +
-                "BAD: Guessing requestIds — always get them from get_network_requests / search_network first.\n",
+                "Get full details of one network request: headers, body, status, timing.\n" +
+                "PURPOSE: Drill into a single entry after get_network_requests or search_network returns a suspect id.\n" +
+                "WORKFLOW: get id -> read the shape -> get_request_details({ requestId, query }) for the subtree you need.\n" +
+                "SHAPE FIRST: a large JSON body returns as its structure — key paths kept, arrays and objects annotated with real sizes, leaves clipped. The first call already answers 'is there an errors array' and 'does this field exist'.\n" +
+                "QUERY: dot-path into the JSON body, returned in full. Supports a.b.c, [0], [-1], [*], [\"key.with.dots\"]. Targets the response body, or the request body when there is none. No match returns the shape plus what IS there — retry from that.\n" +
+                "LIMITATIONS: Bodies need the execbro-sdk; CDP-only targets have no response body. Non-JSON is clipped at maxBodyLength, not projected.\n" +
+                "GOOD: get_request_details({ requestId: \"42\", query: \"data.approvals.single.basicInfo\" }) | query: \"errors[*].message\"\n" +
+                "BAD: verbose:true to find one field — that is the 40KB dump this avoids. Or guessing requestIds.\n",
             inputSchema: {
                 requestId: z.string().describe("The request ID to get details for"),
+                query: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Dot-path into the JSON body, returned in full: \"data.items[0].id\", \"errors[*].message\", \"data[\\\"weird.key\\\"]\". A leading $. is accepted. Omit to get the shape of the whole body. A path that matches nothing returns the shape plus what is actually there, not an error."
+                    ),
                 maxBodyLength: z.coerce
                     .number()
                     .optional()
-                    .default(500)
+                    .default(DEFAULT_BODY_BUDGET)
                     .describe(
-                        "Max characters for request body (default: 500, set to 0 for unlimited). Tip: Large POST bodies (file uploads, base64) can be 10KB+."
+                        `Byte target for each rendered body (default: ${DEFAULT_BODY_BUDGET}, 0 for unlimited). JSON is bounded structurally, so this trades depth and array width for size rather than cutting the text off.`
                     ),
                 verbose: z
                     .boolean()
                     .optional()
                     .default(false)
-                    .describe("Disable body truncation. Tip: Use when you need to inspect full JSON payloads."),
+                    .describe("Return bodies raw and unbounded. Prefer query — verbose on a large JSON body is the 40KB dump this tool exists to avoid."),
                 device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
-        async ({ requestId, maxBodyLength, verbose, device }) => {
+        async ({ requestId, query, maxBodyLength, verbose, device }) => {
             // Single source: the buffer holds mirrored SDK entries (with bodies),
             // CDP entries and interceptor entries, across every app run. get()
             // falls back across epochs so a pre-restart id still resolves.
@@ -355,7 +363,7 @@ export function registerNetworkTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: formatRequestDetails(request, { maxBodyLength, verbose }) + activeMockBanner()
+                        text: formatRequestDetails(request, { maxBodyLength, verbose, query }) + activeMockBanner()
                     }
                 ]
             };

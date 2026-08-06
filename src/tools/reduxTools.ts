@@ -3,6 +3,8 @@ import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { reduxDispatch, reduxGetState } from "../core/redux.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
+import { projectJson, formatProjectionNote } from "../core/jsonProjection.js";
+import { DEFAULT_MAX_BYTES } from "../core/truncate.js";
 
 export function registerReduxTools(server: McpServer): void {
     registerToolWithTelemetry(
@@ -63,8 +65,10 @@ export function registerReduxTools(server: McpServer): void {
                 "PURPOSE: Inspect the current app state without relying on __RN_AI_DEVTOOLS__.stores.redux (which may point at a different store instance than the Provider).\n" +
                 "WHEN TO USE: Verify state shape before/after redux_dispatch, or check what slice keys exist before crafting an action.\n" +
                 "WORKFLOW: redux_get_state() -> craft action -> redux_dispatch -> redux_get_state({ path: 'app' }) to confirm.\n" +
+                "SHAPE FIRST: a large state comes back as its structure — every key path kept, arrays and objects annotated with real sizes, leaves clipped. Read it, then narrow.\n" +
+                "NARROWING, TWO WAYS: path drills IN THE APP, so the rest of the state never crosses the wire — prefer it when you know the slice. query runs here and adds [0], [-1], [*] and quoted keys. They compose: path picks the slice, query picks the field inside it.\n" +
                 "LIMITATIONS: Requires React DevTools hook (dev mode). State must be JSON-serializable; non-serializable values are replaced with an error marker.\n" +
-                "GOOD: redux_get_state({ path: 'app' })\n" +
+                "GOOD: redux_get_state({ path: 'app' }) | redux_get_state({ path: 'cart', query: 'items[*].sku' })\n" +
                 "BAD: redux_get_state({ path: 'app.isLoading.0' }) when isLoading is a boolean — path traversal returns undefined.",
             inputSchema: {
                 storeIndex: z
@@ -76,14 +80,25 @@ export function registerReduxTools(server: McpServer): void {
                 path: z
                     .string()
                     .optional()
-                    .describe("Optional dotted path into state (e.g. 'app' or 'auth.user'). Omit for the full state."),
+                    .describe("Optional dotted path into state (e.g. 'app' or 'auth.user'), resolved in-app so only that slice crosses the wire. Omit for the full state."),
+                query: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Dot-path into the state that came back, returned in full: \"items[0].sku\", \"orders[*].status\", \"byId[\\\"a.b\\\"]\". Applies after path. A path that matches nothing returns the shape plus what is actually there, not an error."
+                    ),
+                maxResultLength: z.coerce
+                    .number()
+                    .optional()
+                    .default(DEFAULT_MAX_BYTES)
+                    .describe(`Byte target for the rendered state (default: ${DEFAULT_MAX_BYTES}, 0 for unlimited). Bounded structurally, so size is traded for depth and array width rather than cutting the text off.`),
                 device: z
                     .string()
                     .optional()
                     .describe(DEVICE_ARG_DESC)
             }
         },
-        async ({ storeIndex, path, device }) => {
+        async ({ storeIndex, path, query, maxResultLength, device }) => {
             const result = await reduxGetState({ storeIndex, path, device });
             if (!result.success) {
                 return {
@@ -92,7 +107,16 @@ export function registerReduxTools(server: McpServer): void {
                 };
             }
             const header = `Store ${result.storeIndex} of ${result.storeCount}${path ? ` at path '${path}'` : ""}:`;
-            return { content: [{ type: "text", text: `${header}\n\n${JSON.stringify(result.state, null, 2)}` }] };
+            const projected = projectJson(result.state, {
+                query,
+                maxBytes: maxResultLength > 0 ? maxResultLength : Number.MAX_SAFE_INTEGER
+            });
+            const note = formatProjectionNote(
+                projected,
+                "Narrow with path (drills in-app) or query, or raise maxResultLength."
+            );
+            const body = note ? `${projected.text}\n\n${note}` : projected.text;
+            return { content: [{ type: "text", text: `${header}\n\n${body}` }] };
         }
     );
 }

@@ -78,6 +78,7 @@ export {
   formatRequest,
   formatRequests,
   formatRequestDetails,
+  DEFAULT_BODY_BUDGET,
   getNetworkRequests,
   searchNetworkRequests,
   getNetworkStats,
