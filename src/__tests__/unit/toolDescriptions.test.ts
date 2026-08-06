@@ -157,3 +157,35 @@ describe("Tool descriptions (registration enforcement)", () => {
         expect(totalBytes).toBeLessThan(500_000);
     });
 });
+
+// The auth-carrying request tools describe HOW they authenticate, and an agent
+// that believes the description will paste a credential the tool did not need.
+// These pin the description against what the code actually does — the drift
+// they exist to catch was real: app_request advertised only the three redux
+// paths while `appRequest.ts` also scavenges the last captured Authorization
+// header, so "pass an explicit Authorization header" read as the sole option
+// for a keychain app. Following that advice puts the token in the transcript,
+// which is the exact outcome the tool's WHY THIS EXISTS line promises to avoid.
+describe("request tools describe their real auth resolution", () => {
+    const byName = new Map(
+        Array.from(toolRegistry.entries()).map(([name, { config }]) => [
+            name,
+            String(config?.description ?? ""),
+        ])
+    );
+
+    it("app_request documents the captured-request fallback it implements", () => {
+        expect(byName.get("app_request")).toMatch(/captured request/i);
+    });
+
+    it("app_request says cookie auth needs no token resolution at all", () => {
+        // Verified on an iPhone Air simulator: a cookie set by one in-app
+        // request is attached to the next by the native cookie jar. An agent
+        // told only about bearer tokens will hunt for one that isn't used.
+        expect(byName.get("app_request")).toMatch(/cookie/i);
+    });
+
+    it("network_replay says cookies ride along with the captured credentials", () => {
+        expect(byName.get("network_replay")).toMatch(/cookie/i);
+    });
+});
