@@ -131,3 +131,83 @@ describe("isOwned", () => {
             .toEqual({ owned: true, reason: "pid" });
     });
 });
+
+// Verbatim from a live iPhone Air simulator on 2026-08-06. The app emitted 878
+// lines in two minutes and NOT ONE passed ownership: iOS never populates
+// identity.pid (only resolveAndroidPid exists), and `declared`/`verdict` both
+// look for the bundle id in the MESSAGE, which ordinary os_log output has no
+// reason to contain. The executable name is the identifier iOS actually
+// carries, on every line, which is why it becomes rule 3.
+describe("isOwned on iOS", () => {
+    const IOS: AppIdentity = {
+        deviceKey: "F93612A3-0042-4BDC-855F-8CAB1BDD76C6",
+        platform: "ios",
+        appId: "com.example.appa",
+        processName: "AppA",
+    };
+
+    it("owns ordinary app output via the emitting process", () => {
+        expect(isOwned(line({
+            pid: 12736,
+            process: "AppA",
+            tag: "com.apple.CFNetwork:Default",
+            message: "Task <B812CCCC>.<3> resuming, timeouts(10.0, 604800.0)",
+        }), IOS)).toEqual({ owned: true, reason: "process" });
+    });
+
+    it("owns app output that never mentions the bundle id", () => {
+        // The case that broke: 758 of 878 lines looked exactly like this.
+        expect(isOwned(line({
+            pid: 12736,
+            process: "AppA",
+            tag: "com.apple.UIKit:KeyboardSceneDelegate",
+            message: "Keyboard scene delegate resigned first responder",
+        }), IOS)).toEqual({ owned: true, reason: "process" });
+    });
+
+    it("owns a termination verdict written by runningboardd, not the app", () => {
+        // Emitted by another process entirely, so the process rule cannot
+        // claim it — this is what `verdict` is for, and on iOS it is the only
+        // way a crash or OOM kill is ever attributed.
+        expect(isOwned(line({
+            pid: 231,
+            process: "runningboardd",
+            tag: "com.apple.runningboard:process",
+            level: "error",
+            message: "Process com.example.appa terminated: [jetsam] exceeded memory limit",
+        }), IOS)).toEqual({ owned: true, reason: "verdict" });
+    });
+
+    it("rejects a runningboardd verdict about a DIFFERENT app", () => {
+        expect(isOwned(line({
+            pid: 231,
+            process: "runningboardd",
+            tag: "com.apple.runningboard:process",
+            level: "error",
+            message: "Process com.apple.mobilesafari terminated: [jetsam] exceeded memory limit",
+        }), IOS)).toEqual({ owned: false });
+    });
+
+    it("rejects another app's own output", () => {
+        // Reachable whenever the predicate is broadened — the process rule
+        // must key on the app's executable, not merely on the field existing.
+        expect(isOwned(line({
+            pid: 95301,
+            process: "locationd",
+            tag: "com.apple.locationd:Position",
+            message: "CL: notifyClientsWithData (Fallback)",
+        }), IOS)).toEqual({ owned: false });
+    });
+
+    it("does not own by process when the executable name is unknown", () => {
+        // resolveIosProcessName failed (app not installed, simctl error), so
+        // the fetch was never process-scoped either. Claiming ownership on an
+        // absent identifier would own the whole device.
+        expect(isOwned(line({
+            pid: 12736,
+            process: "AppA",
+            tag: "com.apple.CFNetwork:Default",
+            message: "Task resuming",
+        }), { ...IOS, processName: undefined })).toEqual({ owned: false });
+    });
+});

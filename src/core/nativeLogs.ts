@@ -291,7 +291,10 @@ async function fetchForTarget(
             identity.pid = await resolveAndroidPid(identity.appId, target.adbSerial);
             lines = await fetchAndroidLines({ serial: target.adbSerial, sinceTs });
         } else {
+            // Carried on the identity, not just into the predicate: it is what
+            // ownership attributes iOS lines by, the way pid does on Android.
             const processName = await resolveIosProcessName(target.deviceKey, identity.appId);
+            identity.processName = processName;
             lines = await fetchIosLines({ udid: target.deviceKey, processName, sinceTs });
         }
         const result = runNativePipeline(lines, identity, target.deviceName, { minLevel: opts.minLevel });

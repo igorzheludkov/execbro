@@ -27,6 +27,16 @@ export interface RawLogLine {
      * pid, not the dead app's, so this is the only way to attribute a crash.
      */
     subject?: string;
+    /**
+     * The executable that EMITTED the line, when the source reports one.
+     *
+     * iOS only: `log show` carries it on every record, and it is the only
+     * app identifier ordinary os_log output has — the bundle id appears
+     * nowhere in a CFNetwork or UIKit message. Distinct from `subject`, which
+     * is the app a line is ABOUT: a jetsam kill has process "runningboardd"
+     * and subject "com.example.appa", and attributing it needs both.
+     */
+    process?: string;
     raw: string;
 }
 
@@ -66,6 +76,15 @@ export interface AppIdentity {
     appId: string;
     /** Live pid, when the app is running. Absent after a crash. */
     pid?: number;
+    /**
+     * iOS executable name (bundle id "com.example.appa" -> "AppA").
+     *
+     * The iOS counterpart to `pid`: it is what attributes a line to the app,
+     * and like `pid` its absence must disable that rule rather than weaken it.
+     * Undefined when resolveIosProcessName failed — in which case the fetch
+     * was not process-scoped either, so owning by it would own the device.
+     */
+    processName?: string;
 }
 
 export const LEVEL_RANK: Record<EventLevel, number> = {

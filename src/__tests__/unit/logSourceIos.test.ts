@@ -18,7 +18,7 @@ describe("buildLogShowCommand", () => {
     it("pushes the process filter into the predicate", () => {
         // 30m app-scoped is 42KB; unfiltered is orders of magnitude more.
         const args = buildLogShowCommand({ udid: UDID, processName: "RnDebuggerTestApp" });
-        expect(args).toContain(`process == "RnDebuggerTestApp"`);
+        expect(args[args.indexOf("--predicate") + 1]).toContain(`process == "RnDebuggerTestApp"`);
     });
 
     it("emits --start in device-local time, not UTC", () => {
@@ -30,9 +30,29 @@ describe("buildLogShowCommand", () => {
         expect(args[args.indexOf("--start") + 1]).toBe("2026-07-29 22:15:30");
     });
 
+    it("admits termination verdicts alongside the app's own process", () => {
+        // runningboardd — not the app — reports jetsam kills and launch
+        // failures. A bare `process ==` predicate excluded every one, which
+        // made IOS_VERDICT_SUBSYSTEMS unreachable and the advertised "surfaces
+        // crashes and OOM kills" false on iOS. Measured: 9 such lines about
+        // the app in a 2-minute window, all dropped.
+        const predicate = buildLogShowCommand({ udid: UDID, processName: "AppA" })
+            .find((a) => a.includes("process =="))!;
+        expect(predicate).toContain(`process == "AppA"`);
+        expect(predicate).toContain("com.apple.runningboard");
+        expect(predicate).toContain("OR");
+    });
+
     it("keeps a hostile process name as one argument, not shell syntax", () => {
-        const args = buildLogShowCommand({ udid: UDID, processName: 'App"; touch /tmp/pwned; #' });
-        expect(args).toContain(`process == "App"; touch /tmp/pwned; #"`);
+        const hostile = 'App"; touch /tmp/pwned; #';
+        const args = buildLogShowCommand({ udid: UDID, processName: hostile });
+        // The whole predicate is ONE argv element, so the injected `;` is
+        // predicate text and never reaches a shell. Asserted as an exact
+        // element rather than a substring: a split would satisfy `toContain`
+        // on the array while being precisely the bug this guards.
+        const predicate = args[args.indexOf("--predicate") + 1];
+        expect(predicate).toContain(`process == "${hostile}"`);
+        expect(args.filter((a) => a.includes("touch /tmp/pwned"))).toEqual([predicate]);
     });
 });
 

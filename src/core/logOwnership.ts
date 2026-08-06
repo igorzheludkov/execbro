@@ -1,6 +1,6 @@
 import type { AppIdentity, RawLogLine } from "./logEvents.js";
 
-export type OwnReason = "declared" | "pid" | "verdict";
+export type OwnReason = "declared" | "pid" | "process" | "verdict";
 export type OwnershipVerdict = { owned: true; reason: OwnReason } | { owned: false };
 
 /**
@@ -72,6 +72,9 @@ function namesPackage(message: string, appId: string): boolean {
  * Rule order matters: `declared` precedes `pid` because a tombstone is written
  * by tombstoned's pid while naming the dead app as its subject, so pid
  * matching would miss every crash — the exact case this feature exists for.
+ * `process` sits after both and before `verdict` for the same reason in
+ * reverse: it identifies output FROM the app, so it must not get first refusal
+ * on a line that DECLARES a different owner.
  */
 export function isOwned(line: RawLogLine, identity: AppIdentity): OwnershipVerdict {
     if (MIRRORED_TAGS.has(line.tag)) return { owned: false };
@@ -80,6 +83,19 @@ export function isOwned(line: RawLogLine, identity: AppIdentity): OwnershipVerdi
     }
     if (identity.pid !== undefined && line.pid === identity.pid) {
         return { owned: true, reason: "pid" };
+    }
+    // iOS has no pid rule — nothing resolves a simulator pid, and the two
+    // message-matching rules look for the bundle id, which ordinary os_log
+    // output never contains. Measured on a live simulator: 878 lines from the
+    // app's own process, 0 owned. The executable name is the identifier iOS
+    // does carry, on every record.
+    //
+    // Keyed on the app's OWN name, not on the field merely being present: the
+    // predicate is broadened to admit runningboardd's termination verdicts, so
+    // foreign processes legitimately appear in the stream and must fall
+    // through to the verdict rule below.
+    if (identity.processName !== undefined && line.process === identity.processName) {
+        return { owned: true, reason: "process" };
     }
     if (isVerdictSource(line, identity.platform) && namesPackage(line.message, identity.appId)) {
         return { owned: true, reason: "verdict" };

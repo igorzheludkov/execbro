@@ -1,4 +1,5 @@
 import { execFileAsync, withCancelableTimeout } from "./exec.js";
+import { IOS_VERDICT_SUBSYSTEMS } from "./logOwnership.js";
 import type { EventLevel, RawLogLine } from "./logEvents.js";
 
 const MAX_BUFFER = 32 * 1024 * 1024;
@@ -41,7 +42,16 @@ export function buildLogShowCommand(opts: {
     minMessageType?: "error" | "fault";
 }): string[] {
     const predicates: string[] = [];
-    if (opts.processName) predicates.push(`process == "${opts.processName}"`);
+    if (opts.processName) {
+        // The app's own output AND the verdicts about it. runningboardd, not
+        // the app, reports jetsam kills and launch failures, so a bare
+        // `process ==` scoped them out of existence: IOS_VERDICT_SUBSYSTEMS
+        // could never match, and "surfaces crashes and OOM kills" was false on
+        // iOS. Ownership discriminates per line, so admitting the reporters
+        // here does not admit their verdicts about other apps.
+        const verdicts = [...IOS_VERDICT_SUBSYSTEMS].map((s) => `subsystem == "${s}"`).join(" OR ");
+        predicates.push(`(process == "${opts.processName}" OR ${verdicts})`);
+    }
     // Enumerated explicitly — the predicate language has no ordering over
     // messageType, so a ">=" comparison silently matches nothing.
     if (opts.minMessageType === "fault") {
@@ -82,8 +92,14 @@ export function parseLogShowNdjson(stdout: string): RawLogLine[] {
         const category = typeof rec.category === "string" ? rec.category : "";
         const message = rec.eventMessage;
         const messageType = typeof rec.messageType === "string" ? rec.messageType : "Default";
+        // `log show` reports no bare process field — only the executable's
+        // full path, whose basename is what the `process ==` predicate and
+        // resolveIosProcessName both speak in.
+        const imagePath = typeof rec.processImagePath === "string" ? rec.processImagePath : "";
+        const process = imagePath.split("/").pop() || undefined;
 
         out.push({
+            process,
             ts: new Date(String(rec.timestamp).replace(" ", "T").replace(/([+-]\d{2})(\d{2})$/, "$1:$2")),
             level: MESSAGE_TYPE[messageType] ?? "log",
             pid: Number(rec.processID ?? 0),
