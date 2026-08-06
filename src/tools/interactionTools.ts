@@ -1048,12 +1048,12 @@ export function registerInteractionTools(server: McpServer): void {
             description:
                 "Type text on an iOS simulator." +
                 platformFallbackBanner("`input_text` — it targets, focuses, writes and verifies in one call") +
-                " The text is typed into whichever field currently has focus (tap an input first). Mirrors `android_input_text` so cross-platform agents can use `<platform>_input_text` without branching on the iOS driver shell-out." +
-                "\nPURPOSE: Send keystrokes to the focused field on an iOS simulator via the active UI driver (AXe — preferred — or IDB)." +
-                "\nWHEN TO USE: Only after an input is already focused, or when `tap(testID=...)` on the input didn't take focus for some reason. Use the testID-first flow whenever possible — it's faster and survives UI repositioning." +
-                "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value." +
-                "\nVERIFICATION: the field is read back from the accessibility tree after typing, and the result describes what LANDED. A mismatch is an error carrying sent vs landed; an unreadable field is reported as NOT verified rather than as success." +
-                "\nLIMITATIONS: keystrokes go out as US-keyboard HID scancodes, but the SIMULATOR's active keyboard layout decides what characters arrive — on a Cyrillic/Hebrew/CJK layout even pure ASCII is rewritten. Non-ASCII text cannot be sent at all. Both cases are caught by the read-back; `input_text` avoids them entirely by writing through React.",
+                " Types into whichever field has focus (tap an input first). Mirrors `android_input_text` so agents need not branch on the iOS driver shell-out." +
+                "\nPURPOSE: Send keystrokes to the focused field via the active UI driver (AXe — preferred — or IDB)." +
+                "\nWHEN TO USE: Only once an input is focused, or when `tap(testID=...)` didn't take focus. Prefer the testID-first flow — faster, and survives UI repositioning." +
+                "\nREPLACE MODE: replace:true clears the focused field first (via React onChangeText, so controlled state stays consistent), then types. Use for pre-filled fields where appending would corrupt the value." +
+                "\nVERIFICATION: the field is read back after typing and the result describes what LANDED, never what was requested. Formatting the field applies itself (autoCapitalize, trimming) still verifies; a genuine mismatch is an error carrying sent vs landed, and an unreadable field reports NOT verified rather than success." +
+                "\nLIMITATIONS: keystrokes go out as US-keyboard HID scancodes, but the SIMULATOR's active layout decides what arrives — under a Cyrillic/Hebrew/CJK layout even pure ASCII is rewritten. Non-ASCII cannot be sent at all. The read-back catches both; `input_text` avoids them by writing through React.",
             inputSchema: {
                 text: z.string().describe("Text to type into the currently focused field."),
                 replace: z

@@ -50,6 +50,39 @@ export type TypedTextVerdict = {
     landed?: string;
 };
 
+/**
+ * Compare the way a text field behaves, not the way a string does.
+ *
+ * Two things force this. A field applies its own transformations — RN defaults
+ * `autoCapitalize` to "sentences", so typing "abc" legitimately yields "Abc" —
+ * and strict equality reports that as corruption. And on iOS the accessibility
+ * tree exposes AXValue but NO placeholder attribute (verified on device: an
+ * empty field reports AXValue "Search" with AXLabel, title and
+ * AXPlaceholderValue all null), so a read of an empty field is indistinguishable
+ * from a read of one containing that word. Android has `hint` to subtract; iOS
+ * has nothing.
+ *
+ * So the question asked is not "does the field equal what I predicted" — that
+ * needs the prior text, which is exactly what cannot be read. It is "did the
+ * characters I sent arrive intact", which needs only the sent string.
+ */
+function normalizeForCompare(s: string): string {
+    return s.trim().toLowerCase();
+}
+
+export type TypedTextMatch = "exact" | "normalized" | "none";
+
+export function matchTypedText(landed: string, expected: string, sent: string): TypedTextMatch {
+    if (landed === expected || landed === sent) return "exact";
+    const nLanded = normalizeForCompare(landed);
+    const nSent = normalizeForCompare(sent);
+    if (nLanded === normalizeForCompare(expected)) return "normalized";
+    // The prior content is unknowable (see above), so an append is verified by
+    // its tail. Empty sent text has no tail to prove anything with.
+    if (nSent.length > 0 && nLanded.endsWith(nSent)) return "normalized";
+    return "none";
+}
+
 export type TypedTextInput = {
     /** What the caller asked to type. */
     sent: string;
@@ -90,12 +123,20 @@ export function verdictForTypedText(input: TypedTextInput): TypedTextVerdict {
         };
     }
 
-    if (landed === expected) {
+    const match = matchTypedText(landed, expected, sent);
+    if (match !== "none") {
+        const normalized =
+            match === "normalized"
+                ? " The field applied its own formatting (capitalization or trimming) — the characters" +
+                  " sent arrived intact, so this is not a layout remap."
+                : "";
         return {
             status: "verified",
             sent,
             landed,
-            message: `Typed ${JSON.stringify(sent)} — verified: the field now reads ${JSON.stringify(landed)}.`
+            message:
+                `Typed ${JSON.stringify(sent)} — verified: the field now reads ${JSON.stringify(landed)}.` +
+                normalized
         };
     }
 

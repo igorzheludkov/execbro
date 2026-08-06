@@ -1,5 +1,70 @@
 import { describe, expect, it } from "@jest/globals";
-import { scriptOf, verdictForTypedText } from "../../core/typedTextVerify.js";
+import { matchTypedText, scriptOf, verdictForTypedText } from "../../core/typedTextVerify.js";
+
+/**
+ * Both cases here were found on an iPhone Air simulator, not by reading the
+ * code — the original strict-equality compare threw an Error on two completely
+ * successful writes.
+ */
+describe("field-applied formatting vs. a real remap (device-found)", () => {
+    it("verifies text the field capitalized itself", () => {
+        // RN defaults autoCapitalize="sentences", so this is the common case,
+        // not an edge one: every un-opted-out field does it.
+        const v = verdictForTypedText({
+            sent: "abc",
+            expected: "abc",
+            landed: "Abc",
+            nonLatinKeyboards: ["uk_UA (Ukrainian)"]
+        });
+        expect(v.status).toBe("verified");
+        expect(v.message).toContain("its own formatting");
+    });
+
+    it("verifies an append when the prior text could not be known", () => {
+        // iOS reports an empty field's AXValue as its PLACEHOLDER and exposes no
+        // placeholder attribute to subtract, so `expected` was built as
+        // "Search" + the typed text. The tail is what proves delivery.
+        const v = verdictForTypedText({
+            sent: "envcheck@example.com",
+            expected: "Searchenvcheck@example.com",
+            landed: "Envcheck@example.com",
+            nonLatinKeyboards: []
+        });
+        expect(v.status).toBe("verified");
+    });
+
+    it("still fails the Cyrillic remap that motivated the check", () => {
+        const v = verdictForTypedText({
+            sent: "envcheck@example.com",
+            expected: "envcheck@example.com",
+            landed: 'envchус"учфьздуюсщь',
+            nonLatinKeyboards: ["uk_UA (Ukrainian)"]
+        });
+        expect(v.status).toBe("mismatch");
+        expect(v.message).toContain("Cyrillic");
+        expect(v.message).toContain("uk_UA (Ukrainian)");
+    });
+
+    it("still fails when nothing was typed and the placeholder remains", () => {
+        const v = verdictForTypedText({
+            sent: "abc",
+            expected: "Searchabc",
+            landed: "Search",
+            nonLatinKeyboards: []
+        });
+        expect(v.status).toBe("mismatch");
+    });
+
+    it("still fails a truncated write", () => {
+        expect(matchTypedText("envcheck@exa", "envcheck@example.com", "envcheck@example.com")).toBe("none");
+    });
+
+    it("does not treat an empty send as proof of anything", () => {
+        // "" is a suffix of every string; that must not read as delivered.
+        expect(matchTypedText("Search", "Search", "")).toBe("exact");
+        expect(matchTypedText("anything else", "Search", "")).toBe("none");
+    });
+});
 
 describe("scriptOf", () => {
     it("returns null for plain ASCII", () => {

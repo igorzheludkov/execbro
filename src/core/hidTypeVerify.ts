@@ -11,7 +11,7 @@
  * mismatch: no evidence is not the same as evidence of corruption.
  */
 import type { NativeField, NativeFieldsResult } from "./nativeInputValue.js";
-import { verdictForTypedText, type TypedTextVerdict } from "./typedTextVerify.js";
+import { matchTypedText, verdictForTypedText, type TypedTextVerdict } from "./typedTextVerify.js";
 
 export type HidTypeDeps = {
     /** Snapshot of the platform's text fields. */
@@ -123,7 +123,7 @@ export async function typeAndVerify(
         readError = undefined;
         previous = hit.previous;
         landed = hit.landed;
-        if (landed === previousAfterClear(previous) + text) break;
+        if (matchTypedText(landed, previousAfterClear(previous) + text, text) !== "none") break;
     }
 
     const verdict = verdictForTypedText({
