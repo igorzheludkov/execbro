@@ -185,7 +185,7 @@ export function registerExecutionTools(server: McpServer): void {
                 "PURPOSE: Enumerate the app's globalThis.* surface so you know which stores, clients, and debug hooks you can drill into.\n" +
                 "WHEN TO USE: Start of a state-debugging session, or when you don't know whether the app exposes a Redux/Apollo/Zustand handle.\n" +
                 "WORKFLOW: list_debug_globals -> inspect_global(objectName=\"...\") -> execute_in_app for reads/mutations.\n" +
-                "SDK INTEGRATION: When react-native-ai-devtools-sdk's init({ stores, navigation, custom }) was called, the response includes an sdk.paths array of dotted paths (e.g. __RN_AI_DEVTOOLS__.stores.redux). Pass them to inspect_global or execute_in_app.\n" +
+                "SDK INTEGRATION: When init({ stores, navigation, custom }) from execbro-sdk (formerly react-native-ai-devtools-sdk) was called, the response includes an sdk.paths array of dotted paths (e.g. __RN_AI_DEVTOOLS__.stores.redux). Pass them to inspect_global or execute_in_app.\n" +
                 "RN NAMESPACE: The rn field reports globalThis.__rn__ — a curated set of seven RN modules (I18nManager, PixelRatio, Platform, StyleSheet, AppRegistry, NativeModules, Dimensions) populated by SDK exposeRnGlobals() or the executor's fallback bootstrap. Use paths like __rn__.Platform.OS. rn=null → bootstrap not yet run; keys=[] → ran but no match.\n" +
                 "OUTPUT: { sdk: {...}|null, rn: {keys, hint}|null, categories: {...} }\n" +
                 "LIMITATIONS: Only sees variables explicitly assigned to a global. Module-scoped state is invisible — expose it first or use the SDK.\n",
@@ -255,7 +255,7 @@ export function registerExecutionTools(server: McpServer): void {
                         errorText += `\n\nNOTE: '${objectName}' did not resolve. Call list_debug_globals to confirm the path. If you expected the SDK to expose it, verify init({ stores, navigation, custom }) was called and check the sdk.paths array.`;
                     } else {
                         const suggested = objectName.replace(/^__/, "").replace(/__$/, "");
-                        errorText += `\n\nNOTE: '${objectName}' is not exposed as a global variable. Either (a) assign it in app code (\`globalThis.${objectName} = ${suggested};\`), or (b) register it via react-native-ai-devtools-sdk's init({ custom: { ${suggested}: ${suggested} } }) and access it as __RN_AI_DEVTOOLS__.custom.${suggested}. Then call list_debug_globals to confirm.`;
+                        errorText += `\n\nNOTE: '${objectName}' is not exposed as a global variable. Either (a) assign it in app code (\`globalThis.${objectName} = ${suggested};\`), or (b) register it via execbro-sdk's init({ custom: { ${suggested}: ${suggested} } }) and access it as __RN_AI_DEVTOOLS__.custom.${suggested}. Then call list_debug_globals to confirm.`;
                     }
                 }
     

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { CONFIG_DIR } from "./paths.js";
 
 const FEEDBACK_FILE = join(CONFIG_DIR, "feedback.json");
@@ -44,7 +45,28 @@ export function markFeedbackHintShown(): void {
 // Issue Formatting
 // ============================================================================
 
-const GITHUB_REPO = "igorzheludkov/react-native-ai-devtools";
+// Last-resort slug. The repo has been renamed once already (react-native-ai-devtools →
+// execbro), and the hardcoded copy of the old name outlived the rename here, so the slug is
+// read from package.json — the one place a rename is guaranteed to update.
+const FALLBACK_GITHUB_REPO = "igorzheludkov/execbro";
+
+/** Reduce a GitHub clone/issues/homepage URL to its `owner/repo` slug. */
+export function parseRepoSlug(url: unknown): string | undefined {
+    if (typeof url !== "string") return undefined;
+    const match = url.match(/github\.com[/:]([^/]+)\/([^/#?]+)/);
+    if (!match) return undefined;
+    return `${match[1]}/${match[2].replace(/\.git$/, "")}`;
+}
+
+export function getGitHubRepo(): string {
+    try {
+        const here = dirname(fileURLToPath(import.meta.url));
+        const pkg = JSON.parse(readFileSync(join(here, "..", "..", "package.json"), "utf-8"));
+        return parseRepoSlug(pkg?.bugs?.url) ?? parseRepoSlug(pkg?.repository?.url) ?? FALLBACK_GITHUB_REPO;
+    } catch {
+        return FALLBACK_GITHUB_REPO;
+    }
+}
 
 interface FeedbackInput {
     type: "feedback" | "feature_request" | "bug";
@@ -94,5 +116,5 @@ export function buildGitHubUrl(title: string, type: FeedbackInput["type"]): stri
         title,
         labels: label,
     });
-    return `https://github.com/${GITHUB_REPO}/issues/new?${params.toString()}`;
+    return `https://github.com/${getGitHubRepo()}/issues/new?${params.toString()}`;
 }
