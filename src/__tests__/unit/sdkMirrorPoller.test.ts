@@ -57,6 +57,50 @@ describe("mirrorOnce", () => {
         expect(getNetworkBuffer("dev").size).toBe(1);
     });
 
+    // Reproduced on a live iPhone Air simulator, 2026-08-06: a request still in
+    // flight when a poll fired stayed "pending" in the server buffer forever,
+    // with no status and no body, while the app's own SDK buffer held the same
+    // id completed with a 200 and 452 bytes. The SDK adds an entry at request
+    // START (`completed:false`) and mutates it later via `buffer.update()`, but
+    // the seen-set latched the id on first sight, so the completed version was
+    // never read again. Repeated polls could not repair it — the latch is
+    // per-epoch, so it survived until app restart.
+    it("picks up the response when a request completes after being mirrored while pending", async () => {
+        executeInApp.mockResolvedValue(payload([{ ...netEntry("n1"), completed: false, status: undefined }], []));
+        await mirrorOnce("dev");
+        expect(getNetworkBuffer("dev").get("n1")?.completed).toBe(false);
+
+        executeInApp.mockResolvedValue(payload([{ ...netEntry("n1"), responseBody: '{"ok":true}' }], []));
+        const second = await mirrorOnce("dev");
+
+        expect(second.network).toBe(1);
+        const stored = getNetworkBuffer("dev").get("n1");
+        expect(stored?.completed).toBe(true);
+        expect(stored?.status).toBe(200);
+        expect(stored?.responseBody).toBe('{"ok":true}');
+        // Updated in place, not duplicated as a second row.
+        expect(getNetworkBuffer("dev").size).toBe(1);
+    });
+
+    it("latches a completed entry so steady-state polls stay no-ops", async () => {
+        // The re-read above must not become an unconditional re-copy: that
+        // would undo the idempotence the seen-set exists for.
+        executeInApp.mockResolvedValue(payload([netEntry("n1")], []));
+        await mirrorOnce("dev");
+        expect((await mirrorOnce("dev")).network).toBe(0);
+        expect((await mirrorOnce("dev")).network).toBe(0);
+    });
+
+    it("keeps re-reading an entry that stays pending across many polls", async () => {
+        executeInApp.mockResolvedValue(payload([{ ...netEntry("n1"), completed: false, status: undefined }], []));
+        await mirrorOnce("dev");
+        // Still in flight two polls later — must remain readable, or its
+        // eventual completion is lost the same way.
+        expect((await mirrorOnce("dev")).network).toBe(1);
+        expect((await mirrorOnce("dev")).network).toBe(1);
+        expect(getNetworkBuffer("dev").size).toBe(1);
+    });
+
     it("re-mirrors the same SDK ids after an epoch bump", async () => {
         executeInApp.mockResolvedValue(payload([netEntry("n1")], [logEntry("c1", "hello")]));
         await mirrorOnce("dev");

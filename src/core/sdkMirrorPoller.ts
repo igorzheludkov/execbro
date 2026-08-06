@@ -153,7 +153,23 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
     for (const entry of parsed.network ?? []) {
         const key = `n:${epoch}:${entry.id}`;
         if (seen.has(key)) continue;
-        seen.add(key);
+        // Latch only what is FINISHED. A network entry is not immutable: the
+        // SDK adds it at request start with `completed:false` and fills in
+        // status, headers and body later via `buffer.update()`. Latching on
+        // first sight froze every request that was in flight when a poll fired
+        // — permanently, since the seen-set is per-epoch, so no later poll and
+        // no refreshMirror could repair it. Verified on a live simulator: the
+        // app held the id completed with a 200 and a 452-byte body while the
+        // server still rendered it "pending" with neither.
+        //
+        // Re-reading a pending entry is cheap (it has no body yet) and
+        // self-limiting: it stops the moment the request finishes. `set()`
+        // overwrites by key, so the completed version replaces the pending row
+        // rather than adding a second one.
+        //
+        // Console entries are exempt by nature — a log line never mutates
+        // after capture — so their latch below stays unconditional.
+        if (entry.completed) seen.add(key);
         getNetworkBuffer(deviceKey).set(entry.id, {
             requestId: entry.id,
             timestamp: new Date(entry.timestamp),
