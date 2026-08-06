@@ -248,6 +248,12 @@ COST: native reads shell out to the device (~1-1.5s per device), so source="js"
 stays the default. minLevel defaults to "warn"; crashes and ANRs are returned
 regardless of it.
 
+FLOOR: minLevel is ordered debug < log < info < warn < error < fatal. On iOS reach
+for "log" — os_log "Default", the tier a plain os_log() call emits and most of what
+a simulator produces, sits there, so "info" excludes it. When a floor hides every
+event the read says so and names the floor to retry with, rather than returning a
+bare "No log events."
+
 LIMITS: iOS Simulator and Android emulator/device only (physical iOS devices are not
 supported). Event ids stay valid until that device's buffer rolls over or clear_logs
 runs — if get_log_details reports an unknown id, call get_logs again to refresh them.

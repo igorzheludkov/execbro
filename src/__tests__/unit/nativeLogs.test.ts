@@ -26,13 +26,14 @@ const execAsyncMock = jest.fn<(file: string, args: string[]) => Promise<{ stdout
 jest.unstable_mockModule("../../core/exec.js", () => ({
     execFileAsync: execAsyncMock,
     quoteForDeviceShell: (v: string) => `'${v.replace(/'/g, `'"'"'`)}'`,
-    // logSourceAndroid.js / logSourceIos.js import this too — unused by these
-    // tests (fetchForTarget is never exercised here) but must exist so the
-    // module graph resolves.
-    withCancelableTimeout: jest.fn(),
+    // logSourceAndroid.js / logSourceIos.js wrap their subprocess in this.
+    // A passthrough keeps the timeout out of the way while letting the
+    // collectNativeEvents tests below actually reach the mocked exec.
+    withCancelableTimeout: (fn: (signal?: AbortSignal) => unknown) => fn(undefined),
 }));
 
-const { runNativePipeline, identityFromMemory, resolveLogTargets } = await import("../../core/nativeLogs.js");
+const { runNativePipeline, identityFromMemory, resolveLogTargets, collectNativeEvents } = await import("../../core/nativeLogs.js");
+const { __resetIosProcessNameCache } = await import("../../core/logSourceIos.js");
 const { __resetNativeLogBuffers } = await import("../../core/logEvents.js");
 
 function emptyDiscovery(): ListAllDevicesResult {
@@ -109,6 +110,126 @@ describe("runNativePipeline", () => {
         expect(a.events).toHaveLength(1);
         expect(b.events).toHaveLength(1);          // NOT deduped against device A
         expect(a.events[0].id).not.toBe(b.events[0].id);
+    });
+
+    it("reports what the floor dropped when it leaves nothing", () => {
+        // iOS os_log `Default` lands on level "log", which ranks below "info".
+        // A caller asking for minLevel="info" therefore gets an empty result
+        // that is indistinguishable from a silent device — the pipeline has to
+        // say that it fetched something and the floor ate it.
+        const lines = [
+            line({ pid: 23325, tag: "default", level: "log", message: "Identity resolved as app<com.example.appb>" }),
+            line({ pid: 23325, tag: "default", level: "log", message: "kExcludedFromBackupXattrName set on path: /HTTPStorages" }),
+            line({ pid: 23325, tag: "nativeloader", level: "debug", message: "Load librnscreens.so: ok" }),
+        ];
+        const { events, belowFloor } = runNativePipeline(lines, APP, "iPad Air", { minLevel: "info" });
+        expect(events).toEqual([]);
+        // suggestedLevel is the HIGHEST dropped tier: the lowest floor that
+        // still admits something, so following the hint cannot return nothing.
+        expect(belowFloor).toEqual({ count: 3, suggestedLevel: "log" });
+    });
+
+    it("stays silent about the floor when events survived it", () => {
+        const lines = [
+            line({ pid: 23325, tag: "default", level: "log", message: "Identity resolved as app<com.example.appb>" }),
+            line({ pid: 23325, tag: "X", level: "warn", message: "Something worth showing" }),
+        ];
+        const { events, belowFloor } = runNativePipeline(lines, APP, "iPad Air", { minLevel: "warn" });
+        expect(events).toHaveLength(1);
+        expect(belowFloor).toBeUndefined();
+    });
+
+    it("stays silent about the floor when the device produced nothing to drop", () => {
+        // A genuinely quiet device must not be told to lower its floor —
+        // that would send the caller chasing logs that do not exist.
+        const { events, belowFloor } = runNativePipeline([], APP, "iPad Air", { minLevel: "info" });
+        expect(events).toEqual([]);
+        expect(belowFloor).toBeUndefined();
+    });
+
+    it("does not blame the floor for lines dropped by ownership", () => {
+        // A foreign line never reached the floor; reporting it as filtered
+        // would suggest a retry that returns exactly the same emptiness.
+        const lines = [line({ pid: 998, tag: "MMKV", level: "log", message: "open /data/data/com.other.app/files/mmkv" })];
+        const { events, belowFloor } = runNativePipeline(lines, APP, "iPad Air", { minLevel: "info" });
+        expect(events).toEqual([]);
+        expect(belowFloor).toBeUndefined();
+    });
+});
+
+describe("collectNativeEvents — iOS os_log Default floor", () => {
+    // The reported bug, end to end: os_log `Default` is the tier a plain
+    // os_log() call emits, and every one of these records is dropped by
+    // minLevel="info". The read then looks exactly like a silent device.
+    const IOS_NDJSON = [
+        { messageType: "Default", eventMessage: "Identity resolved as app<com.example.appb((null))>" },
+        { messageType: "Default", eventMessage: "kExcludedFromBackupXattrName set on path: /HTTPStorages/com.example.appb" },
+    ]
+        .map((rec, i) => JSON.stringify({
+            ...rec,
+            timestamp: `2026-07-30 16:12:2${i}.000000+0000`,
+            processID: 91219,
+            threadID: 91219,
+            subsystem: "",
+            category: "",
+        }))
+        .join("\n");
+
+    beforeEach(() => {
+        __resetNativeLogBuffers();
+        __resetIosProcessNameCache();
+        listDevicesMock.mockReset();
+        recordDeviceMock.mockReset();
+        connectedAppsMock.clear();
+        execAsyncMock.mockReset();
+        listAllDevicesMock.mockReset();
+
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            ios: {
+                available: true,
+                simulators: [{ udid: "SIM-1", name: "iPad Air 13-inch (M3)", state: "booted" }],
+            },
+            summary: { booted: 1, total: 1 },
+        } as ListAllDevicesResult);
+        listDevicesMock.mockReturnValue([
+            memoryRow({ identifier: "SIM-1", name: "iPad Air 13-inch (M3)", platform: "ios", appId: "com.example.appb" }),
+        ]);
+        execAsyncMock.mockImplementation(async (_file: string, args: string[]) => {
+            if (args.includes("get_app_container")) return { stdout: "/x/AppB.app\n", stderr: "" };
+            return { stdout: IOS_NDJSON, stderr: "" };
+        });
+    });
+
+    it("tells the caller the floor hid everything, and which floor to retry with", async () => {
+        const { events, notes } = await collectNativeEvents({ minLevel: "info" });
+
+        expect(events).toEqual([]);
+        expect(notes.join("\n")).toContain('2 events fetched, all below minLevel="info" — retry with minLevel="log"');
+    });
+
+    it("keeps the stale-identity warning alongside the floor hint", async () => {
+        // Both notes describe a different reason the read could be empty;
+        // dropping either one sends the caller down the wrong path.
+        const { notes } = await collectNativeEvents({ minLevel: "info" });
+        const joined = notes.join("\n");
+        expect(joined).toContain("came from project memory");
+        expect(joined).toContain("retry with minLevel=");
+    });
+
+    it("surfaces the floor verdict structurally, not only as prose", async () => {
+        // get_logs has to label this empty read as a FILTER outcome rather
+        // than a capture failure, and it cannot do that by parsing its own
+        // note text.
+        const { belowFloor } = await collectNativeEvents({ minLevel: "info" });
+        expect(belowFloor).toEqual({ count: 2, suggestedLevel: "log" });
+    });
+
+    it("returns those same records once the floor is lowered to log", async () => {
+        // Proves the suggestion is honest: following it actually yields events.
+        const { events } = await collectNativeEvents({ minLevel: "log" });
+        expect(events).toHaveLength(2);
+        expect(events[0].title).toContain("Identity resolved");
     });
 });
 

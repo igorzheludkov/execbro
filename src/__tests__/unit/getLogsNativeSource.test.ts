@@ -25,6 +25,22 @@ describe("get_logs native source", () => {
         }
     });
 
+    it("builds the minLevel enum from the shared tier list, not a hand-written copy", () => {
+        // The inline copy omitted "log" — the tier iOS os_log `Default` maps
+        // to — so minLevel="info" silently returned nothing on iOS while
+        // looking identical to a device with no logs. Sourcing the enum from
+        // LEVEL_RANK's own tier list is what stops the two drifting again.
+        expect(src).toMatch(/z\s*\.enum\(MIN_LEVEL_CHOICES\)/);
+        expect(src).not.toMatch(/z\s*\.enum\(\[\s*"debug"/);
+    });
+
+    it("reports a floor-emptied native read as filtered, not as a capture failure", () => {
+        // _emptyResult measures CAPTURE reliability. Events that were fetched
+        // and then dropped by minLevel are a filter outcome — counting them as
+        // capture failures buries the real signal in the empty-result metric.
+        expect(src).toContain("below_min_level");
+    });
+
     it("defaults source to js so the common path stays subprocess-free", () => {
         expect(src).toMatch(/source[\s\S]{0,200}?\.default\("js"\)/);
     });

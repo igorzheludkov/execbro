@@ -4,7 +4,9 @@ import { listAllDevices } from "./deviceDiscovery.js";
 import { execFileAsync } from "./exec.js";
 import {
     getNativeLogBuffer,
+    LEVEL_RANK,
     type AppIdentity,
+    type DraftEvent,
     type LogEvent,
     type EventLevel,
     type RawLogLine,
@@ -82,7 +84,7 @@ export function runNativePipeline(
     identity: AppIdentity,
     deviceName: string,
     opts: { minLevel: EventLevel }
-): { events: LogEvent[] } {
+): { events: LogEvent[]; belowFloor?: BelowFloor } {
     const owned = lines.filter((l) => isOwned(l, identity).owned);
     const drafts = groupIntoEvents(owned, {
         deviceKey: identity.deviceKey,
@@ -90,7 +92,39 @@ export function runNativePipeline(
         source: "native",
     });
     const relevant = drafts.filter((d) => isRelevant(d, { minLevel: opts.minLevel }));
-    return { events: getNativeLogBuffer(identity.deviceKey).ingest(relevant) };
+    return {
+        events: getNativeLogBuffer(identity.deviceKey).ingest(relevant),
+        // Judged on the FILTER's outcome, not on what ingest returned: an
+        // inclusive refetch legitimately ingests nothing, and blaming the
+        // floor for that would send the caller after events they already have.
+        belowFloor: relevant.length === 0 ? describeBelowFloor(drafts) : undefined,
+    };
+}
+
+/** What a severity floor hid, when it hid everything. */
+export interface BelowFloor {
+    /** Events fetched and grouped, then dropped by the floor. */
+    count: number;
+    /**
+     * The highest tier among them — i.e. the highest floor that still admits
+     * something. Suggesting anything lower would be needlessly noisy;
+     * suggesting anything higher would return the same emptiness again.
+     */
+    suggestedLevel: EventLevel;
+}
+
+/**
+ * Only events that REACHED the floor count. Lines dropped by ownership never
+ * did, so a device whose whole output belonged to another app must not be
+ * reported as "filtered out" — the retry would be identical.
+ */
+function describeBelowFloor(dropped: DraftEvent[]): BelowFloor | undefined {
+    if (dropped.length === 0) return undefined;
+    let suggestedLevel = dropped[0].level;
+    for (const d of dropped) {
+        if (LEVEL_RANK[d.level] > LEVEL_RANK[suggestedLevel]) suggestedLevel = d.level;
+    }
+    return { count: dropped.length, suggestedLevel };
 }
 
 export interface LogTarget {
@@ -226,7 +260,7 @@ export async function resolveLogTargets(device?: string): Promise<LogTarget[]> {
 async function fetchForTarget(
     target: LogTarget,
     opts: { minLevel: EventLevel; since?: Date }
-): Promise<{ events: LogEvent[]; note?: string }> {
+): Promise<{ events: LogEvent[]; notes: string[]; belowFloor?: BelowFloor }> {
     const buffer = getNativeLogBuffer(target.deviceKey);
     const sinceTs = opts.since ?? buffer.watermark;
 
@@ -245,7 +279,7 @@ async function fetchForTarget(
             }).filter((d) => d.kind === "crash" || d.kind === "anr");
             return {
                 events: buffer.ingest(drafts),
-                note: `${target.deviceName}: no app identity known — showing crashes only`,
+                notes: [`${target.deviceName}: no app identity known — showing crashes only`],
             };
         }
 
@@ -261,15 +295,25 @@ async function fetchForTarget(
             lines = await fetchIosLines({ udid: target.deviceKey, processName, sinceTs });
         }
         const result = runNativePipeline(lines, identity, target.deviceName, { minLevel: opts.minLevel });
-        return target.identitySource === "memory"
-            ? {
-                ...result,
-                note: `${target.deviceName}: app identity "${identity.appId}" came from project memory (app not currently connected) — if this is stale, events will be filtered out`,
-            }
-            : result;
+        const notes: string[] = [];
+        if (target.identitySource === "memory") {
+            notes.push(`${target.deviceName}: app identity "${identity.appId}" came from project memory (app not currently connected) — if this is stale, events will be filtered out`);
+        }
+        if (result.belowFloor) {
+            // Without this, "the floor hid everything" and "the device was
+            // silent" render as the same empty result — the reported bug.
+            // Both notes can apply at once: they name different reasons the
+            // read came back empty, and each points somewhere different.
+            const { count, suggestedLevel } = result.belowFloor;
+            notes.push(
+                `${target.deviceName}: ${count} event${count === 1 ? "" : "s"} fetched, ` +
+                `all below minLevel="${opts.minLevel}" — retry with minLevel="${suggestedLevel}" to see them`
+            );
+        }
+        return { events: result.events, notes, belowFloor: result.belowFloor };
     } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        return { events: [], note: `${target.deviceName}: unavailable (${reason})` };
+        return { events: [], notes: [`${target.deviceName}: unavailable (${reason})`] };
     }
 }
 
@@ -281,7 +325,7 @@ export async function collectNativeEvents(opts: {
     device?: string;
     minLevel: EventLevel;
     since?: Date;
-}): Promise<{ events: LogEvent[]; notes: string[] }> {
+}): Promise<{ events: LogEvent[]; notes: string[]; belowFloor?: BelowFloor }> {
     const targets = await resolveLogTargets(opts.device);
     if (targets.length === 0) {
         return { events: [], notes: ["No iOS simulators or Android devices found."] };
@@ -291,10 +335,25 @@ export async function collectNativeEvents(opts: {
 
     const events: LogEvent[] = [];
     const notes: string[] = [];
+    let belowFloor: BelowFloor | undefined;
     for (const result of settled) {
         if (result.status === "fulfilled") {
             events.push(...result.value.events);
-            if (result.value.note) notes.push(result.value.note);
+            notes.push(...result.value.notes);
+            // Merged across devices: the caller's floor is one setting for the
+            // whole read, so the suggestion has to clear the highest tier any
+            // device had hidden — a lower one would still hide that device.
+            const dropped = result.value.belowFloor;
+            if (dropped) {
+                belowFloor = belowFloor
+                    ? {
+                        count: belowFloor.count + dropped.count,
+                        suggestedLevel: LEVEL_RANK[dropped.suggestedLevel] > LEVEL_RANK[belowFloor.suggestedLevel]
+                            ? dropped.suggestedLevel
+                            : belowFloor.suggestedLevel,
+                    }
+                    : dropped;
+            }
         } else {
             notes.push(`device unavailable: ${String(result.reason)}`);
         }
@@ -302,5 +361,5 @@ export async function collectNativeEvents(opts: {
     // Exact within a device, approximate across devices — emulator clocks
     // measured 4s of skew from the host, which we cannot correct for.
     events.sort((a, b) => a.ts.getTime() - b.ts.getTime());
-    return { events, notes };
+    return { events, notes, belowFloor };
 }

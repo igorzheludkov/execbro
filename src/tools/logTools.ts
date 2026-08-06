@@ -26,7 +26,7 @@ import { refreshMirror } from "../core/sdkMirrorPoller.js";
 import { evictionNotice, resolveEpochFilter } from "../core/epochRender.js";
 import type { LogEntry } from "../core/types.js";
 
-import { findLogEvent, nativeLogBuffers, getNativeLogBuffer, type LogEvent } from "../core/logEvents.js";
+import { findLogEvent, nativeLogBuffers, getNativeLogBuffer, MIN_LEVEL_CHOICES, type LogEvent } from "../core/logEvents.js";
 import { jsEventsFromEntries } from "../core/jsLogEvents.js";
 import { formatEventList, formatEventDetails } from "../core/logEventFormat.js";
 import { resolveListStacks, resolveFullStack } from "../core/logSymbolication.js";
@@ -252,11 +252,12 @@ export function registerLogTools(server: McpServer): void {
                     .optional()
                     .describe("Filter native/merged events by kind. Omit for all kinds."),
                 minLevel: z
-                    .enum(["debug", "info", "warn", "error", "fatal"])
+                    .enum(MIN_LEVEL_CHOICES)
                     .optional()
                     .default("warn")
                     .describe(
-                        "Relevance floor for native events (default: warn). Crashes and ANRs are always returned regardless. Lower to 'debug' to see native library loading."
+                        "Relevance floor for native events (default: warn), ordered debug < log < info < warn < error < fatal. Crashes and ANRs are always returned regardless. " +
+                        "On iOS use 'log': os_log 'Default' — what a plain os_log() call emits, and most of what a simulator produces — maps to that tier, so 'info' excludes it. Lower to 'debug' to see native library loading."
                     ),
                 since: z
                     .string()
@@ -276,7 +277,7 @@ export function registerLogTools(server: McpServer): void {
             if (source === "native" || source === "all") {
                 const sinceParsed = parseSince(since);
                 const nativeOpts = { device, minLevel, since: sinceParsed.date };
-                const { events, notes } = await collectNativeEvents(nativeOpts);
+                const { events, notes, belowFloor } = await collectNativeEvents(nativeOpts);
                 nativeEventsForEscalation = events;
                 const filtered = kind ? events.filter((e) => e.kind === kind) : events;
                 const { capped, note: cappedNote } = capEventsForDisplay(filtered, maxLogs);
@@ -291,8 +292,19 @@ export function registerLogTools(server: McpServer): void {
                     // handling below. Capping is a display bound, not a
                     // capture/filter outcome, so it plays no part in either
                     // signal.
-                    const nativeEmpty = events.length === 0;
-                    const nativeEmptyReason = !nativeEmpty && filtered.length === 0 ? "filtered_out" : undefined;
+                    //
+                    // `minLevel` is the same kind of filter, just applied
+                    // upstream: `belowFloor` means the device DID produce
+                    // events and the floor dropped them all. Capture worked,
+                    // so this must not count against the empty-result metric —
+                    // and the note already tells the caller which floor to
+                    // retry with. Both are handler-local for the reason
+                    // `filtered_out` is: they describe the caller's filter,
+                    // not connection state.
+                    const nativeEmpty = events.length === 0 && !belowFloor;
+                    const nativeEmptyReason = belowFloor
+                        ? "below_min_level"
+                        : !nativeEmpty && filtered.length === 0 ? "filtered_out" : undefined;
                     return {
                         _emptyResult: nativeEmpty,
                         ...(nativeEmptyReason && { _emptyReason: nativeEmptyReason }),

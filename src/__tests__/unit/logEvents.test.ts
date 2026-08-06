@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "@jest/globals";
 import {
     fingerprintEvent,
     LEVEL_RANK,
+    MIN_LEVEL_CHOICES,
     type RawLogLine,
     NativeLogBuffer,
     getNativeLogBuffer,
@@ -9,6 +10,22 @@ import {
     __resetNativeLogBuffers,
     type DraftEvent,
 } from "../../core/logEvents.js";
+
+describe("MIN_LEVEL_CHOICES", () => {
+    it("offers every ranked tier as a selectable floor", () => {
+        // The bug this pins: `log` — where iOS os_log `Default` lands, the most
+        // common tier on the platform — was ranked between debug and info but
+        // absent from the tool's enum, so no reachable floor sat between
+        // "everything" and "warnings only". Any tier that can be ranked must be
+        // selectable, or it becomes a silent hole in the ladder again.
+        expect([...MIN_LEVEL_CHOICES].sort()).toEqual(Object.keys(LEVEL_RANK).sort());
+    });
+
+    it("lists the tiers in rank order, so the enum reads as a severity ladder", () => {
+        const ranks = MIN_LEVEL_CHOICES.map((l) => LEVEL_RANK[l]);
+        expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    });
+});
 
 function line(over: Partial<RawLogLine> = {}): RawLogLine {
     return {

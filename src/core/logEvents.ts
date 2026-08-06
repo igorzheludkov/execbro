@@ -78,6 +78,24 @@ export const LEVEL_RANK: Record<EventLevel, number> = {
 };
 
 /**
+ * Every tier, in rank order — the choices a severity floor may be set to.
+ *
+ * Exported so the tool schema cannot hand-write its own subset. It did, and it
+ * left out `log`: the tier iOS os_log `Default` maps to, which is both the
+ * level a bare `os_log()` emits and the parser's fallback, so it covers most
+ * of what a simulator produces. With `log` unreachable there was no floor
+ * between `debug` (everything) and `warn` (the default, usually nothing), and
+ * `minLevel:"info"` — the obvious middle choice — dropped every Default record
+ * while reading as "this device had no logs".
+ *
+ * Note the ordering is ExecBro's, not Apple's: os_log ranks Default ABOVE Info,
+ * this ladder ranks it below. Reversing it here would also re-rank Android's
+ * unparsed-priority fallback and change which line represents a mixed group,
+ * so the tier is made selectable instead of moved.
+ */
+export const MIN_LEVEL_CHOICES = ["debug", "log", "info", "warn", "error", "fatal"] as const;
+
+/**
  * Identity of an event, derived from its FIRST line only.
  *
  * `logcat -T <ts>` is inclusive of the boundary, so the last event seen always
