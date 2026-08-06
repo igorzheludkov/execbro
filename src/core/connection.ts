@@ -155,6 +155,32 @@ function scheduleFastSdkReprobe(ws: WebSocket, appKey: string): void {
     }
 }
 
+// Write the JS interceptor's emit flag into the app. The flag lives on
+// globalThis, so its lifetime is the execution context's — shorter than the
+// CDP connection's. Every write site must therefore be a *context* event or a
+// detection edge, never one alone: an in-app reload (DevSettings.reload(),
+// ⌘R, Fast Refresh full reload) recreates the context without dropping the
+// connection, and the SDK-presence edge detector — held true across that
+// window by SDK_ABSENCE_CONFIRM_COUNT hysteresis — sees no edge to act on.
+// Fire-and-forget; the flag is idempotent and the next probe edge retries.
+function sendNetSuppressionFlag(ws: WebSocket, disabled: boolean): void {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try {
+        ws.send(
+            JSON.stringify({
+                id: getNextMessageId(),
+                method: "Runtime.evaluate",
+                params: {
+                    expression: `globalThis.__RN_NET_DISABLED__ = ${disabled ? "true" : "false"}`,
+                    returnByValue: true
+                }
+            })
+        );
+    } catch {
+        // ignore — next probe will retry
+    }
+}
+
 // Suppress auto-reconnection for intentionally disconnected devices
 const reconnectionSuppressed: Set<string> = new Set();
 
@@ -723,23 +749,8 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                     console.error(`[execbro] SDK ${present ? "detected" : "no longer detected"} on ${app.deviceInfo.title}; CDP/JS-interceptor buffer writes ${present ? "suppressed" : "restored"}`);
                     // Toggle the in-app interceptor's emit flag so it stops
                     // (or resumes) producing console.debug lines and CDP
-                    // traffic. Fire-and-forget — the flag is idempotent.
-                    if (app.ws.readyState === WebSocket.OPEN) {
-                        try {
-                            app.ws.send(
-                                JSON.stringify({
-                                    id: getNextMessageId(),
-                                    method: "Runtime.evaluate",
-                                    params: {
-                                        expression: `globalThis.__RN_NET_DISABLED__ = ${present ? "true" : "false"}`,
-                                        returnByValue: true
-                                    }
-                                })
-                            );
-                        } catch {
-                            // ignore — next probe will retry
-                        }
-                    }
+                    // traffic.
+                    sendNetSuppressionFlag(app.ws, nextPresent);
                 }
             }
             return;
@@ -1001,6 +1012,15 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             const ctxApp = connectedApps.get(appKey);
             if (ctxApp?.ws?.readyState === WebSocket.OPEN) {
                 injectNetworkInterceptor(ctxApp.ws);
+                // The fresh context starts with __RN_NET_DISABLED__ undefined,
+                // so the just-injected interceptor would emit alongside the SDK
+                // until something flips it back. The probe's edge detector
+                // cannot supply that flip — sdkPresent is held true across this
+                // window by design, so true→true produces no edge. Context
+                // recreation is the state change, so re-assert it here from the
+                // current belief; a later probe edge corrects it if the SDK has
+                // genuinely gone away.
+                sendNetSuppressionFlag(ctxApp.ws, ctxApp.sdkPresent === true);
                 // Re-apply mock rules to the new JS context. The server is
                 // authoritative; without this every reload_app would silently
                 // drop the agent's mocks — precisely when reproducing a
