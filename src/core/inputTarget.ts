@@ -22,6 +22,18 @@ export type InputQuery = {
     textMatch?: string;
     /** Zero-based choice among matches. Required when a target matches more than one input. */
     index?: number;
+    /**
+     * The already-resolved field, pinned by native tag.
+     *
+     * Set by callers AFTER a resolve so every later operation addresses the
+     * same field. A query is a description, and a write changes the thing being
+     * described: `textMatch` matching a field's VALUE stops matching the moment
+     * the value is replaced, so the read-back and retry then re-resolved to
+     * nothing and a landed write was reported as "no TextInput matched that
+     * target". Falls back to the rest of the query when the tag is gone, which
+     * is what a genuine remount looks like.
+     */
+    nativeTag?: number;
 };
 
 /** What an agent needs to tell two inputs apart and target the right one. */
@@ -108,6 +120,7 @@ function prelude(query: InputQuery | undefined): string {
   var wantTestID = ${wantTestID};
   var wantComponent = ${wantComponent};
   var wantText = ${wantText};
+  var wantTag = ${query?.nativeTag != null ? String(query.nativeTag) : "null"};
 
   function __eb_name(t) { return typeof t === "string" ? t : (t && (t.displayName || t.name)) || null; }
 

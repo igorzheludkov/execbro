@@ -39,6 +39,8 @@ import { enterText, type TextEntryResult } from "../core/textEntry.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readNativeFields } from "../core/nativeInputValue.js";
+import { typeAndVerify } from "../core/hidTypeVerify.js";
+import { nonLatinKeyboardsFor } from "../core/iosKeyboardLayout.js";
 import { primaryInteractionBanner, platformFallbackBanner, platformUniqueBanner } from "../core/toolHelpers.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { PINCH_IN_DEFAULT_SPAN } from "../core/pinchThresholds.js";
@@ -1050,7 +1052,8 @@ export function registerInteractionTools(server: McpServer): void {
                 "\nPURPOSE: Send keystrokes to the focused field on an iOS simulator via the active UI driver (AXe — preferred — or IDB)." +
                 "\nWHEN TO USE: Only after an input is already focused, or when `tap(testID=...)` on the input didn't take focus for some reason. Use the testID-first flow whenever possible — it's faster and survives UI repositioning." +
                 "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value." +
-                "\nLIMITATIONS: AXe types via the US-keyboard HID — non-ASCII characters (Cyrillic, CJK, Arabic) may not transmit correctly. If the active driver is AXe and the text contains non-ASCII chars, prefer pasting via the simulator pasteboard or setting IOS_DRIVER=idb.",
+                "\nVERIFICATION: the field is read back from the accessibility tree after typing, and the result describes what LANDED. A mismatch is an error carrying sent vs landed; an unreadable field is reported as NOT verified rather than as success." +
+                "\nLIMITATIONS: keystrokes go out as US-keyboard HID scancodes, but the SIMULATOR's active keyboard layout decides what characters arrive — on a Cyrillic/Hebrew/CJK layout even pure ASCII is rewritten. Non-ASCII text cannot be sent at all. Both cases are caught by the read-back; `input_text` avoids them entirely by writing through React.",
             inputSchema: {
                 text: z.string().describe("Text to type into the currently focused field."),
                 replace: z
@@ -1071,20 +1074,26 @@ export function registerInteractionTools(server: McpServer): void {
         async ({ text, replace, device, udid }) => {
             const r = await resolveIosUdid(udid);
             if (!r.ok) return r.response;
-            const result = await inputTextWithReplace(
+
+            // Typing is delivery; the read-back is the result. Echoing the
+            // requested string as a confirmation is what let a layout-mangled
+            // write pass for a clean one (issue #14).
+            const result = await typeAndVerify(
                 text,
-                replace === true,
-                (t) => iosInputText(t, r.udid),
-                () => clearFocusedInput(device)
+                { replace: replace === true },
+                {
+                    readFields: () => readNativeFields("ios", r.udid),
+                    type: async (t: string) => {
+                        const typed = await iosInputText(t, r.udid);
+                        return { success: typed.success, error: typed.error };
+                    },
+                    clear: () => clearFocusedInput(device),
+                    nonLatinKeyboards: () => nonLatinKeyboardsFor(r.udid)
+                }
             );
-    
+
             return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
+                content: [{ type: "text", text: result.success ? result.message : `Error: ${result.message}` }],
                 isError: !result.success
             };
         }

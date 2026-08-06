@@ -1027,7 +1027,11 @@ export async function iosInputText(
 
     return {
       success: true,
-      result: `Typed text: "${text}"`,
+      // Deliberately NOT "Typed text: ..." — this driver only knows that
+      // scancodes went out. What the field received is decided by the
+      // simulator's active keyboard layout, and echoing the request here read
+      // as a confirmation of receipt (issue #14). The caller verifies.
+      result: `Sent keystrokes for "${text}" to the focused field (delivery only — not read back)`,
     };
   } catch (error) {
     return {
