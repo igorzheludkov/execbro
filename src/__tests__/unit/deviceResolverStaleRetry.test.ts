@@ -15,6 +15,7 @@ jest.unstable_mockModule("../../core/deviceDiscovery.js", () => ({
 }));
 jest.unstable_mockModule("../../core/connection.js", () => ({
     getConnectedApps: () => [],
+    findDisconnectedDeviceName: () => null,
 }));
 jest.unstable_mockModule("../../core/projectMemory.js", () => ({
     listDevices: () => [],

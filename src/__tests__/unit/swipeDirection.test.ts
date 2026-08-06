@@ -77,3 +77,45 @@ describe("computeSwipeFromDirection — odd distance and one-sided clamp", () =>
         expect(r.endY).toBeGreaterThanOrEqual(lo);
     });
 });
+
+describe("computeSwipeFromDirection — system-bar safe band", () => {
+    // A swipe whose first contact lands in Android's home-gesture strip is taken by the
+    // system: the app goes to the background while the tool reports success, and the next
+    // tap — aimed with pre-swipe coordinates — lands on the launcher.
+    const band = { top: 140, bottom: 150 };
+
+    it("keeps a vertical gesture clear of the bottom strip when the band is stricter", () => {
+        // A short screen: 10% of the axis (60) does not clear a 150px strip.
+        const r = computeSwipeFromDirection("up", 500, 400, 600, band);
+        expect(r.startY).toBeLessThanOrEqual(600 - band.bottom);
+        expect(r.endY).toBeGreaterThanOrEqual(band.top);
+    });
+
+    it("keeps the 10% margin when it is the stricter of the two", () => {
+        // 10% of 2000 is 200, already past a 150px strip — the band must not loosen it.
+        const withBand = computeSwipeFromDirection("up", 5000, W, H, band);
+        const without = computeSwipeFromDirection("up", 5000, W, H);
+        expect(withBand.startY).toBe(without.startY);
+        expect(withBand.endY).toBe(without.endY);
+    });
+
+    it("clamps a distance large enough to push past the strip", () => {
+        const r = computeSwipeFromDirection("up", 100000, W, H, band);
+        expect(r.startY).toBeLessThanOrEqual(H - band.bottom);
+        expect(r.startY).toBeGreaterThan(r.endY);
+    });
+
+    it("leaves horizontal gestures alone — the band is a vertical constraint", () => {
+        const withBand = computeSwipeFromDirection("left", 400, W, H, band);
+        const without = computeSwipeFromDirection("left", 400, W, H);
+        expect(withBand).toEqual(without);
+    });
+
+    it("falls back to the plain margin when the band would swallow the axis", () => {
+        // Insets taller than the screen must not invert the range into start < end.
+        const r = computeSwipeFromDirection("up", 200, 400, 300, { top: 200, bottom: 200 });
+        expect(r.startY).toBeGreaterThan(r.endY);
+        expect(r.startY).toBeLessThanOrEqual(300);
+        expect(r.endY).toBeGreaterThanOrEqual(0);
+    });
+});

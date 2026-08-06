@@ -1,4 +1,4 @@
-import { getConnectedApps } from "./connection.js";
+import { findDisconnectedDeviceName, getConnectedApps } from "./connection.js";
 import { listAllDevices, resetDeviceDiscoveryCache } from "./deviceDiscovery.js";
 import { listDevices, recordDevice } from "./projectMemory.js";
 
@@ -257,6 +257,19 @@ async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult>
                 "MULTIPLE_DEVICES_MATCH",
                 `"${trimmed}" matches multiple devices. Pass a UDID or adb serial to disambiguate.`,
                 candidates
+            );
+        }
+        // Distinguish "never seen this name" from "this device was attached
+        // earlier and has since dropped off" — the second reads as a typo
+        // otherwise, and sends the reader to re-check their spelling instead of
+        // the device.
+        const dropped = findDisconnectedDeviceName(trimmed);
+        if (dropped) {
+            return err(
+                "DEVICE_NOT_FOUND",
+                `Device "${dropped.name}" DISCONNECTED — it was attached earlier in this session and is not reachable now. ` +
+                `The name is correct; the device dropped off. Run scan_metro to re-attach, or list_devices to see whether ` +
+                `the emulator/simulator is still running.`
             );
         }
         return err(

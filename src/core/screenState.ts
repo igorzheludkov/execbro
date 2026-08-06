@@ -34,6 +34,12 @@ export interface ScreenStatePressable {
     blockedByOverlay?: boolean;
     /** What pressing triggers: "onPress=handleSubmit()", "onBack=goBack()", or "onPress→onBack" (prop route when the fn is anonymous). Absent when nothing meaningful survives Hermes. */
     onPressHint?: string | null;
+    /**
+     * Set when this element sits under a transform the layout tree does not include —
+     * a sticky header, a collapsing toolbar, a sheet mid-animation. The frame is then
+     * pre-transform: real geometry, wrong place. Absent means the frame is trustworthy.
+     */
+    transformNote?: string | null;
 }
 
 export interface ScreenStateText {
@@ -41,6 +47,7 @@ export interface ScreenStateText {
     center: { x: number; y: number };
     bounds: { x: number; y: number; width: number; height: number };
     blockedByOverlay?: boolean;
+    transformNote?: string | null;
 }
 
 export interface ScreenStateImage {
@@ -49,6 +56,7 @@ export interface ScreenStateImage {
     center: { x: number; y: number };
     bounds: { x: number; y: number; width: number; height: number };
     blockedByOverlay?: boolean;
+    transformNote?: string | null;
 }
 
 export interface ScreenStateOverlay {
@@ -164,7 +172,7 @@ export function formatTextEntry(
 ): string {
     const { center, frame } = convert(t);
     const body = opts.fullText ? t.text : truncate(t.text, TEXT_DISPLAY_MAX);
-    return `  (${center.x}, ${center.y}) 📝 "${body}" frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
+    return `  (${center.x}, ${center.y}) 📝 "${body}" frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})${formatTransformTag(t)}`;
 }
 
 /** One merged-list line for an image node — coordinates match pressable lines. */
@@ -175,7 +183,7 @@ export function formatImageEntry(
     const { center, frame } = convert(img);
     const src = img.src ? ` src="${truncate(img.src, IMAGE_SRC_DISPLAY_MAX)}"` : "";
     const alt = img.alt ? ` alt="${img.alt}"` : "";
-    return `  (${center.x}, ${center.y}) 🖼 Image ${frame.width}x${frame.height}${src}${alt} frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
+    return `  (${center.x}, ${center.y}) 🖼 Image ${frame.width}x${frame.height}${src}${alt} frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})${formatTransformTag(img)}`;
 }
 
 const TEXT_CAP = 60;
@@ -253,18 +261,56 @@ export function formatInputState(p: ScreenStatePressable): string {
         : " [input] empty";
 }
 
+/**
+ * Route params, one line. Keys always; values only when asked for.
+ *
+ * The full blob used to print on every screenshot and every screen-state call —
+ * hundreds of characters of image URLs and ids, per call, dozens of times a
+ * session, and read approximately never. Knowing *which* params exist is what
+ * actually orients you; the values are a lookup you can ask for.
+ */
+export function formatRouteParams(
+    params: Record<string, unknown> | null | undefined,
+    fullParams: boolean
+): string | null {
+    if (!params) return null;
+    const keys = Object.keys(params);
+    if (keys.length === 0) return null;
+    if (!fullParams) {
+        return `   route params: ${keys.join(", ")}  (values: fullParams=true)`;
+    }
+    const json = JSON.stringify(params);
+    return `   route params: ${json.length > 600 ? json.slice(0, 600) + "…" : json}`;
+}
+
+/**
+ * The tag that stops a pre-transform frame being read as a tap target.
+ *
+ * Deliberately inline on the element's own line rather than only in a footnote — the
+ * coordinates and the warning about them have to travel together, because the coordinates
+ * are what gets copied into the next tap().
+ */
+export function formatTransformTag(el: { transformNote?: string | null }): string {
+    if (!el.transformNote) return "";
+    return `  ⚠transformed(${el.transformNote}) — frame is pre-transform, verify before tapping`;
+}
+
 export function formatScreenStateSummary(
     ss: ScreenState,
     convert: ItemCoordConverter = identityCoords,
-    opts: { pressablesOnly?: boolean; fullText?: boolean; keyboard?: KeyboardState; pixelScale?: number } = {}
+    opts: {
+        pressablesOnly?: boolean;
+        fullText?: boolean;
+        fullParams?: boolean;
+        keyboard?: KeyboardState;
+        pixelScale?: number;
+    } = {}
 ): string {
     const lines: string[] = [];
     if (ss.route) {
         lines.push(`📍 Currently focused screen: "${ss.route.name}"  [navigation stack: ${ss.route.stack.join(" > ")}]`);
-        if (ss.route.params && Object.keys(ss.route.params).length > 0) {
-            const params = JSON.stringify(ss.route.params);
-            lines.push(`   route params: ${params.length > 600 ? params.slice(0, 600) + "…" : params}`);
-        }
+        const paramLine = formatRouteParams(ss.route.params, opts.fullParams === true);
+        if (paramLine) lines.push(paramLine);
     } else {
         lines.push("📍 Currently focused screen: unknown (no React Navigation / Expo Router detected)");
     }
@@ -290,7 +336,7 @@ export function formatScreenStateSummary(
         return `  (${center.x}, ${center.y})${marker}${p.component ? ` <${p.component} />` : ""} ${p.label ? `"${p.label}"` : "(unlabeled)"}` +
             `${p.nearbyText ? ` near "${p.nearbyText}"` : ""}${p.onPressHint ? ` ${p.onPressHint}` : ""}` +
             `${p.testID ? ` testID="${p.testID}"` : ""}${formatInputState(p)}` +
-            ` frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})`;
+            ` frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})${formatTransformTag(p)}`;
     };
 
     // Merge pressables + (unless pressablesOnly) texts + images for one reachability
@@ -762,6 +808,106 @@ export async function getScreenState(
         return typeof s === 'object' ? s : null;
     }
 
+    // RN's own sticky-header implementation. It leaves the header at its natural layout
+    // position — far above the viewport once the list is scrolled — and pins it purely with
+    // translateY, so its measured frame is never where it is drawn. An exact marker, unlike
+    // "is animated", which is true of half the tab bars in existence.
+    var STICKY_OWNER = /^ScrollViewStickyHeader$/;
+
+    /** The current value of an Animated node, or null when it is not one / cannot be read. */
+    function animatedValueOf(v) {
+        if (!v || typeof v !== 'object') return null;
+        if (typeof v.__getValue !== 'function') return null;
+        try {
+            var got = v.__getValue();
+            return typeof got === 'number' && isFinite(got) ? got : null;
+        } catch (e) { return null; }
+    }
+
+    /** True for an Animated node handed to the native driver, whose JS value may be stale. */
+    function isNativeDriven(v) {
+        return !!(v && typeof v === 'object' && v.__isNative === true);
+    }
+
+    /**
+     * Resolve the transform chain above this fiber, up to the fiber root.
+     *
+     * Returns null when there is no transform at all, else { dx, dy, uncertain, label }:
+     * dx/dy are the best available composed translation, and the uncertain flag says
+     * whether that number can be trusted.
+     *
+     * The hard case is a native-driven transform. measureInWindow and getBoundingClientRect
+     * both read the shadow tree, so neither sees one — verified on RN 0.83/Fabric, where a
+     * pinned sticky header sat at y=132pt on screen while both APIs reported y=-1698pt. The
+     * JS-side style holds whatever was last committed, which for that header is translateY:0
+     * forever. So there is no way to be exactly right; the goal is to be exactly honest.
+     *
+     * Reading Animated nodes with __getValue() is what keeps this quiet enough to be worth
+     * reading: a resting tab bar composes to 0 and says nothing, instead of tagging every
+     * tab item on every screen and training the reader to ignore the tag.
+     */
+    function transformStateOf(fiber) {
+        var dx = 0, dy = 0;
+        var uncertain = false;
+        var sticky = false;
+        var label = null;
+        var sawTransform = false;
+        var cur = fiber;
+        var steps = 0;
+        while (cur && steps < 30) {
+            var ownerName = getComponentName(cur);
+            if (ownerName && STICKY_OWNER.test(ownerName)) sticky = true;
+
+            var st = flattenStyle(cur.memoizedProps && cur.memoizedProps.style);
+            var t = st && st.transform;
+            if (t) {
+                sawTransform = true;
+                if (Array.isArray(t)) {
+                    for (var i = 0; i < t.length; i++) {
+                        var op = t[i];
+                        if (!op || typeof op !== 'object') continue;
+                        for (var key in op) {
+                            var raw = op[key];
+                            var val = typeof raw === 'number' && isFinite(raw) ? raw : animatedValueOf(raw);
+                            if (val === null) {
+                                // An opaque value: not a number and not a readable node.
+                                uncertain = true;
+                                if (!label) label = key + ':<unreadable>';
+                                continue;
+                            }
+                            if (isNativeDriven(raw)) uncertain = true;
+                            if (key === 'translateX') {
+                                dx += val;
+                                if (!label && val !== 0) label = 'translateX:' + val;
+                            } else if (key === 'translateY') {
+                                dy += val;
+                                if (!label && val !== 0) label = 'translateY:' + val;
+                            } else if (val !== 0 && !(key === 'scale' && val === 1) &&
+                                       !(key === 'scaleX' && val === 1) && !(key === 'scaleY' && val === 1)) {
+                                // scale / rotate / skew / matrix at a non-identity value: a real
+                                // geometric effect this does not model. Say so rather than
+                                // presenting the untouched frame as exact.
+                                uncertain = true;
+                                if (!label) label = key + ':' + val;
+                            }
+                        }
+                    }
+                } else {
+                    uncertain = true;
+                    if (!label) label = 'transform:<opaque>';
+                }
+            }
+            cur = cur.return;
+            steps++;
+        }
+        if (sticky && sawTransform) {
+            uncertain = true;
+            label = 'sticky header';
+        }
+        if (!sawTransform) return null;
+        return { dx: dx, dy: dy, uncertain: uncertain, label: label || 'transformed' };
+    }
+
     // "Opaque enough to hide what is behind it." Colours reach the fiber either as CSS
     // strings or, on Fabric, as processed ARGB integers; both carry the alpha that decides
     // whether this is a cover or just a tint. A translucent scrim is deliberately NOT a
@@ -1135,7 +1281,7 @@ export async function getScreenState(
                 var hostIdx = hostFibers.length;
                 hostFibers.push(hostFiber);
                 var pressFn = (typeof pProps.onPress === 'function' && pProps.onPress) || (typeof hProps.onPress === 'function' && hProps.onPress) || null;
-                fiberMeta.push({ label: label, testID: testID, hostIdx: hostIdx, icon: icon, overlayIdx: ovIdx, component: resolveComponentName(pressableFiber), hasOwnLabel: !!baseLabel, handler: pressFn ? handlerHint(pressFn) : null, propHandlers: collectPropHandlers(pressableFiber, pressFn) });
+                fiberMeta.push({ label: label, testID: testID, hostIdx: hostIdx, icon: icon, overlayIdx: ovIdx, component: resolveComponentName(pressableFiber), hasOwnLabel: !!baseLabel, handler: pressFn ? handlerHint(pressFn) : null, propHandlers: collectPropHandlers(pressableFiber, pressFn), transform: transformStateOf(hostFiber) });
             }
             return;
         }
@@ -1159,7 +1305,7 @@ export async function getScreenState(
                 }
                 var hostIdx2 = hostFibers.length;
                 hostFibers.push(hosts3[0]);
-                fiberMeta.push({ label: label2, testID: testID2, hostIdx: hostIdx2, icon: icon2, overlayIdx: ovIdx, component: resolveComponentName(fiber), hasOwnLabel: !!baseLabel2, handler: handlerHint(props.onPress), propHandlers: collectPropHandlers(fiber, props.onPress) });
+                fiberMeta.push({ label: label2, testID: testID2, hostIdx: hostIdx2, icon: icon2, overlayIdx: ovIdx, component: resolveComponentName(fiber), hasOwnLabel: !!baseLabel2, handler: handlerHint(props.onPress), propHandlers: collectPropHandlers(fiber, props.onPress), transform: transformStateOf(hosts3[0]) });
             }
         }
 
@@ -1189,7 +1335,7 @@ export async function getScreenState(
                 var iconI = baseLabelI ? null : findMeaningfulChildName(fiber);
                 var hostIdxI = hostFibers.length;
                 hostFibers.push(hostsI[0]);
-                fiberMeta.push({ label: labelI, testID: testIDI, hostIdx: hostIdxI, icon: iconI, overlayIdx: ovIdx, component: resolveComponentName(fiber), isInput: true, hasOwnLabel: !!baseLabelI, inputValue: valueI, inputPlaceholder: placeholderI });
+                fiberMeta.push({ label: labelI, testID: testIDI, hostIdx: hostIdxI, icon: iconI, overlayIdx: ovIdx, component: resolveComponentName(fiber), isInput: true, hasOwnLabel: !!baseLabelI, inputValue: valueI, inputPlaceholder: placeholderI, transform: transformStateOf(hostsI[0]) });
             }
         }
 
@@ -1209,6 +1355,7 @@ export async function getScreenState(
     var textFibers = [];
     var textContents = [];
     var textOverlayIdx = [];
+    var textTransforms = [];
 
     function extractTextString(fiber) {
         var p = fiber.memoizedProps;
@@ -1283,6 +1430,7 @@ export async function getScreenState(
                     textFibers.push(measurableT);
                     textContents.push(str);
                     textOverlayIdx.push(ovIdx);
+                    textTransforms.push(transformStateOf(measurableT));
                 }
             }
         }
@@ -1341,7 +1489,8 @@ export async function getScreenState(
                 imageMeta.push({
                     src: imageSource(props),
                     alt: (props && typeof props.accessibilityLabel === 'string') ? props.accessibilityLabel.slice(0, 80) : null,
-                    overlayIdx: ovIdx
+                    overlayIdx: ovIdx,
+                    transform: transformStateOf(measurableI)
                 });
             }
         }
@@ -1407,6 +1556,7 @@ export async function getScreenState(
     globalThis.__screenStateTextContents = textContents;
     globalThis.__screenStateTextMeasurements = new Array(textFibers.length).fill(null);
     globalThis.__screenStateTextOverlayIdx = textOverlayIdx;
+    globalThis.__screenStateTextTransforms = textTransforms;
     globalThis.__screenStateImageMeta = imageMeta;
     globalThis.__screenStateImageMeasurements = new Array(imageFibers.length).fill(null);
 
@@ -1448,19 +1598,29 @@ export async function getScreenState(
         } catch(e) {}
     }
 
-    return { count: hostFibers.length, overlayCount: overlayFiberMeta.length };
+    return { count: hostFibers.length + textFibers.length + imageFibers.length, overlayCount: overlayFiberMeta.length };
 })()
     `;
 
     const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000, originatingToolName: "get_screen_state" }, device);
     if (!dispatchResult.success) return dispatchResult;
 
+    let dispatchedNodes = 0;
     try {
         const dp = JSON.parse(dispatchResult.result || "{}");
         if (dp.error) return { success: false, error: dp.error };
+        if (typeof dp.count === "number") dispatchedNodes = dp.count;
     } catch { /* ignore */ }
 
-    await delay(300);
+    // Scale the wait with the node count instead of a flat 300ms.
+    //
+    // measureInWindow callbacks land asynchronously, and every one that has not fired by
+    // the time the resolve pass runs is a null slot — an element that silently does not
+    // appear in the output. 300ms was ample for a small screen and demonstrably not for a
+    // dense list, which is how whole blocks came and went between identical calls. Same
+    // budget shape inspect_at_point already uses.
+    const measureBudgetMs = Math.min(3000, 400 + dispatchedNodes * 2);
+    await delay(measureBudgetMs);
 
     const resolveExpression = `
 (function() {
@@ -1474,6 +1634,7 @@ export async function getScreenState(
     var textContents = globalThis.__screenStateTextContents || [];
     var textMeasurements = globalThis.__screenStateTextMeasurements || [];
     var textOverlayIdx = globalThis.__screenStateTextOverlayIdx || [];
+    var textTransforms = globalThis.__screenStateTextTransforms || [];
     var imageMeta = globalThis.__screenStateImageMeta || [];
     var imageMeasurements = globalThis.__screenStateImageMeasurements || [];
     var nativeMarkers = globalThis.__screenStateNativeMarkers || [];
@@ -1481,6 +1642,7 @@ export async function getScreenState(
     globalThis.__screenStateTextContents = null;
     globalThis.__screenStateTextMeasurements = null;
     globalThis.__screenStateTextOverlayIdx = null;
+    globalThis.__screenStateTextTransforms = null;
     globalThis.__screenStateImageMeta = null;
     globalThis.__screenStateImageMeasurements = null;
     globalThis.__screenStateFibers = null;
@@ -1573,15 +1735,66 @@ export async function getScreenState(
         overlays.push({ origIdx: oi, type: om.type, title: om.title, blockBounds: blockBounds, contentBounds: contentBounds, hasContent: cValid && !geometric, geometric: geometric, enterIdx: om.enterIdx, pressables: [] });
     }
 
+    // A measurement callback that never fired leaves null here. Counting those is the
+    // difference between "there is nothing there" and "we did not find out" — the second
+    // used to render as the first, and silence reads as evidence.
+    var unmeasuredCount = 0;
+
+    /** Outside the viewport by the frame given. */
+    function offViewport(m) {
+        if (m.x + m.width < 0 || m.y + m.height < 0) return true;
+        if (m.x > viewportW || m.y > viewportH) return true;
+        return false;
+    }
+
+    /**
+     * Fold the composed translation into the measured frame, and decide whether the result
+     * is worth warning about.
+     *
+     * The tag is deliberately NOT raised for every uncertain transform. An Animated value
+     * that currently reads 0 on an element that measures on screen is almost certainly
+     * exactly where it says it is; tagging those buries the one case that matters. Even a
+     * sticky header is at its measured position while the list sits at the top — it only
+     * starts lying once it is pinned, and then it measures off-screen.
+     *
+     * So what earns a tag is a transform that is visibly doing something: a non-zero
+     * composed offset, or a frame that lands off-screen — the exact shape that used to make
+     * pinned headers disappear from the listing. The cost is a narrow blind spot mid-
+     * animation, where an element is displaced but still measures on screen; the gain is
+     * that a tag, when it appears, means something.
+     */
+    function withTransform(m, tf) {
+        if (!tf) return { m: m, unreliable: false, note: null };
+        var moved = { x: m.x + tf.dx, y: m.y + tf.dy, width: m.width, height: m.height };
+        var displaced = tf.dx !== 0 || tf.dy !== 0;
+        var worthWarning = tf.uncertain && (displaced || offViewport(moved));
+        return { m: moved, unreliable: worthWarning, note: worthWarning ? tf.label : null };
+    }
+
+    /**
+     * Should this element be listed?
+     *
+     * An element whose frame is pre-transform must NOT be viewport-filtered on that frame.
+     * A pinned sticky header measures hundreds of points above the screen while sitting in
+     * plain sight, and dropping it made whole blocks — title, tab bar, search field —
+     * vanish from the listing with no indication anything had been omitted.
+     */
+    function keepElement(m, unreliable) {
+        if (m.width <= 0 || m.height <= 0) return false;
+        return unreliable || !offViewport(m);
+    }
+
     // Build pressable list
     var allPressables = [];
     for (var i = 0; i < meta.length; i++) {
         if (i === rootIdx) continue;
-        var m = measurements[i];
-        if (!m || m.width <= 0 || m.height <= 0) continue;
-        if (m.x + m.width < 0 || m.y + m.height < 0) continue;
-        if (m.x > viewportW || m.y > viewportH) continue;
+        var m0 = measurements[i];
+        if (!m0) { unmeasuredCount++; continue; }
+        var tr = withTransform(m0, meta[i].transform);
+        var m = tr.m;
+        if (!keepElement(m, tr.unreliable)) continue;
         allPressables.push({
+            transformNote: tr.note,
             // Position in the DFS collection order == paint order. Kept so occlusion can
             // ask "was this drawn before the overlay?" rather than only "is it inside it?".
             paintIdx: i,
@@ -1605,11 +1818,12 @@ export async function getScreenState(
     // Row siblings first (checkbox labels), center distance as fallback.
     var textBoxes = [];
     for (var tmi = 0; tmi < textMeasurements.length; tmi++) {
-        var tm = textMeasurements[tmi];
+        var tm0 = textMeasurements[tmi];
         var tc = textContents[tmi];
-        if (!tm || !tc || tm.width <= 0 || tm.height <= 0) continue;
-        if (tm.x + tm.width < 0 || tm.y + tm.height < 0) continue;
-        if (tm.x > viewportW || tm.y > viewportH) continue;
+        if (!tm0 || !tc) continue;
+        var ttr = withTransform(tm0, textTransforms[tmi]);
+        var tm = ttr.m;
+        if (!keepElement(tm, ttr.unreliable)) continue;
         textBoxes.push({ text: tc, x: tm.x, y: tm.y, width: tm.width, height: tm.height, cx: tm.x + tm.width / 2, cy: tm.y + tm.height / 2 });
     }
     for (var ni = 0; ni < allPressables.length; ni++) {
@@ -1738,20 +1952,24 @@ export async function getScreenState(
     }
 
     for (var ti = 0; ti < textContents.length; ti++) {
-        var tm = textMeasurements[ti];
-        if (!tm || tm.width <= 0 || tm.height <= 0) continue;
-        if (tm.x + tm.width < 0 || tm.y + tm.height < 0) continue;
-        if (tm.x > viewportW || tm.y > viewportH) continue;
+        var tmA = textMeasurements[ti];
+        if (!tmA) { unmeasuredCount++; continue; }
+        var tTr = withTransform(tmA, textTransforms[ti]);
+        var tm2 = tTr.m;
+        if (!keepElement(tm2, tTr.unreliable)) continue;
         pushClassified({ text: textContents[ti],
-            center: { x: Math.round(tm.x + tm.width/2), y: Math.round(tm.y + tm.height/2) },
-            bounds: { x: Math.round(tm.x), y: Math.round(tm.y), width: Math.round(tm.width), height: Math.round(tm.height) } }, 'texts', textOverlayIdx[ti]);
+            transformNote: tTr.note,
+            center: { x: Math.round(tm2.x + tm2.width/2), y: Math.round(tm2.y + tm2.height/2) },
+            bounds: { x: Math.round(tm2.x), y: Math.round(tm2.y), width: Math.round(tm2.width), height: Math.round(tm2.height) } }, 'texts', textOverlayIdx[ti]);
     }
     for (var ii = 0; ii < imageMeta.length; ii++) {
-        var im = imageMeasurements[ii];
-        if (!im || im.width <= 0 || im.height <= 0) continue;
-        if (im.x + im.width < 0 || im.y + im.height < 0) continue;
-        if (im.x > viewportW || im.y > viewportH) continue;
+        var imA = imageMeasurements[ii];
+        if (!imA) { unmeasuredCount++; continue; }
+        var iTr = withTransform(imA, imageMeta[ii].transform);
+        var im = iTr.m;
+        if (!keepElement(im, iTr.unreliable)) continue;
         pushClassified({ src: imageMeta[ii].src, alt: imageMeta[ii].alt,
+            transformNote: iTr.note,
             center: { x: Math.round(im.x + im.width/2), y: Math.round(im.y + im.height/2) },
             bounds: { x: Math.round(im.x), y: Math.round(im.y), width: Math.round(im.width), height: Math.round(im.height) } }, 'images', imageMeta[ii].overlayIdx);
     }
@@ -1776,7 +1994,23 @@ export async function getScreenState(
         return { type: o.type, title: o.title, pressables: o.pressables, texts: o.texts, images: o.images };
     });
 
-    return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages, nativeMarkers: nativeMarkers };
+    // Everything the caller needs to judge how complete this snapshot is. Both counts used
+    // to be invisible: an unmeasured node and a node that genuinely is not there produced
+    // exactly the same output — nothing.
+    var transformedCount = 0;
+    function countTransformed(list) {
+        for (var q = 0; q < list.length; q++) if (list[q] && list[q].transformNote) transformedCount++;
+    }
+    countTransformed(rootPressables); countTransformed(rootTexts); countTransformed(rootImages);
+    for (var co = 0; co < overlays.length; co++) {
+        countTransformed(overlays[co].pressables);
+        countTransformed(overlays[co].texts || []);
+        countTransformed(overlays[co].images || []);
+    }
+
+    return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages, nativeMarkers: nativeMarkers,
+        unmeasuredCount: unmeasuredCount, transformedCount: transformedCount,
+        dispatchedCount: meta.length + textContents.length + imageMeta.length };
 })()
     `;
 
@@ -1785,15 +2019,37 @@ export async function getScreenState(
     if (!resolveResult.success) return resolveResult;
 
     let screenState: ScreenState | undefined;
+    let counts: { unmeasuredCount?: number; transformedCount?: number; dispatchedCount?: number } = {};
     try {
         const parsed = JSON.parse(resolveResult.result || "{}");
         if (parsed.error) return { success: false, error: parsed.error };
+        counts = parsed as typeof counts;
         screenState = parseScreenStateResponse(parsed) ?? undefined;
     } catch {
         return { success: false, error: "Failed to parse screen state response" };
     }
 
     if (!screenState) return { success: false, error: "Empty screen state response" };
+
+    // Surface incompleteness rather than shipping a shorter list and letting it read as
+    // "that is everything on screen".
+    const completenessNotes: string[] = [];
+    if ((counts.unmeasuredCount ?? 0) > 0) {
+        completenessNotes.push(
+            `${counts.unmeasuredCount} element(s) did not return a measurement within ${measureBudgetMs}ms and are NOT listed below. ` +
+            `This is a timing miss, not an empty screen — call get_screen_state again, or take a screenshot, before concluding anything is absent.`
+        );
+    }
+    if ((counts.transformedCount ?? 0) > 0) {
+        completenessNotes.push(
+            `${counts.transformedCount} element(s) are marked ⚠transformed. Their frames come from the layout tree, which does not include ` +
+            `native-driven transforms (sticky headers, collapsing toolbars, animating sheets), so the coordinates may not be where the element ` +
+            `is drawn. Confirm against a screenshot before tapping those.`
+        );
+    }
+    if (completenessNotes.length > 0) {
+        screenState.notes = [...(screenState.notes ?? []), ...completenessNotes];
+    }
 
     // Deduplicate pressables by center coordinates (PDV + onPress fallback can both fire)
     const dedupPressables = (list: ScreenStatePressable[]): ScreenStatePressable[] => {

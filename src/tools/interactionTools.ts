@@ -15,7 +15,20 @@ import {
     getDevicePixelRatio,
     connectedApps,
 } from "../core/index.js";
-import { tap, convertScreenshotToTapCoords, computeSwipeFromDirection, type SwipeDirection, type TapResult } from "../pro/tap.js";
+import {
+    tap,
+    convertScreenshotToTapCoords,
+    computeSwipeFromDirection,
+    SWIPE_SYSTEM_BAR_MARGIN_PX,
+    type SwipeDirection,
+    type SwipeSafeBand,
+    type TapResult,
+} from "../pro/tap.js";
+import { androidSystemBarInsets } from "../core/androidSystemBars.js";
+import { resolveDeliveredScaleFactor, resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
+import { androidForegroundPackage, foregroundLossWarning } from "../core/androidForeground.js";
+import { probeScrollAt, explainNoOpSwipe } from "../core/swipeDiagnosis.js";
+import { bundleStaleWarning } from "../core/metroIdentity.js";
 import {
     captureScreenshot,
     verifyAndCapture,
@@ -169,7 +182,14 @@ export function registerInteractionTools(server: McpServer): void {
             });
     
             const { screenshot: screenshotData, ...resultWithoutScreenshot } = result;
-            const text = JSON.stringify(resultWithoutScreenshot, null, 2);
+            const tapStaleWarning = bundleStaleWarning(args.device);
+            const text = JSON.stringify(
+                tapStaleWarning
+                    ? { ...resultWithoutScreenshot, staleBundle: tapStaleWarning }
+                    : resultWithoutScreenshot,
+                null,
+                2
+            );
             // Pack predicate + strategy mode + attempted strategies into errorContext for telemetry.
             // Always include the predicate so unmeaningful outcomes (no isError, no _errorMessage) still
             // carry triage context — otherwise blob8 ends up blank and the dashboard shows empty rows.
@@ -268,10 +288,11 @@ export function registerInteractionTools(server: McpServer): void {
                 "Swipe gesture that auto-routes to the correct platform (iOS or Android), with pixel-diff verification." +
                 primaryInteractionBanner() + "\n" +
                 "PURPOSE: Single unified swipe entry point. Easiest form: swipe({ direction: \"up\" }) scrolls to reveal more content (\"down\"/\"left\"/\"right\" also work; bare swipe() defaults to \"up\"). Optional distance in screenshot pixels (default 33% of axis). For precise control, pass all four coordinates (startX/startY/endX/endY) — they take precedence over direction.\n" +
-                "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers — anything that needs a gesture rather than a tap. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
-                "VERIFICATION: verify=true (default) returns `verification.meaningful` — false means the scroll did nothing (end-of-list, non-scrollable surface, or missed coordinates). burst=true catches transient feedback like overscroll bounce.\n" +
+                "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
+                "VERIFICATION: verify=true (default) returns `verification.meaningful`. When false, `warning` names the actual cause — already at top, already at end, not scrollable, wrong axis, or no scroll view under the start point. burst=true catches transient feedback like overscroll bounce.\n" +
+                "SAFETY: Android direction swipes stay clear of the system bars; `foregroundLost` appears if the app left the foreground anyway.\n" +
                 "WORKFLOW: swipe({ direction: \"up\" }) -> read response.verification.meaningful. Advanced: pass startX/startY/endX/endY for coordinate-precise gestures.\n" +
-                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n",
+                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific device — call list_devices for the inventory.\n",
             inputSchema: {
                 direction: z
                     .enum(["up", "down", "left", "right"])
@@ -373,10 +394,14 @@ export function registerInteractionTools(server: McpServer): void {
                 ? await captureScreenshot(resolvedPlatform!, resolvedUdid)
                 : null;
 
+            // The frame this gesture's geometry is derived from. Held outside the
+            // direction branch because the scale factor below must come from the SAME
+            // capture that sized the gesture.
+            let dims = beforeCapture;
+
             if (useDirection) {
                 // Need screen dimensions to compute the centered gesture. Reuse the
                 // before-frame if we captured one; otherwise grab one measurement frame.
-                let dims = beforeCapture;
                 if (!dims) {
                     dims = await captureScreenshot(resolvedPlatform!, resolvedUdid);
                 }
@@ -397,11 +422,33 @@ export function registerInteractionTools(server: McpServer): void {
                 // 1080x2424 device it swiped at (654, 1954) while reporting
                 // (540, 1612).
                 const shotScale = dims.scaleFactor || 1;
+
+                // Keep the gesture out of the system bars' touch regions. Android's
+                // home-gesture strip claims a swipe that STARTS inside it, hands the app to
+                // the background, and leaves this tool reporting a clean success — after
+                // which taps aimed with pre-swipe coordinates land on whatever the launcher
+                // is showing. Insets come back in device pixels; the gesture is computed in
+                // delivered-screenshot pixels, so divide by the same scale used above.
+                //
+                // Only the direction shorthand is clamped. Four explicit coordinates are a
+                // deliberate instruction and are left alone.
+                let safeBand: SwipeSafeBand | undefined;
+                if (resolvedPlatform === "android") {
+                    const bars = await androidSystemBarInsets(
+                        resolved.target.androidSerial,
+                        SWIPE_SYSTEM_BAR_MARGIN_PX
+                    );
+                    if (bars) {
+                        safeBand = { top: bars.top / shotScale, bottom: bars.bottom / shotScale };
+                    }
+                }
+
                 const computed = computeSwipeFromDirection(
                     (direction ?? "up") as SwipeDirection,
                     distance,
                     dims.width / shotScale,
-                    dims.height / shotScale
+                    dims.height / shotScale,
+                    safeBand
                 );
                 startX = computed.startX;
                 startY = computed.startY;
@@ -416,13 +463,32 @@ export function registerInteractionTools(server: McpServer): void {
             // turn over `connectedApps[0].lastScreenshot`, which may be stale or
             // belong to another device on a multi-device setup — the same fix tap
             // carries for its coordinate strategy (Bug #5, 2026-05-20).
+            //
+            // `dims`, not `beforeCapture`: with verify:false and screenshot:false there is
+            // no before-frame, so this fell through to 1 while the gesture had already been
+            // sized in delivered-screenshot pixels from the measurement frame. The two
+            // disagreed by exactly the downscale — on a 1080x2424 emulator a centered swipe
+            // was sent to adb at x=446 instead of 541, and 82.5% down each axis. Measured
+            // 2026-08-06.
             const swipeScaleFactor =
-                beforeCapture?.scaleFactor
+                dims?.scaleFactor
+                ?? await resolveDeliveredScaleFactor({
+                    platform: resolvedPlatform,
+                    udid: resolvedUdid,
+                    deviceId: resolved.target.androidSerial,
+                })
                 ?? (connectedApps.values().next().value as ConnectedApp | undefined)?.lastScreenshot?.scaleFactor
                 ?? 1;
             const dprHint = beforeCapture && beforeCapture.width > 0 && beforeCapture.height > 0
                 ? { width: beforeCapture.width, height: beforeCapture.height }
                 : undefined;
+
+            // Baseline for the foreground-loss check below, sampled while the app is still
+            // whatever it is about to stop being.
+            const foregroundBefore =
+                resolvedPlatform === "android"
+                    ? await androidForegroundPackage(resolved.target.androidSerial)
+                    : null;
 
             let driverResult: { success: boolean; result?: string; error?: string };
             if (resolvedPlatform === "ios") {
@@ -470,16 +536,53 @@ export function registerInteractionTools(server: McpServer): void {
 
             const { screenshot: screenshotData, verification } = verifyResult;
 
-            const warning =
-                verification && !verification.skipped && verification.meaningful === false
-                    ? "Swipe executed but no visual change detected — list may be at end-of-scroll, content is non-scrollable, or the gesture missed the scroll surface. Inspect the screenshot and retry with adjusted coordinates if needed."
-                    : undefined;
+            // Did the gesture hand the device to something other than what was in front?
+            //
+            // Compared against a reading taken BEFORE the gesture rather than against the
+            // connected-app registry: backgrounding the app drops its CDP connection, so by
+            // the time the check runs the registry no longer knows the package — the lookup
+            // failed in precisely the case it existed for. Two ~75ms adb queries, Android
+            // only, and self-contained.
+            const foregroundWarning = foregroundLossWarning(
+                foregroundBefore,
+                resolvedPlatform === "android" && foregroundBefore
+                    ? await androidForegroundPackage(resolved.target.androidSerial)
+                    : null
+            );
+
+            // Only pay for the scroll probe when the swipe did nothing — that is the only
+            // time the answer is needed, and it costs two JS round-trips.
+            const didNothing =
+                !!verification && !verification.skipped && verification.meaningful === false;
+            let warning: string | undefined;
+            if (didNothing) {
+                // Same metrics get_screen_state uses, so the probe hit-tests in the space
+                // the caller's coordinates are actually in.
+                const metrics = await resolveScreenSpaceMetrics({
+                    platform: resolvedPlatform,
+                    udid: resolvedUdid,
+                    deviceId: resolved.target.androidSerial,
+                });
+                const probe = await probeScrollAt(startX!, startY!, device, metrics);
+                warning = `Swipe executed but nothing moved: ${explainNoOpSwipe(
+                    probe,
+                    { x: startX!, y: startY! },
+                    { dx: endX! - startX!, dy: endY! - startY! }
+                )}`;
+            }
 
             const responseBody: Record<string, unknown> = {
                 success: true,
                 platform: resolvedPlatform,
                 from: { x: startX, y: startY },
                 to: { x: endX, y: endY },
+                ...(foregroundWarning && { foregroundLost: foregroundWarning }),
+                // Carried on the tools you are actually calling. get_refresh_status can
+                // answer this too, but only if you already suspect it — and the whole
+                // problem is that nothing else gives you a reason to.
+                ...(bundleStaleWarning(resolved.target.deviceName) && {
+                    staleBundle: bundleStaleWarning(resolved.target.deviceName),
+                }),
                 driverMessage: driverResult.result,
                 ...(verification && { verification }),
                 ...(warning && { warning }),

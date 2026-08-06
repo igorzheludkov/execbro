@@ -13,9 +13,12 @@ type ConnectedAppRegistryEntry = {
 
 const getConnectedAppsMock = jest.fn<() => ConnectedAppRegistryEntry[]>();
 const listAllDevicesMock = jest.fn<() => Promise<unknown>>();
+const findDisconnectedDeviceNameMock =
+    jest.fn<(device: string) => { name: string; lastSeenAt: number } | null>(() => null);
 
 jest.unstable_mockModule("../../core/connection.js", () => ({
     getConnectedApps: getConnectedAppsMock,
+    findDisconnectedDeviceName: findDisconnectedDeviceNameMock,
     // Minimal extras the setup chain may reach via state.js/bundle.js
     createWebSocketWithOriginFallback: jest.fn(),
     getConnectedAppByDevice: jest.fn(),

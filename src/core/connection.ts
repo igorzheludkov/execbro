@@ -42,6 +42,45 @@ const connectionLocks: Set<string> = new Set();
 // Last CDP target id seen per device name, used to detect app relaunches.
 const lastTargetIdByDevice = new Map<string, string>();
 
+/**
+ * Every device name that has been connected at any point in this server
+ * session, with the time it was last seen. Never pruned on disconnect — that is
+ * the whole point.
+ *
+ * A name that worked for a dozen calls and then stopped is a *disconnect*, not
+ * a typo, but the resolver could not tell the two apart and reported both as
+ * "no connected device matches". The natural response to that wording is to
+ * re-check the spelling, which is exactly the wrong move: the spelling is fine
+ * and the device is gone.
+ */
+const devicesSeenThisSession = new Map<string, number>();
+
+/** Record a device name as having been connected. Called on every successful attach. */
+export function recordDeviceSeen(name: string | null | undefined): void {
+    const key = (name || "").trim();
+    if (key) devicesSeenThisSession.set(key, Date.now());
+}
+
+/**
+ * The session-seen name matching `device`, or null. Uses the same normalized
+ * substring rule as live resolution, so a name that *would* have matched while
+ * the device was attached is recognised as the same device now that it is not.
+ */
+export function findDisconnectedDeviceName(device: string): { name: string; lastSeenAt: number } | null {
+    const needle = normalizeDeviceId(device);
+    if (!needle) return null;
+    for (const [name, lastSeenAt] of devicesSeenThisSession.entries()) {
+        const norm = normalizeDeviceId(name);
+        if (norm.includes(needle) || needle.includes(norm)) return { name, lastSeenAt };
+    }
+    return null;
+}
+
+/** Test seam: forget every session-seen device. */
+export function resetDevicesSeenThisSession(): void {
+    devicesSeenThisSession.clear();
+}
+
 // Track Network.enable message IDs to detect CDP network support
 const pendingNetworkEnableIds: Set<number> = new Set();
 
@@ -1188,6 +1227,7 @@ export async function connectToDevice(
             // Connection established — run setup
             connectionLocks.delete(appKey);
             connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
+            recordDeviceSeen(device.deviceName || device.title);
             markConnectionEstablished();
 
             // A new CDP target id under a device name we have buffered before
@@ -1558,6 +1598,16 @@ function deviceLabel(app: ConnectedApp): string {
     return app.deviceInfo.deviceName || app.deviceInfo.title || "";
 }
 
+/** "12s ago" / "4m ago" / "2h ago" — coarse on purpose; only the order of magnitude matters. */
+function formatAgo(ms: number): string {
+    if (!Number.isFinite(ms) || ms < 0) return "just now";
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.round(m / 60)}h ago`;
+}
+
 /**
  * Human-facing explanation for a `kind: "none"` / `kind: "ambiguous"` resolution.
  * Kept next to the matcher so the message always reflects the matching rules.
@@ -1574,6 +1624,24 @@ export function describeDeviceResolution(resolution: DeviceResolution): string {
     if (!device) {
         return "No apps connected. Run scan_metro to discover and connect to Metro servers.";
     }
+
+    // A name we have already driven this session is not a misspelling. Say so
+    // before anything else, so the reader investigates the device rather than
+    // re-reading their own argument.
+    const dropped = findDisconnectedDeviceName(device);
+    if (dropped) {
+        const ago = formatAgo(Date.now() - dropped.lastSeenAt);
+        const others = connected.length > 0
+            ? ` Still connected: ${connected.map(a => `"${deviceLabel(a)}"`).join(", ")}.`
+            : " No devices are connected right now.";
+        return [
+            `Device "${dropped.name}" DISCONNECTED — it was attached earlier in this session (last seen ${ago})`,
+            `and no longer is. The name is correct; the device dropped off.${others}`,
+            `Run scan_metro to re-attach. If that finds nothing, the emulator/simulator or the app itself has exited —`,
+            `check list_devices, then relaunch the app.`
+        ].join(" ");
+    }
+
     if (connected.length === 0) {
         return `No connected device matches "${device}". No devices are currently connected — run scan_metro to discover and connect to Metro servers.`;
     }

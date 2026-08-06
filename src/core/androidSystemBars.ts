@@ -30,7 +30,8 @@ export interface SystemBarInsets {
  * rather than placing contacts blind.
  */
 export async function androidSystemBarInsets(
-    deviceId?: string
+    deviceId?: string,
+    marginPx: number = SYSTEM_GESTURE_MARGIN_PX
 ): Promise<SystemBarInsets | null> {
     const deviceArgs = deviceId ? ["-s", deviceId] : [];
     try {
@@ -60,7 +61,11 @@ export async function androidSystemBarInsets(
         // gesture to SystemUI entirely, so the asymmetry favours generosity.
         // The same margin is applied at the bottom, where a symmetric gesture
         // made the nav bar impossible to measure independently.
-        return { top: top + SYSTEM_GESTURE_MARGIN_PX, bottom: bottom + SYSTEM_GESTURE_MARGIN_PX };
+        //
+        // The margin is a parameter because the trade differs per gesture: a pinch
+        // pays only span for a generous margin, while a swipe pays travel distance,
+        // and a swipe only needs its *first contact* clear of the strip.
+        return { top: top + marginPx, bottom: bottom + marginPx };
     } catch {
         return null;
     }

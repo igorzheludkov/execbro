@@ -483,6 +483,30 @@ export const convertPixelsToPoints = convertScreenshotToTapCoords;
 export type SwipeDirection = "up" | "down" | "left" | "right";
 
 /**
+ * Vertical band a direction-based gesture may touch, in the same pixel space as the
+ * gesture itself. Insets are the system bars' reach, not their drawn height.
+ */
+export interface SwipeSafeBand {
+    /** Pixels to keep clear at the top (status bar / notch). */
+    top: number;
+    /** Pixels to keep clear at the bottom (navigation bar / home-gesture strip). */
+    bottom: number;
+}
+
+/**
+ * Extra clearance beyond the navigation bar's reported frame.
+ *
+ * On a gesture-navigation device the home strip claims touches that START inside it, and
+ * its touchable region runs past the drawn bar. A gesture that begins there is taken by
+ * the system: the app goes to the background, the tool still reports success, and the next
+ * tap — aimed with coordinates captured before the swipe — lands on the launcher. On a
+ * personal phone that can open anything.
+ *
+ * Costing a few percent of travel is the right trade against losing the app entirely.
+ */
+export const SWIPE_SYSTEM_BAR_MARGIN_PX = 24;
+
+/**
  * Turn a swipe direction (+ optional pixel distance) into screenshot-pixel
  * start/end coordinates, centered on the screen. Content-scroll semantics:
  * "up" = finger travels bottom→top, revealing content below.
@@ -494,7 +518,8 @@ export function computeSwipeFromDirection(
     direction: SwipeDirection,
     distance: number | undefined,
     width: number,
-    height: number
+    height: number,
+    safeBand?: SwipeSafeBand
 ): { startX: number; startY: number; endX: number; endY: number } {
     const vertical = direction === "up" || direction === "down";
     const axis = vertical ? height : width;
@@ -502,8 +527,23 @@ export function computeSwipeFromDirection(
 
     const cx = Math.round(width / 2);
     const cy = Math.round(height / 2);
-    const lo = Math.round(0.1 * axis);
-    const hi = Math.round(0.9 * axis);
+    // The 10%/90% margin keeps a gesture on screen; the safe band keeps it out of the
+    // system's hands. Both apply, and the stricter one wins — on a tall device 10% of the
+    // axis already clears the nav strip, but a caller-supplied `distance` large enough to
+    // push the endpoints outward, or a short/dense screen, does not.
+    let lo = Math.round(0.1 * axis);
+    let hi = Math.round(0.9 * axis);
+    if (vertical && safeBand) {
+        lo = Math.max(lo, Math.round(safeBand.top));
+        hi = Math.min(hi, Math.round(height - safeBand.bottom));
+        // A band that swallows the whole axis (tiny screen, huge insets) would invert the
+        // range and produce a nonsense gesture. Fall back to the plain margin rather than
+        // emitting start > end.
+        if (hi <= lo) {
+            lo = Math.round(0.1 * axis);
+            hi = Math.round(0.9 * axis);
+        }
+    }
 
     // Center a band of length d on the axis midpoint, then clamp to [lo, hi].
     const mid = Math.round(axis / 2);

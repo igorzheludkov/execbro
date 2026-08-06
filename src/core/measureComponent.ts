@@ -65,21 +65,50 @@ export function buildMeasureComponentExpression(componentName: string, index: nu
         const pub = sn.canonical.publicInstance;
         return { instance: pub, nativeTag: pub.__nativeTag };
       }
+      // Fabric shadow-node handle: no public instance on the fiber, but the UIManager can
+      // measure the node directly. Without this branch a plain RCTView is invisible to the
+      // search, so it walked past every one of them and picked whatever deep descendant
+      // happened to expose a public instance — on RN 0.83 that was an RNGestureHandlerButton
+      // inside the first tab, which made measure("ShopHeader") and measure("SubTabBar")
+      // return byte-identical frames and the same nativeTag. Same branch screenState and
+      // componentSource already carry; measure was the one that never got it.
+      const node = sn.node || (sn.canonical && sn.canonical.node);
+      if (node && globalThis.nativeFabricUIManager && typeof globalThis.nativeFabricUIManager.measureInWindow === "function") {
+        // The tag lives on the canonical record here, not on a public instance.
+        const canonicalTag = sn.canonical && typeof sn.canonical.nativeTag === "number"
+          ? sn.canonical.nativeTag
+          : undefined;
+        return {
+          instance: {
+            measureInWindow: (cb) => {
+              try { globalThis.nativeFabricUIManager.measureInWindow(node, cb); } catch (e) {}
+            }
+          },
+          nativeTag: canonicalTag
+        };
+      }
       return null;
     };
 
     let target = getMeasurable(matched);
     if (!target) {
-      // Descend to nearest host descendant with measureInWindow.
-      (function findHost(f) {
-        if (!f || target) return;
-        if (f !== matched) {
-          const m = getMeasurable(f);
-          if (m) { target = m; return; }
-        }
-        if (f.child) findHost(f.child);
-        if (f.sibling && f !== matched) findHost(f.sibling);
-      })(matched.child);
+      // Breadth-first, so the SHALLOWEST measurable host wins.
+      //
+      // The previous descent was pre-order depth-first, which follows one spine to the leaf
+      // before trying the next branch. With a getMeasurable that can miss, that turns a near
+      // miss into a wildly wrong answer: the component's own container is skipped and some
+      // small leaf several levels down is measured and reported under the component's name.
+      // Breadth-first cannot do that — it exhausts a whole depth before descending.
+      const enqueueChain = (start, q) => { let n = start; while (n) { q.push(n); n = n.sibling; } };
+      const queue = [];
+      enqueueChain(matched.child, queue);
+      let guard = 0;
+      while (queue.length > 0 && !target && guard++ < 20000) {
+        const f = queue.shift();
+        const m = getMeasurable(f);
+        if (m) { target = m; break; }
+        enqueueChain(f.child, queue);
+      }
     }
 
     if (!target) {
@@ -88,9 +117,14 @@ export function buildMeasureComponentExpression(componentName: string, index: nu
     }
 
     let done = false;
+    // Held so the loser can be cancelled. Without this the 1.5s timer stays armed in the
+    // app's runtime after every successful measure — harmless, but it is a timer per call
+    // that exists only to be ignored.
+    let timeoutId = null;
     target.instance.measureInWindow((x, y, width, height) => {
       if (done) return;
       done = true;
+      if (timeoutId !== null) { try { clearTimeout(timeoutId); } catch (e) {} }
       resolve({
         outcome: "measured",
         x: x,
@@ -101,7 +135,7 @@ export function buildMeasureComponentExpression(componentName: string, index: nu
         nativeTag: typeof target.nativeTag === "number" ? target.nativeTag : undefined,
       });
     });
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       if (done) return;
       done = true;
       resolve({ outcome: "timeout", error: "measureInWindow timed out (1500ms)" });

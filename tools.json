@@ -230,6 +230,7 @@
         ],
         "get_screen_state": [
             "device",
+            "fullParams",
             "fullText",
             "includeHistory",
             "pressablesOnly"

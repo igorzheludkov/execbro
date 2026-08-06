@@ -8,9 +8,76 @@ import {
     applyIconHintToLabel,
     formatTextEntry,
     formatImageEntry,
+    formatTransformTag,
+    formatRouteParams,
     type ScreenState,
     type ScreenStatePressable,
 } from "../../core/screenState.js";
+
+describe("formatRouteParams", () => {
+    it("returns null when there are no params", () => {
+        expect(formatRouteParams(null, false)).toBeNull();
+        expect(formatRouteParams({}, false)).toBeNull();
+    });
+
+    it("lists key names and points at the flag by default", () => {
+        const line = formatRouteParams({ id: "7", token: "abc" }, false);
+        expect(line).toContain("id, token");
+        expect(line).toContain("fullParams=true");
+        expect(line).not.toContain("abc");
+    });
+
+    it("emits JSON when fullParams is set", () => {
+        expect(formatRouteParams({ id: "7" }, true)).toContain('{"id":"7"}');
+    });
+
+    it("truncates an oversized blob rather than flooding the output", () => {
+        const line = formatRouteParams({ blob: "x".repeat(2000) }, true)!;
+        expect(line.length).toBeLessThan(700);
+        expect(line.endsWith("…")).toBe(true);
+    });
+});
+
+describe("formatTransformTag", () => {
+    it("says nothing for an element with a trustworthy frame", () => {
+        expect(formatTransformTag({})).toBe("");
+        expect(formatTransformTag({ transformNote: null })).toBe("");
+    });
+
+    it("marks the frame as pre-transform, on the element's own line", () => {
+        const tag = formatTransformTag({ transformNote: "sticky header" });
+        expect(tag).toContain("⚠transformed(sticky header)");
+        expect(tag).toContain("pre-transform");
+    });
+
+    it("rides along on pressable, text and image lines alike", () => {
+        const note = { transformNote: "translateY:-229" };
+        expect(
+            formatScreenStateSummary({
+                route: null,
+                overlays: [],
+                pressables: [pressable(note)],
+                texts: [],
+                images: [],
+            })
+        ).toContain("⚠transformed(translateY:-229)");
+        expect(
+            formatTextEntry({
+                text: "Shop",
+                center: { x: 10, y: 10 },
+                bounds: { x: 0, y: 0, width: 20, height: 20 },
+                ...note,
+            })
+        ).toContain("⚠transformed(translateY:-229)");
+        expect(
+            formatImageEntry({
+                center: { x: 10, y: 10 },
+                bounds: { x: 0, y: 0, width: 20, height: 20 },
+                ...note,
+            })
+        ).toContain("⚠transformed(translateY:-229)");
+    });
+});
 
 describe("formatScreenStateSummary nativeOverlay", () => {
     function emptyState(over: Partial<ScreenState> = {}): ScreenState {
@@ -354,9 +421,22 @@ describe("formatScreenStateSummary", () => {
     it("renders route, params, component tags, labels, nearby text, and frames", () => {
         const out = formatScreenStateSummary(state);
         expect(out).toContain('📍 Currently focused screen: "Checkout"  [navigation stack: Tabs > Cart > Checkout]');
-        expect(out).toContain('route params: {"id":"7"}');
+        // Keys, not values: the blob is hundreds of characters of ids and image URLs on a
+        // real screen, printed on every call and read approximately never.
+        expect(out).toContain("route params: id  (values: fullParams=true)");
+        expect(out).not.toContain('{"id":"7"}');
         expect(out).toContain('(210, 838) 🔘 <Button /> "Send" frame:(20,810 380x56)');
         expect(out).toContain('near "Skip verification."');
+    });
+
+    it("emits param values only when fullParams is set", () => {
+        const out = formatScreenStateSummary(state, undefined, { fullParams: true });
+        expect(out).toContain('route params: {"id":"7"}');
+    });
+
+    it("omits the params line entirely when the route has none", () => {
+        const bare = { ...state, route: { name: "Home", params: null, stack: ["Home"] } };
+        expect(formatScreenStateSummary(bare)).not.toContain("route params");
     });
 
     it("applies the coordinate converter to centers and frames", () => {

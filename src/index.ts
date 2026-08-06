@@ -133,6 +133,42 @@ async function main() {
             const url = new URL(req.url || "", `http://localhost:${httpPort}`);
 
             if (url.pathname === "/mcp") {
+                // GET opens the standalone server→client SSE stream, and DELETE
+                // terminates a session. Neither is answerable here: this server
+                // is stateless (sessionIdGenerator: undefined), so there is no
+                // session to address a server-initiated message to or to delete.
+                //
+                // They must also never enter the queue. A GET stream stays open
+                // by design, so a queued one holds the single slot until the
+                // 30s drain timeout — and the client reopens it the moment it
+                // closes. Every tool-call POST then queues behind a stream that
+                // is always there, and the server answers nothing while looking
+                // completely healthy: listening, idle, accepting connections.
+                // That is what kept `execbro-dev` from ever attaching to a
+                // Claude Code session.
+                //
+                // 405 is the documented answer for a streamable-HTTP server
+                // that offers no standalone stream; clients fall back to
+                // POST-only and proceed normally.
+                if (req.method === "GET" || req.method === "DELETE") {
+                    res.writeHead(405, {
+                        "Content-Type": "application/json",
+                        Allow: "POST",
+                    });
+                    res.end(
+                        JSON.stringify({
+                            jsonrpc: "2.0",
+                            error: {
+                                code: -32000,
+                                message:
+                                    "Method not allowed: this server is stateless and offers no standalone SSE stream.",
+                            },
+                            id: null,
+                        })
+                    );
+                    return;
+                }
+
                 // Serialized: the transport is per-request but `server` is not,
                 // and McpServer.connect() throws "Already connected to a
                 // transport" if a second transport attaches before the first

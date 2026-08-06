@@ -2,6 +2,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import {
+    metroProcessChanged,
+    markBundlePossiblyStale,
+    clearBundleStale,
+    staleBundleMessage,
+} from "../core/metroIdentity.js";
+import {
     scanMetroPorts,
     fetchDevices,
     filterDebuggableDevices,
@@ -121,6 +127,17 @@ export function registerConnectionTools(server: McpServer): void {
                 }
             }
     
+            // Phase 2.5: Is this the same Metro process we attached to before?
+            //
+            // A restart is invisible from every other signal — the app reconnects, the CDP
+            // socket is healthy, and this scan reports success — while any edit made in the
+            // meantime never reached the running bundle. Checked before connecting so the
+            // devices about to attach can be flagged.
+            const restartedPorts = new Set<number>();
+            for (const port of openPorts) {
+                if (await metroProcessChanged(port)) restartedPorts.add(port);
+            }
+
             // Phase 3: Connect devices to their assigned ports
             const results: string[] = [];
             if (purged.length > 0) {
@@ -147,6 +164,9 @@ export function registerConnectionTools(server: McpServer): void {
                         const isStale = connectionResult.includes("stale CDP target");
                         const prefix = isStale ? "  - STALE" : "  -";
                         results.push(`${prefix} ${connectionResult}`);
+                        if (restartedPorts.has(port) && !isStale) {
+                            markBundlePossiblyStale(name, staleBundleMessage(name));
+                        }
                     } catch (error) {
                         results.push(`  - ${name}: Failed - ${error}`);
                     }
@@ -161,6 +181,19 @@ export function registerConnectionTools(server: McpServer): void {
                 }
             }
     
+            // The loudest thing in this result when it applies: everything else here reads
+            // as "you are connected and ready", which is exactly the impression that makes
+            // a stale bundle cost an afternoon.
+            if (restartedPorts.size > 0) {
+                results.push("");
+                results.push(
+                    `⚠️ METRO RESTARTED since this session last attached (port ${[...restartedPorts].join(", ")}). ` +
+                    `Fast Refresh history is discontinuous: edits made while Metro was down are NOT in the running bundle, ` +
+                    `and reconnecting does not reconcile them. Run reload_app before trusting any behaviour you observe — ` +
+                    `otherwise an edit that never loaded looks exactly like an edit that did not work.`
+                );
+            }
+
             // Advisory if any CDP targets failed the liveness probe
             const staleCount = results.filter((r) => r.startsWith("  - STALE")).length;
             if (staleCount > 0) {
@@ -728,6 +761,10 @@ export function registerConnectionTools(server: McpServer): void {
         },
         async ({ device }) => {
             const result = await reloadApp(device);
+
+            // A completed reload is the one action that guarantees the running bundle is
+            // what Metro can serve right now, so it retires the stale-bundle warning.
+            if (result.success) clearBundleStale(device);
 
             if (!result.success) {
                 return {

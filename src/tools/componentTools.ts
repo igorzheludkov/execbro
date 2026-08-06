@@ -7,6 +7,7 @@ import {
     formatRouteTrail
 } from "../core/routeHistory.js";
 import { getEpoch } from "../core/state.js";
+import { bundleStaleWarning } from "../core/metroIdentity.js";
 import {
     getComponentTree,
     getScreenLayout,
@@ -251,16 +252,18 @@ export function registerComponentTools(server: McpServer): void {
                 "COORDINATES: delivered-screenshot pixels — the same space as ios_screenshot/android_screenshot, get_screen_layout, inspect_at_point, measure and tap(). Pass them through unchanged; never scale by devicePixelRatio yourself.\n" +
                 "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection.\n" +
                 "HISTORY: includeHistory=true appends the route trail (dwell + origin per screen).\n" +
+                "PARAMS: route params listed by key; fullParams=true adds values.\n" +
                 "SOURCE: this lists what is on screen, not where it lives in code — for the file:line that renders an element, call inspect_at_point(x, y).\n" +
-                "SEE ALSO: get_screen_layout for the full hierarchical component tree (deep inspection) — this gives a flat, tap-ready content list instead.",
+                "SEE ALSO: get_screen_layout for the full component tree; this is a flat, tap-ready content list.",
             inputSchema: {
                 device: z.string().optional().describe(DEVICE_ARG_DESC),
                 pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false."),
                 fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false."),
+                fullParams: z.boolean().optional().describe("Emit the route params' values. Default false — only the param key names are listed, because the full blob is usually hundreds of characters of ids and image URLs."),
                 includeHistory: z.boolean().optional().describe("Append the route trail — which screens the app has been on, most recent first, with dwell time and the route each was entered from. Recorded from connection time; an app restart shows an epoch divider. If no navigation listener could be attached the trail reports itself as sampled, meaning transitions between calls may be missing. Default false.")
             }
         },
-        async ({ device, pressablesOnly, fullText, includeHistory }) => {
+        async ({ device, pressablesOnly, fullText, fullParams, includeHistory }) => {
             if (!hasMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_state");
                 return {
@@ -301,7 +304,7 @@ export function registerComponentTools(server: McpServer): void {
             const ss = rawSs ? screenStateToScreenSpace(rawSs, metrics) : rawSs;
             const summary = ss
                 ? formatScreenStateSummary(ss, pxScaleConverter(metrics), {
-                    pressablesOnly, fullText, keyboard, pixelScale: metrics.pixelScale
+                    pressablesOnly, fullText, fullParams, keyboard, pixelScale: metrics.pixelScale
                 })
                 : (result.result ?? "{}");
             // Sample on every read, not only when history is requested — the
@@ -313,7 +316,14 @@ export function registerComponentTools(server: McpServer): void {
             }
 
             const scaleNote = unresolvedScaleNote(metrics);
-            const allNotes = scaleNote ? [scaleNote, ...metaNotes] : metaNotes;
+            // Ahead of the other notes: if the running bundle predates your edits, nothing
+            // else in this snapshot means what it appears to mean.
+            const staleNote = bundleStaleWarning(device);
+            const allNotes = [
+                ...(staleNote ? [staleNote] : []),
+                ...(scaleNote ? [scaleNote] : []),
+                ...metaNotes,
+            ];
             let body = allNotes.length > 0
                 ? `${summary}\n\n${allNotes.join("\n")}`
                 : summary;

@@ -38,6 +38,42 @@ function pixelScaleFrom(
     return deviceScale / computeDeliveredDownscale(pixelSize.width, pixelSize.height);
 }
 
+/**
+ * delivered-screenshot pixels -> device pixels, without taking a screenshot.
+ *
+ * Gesture tools speak delivered pixels and drivers speak device pixels, so something has to
+ * bridge them. Reading it off a capture is exact but costs a screenshot, which the
+ * `screenshot:false, verify:false` fast path exists to avoid — and falling back to 1 there
+ * is not a neutral default, it silently shrinks every coordinate by the downscale.
+ *
+ * The factor is a property of the device (its pixel size decides the downscale), not of any
+ * particular capture, so it can be derived from cached size queries instead. Returns
+ * undefined when the size is unknown, so callers can keep their own fallbacks.
+ */
+export async function resolveDeliveredScaleFactor(opts: {
+    platform: "ios" | "android";
+    udid?: string;
+    deviceId?: string;
+}): Promise<number | undefined> {
+    try {
+        const pixelSize =
+            opts.platform === "ios"
+                ? await getIOSScreenPixelSize(opts.udid).catch(() => null)
+                : await androidGetScreenSize(opts.deviceId)
+                      .then((s) => (s && s.success && s.width && s.height ? { width: s.width, height: s.height } : null))
+                      .catch(() => null);
+        if (!pixelSize) return undefined;
+        // computeDeliveredDownscale returns a DIVISOR: delivered = device / downscale.
+        // So device/delivered — the factor gesture drivers need — is the value itself, not
+        // its reciprocal. On a 1080x2424 device that is 2424/2000 = 1.212.
+        const downscale = computeDeliveredDownscale(pixelSize.width, pixelSize.height);
+        if (!downscale || downscale <= 0) return undefined;
+        return downscale;
+    } catch {
+        return undefined;
+    }
+}
+
 export async function resolveScreenSpaceMetrics(opts: {
     platform: "ios" | "android";
     /** iOS simulator UDID. */
