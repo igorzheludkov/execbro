@@ -5,9 +5,9 @@ import { bootstrappedApps, connectedApps } from "./state.js";
  * Best-effort fiber walk that probes for the seven curated RN modules
  * by shape signature. Hermes does not expose closure-captured variables,
  * so this fallback almost always sets globalThis.__rn__ = null. Apps that
- * install react-native-ai-devtools-sdk get the namespace populated directly
- * via the SDK's exposeRnGlobals() — that's the preferred path. This walk
- * is here so list_debug_globals can report the failure clearly.
+ * install execbro-sdk get the namespace populated directly via the SDK's
+ * exposeRnGlobals() — that's the preferred path. This walk is here so
+ * list_debug_globals can report the failure clearly.
  */
 export function buildRnGlobalsBootstrapExpression(): string {
     // Hermes-compatible IIFE: scans every fiber's memoizedProps / stateNode /
@@ -15,7 +15,7 @@ export function buildRnGlobalsBootstrapExpression(): string {
     // module signatures. Stops on first match per module.
     return `(() => {
         try {
-            // SDK fast path: if react-native-ai-devtools-sdk's exposeRnGlobals()
+            // SDK fast path: if execbro-sdk's exposeRnGlobals()
             // already populated __rn__, don't run the fiber walk and don't clobber it.
             const existing = globalThis.__rn__;
             if (existing && typeof existing === "object") {

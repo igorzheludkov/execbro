@@ -114,7 +114,7 @@ export function buildListDebugGlobalsExpression(): string {
                 } else if (rnRaw === null) {
                     rn = {
                         keys: [],
-                        hint: 'Bootstrap attempted but no fiber had the curated RN modules in scope. Install react-native-ai-devtools-sdk or fall back to a fiber walk.'
+                        hint: 'Bootstrap attempted but no fiber had the curated RN modules in scope. Install execbro-sdk or fall back to a fiber walk.'
                     };
                     if (categories['Other Debug'].indexOf('__rn__') < 0) {
                         categories['Other Debug'].push('__rn__');
