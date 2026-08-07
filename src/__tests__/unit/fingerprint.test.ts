@@ -16,10 +16,16 @@ jest.unstable_mockModule("child_process", () => ({
 
 const mockReadFileSync = jest.fn();
 const mockExistsSync = jest.fn();
+const mockWriteFileSync = jest.fn();
+const mockMkdirSync = jest.fn();
 jest.unstable_mockModule("fs", () => ({
     ...realFs,
     readFileSync: mockReadFileSync,
     existsSync: mockExistsSync,
+    // Mocked so a degraded-fingerprint test never writes a salt file into the
+    // developer's real ~/.execbro.
+    writeFileSync: mockWriteFileSync,
+    mkdirSync: mockMkdirSync,
 }));
 
 const mockUserInfo = jest.fn();
@@ -32,7 +38,8 @@ jest.unstable_mockModule("os", () => ({
     platform: mockPlatform,
 }));
 
-const { getDeviceFingerprint, getMachineId } = await import("../../core/fingerprint.js");
+const { createHash } = await import("node:crypto");
+const { getDeviceFingerprint, getMachineId, isFingerprintDegraded } = await import("../../core/fingerprint.js");
 
 describe("fingerprint", () => {
     beforeEach(() => {
@@ -113,9 +120,46 @@ describe("fingerprint", () => {
             mockExecSync.mockImplementation(() => {
                 throw new Error("permission denied");
             });
+            mockExistsSync.mockReturnValue(true);
+            mockReadFileSync.mockReturnValue(JSON.stringify({ salt: "salt-aaaa" }));
 
             const fp = getDeviceFingerprint();
             expect(fp).toMatch(/^[a-f0-9]{64}$/);
+        });
+
+        it("flags degraded mode when no machineId is available", () => {
+            mockPlatform.mockReturnValue("darwin");
+            mockExecSync.mockImplementation(() => {
+                throw new Error("permission denied");
+            });
+            mockExistsSync.mockReturnValue(true);
+            mockReadFileSync.mockReturnValue(JSON.stringify({ salt: "salt-aaaa" }));
+
+            getDeviceFingerprint();
+            expect(isFingerprintDegraded()).toBe(true);
+        });
+
+        it("does not collide across installs sharing username and CPU when machineId is missing", () => {
+            // The pre-salt implementation hashed username + cpuModel only, so every
+            // container built from one image produced this exact value — pooling
+            // unrelated users into a single fingerprint-keyed usage group.
+            mockPlatform.mockReturnValue("darwin");
+            mockExecSync.mockImplementation(() => {
+                throw new Error("permission denied");
+            });
+            mockExistsSync.mockReturnValue(true);
+            mockReadFileSync.mockReturnValue(JSON.stringify({ salt: "salt-aaaa" }));
+
+            const shareable = createHash("sha256").update("testuser" + "Apple M2 Pro").digest("hex");
+            expect(getDeviceFingerprint()).not.toBe(shareable);
+        });
+
+        it("clears the degraded flag once a machineId becomes available", () => {
+            mockPlatform.mockReturnValue("darwin");
+            mockExecSync.mockReturnValue("Hardware UUID: ABC123\n");
+
+            getDeviceFingerprint();
+            expect(isFingerprintDegraded()).toBe(false);
         });
     });
 });

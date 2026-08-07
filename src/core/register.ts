@@ -6,6 +6,7 @@ import {
     getPackageName,
     categorizeError,
     trackToolInvocation,
+    isTelemetryEnabled,
 } from "./telemetry.js";
 import { getTargetPlatform } from "./state.js";
 import { UserInputError } from "./errors.js";
@@ -198,7 +199,7 @@ export function registerToolWithTelemetry(
             // telemetry's trackToolInvocation in the finally block; we just
             // skip the dedicated error-tracking pipe so the dashboard surfaces
             // real product bugs rather than validation noise.
-            if (!(error instanceof UserInputError)) {
+            if (!(error instanceof UserInputError) && isTelemetryEnabled()) {
                 getPostHogClient()?.captureException(error, getInstallationId(), { tool: toolName, server_version: getServerVersion(), package_name: getPackageName() });
             }
             throw error;
@@ -215,27 +216,35 @@ export function registerToolWithTelemetry(
                 if (toolName.startsWith("ios_") || toolName.startsWith("android_")) platformKind = "native";
             }
 
-            getPostHogClient()?.capture({
-                distinctId: getInstallationId(),
-                event: toolName,
-                properties: {
-                    success,
-                    duration,
-                    server_version: getServerVersion(),
-                    package_name: getPackageName(),
-                    ...(errorMessage && { error: errorMessage.substring(0, 200) }),
-                    ...(errorMessage && { error_category: categorizeError(errorMessage, errorContext) }),
-                    ...(errorOrigin && { error_origin: errorOrigin }),
-                    ...(getTargetPlatform() && { platform: getTargetPlatform() }),
-                    ...(platformKind && { platform_kind: platformKind }),
-                    ...(tapStrategy && { tap_strategy: tapStrategy }),
-                    ...(meaningful !== undefined && { meaningful }),
-                    ...(changeRate !== undefined && { change_rate: changeRate }),
-                    ...(iosDriver && { ios_driver: iosDriver }),
-                    ...(emptyResult !== undefined && { empty_result: emptyResult }),
-                    ...(emptyReason && { empty_reason: emptyReason }),
-                },
-            });
+            // Analytics only — gated on the same flag as the tool_invocation
+            // mirror in telemetry.ts. Leaving it ungated made opted-out installs
+            // emit per-tool events with no tool_invocation/app_detected
+            // counterpart, which read as "users who never connected an app".
+            // Guarded with an if, never an early return: a `return` inside
+            // `finally` discards the exception the catch block re-threw.
+            if (isTelemetryEnabled()) {
+                getPostHogClient()?.capture({
+                    distinctId: getInstallationId(),
+                    event: toolName,
+                    properties: {
+                        success,
+                        duration,
+                        server_version: getServerVersion(),
+                        package_name: getPackageName(),
+                        ...(errorMessage && { error: errorMessage.substring(0, 200) }),
+                        ...(errorMessage && { error_category: categorizeError(errorMessage, errorContext) }),
+                        ...(errorOrigin && { error_origin: errorOrigin }),
+                        ...(getTargetPlatform() && { platform: getTargetPlatform() }),
+                        ...(platformKind && { platform_kind: platformKind }),
+                        ...(tapStrategy && { tap_strategy: tapStrategy }),
+                        ...(meaningful !== undefined && { meaningful }),
+                        ...(changeRate !== undefined && { change_rate: changeRate }),
+                        ...(iosDriver && { ios_driver: iosDriver }),
+                        ...(emptyResult !== undefined && { empty_result: emptyResult }),
+                        ...(emptyReason && { empty_reason: emptyReason }),
+                    },
+                });
+            }
         }
     });
 }

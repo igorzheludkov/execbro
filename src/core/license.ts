@@ -3,7 +3,7 @@ import { platform, hostname, release } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getInstallationId } from "./telemetry.js";
-import { getDeviceFingerprint, getFingerprintVersion } from "./fingerprint.js";
+import { getDeviceFingerprint, getFingerprintVersion, isFingerprintDegraded } from "./fingerprint.js";
 import { getPostHogClient } from "./posthog.js";
 import { CONFIG_DIR } from "./paths.js";
 import { readUsageCache, writeUsageCache, getUsageCacheState } from "./usageCache.js";
@@ -217,6 +217,9 @@ async function callValidationApi(installationId: string): Promise<ApiResponse | 
                 installationId,
                 fingerprint: getDeviceFingerprint(),
                 fingerprintVersion: getFingerprintVersion(),
+                // No hardware signal behind this fingerprint — it identifies an
+                // install, not a device, so it must not be used to group installs.
+                fingerprintDegraded: isFingerprintDegraded(),
                 platform: platform(),
                 serverVersion: getServerVersion(),
                 hostname: hostname(),
