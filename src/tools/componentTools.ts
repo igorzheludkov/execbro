@@ -7,6 +7,7 @@ import {
     formatRouteTrail
 } from "../core/routeHistory.js";
 import { getEpoch } from "../core/state.js";
+import { recordScreen } from "../core/screenStaleness.js";
 import { bundleStaleWarning } from "../core/metroIdentity.js";
 import {
     getComponentTree,
@@ -313,6 +314,21 @@ export function registerComponentTools(server: McpServer): void {
             if (routeName) {
                 const key = device ?? "default";
                 recordSampledRoute(key, routeName, getEpoch(key), Date.now());
+            }
+
+            // This read IS the agent's model of the screen, and it happens
+            // AFTER whatever action preceded it — which makes it the only
+            // baseline a later miss can be judged against honestly. A baseline
+            // taken during a tap or input_text resolve necessarily predates the
+            // action it resolved for, so every following miss compares against
+            // a screen the agent's own work had already replaced.
+            if (ss?.pressables?.length) {
+                recordScreen(device, {
+                    elements: ss.pressables.map(p =>
+                        p.testID || [p.component, p.label, p.inputPlaceholder].filter(Boolean).join("|") || "?"
+                    ),
+                    focused: keyboard?.visible === true
+                });
             }
 
             const scaleNote = unresolvedScaleNote(metrics);

@@ -55,7 +55,7 @@ export function getPackageName(): string {
 // Types
 // ============================================================================
 
-type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'driver_missing' | 'unknown';
+type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'driver_missing' | 'screen_changed' | 'unknown';
 
 /**
  * How a failure reached telemetry. Both paths set success=false and converge on
@@ -122,6 +122,16 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
         if (ctxLower.includes('ios ui driver is not instal') || ctxLower.includes('idb is not instal') || ctxLower.includes('adb is not installed') || ctxLower.includes('adb is not in path')) {
             return 'driver_missing';
         }
+    }
+    // The screen moved under the agent — someone was using the app in parallel,
+    // so the target genuinely was not there to hit. An explicit self-tag, never
+    // inferred from prose, emitted by core/screenStaleness.ts. Deliberately
+    // ranked below driver_missing (a missing driver is the realer cause when
+    // both appear) and above everything else, because otherwise these land in
+    // 'validation' and inflate the failure rate of a tool that did nothing
+    // wrong — the same reasoning that gave driver_missing its own bucket.
+    if (errorContext?.includes('screen_changed:')) {
+        return 'screen_changed';
     }
     // Genuine JS runtime faults — the only signal that means "something actually
     // broke at runtime". Checked before 'network' because that rule matches the

@@ -73,6 +73,13 @@ export type InputFound = {
     hasOnChangeText: boolean;
     ok: boolean;
     via?: string;
+    /**
+     * Every input on screen, not just the resolved one. Returned by `find`
+     * alone — it is the baseline screenStaleness compares the NEXT miss
+     * against, and a miss can only be judged a race if we know what the screen
+     * looked like when it was last working. Capped like the candidate lists.
+     */
+    allInputs?: InputCandidate[];
 };
 
 export type InputMissing = {
@@ -80,6 +87,15 @@ export type InputMissing = {
     reason: string;
     /** True when the target matched several inputs and none was chosen. */
     ambiguous?: boolean;
+    /**
+     * True when `candidates` holds the inputs that MATCHED, not the inputs on
+     * screen. Without it the renderer compares the list against `totalInputs`
+     * and prints "showing 1 of 4" — which says the list was truncated when in
+     * fact 1 of the 4 mounted inputs matched and all of them are listed. Agents
+     * read that as "there are more, try a higher index" and pass one, which is
+     * where the `index 1 is out of range` events on 2.8.1 come from.
+     */
+    matchedOnly?: boolean;
     candidates?: InputCandidate[];
     /**
      * How many inputs exist in total. The candidate list is capped, and a cap
@@ -372,6 +388,7 @@ function prelude(query: InputQuery | undefined): string {
       return {
         found: false,
         reason: "index " + __eb_index + " is out of range — " + __eb_matches.length + " input(s) matched",
+        matchedOnly: true,
         candidates: __eb_matches.map(__eb_describe),
         totalInputs: __eb_inputs.length
       };
@@ -420,6 +437,17 @@ export function buildInputExpression(op: InputOp, query?: InputQuery): string {
 
     switch (op.kind) {
         case "find":
+            // The only op that reports the whole screen. Every later op
+            // addresses one already-resolved field, so paying for the full list
+            // there would be five serialisations of the same thing per write.
+            action = `
+  var __eb_all = [];
+  for (var ai = 0; ai < __eb_inputs.length && __eb_all.length < 12; ai++) {
+    __eb_all.push(__eb_describe(__eb_inputs[ai], ai));
+  }
+  return { ${BASE}, ok: true, allInputs: __eb_all };`;
+            break;
+
         case "read":
             action = `
   return { ${BASE}, ok: true };`;

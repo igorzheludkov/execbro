@@ -35,7 +35,7 @@ import {
     burstCaptureAndVerify,
 } from "../pro/verifyAction.js";
 import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
-import { enterText, type TextEntryResult } from "../core/textEntry.js";
+import { enterText, textEntryAxes, type TextEntryResult } from "../core/textEntry.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readNativeFields } from "../core/nativeInputValue.js";
@@ -208,7 +208,11 @@ export function registerInteractionTools(server: McpServer): void {
             const attemptedPart = result.attempted?.length
                 ? result.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|")
                 : "";
-            const ctxParts = `${predicatePrefix}${stratPrefix}${attemptedPart}`;
+            // Staleness first: categorizeError keys off the `screen_changed:`
+            // tag, and errorContext is truncated to 150 chars downstream — a
+            // tag at the tail is a tag that sometimes isn't there.
+            const stalePrefix = result.staleTag ? `${result.staleTag}|` : "";
+            const ctxParts = `${stalePrefix}${predicatePrefix}${stratPrefix}${attemptedPart}`;
             const errorContext = ctxParts ? ctxParts.replace(/\|$/, "") : undefined;
     
             const content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [
@@ -1167,9 +1171,84 @@ export function registerInteractionTools(server: McpServer): void {
                 }
             );
 
-            return formatTextEntryResponse(result);
+            return await decorateTextEntryTelemetry(
+                formatTextEntryResponse(result),
+                result,
+                { text, testID, component, textMatch, index, replace },
+                platform,
+                platform === "ios" ? iosUdid : androidSerial
+            );
         }
     );
+}
+
+/**
+ * Splits an `input_text` outcome into the two axes the dashboard needs, and
+ * captures an artifact for the ones worth looking at.
+ *
+ * The axes answer different questions and were previously collapsed into one
+ * boolean:
+ *
+ *   success      — could the tool act at all? A targeting miss or a dead
+ *                  connection means it never wrote.
+ *   _meaningful  — did the text actually end up in the field? Defined ONLY when
+ *                  a write was attempted, because "did the text land" is not a
+ *                  question you can ask about a call that never wrote one.
+ *
+ * The gap this closes: `enterText` returns success with `verified: false` when
+ * the field cannot be read back, and telemetry recorded that as a clean
+ * success. Those writes are unconfirmed by construction — exactly the silent
+ * failure the read-back exists to catch — and they are now `_meaningful: false`.
+ */
+async function decorateTextEntryTelemetry(
+    response: { content: Array<{ type: "text"; text: string }>; isError?: boolean },
+    r: TextEntryResult,
+    args: Record<string, unknown>,
+    platform: "ios" | "android",
+    udid?: string
+): Promise<Record<string, unknown>> {
+    const out: Record<string, unknown> = { ...response };
+
+    const axes = textEntryAxes(r);
+    const wrote = axes.wrote;
+    if (wrote) {
+        out._meaningful = axes.meaningful;
+        out._tapStrategy = r.path;
+    }
+
+    const predicate = Object.entries(args)
+        // The text itself is user data and can be long; its shape is in the
+        // artifact bundle, which is access-controlled. Only the targeting keys
+        // belong in a telemetry column.
+        .filter(([k, v]) => k !== "text" && v !== undefined)
+        .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+        .join(" ");
+    const staleTag = r.staleness && r.staleness.kind !== "genuine_miss" ? r.staleness.tag : "";
+    const context = [staleTag, predicate, wrote ? `path=${r.path}` : ""].filter(Boolean).join("|");
+    if (context) out._errorContext = context;
+
+    // Worth a screenshot: a miss we cannot explain from the message alone, a
+    // wrong write, or an unconfirmable one. Not a connection failure — there is
+    // nothing on screen to see, and tap excludes those for the same reason.
+    if (axes.artifactOutcome === null) return out;
+
+    const { captureInputArtifact } = await import("../core/inputArtifact.js");
+    const { categorizeError } = await import("../core/telemetry.js");
+    const signals = await captureInputArtifact({
+        outcome: axes.artifactOutcome,
+        platform,
+        udid,
+        predicate: args,
+        errorMessage: r.error,
+        errorCategory: categorizeError(r.error ?? "", context),
+        strategyChain: context,
+        candidates: r.candidates,
+        sent: r.sent,
+        landed: r.landed
+    });
+    if (signals?.artifactKey) out._artifactKey = signals.artifactKey;
+    if (signals?.fiberPressableCount) out._fiberPressableCount = signals.fiberPressableCount;
+    return out;
 }
 
 /**
@@ -1201,11 +1280,21 @@ export function formatTextEntryResponse(r: TextEntryResult): {
         if (r.candidates?.length) {
             // Never let a capped list read as the complete picture — that is how
             // a caller concludes its field is absent when it is past the cut.
+            // A `matchedOnly` list IS complete: it holds every input that
+            // matched, and the mounted total is a different number entirely.
+            // Printing "showing 1 of 4" against it read as a truncated list,
+            // which is what sent agents guessing at a higher `index`.
+            const listIsMatches = r.ambiguous || r.matchedOnly;
             const hidden =
-                !r.ambiguous && r.totalInputs !== undefined && r.totalInputs > r.candidates.length
+                !listIsMatches && r.totalInputs !== undefined && r.totalInputs > r.candidates.length
                     ? ` (showing ${r.candidates.length} of ${r.totalInputs})`
                     : "";
-            lines.push(r.ambiguous ? "  matching inputs:" : `  inputs on screen${hidden}:`);
+            lines.push(
+                listIsMatches
+                    ? `  matching inputs (all ${r.candidates.length}` +
+                      `${r.totalInputs !== undefined ? ` of ${r.totalInputs} mounted` : ""}):`
+                    : `  inputs on screen${hidden}:`
+            );
             for (const c of r.candidates) {
                 const bits = [
                     c.label ? `label:${JSON.stringify(c.label)}` : null,

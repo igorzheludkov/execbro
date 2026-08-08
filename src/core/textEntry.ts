@@ -1,6 +1,12 @@
 import type { InputCandidate, InputOp, InputQuery, InputResult } from "./inputTarget.js";
 import type { RaiseResult } from "./keyboardRaise.js";
 import { resolveWrittenField, type NativeField, type NativeFieldsResult } from "./nativeInputValue.js";
+import {
+    diagnoseStaleness,
+    inputIdentity,
+    recordScreen,
+    type StalenessVerdict
+} from "./screenStaleness.js";
 
 export type EnterTextArgs = {
     /** The text to write. */
@@ -39,10 +45,61 @@ export type TextEntryResult = {
     sent?: string;
     landed?: string | null;
     ambiguous?: boolean;
+    /** `candidates` holds what matched, not what is on screen. See InputMissing.matchedOnly. */
+    matchedOnly?: boolean;
     candidates?: InputCandidate[];
     /** Total inputs mounted, so a capped candidate list cannot read as complete. */
     totalInputs?: number;
+    /**
+     * On a targeting miss: whether the screen moved under the agent. A miss
+     * caused by someone using the app in parallel is not an input_text defect,
+     * and must not be counted as one — see core/screenStaleness.ts.
+     */
+    staleness?: StalenessVerdict;
 };
+
+/**
+ * The two axes an `input_text` outcome is reported on, and whether it is worth
+ * a failure artifact.
+ *
+ * Separated from the tool handler because the interesting part is this
+ * classification, not the plumbing around it — and because the three-way
+ * `meaningful` (true / false / no opinion) is exactly the distinction that was
+ * lost when everything went through one success boolean.
+ */
+export type TextEntryAxes = {
+    /** A write was attempted. `meaningful` means nothing without this. */
+    wrote: boolean;
+    /**
+     * Did the text verifiably land? `undefined` when nothing was written —
+     * a call that never wrote has no opinion, which is NOT the same as "no".
+     */
+    meaningful?: boolean;
+    /** Which artifact to capture, or null when there is nothing worth seeing. */
+    artifactOutcome: "failure" | "unmeaningful" | null;
+};
+
+export function textEntryAxes(r: TextEntryResult): TextEntryAxes {
+    // A write was attempted exactly when a path was chosen. `verified` is the
+    // only positive evidence the text is in the field; everything else —
+    // mismatch, unreadable field — is an unconfirmed or wrong write.
+    const wrote = r.path !== undefined;
+
+    const isTargetingMiss = !r.success && !wrote && r.candidates !== undefined;
+    const isMismatch = !r.success && wrote;
+    // The gap this closes: these reported success and were counted as clean.
+    const isUnverified = r.success && wrote && r.verified !== true;
+
+    return {
+        wrote,
+        ...(wrote && { meaningful: r.verified === true }),
+        artifactOutcome: isUnverified
+            ? "unmeaningful"
+            : isTargetingMiss || isMismatch
+                ? "failure"
+                : null
+    };
+}
 
 export type TextEntryDeps = {
     runOp: (op: InputOp, query?: InputQuery, device?: string) => Promise<InputResult>;
@@ -112,6 +169,40 @@ export function isHidTypeable(text: string): boolean {
     return /^[\x20-\x7E\t\n]*$/.test(text);
 }
 
+/**
+ * Turns a resolver miss into a result, diagnosing whether the screen moved
+ * under the agent on the way.
+ *
+ * The diagnosis is confined to "nothing matched". An ambiguous target or an
+ * out-of-range index means the field WAS found — the agent simply has not
+ * named one of several — and reporting those as interference would excuse a
+ * targeting problem the agent can fix on its own.
+ */
+function missResult(miss: Extract<InputResult, { found: false }>, device?: string): TextEntryResult {
+    const nothingMatched = !miss.ambiguous && !miss.matchedOnly;
+    const staleness =
+        nothingMatched && miss.candidates
+            ? diagnoseStaleness(device, {
+                elements: miss.candidates.map(inputIdentity),
+                // A miss on an untargeted call IS the report that nothing has
+                // focus, so this is knowable without another round-trip.
+                focused: false
+            })
+            : undefined;
+
+    return {
+        success: false,
+        error: staleness && staleness.kind !== "genuine_miss"
+            ? `${miss.reason}\n  ${staleness.note}`
+            : miss.reason,
+        ...(miss.ambiguous && { ambiguous: true }),
+        ...(miss.matchedOnly && { matchedOnly: true }),
+        ...(miss.candidates && { candidates: miss.candidates }),
+        ...(miss.totalInputs !== undefined && { totalInputs: miss.totalInputs }),
+        ...(staleness && { staleness })
+    };
+}
+
 function queryOf(a: EnterTextArgs): InputQuery | undefined {
     const q: InputQuery = {};
     if (a.testID != null) q.testID = a.testID;
@@ -135,14 +226,16 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // 1. Resolve. A miss is a hard failure — this is precisely where the old
     //    tools typed into the void and reported success.
     const target = await deps.runOp({ kind: "find" }, q, args.device);
-    if (!target.found) {
-        return {
-            success: false,
-            error: target.reason,
-            ...(target.ambiguous && { ambiguous: true }),
-            ...(target.candidates && { candidates: target.candidates }),
-            ...(target.totalInputs !== undefined && { totalInputs: target.totalInputs })
-        };
+    if (!target.found) return missResult(target, args.device);
+
+    // The resolve succeeded, so this is the last moment the screen is known to
+    // have been in a state the agent could work with — the baseline the next
+    // miss is judged against.
+    if (target.allInputs) {
+        recordScreen(args.device, {
+            elements: target.allInputs.map(inputIdentity),
+            focused: target.focused
+        });
     }
 
     // 2. Focus it ourselves if needed. A tap reporting success does not
@@ -154,15 +247,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         // this miss where the first hit, and returning the bare reason leaves
         // the caller with nothing to re-target from — it guesses again, misses
         // again. On 2.6.1 that was 80% of all "no TextInput matched" errors.
-        if (!focused.found) {
-            return {
-                success: false,
-                error: focused.reason,
-                ...(focused.ambiguous && { ambiguous: true }),
-                ...(focused.candidates && { candidates: focused.candidates }),
-                ...(focused.totalInputs !== undefined && { totalInputs: focused.totalInputs })
-            };
-        }
+        if (!focused.found) return missResult(focused, args.device);
         if (!focused.ok) return { success: false, error: focused.via ?? "could not focus the input" };
     }
 

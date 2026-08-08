@@ -19,6 +19,7 @@ import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice 
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { notifyDriverMissing } from "../core/logbox.js";
 import { captureFailureArtifact, type ArtifactOutcome, type CaptureSignals } from "../core/failureArtifact.js";
+import { diagnoseStaleness, recordScreen, type StalenessVerdict } from "../core/screenStaleness.js";
 import {
     captureScreenshot,
     verifyAndCapture,
@@ -251,6 +252,13 @@ export interface TapResult {
     fiberPressableCount?: string;
     accessibilityMatchCount?: string;
     appRoute?: string;
+    /**
+     * `screen_changed:navigation` / `screen_changed:inscreen` when this miss was
+     * the screen moving under the agent rather than a bad predicate. Rides into
+     * telemetry's errorContext, where categorizeError lifts it out of the
+     * `validation` bucket so it stops inflating tap's failure rate.
+     */
+    staleTag?: string;
     /**
      * Why a coordinate tap changed nothing: what occupied the point, whether an
      * overlay covers it, and the nearest reachable pressable with re-tappable
@@ -1536,6 +1544,8 @@ interface ArtifactCaptureContext {
     verification?: TapVerification;
     fiberMatches?: TapResult["matches"];
     evidence?: EvidenceSink;
+    /** `screen_changed:*` when the screen moved under the agent. See screenStaleness.ts. */
+    staleTag?: string;
 }
 
 // D2 (Step 6): in-memory ring buffer of recent coord-strategy artifact keys
@@ -1624,10 +1634,49 @@ async function diagnoseCoordinateMiss(args: {
     }
 }
 
+/**
+ * What fiber saw on screen, as stable element identities.
+ *
+ * `bounds` is excluded on purpose: a scroll moves every element without any of
+ * them leaving, and identity that shifts with position would report ordinary
+ * scrolling as the screen having been replaced.
+ */
+function tapScreenElements(evidence: EvidenceSink | undefined): string[] {
+    return (evidence?.fiber.pressables ?? []).map(
+        p => p.testID || [p.componentName, p.label].filter(Boolean).join("|") || "?"
+    );
+}
+
+/** Records the screen fiber just enumerated, as the baseline for the next miss. */
+function recordTapScreen(deviceName: string | undefined, evidence: EvidenceSink | undefined): void {
+    const elements = tapScreenElements(evidence);
+    if (elements.length > 0) recordScreen(deviceName, { elements, focused: false });
+}
+
+/**
+ * Whether a tap that found nothing found nothing because the screen moved.
+ *
+ * See core/screenStaleness.ts — a person driving the simulator in parallel
+ * produces exactly the same "No element found" as a wrong predicate does, and
+ * only one of the two is a defect in tap.
+ */
+function diagnoseTapStaleness(
+    deviceName: string | undefined,
+    evidence: EvidenceSink | undefined
+): StalenessVerdict | undefined {
+    const elements = tapScreenElements(evidence);
+    if (elements.length === 0) return undefined;
+    const verdict = diagnoseStaleness(deviceName, { elements, focused: false });
+    return verdict.kind === "genuine_miss" ? undefined : verdict;
+}
+
 async function captureTapArtifact(ctx: ArtifactCaptureContext): Promise<CaptureSignals | undefined> {
     try {
         const { getServerVersion, categorizeError } = await import("../core/telemetry.js");
-        const strategyChain = ctx.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`).join("|");
+        const strategyChain = [
+            ctx.staleTag,
+            ...ctx.attempted.map(a => `${a.strategy}:${a.reason.slice(0, 40)}`)
+        ].filter(Boolean).join("|");
 
         // Resolve error category up-front so we can short-circuit driver-missing failures.
         // These aren't tap-tool bugs — they're host setup problems (no idb/axe/adb on PATH).
@@ -2323,6 +2372,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 });
                 attachArtifactSignals(successResult, unmeaningfulSignals);
             }
+            // The tap resolved, so this is the last moment the screen is known
+            // to have matched the agent's model of it — the baseline the next
+            // miss is judged against.
+            recordTapScreen(deviceName, evidence);
             return successResult;
         }
 
@@ -2511,10 +2564,18 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         device: deviceName,
         screenshot: failScreenshot
     });
+    // Before the artifact, so the verdict can ride into it — and before any
+    // other recordScreen, because the diagnosis re-baselines as it decides.
+    const staleness = diagnoseTapStaleness(deviceName, evidence);
+    if (staleness) {
+        failureResult.staleTag = staleness.tag;
+        if (failureResult.error) failureResult.error = `${failureResult.error}\n${staleness.note}`;
+    }
     const failSignals = await captureTapArtifact({
         query,
         outcome: "failure",
         errorMessage: failureResult.error,
+        staleTag: staleness?.tag,
         attempted,
         platform,
         iosDriver: platform === "ios" ? (process.env.IOS_DRIVER?.toLowerCase() || "axe") : undefined,

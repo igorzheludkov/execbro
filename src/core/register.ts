@@ -9,6 +9,7 @@ import {
     isTelemetryEnabled,
 } from "./telemetry.js";
 import { getTargetPlatform } from "./state.js";
+import { recordToolCall } from "./screenStaleness.js";
 import { UserInputError } from "./errors.js";
 import { estimateImageTokens } from "./toolHelpers.js";
 import { connectedApps, shouldShowFeedbackHint, markFeedbackHintShown, pushLogBox } from "./index.js";
@@ -205,6 +206,11 @@ export function registerToolWithTelemetry(
             throw error;
         } finally {
             const duration = Date.now() - startTime;
+            // Attribute the NEXT tool's screen changes. Recorded here, in
+            // `finally`, so that while a handler runs this still names the
+            // PREVIOUS tool — which is what screenStaleness needs to tell
+            // "the agent moved the screen" from "someone else did".
+            recordToolCall(toolName);
             trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin);
             // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
             // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
