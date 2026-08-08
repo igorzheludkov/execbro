@@ -39,11 +39,16 @@ jest.unstable_mockModule("os", () => ({
 }));
 
 const { createHash } = await import("node:crypto");
-const { getDeviceFingerprint, getMachineId, isFingerprintDegraded } = await import("../../core/fingerprint.js");
+const { getDeviceFingerprint, getMachineId, isFingerprintDegraded, resetFingerprintCachesForTests } = await import(
+    "../../core/fingerprint.js"
+);
 
 describe("fingerprint", () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        // getMachineId() memoises across calls, so each case must start clean or
+        // it inherits the previous case's platform result.
+        resetFingerprintCachesForTests();
         mockUserInfo.mockReturnValue({ username: "testuser" });
         mockCpus.mockReturnValue([{ model: "Apple M2 Pro" }]);
     });
@@ -80,6 +85,29 @@ describe("fingerprint", () => {
 
             const id = getMachineId();
             expect(id).toBe("");
+        });
+
+        it("probes the hardware only once, then serves the memoised value", () => {
+            mockPlatform.mockReturnValue("darwin");
+            mockExecSync.mockReturnValue("Hardware UUID: ABC123\n");
+
+            // system_profiler costs ~1s and getDeviceFingerprint() runs on every
+            // license validation, so repeat calls must not re-spawn it.
+            expect(getMachineId()).toBe("ABC123");
+            expect(getMachineId()).toBe("ABC123");
+            getDeviceFingerprint();
+            expect(mockExecSync).toHaveBeenCalledTimes(1);
+        });
+
+        it("memoises an empty result too, so a failing probe is not retried all session", () => {
+            mockPlatform.mockReturnValue("darwin");
+            mockExecSync.mockImplementation(() => {
+                throw new Error("permission denied");
+            });
+
+            expect(getMachineId()).toBe("");
+            expect(getMachineId()).toBe("");
+            expect(mockExecSync).toHaveBeenCalledTimes(1);
         });
 
         it("returns empty string when command fails", () => {

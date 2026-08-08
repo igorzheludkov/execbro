@@ -15,8 +15,39 @@ const SALT_FILE = join(CONFIG_DIR, "fingerprint-salt.json");
 let degraded = false;
 let degradedResolved = false;
 let saltCache: string | null = null;
+let machineIdCache: string | null = null;
 
 export function getMachineId(): string {
+    if (machineIdCache !== null) return machineIdCache;
+    machineIdCache = readMachineId();
+    return machineIdCache;
+}
+
+/**
+ * Clears every memoised value in this module. Tests only — the caches are
+ * process-lifetime by design, and getMachineId() shells out to
+ * system_profiler/reg, so a suite that varies the mocked platform needs a way
+ * to invalidate them between cases.
+ */
+export function resetFingerprintCachesForTests(): void {
+    machineIdCache = null;
+    saltCache = null;
+    degraded = false;
+    degradedResolved = false;
+}
+
+/**
+ * Uncached hardware lookup. Costly: `system_profiler SPHardwareDataType` takes
+ * on the order of a second on macOS, and Windows spawns `reg`. getDeviceFingerprint()
+ * runs on every license validation, so this must stay behind getMachineId()'s cache.
+ *
+ * A failure is memoised alongside a success. Within one process that is strictly
+ * more stable than re-probing (the fingerprint cannot flip mid-session), but it
+ * does mean a transient failure keeps the process degraded until restart. The
+ * realistic empty-result case is structural anyway — a container or an
+ * unsupported platform, where no retry would ever succeed.
+ */
+function readMachineId(): string {
     const os = platform();
 
     try {
