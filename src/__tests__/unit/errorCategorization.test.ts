@@ -38,9 +38,6 @@ describe("categorizeError", () => {
      */
     describe("input targeting guards are validation", () => {
         it.each([
-            "Error: no TextInput matched that target (4 input(s) mounted)",
-            "Error: 2 inputs match this target — pass index to choose one, or target more precisely",
-            "Error: index 1 is out of range — 1 input(s) matched",
             "Error: no TextInput found on screen",
             "Error: no focused TextInput. Pass testID (or component) so this tool can focus a field itself",
         ])("%s", (message) => {
@@ -50,6 +47,45 @@ describe("categorizeError", () => {
         // The guards must not swallow a genuinely broken app state.
         it("leaves a missing devtools hook as a connection problem", () => {
             expect(categorizeError("Error: no devtools hook")).toBe("connection");
+        });
+    });
+
+    /**
+     * A target the screen does not uniquely offer is the agent's mistake, and
+     * no fix on our side removes it. It gets its own bucket so it stops sharing
+     * a rate with faults we own — the driver_missing / screen_changed argument.
+     */
+    describe("targets the screen does not offer are bad_target", () => {
+        it.each([
+            "Error: no TextInput matched that target (4 input(s) mounted)",
+            "Error: 2 inputs match this target — pass index to choose one, or target more precisely",
+            "Error: index 1 is out of range — 1 input(s) matched",
+        ])("%s", (message) => {
+            expect(categorizeError(message)).toBe("bad_target");
+        });
+
+        // These messages carry the screen's own placeholders and labels, so the
+        // prose rules further down would categorise a miss by the app's copy.
+        it("is not swayed by the candidate list's own wording", () => {
+            expect(categorizeError(
+                'Error: no TextInput matched that target (2 input(s) mounted)\n' +
+                '  inputs on screen:\n    0: placeholder:"Socket URL" 1: label:"Required, invalid"'
+            )).toBe("bad_target");
+        });
+
+        // A miss during a race is still a race: someone else moved the screen,
+        // which is not the agent naming the wrong field.
+        it("yields to a screen-change race", () => {
+            expect(categorizeError(
+                "Error: no TextInput matched that target (6 input(s) mounted)",
+                "screen_changed:navigation|textMatch=2"
+            )).toBe("screen_changed");
+        });
+
+        // The tool could have resolved a sole field here, so this one stays in
+        // the rate it can be held to.
+        it("leaves an unfocused miss as validation", () => {
+            expect(categorizeError("Error: no focused TextInput. Tap an input first")).toBe("validation");
         });
     });
 

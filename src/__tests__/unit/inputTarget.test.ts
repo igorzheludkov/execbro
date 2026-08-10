@@ -208,12 +208,19 @@ describe("component targeting across the field's ancestor chain", () => {
             getFiberRoots: () => new Set([{ current: buildTree() }])
         };
         // eslint-disable-next-line no-eval
-        return eval(expr) as { found: boolean; candidates?: Array<{ component: string | null }> };
+        return eval(expr) as {
+            found: boolean;
+            candidates?: Array<{ component: string | null }>;
+            allInputs?: Array<{ component: string | null }>;
+        };
     };
 
     it("still reports the wrapper as the field's name", () => {
+        // The sole mounted input resolves even untargeted and unfocused, so the
+        // field list comes back as `allInputs` on the hit rather than as the
+        // candidate list of a miss.
         const r = run(buildInputExpression({ kind: "find" }));
-        expect(r.candidates?.[0].component).toBe("InputField");
+        expect(r.allInputs?.[0].component).toBe("InputField");
     });
 
     it("matches the wrapper name", () => {
@@ -229,5 +236,100 @@ describe("component targeting across the field's ancestor chain", () => {
 
     it("does not match a component that is nowhere in the chain", () => {
         expect(run(buildInputExpression({ kind: "find" }, { component: "NotOnThisScreen" })).found).toBe(false);
+    });
+});
+
+/**
+ * Resolution when the screen offers no real choice — the two shapes behind the
+ * 2026-08-10 input_text failures: a duplicate mount left behind by a navigation
+ * stack, and a lone unfocused field.
+ */
+describe("resolving without a real choice", () => {
+    const field = (props: Record<string, unknown>, nativeTag = 1) => {
+        const host = {
+            type: "RCTSinglelineTextInputView",
+            memoizedProps: props,
+            stateNode: { isFocused: () => false, __nativeTag: nativeTag },
+            return: null as unknown,
+            child: null,
+            sibling: null as unknown
+        };
+        const owner = {
+            type: { displayName: "Composer" },
+            memoizedProps: { ...props, onChangeText: () => {} },
+            stateNode: null,
+            return: null as unknown,
+            child: host as unknown,
+            sibling: null as unknown
+        };
+        host.return = owner;
+        return owner;
+    };
+
+    const run = (expr: string, ...fields: ReturnType<typeof field>[]) => {
+        const root = { type: { displayName: "Screen" }, memoizedProps: {}, stateNode: null, return: null, child: null as unknown, sibling: null };
+        root.child = fields[0];
+        for (let i = 0; i < fields.length; i++) {
+            fields[i].return = root;
+            fields[i].sibling = fields[i + 1] ?? null;
+        }
+        const g = globalThis as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: unknown; global?: unknown };
+        g.global = globalThis;
+        g.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+            renderers: new Map([[1, {}]]),
+            getFiberRoots: () => new Set([{ current: root }])
+        };
+        // eslint-disable-next-line no-eval
+        return eval(expr) as { found: boolean; ambiguous?: boolean; nativeTag: number | null; reason?: string };
+    };
+
+    const dup = { testID: "message-text-input", placeholder: "내용을 입력해주세요.", value: "" };
+
+    it("takes the later of two identical matches instead of refusing", () => {
+        // A screen kept mounted under its own re-push: same testID, same
+        // placeholder, same value, and only the later one is on screen.
+        const r = run(
+            buildInputExpression({ kind: "find" }, { testID: "message-text-input" }),
+            field(dup, 11),
+            field(dup, 22)
+        );
+        expect(r.found).toBe(true);
+        expect(r.nativeTag).toBe(22);
+    });
+
+    it("refuses when the matches differ only in the text they hold", () => {
+        // Different values are a real difference the caller can act on, and one
+        // of the two may be a live draft — not a call to guess.
+        const r = run(
+            buildInputExpression({ kind: "find" }, { testID: "message-text-input" }),
+            field({ ...dup, value: "draft" }),
+            field(dup)
+        );
+        expect(r.ambiguous).toBe(true);
+    });
+
+    it("still refuses when the matches are distinguishable", () => {
+        const r = run(
+            buildInputExpression({ kind: "find" }, { testID: "message-text-input" }),
+            field({ ...dup, placeholder: "Subject" }),
+            field({ ...dup, placeholder: "Body" })
+        );
+        expect(r.found).toBe(false);
+        expect(r.ambiguous).toBe(true);
+    });
+
+    it("resolves the sole mounted input when nothing is focused and nothing was targeted", () => {
+        const r = run(buildInputExpression({ kind: "find" }), field({ placeholder: "搜索", value: "" }));
+        expect(r.found).toBe(true);
+    });
+
+    it("still reports no focus when there is more than one input to choose from", () => {
+        const r = run(
+            buildInputExpression({ kind: "find" }),
+            field({ placeholder: "Email" }),
+            field({ placeholder: "Password" })
+        );
+        expect(r.found).toBe(false);
+        expect(r.reason).toContain("no focused TextInput");
     });
 });

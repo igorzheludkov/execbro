@@ -402,3 +402,44 @@ describe("retry clearing", () => {
         expect(ops).toContain("clear");
     });
 });
+
+describe("resolving through a screen transition", () => {
+    const miss = (reason = "no TextInput matched that target (1 input(s) mounted)"): InputResult => ({
+        found: false,
+        reason,
+        candidates: [],
+        totalInputs: 1
+    });
+
+    it("re-resolves a targeted miss once before failing", async () => {
+        // The field mounts a beat after the tool looked: the fiber tree still
+        // held the screen being navigated away from.
+        const d = deps([miss(), found(), found({ value: "hi" }), found({ value: "hi" })],
+            { delay: jest.fn(async () => {}) });
+        const r = await enterText({ text: "hi", testID: "message-text-input" }, d);
+        expect(r.success).toBe(true);
+        expect(opsOf(d).filter((k) => k === "find")).toHaveLength(2);
+    });
+
+    it("gives up after the one retry", async () => {
+        const d = deps([miss(), miss()], { delay: jest.fn(async () => {}) });
+        const r = await enterText({ text: "hi", testID: "message-text-input" }, d);
+        expect(r.success).toBe(false);
+        expect(opsOf(d).filter((k) => k === "find")).toHaveLength(2);
+    });
+
+    it("does not wait on an ambiguous match — waiting cannot resolve a choice", async () => {
+        const d = deps([{ found: false, ambiguous: true, reason: "2 inputs match this target" }],
+            { delay: jest.fn(async () => {}) });
+        const r = await enterText({ text: "hi", testID: "message-text-input" }, d);
+        expect(r.success).toBe(false);
+        expect(opsOf(d).filter((k) => k === "find")).toHaveLength(1);
+    });
+
+    it("does not retry an untargeted call — nothing has focus now and waiting will not change that", async () => {
+        const d = deps([miss("no focused TextInput. Pass testID")], { delay: jest.fn(async () => {}) });
+        const r = await enterText({ text: "hi" }, d);
+        expect(r.success).toBe(false);
+        expect(opsOf(d).filter((k) => k === "find")).toHaveLength(1);
+    });
+});

@@ -55,7 +55,7 @@ export function getPackageName(): string {
 // Types
 // ============================================================================
 
-type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'driver_missing' | 'screen_changed' | 'unknown';
+type ErrorCategory = 'network' | 'timeout' | 'validation' | 'execution' | 'connection' | 'driver_missing' | 'screen_changed' | 'bad_target' | 'unknown';
 
 /**
  * How a failure reached telemetry. Both paths set success=false and converge on
@@ -133,6 +133,26 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
     if (errorContext?.includes('screen_changed:')) {
         return 'screen_changed';
     }
+    // The agent named a target the screen does not uniquely offer. The tool ran,
+    // resolved, refused to write, and handed back the fields that ARE there —
+    // one half of a two-step protocol, not a fault, and nothing a fix on our
+    // side would remove. Its own bucket for the same reason driver_missing and
+    // screen_changed have one: on 2026-08-10 these were 11 of 16 input_text
+    // "tool errors", which put a real device disconnect and a real focus miss
+    // in the same pile as an agent mistyping a testID.
+    //
+    // Deliberately NOT here: "no focused TextInput" (the tool could have
+    // resolved a sole field and now does) and "no TextInput found on screen"
+    // (zero inputs mounted is app/screen state, and is also what a broken fiber
+    // walk looks like — that has to stay visible in the tool's own rate).
+    //
+    // Ranked above the generic prose rules on purpose: these messages carry the
+    // screen's own placeholders and labels, so a field labelled "Socket URL" or
+    // "Invalid code" would otherwise be categorised by the app's copy.
+    if (lower.includes('matched that target') || lower.includes('match this target') ||
+        lower.includes('is out of range')) {
+        return 'bad_target';
+    }
     // Genuine JS runtime faults — the only signal that means "something actually
     // broke at runtime". Checked before 'network' because that rule matches the
     // bare substring 'fetch', which would swallow "TypeError: fetch is not a
@@ -196,8 +216,7 @@ export function categorizeError(errorMessage: string, errorContext?: string): Er
     if (lower.includes('no focused textinput') || lower.includes('must provide at least one') ||
         lower.includes('not visible on screen') || lower.includes('no component found') ||
         lower.includes('no connected device matches') || lower.includes('redux-shaped store') ||
-        lower.includes('matched that target') || lower.includes('match this target') ||
-        lower.includes('is out of range') || lower.includes('no textinput found on screen')) {
+        lower.includes('no textinput found on screen')) {
         return 'validation';
     }
     if (lower.includes('invalid') || lower.includes('required') || lower.includes('missing')) {

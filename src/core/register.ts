@@ -9,6 +9,7 @@ import {
     isTelemetryEnabled,
 } from "./telemetry.js";
 import { getTargetPlatform } from "./state.js";
+import { resolveConnectedAppByDevice } from "./connection.js";
 import { recordToolCall } from "./screenStaleness.js";
 import { UserInputError } from "./errors.js";
 import { estimateImageTokens } from "./toolHelpers.js";
@@ -16,6 +17,32 @@ import { connectedApps, shouldShowFeedbackHint, markFeedbackHintShown, pushLogBo
 import { ensureLicense, getUsageInfo } from "./license.js";
 import { freezeSessionVerdict, isToolBlocked, usageWarningLine } from "../pro/usageGate.js";
 import { maybeNotifyUsage, maybeNotifyDeferral } from "../pro/usageNotifications.js";
+
+/**
+ * The platform this invocation actually acted on.
+ *
+ * `getTargetPlatform()` answers with the FIRST connected app, which is only the
+ * right answer in a single-device session. With a simulator and an emulator
+ * both attached, every event was stamped with whichever landed in the map
+ * first: an input_text failure captured on 2026-08-10 carried
+ * `target_platform=ios` while its own artifact bundle and screenshot were
+ * unmistakably Android — so every platform breakdown on the dashboard is
+ * wrong for multi-device sessions, not just this tool's.
+ *
+ * The tool's own `device` argument is the authority when it has one, and an
+ * `ios_`/`android_` tool names its platform outright. Falls back to the old
+ * behaviour when neither applies, which is also what the tool itself does.
+ */
+function invocationPlatform(toolName: string, args: unknown): string | undefined {
+    if (toolName.startsWith("ios_")) return "ios";
+    if (toolName.startsWith("android_")) return "android";
+    const device = (args as { device?: unknown } | null)?.device;
+    if (typeof device === "string" && device.length > 0) {
+        const resolved = resolveConnectedAppByDevice(device);
+        if (resolved.kind === "ok") return resolved.app.platform;
+    }
+    return getTargetPlatform();
+}
 
 // Tools that do NOT require an active Metro connection — excluded from feedback hint trigger
 const NON_METRO_TOOLS = new Set([
@@ -211,7 +238,8 @@ export function registerToolWithTelemetry(
             // PREVIOUS tool — which is what screenStaleness needs to tell
             // "the agent moved the screen" from "someone else did".
             recordToolCall(toolName);
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, getTargetPlatform(), emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin);
+            const targetPlatform = invocationPlatform(toolName, args);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, targetPlatform, emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin);
             // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
             // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
             let platformKind: "rn" | "native" | null = null;
@@ -240,7 +268,7 @@ export function registerToolWithTelemetry(
                         ...(errorMessage && { error: errorMessage.substring(0, 200) }),
                         ...(errorMessage && { error_category: categorizeError(errorMessage, errorContext) }),
                         ...(errorOrigin && { error_origin: errorOrigin }),
-                        ...(getTargetPlatform() && { platform: getTargetPlatform() }),
+                        ...(targetPlatform && { platform: targetPlatform }),
                         ...(platformKind && { platform_kind: platformKind }),
                         ...(tapStrategy && { tap_strategy: tapStrategy }),
                         ...(meaningful !== undefined && { meaningful }),

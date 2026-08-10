@@ -101,6 +101,13 @@ export function textEntryAxes(r: TextEntryResult): TextEntryAxes {
     };
 }
 
+/**
+ * How long a targeted resolve waits before its one retry. Long enough for a
+ * stack push/pop to commit (RN's default screen transition is ~350ms), short
+ * enough that a genuine miss still answers fast.
+ */
+const RESOLVE_SETTLE_MS = 500;
+
 export type TextEntryDeps = {
     runOp: (op: InputOp, query?: InputQuery, device?: string) => Promise<InputResult>;
     typeHid: (text: string) => Promise<{ success: boolean; error?: string }>;
@@ -225,7 +232,20 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
 
     // 1. Resolve. A miss is a hard failure — this is precisely where the old
     //    tools typed into the void and reported success.
-    const target = await deps.runOp({ kind: "find" }, q, args.device);
+    let target = await deps.runOp({ kind: "find" }, q, args.device);
+    // A targeted miss taken DURING a screen transition is not a miss: the field
+    // is a few hundred ms from mounting, and the fiber tree still holds the
+    // screen being navigated away from. Telemetry 2026-08-10: four of the
+    // thirteen captured failures were one flow typing into a chat composer
+    // while the profile screen was still animating out, and the identical
+    // predicate resolved when the agent retried by hand. One re-resolve buys
+    // that whole class back. Only for a targeted query — an untargeted call
+    // reports what has focus right now, and waiting cannot change that.
+    if (!target.found && q && !target.ambiguous && !target.matchedOnly) {
+        const wait = deps.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+        await wait(RESOLVE_SETTLE_MS);
+        target = await deps.runOp({ kind: "find" }, q, args.device);
+    }
     if (!target.found) return missResult(target, args.device);
 
     // The resolve succeeded, so this is the last moment the screen is known to

@@ -363,6 +363,12 @@ function prelude(query: InputQuery | undefined): string {
       var pf = __eb_pub(__eb_inputs[i]);
       if (pf && pf.isFocused && pf.isFocused()) __eb_matches.push(__eb_inputs[i]);
     }
+    // Nothing focused, but only ONE input is mounted: resolve to it instead of
+    // demanding a tap or a testID. The refusal to guess exists to stop text
+    // landing in the WRONG field, and a wrong field needs a second candidate to
+    // exist. Telemetry 2026-08-10: a search sheet with a single field failed
+    // this way while there was nothing else the caller could have meant.
+    if (__eb_matches.length === 0 && __eb_inputs.length === 1) __eb_matches.push(__eb_inputs[0]);
   }
 
   var targeted = (wantTestID !== null || wantComponent !== null || wantText !== null);
@@ -383,6 +389,7 @@ function prelude(query: InputQuery | undefined): string {
   }
 
   var __eb_index = ${typeof query?.index === "number" ? String(query.index) : "null"};
+  var __eb_pick = __eb_index === null ? 0 : __eb_index;
   if (__eb_index !== null) {
     if (__eb_index < 0 || __eb_index >= __eb_matches.length) {
       return {
@@ -394,16 +401,32 @@ function prelude(query: InputQuery | undefined): string {
       };
     }
   } else if (__eb_matches.length > 1) {
-    return {
-      found: false,
-      ambiguous: true,
-      reason: __eb_matches.length + " inputs match this target — pass index to choose one, or target more precisely",
-      candidates: __eb_matches.map(__eb_describe),
-      totalInputs: __eb_inputs.length
-    };
+    // Candidates that describe IDENTICALLY are not a choice. A screen kept
+    // mounted underneath its own re-push (React Navigation does this) presents
+    // the same testID, placeholder, label and value twice, and "pass index to
+    // choose one" then asks the caller to pick between two lines of the same
+    // text — a coin flip it cannot inform. The later fiber is the visible one:
+    // the walk is DFS in mount order, so the screen pushed last is walked last.
+    // Only a genuinely distinguishable set still refuses.
+    var __eb_shape = [];
+    for (i = 0; i < __eb_matches.length; i++) __eb_shape.push(JSON.stringify(__eb_describe(__eb_matches[i], 0)));
+    var __eb_identical = true;
+    for (i = 1; i < __eb_shape.length; i++) {
+      if (__eb_shape[i] !== __eb_shape[0]) { __eb_identical = false; break; }
+    }
+    if (!__eb_identical) {
+      return {
+        found: false,
+        ambiguous: true,
+        reason: __eb_matches.length + " inputs match this target — pass index to choose one, or target more precisely",
+        candidates: __eb_matches.map(__eb_describe),
+        totalInputs: __eb_inputs.length
+      };
+    }
+    __eb_pick = __eb_matches.length - 1;
   }
 
-  var __eb_host = __eb_matches[__eb_index === null ? 0 : __eb_index];
+  var __eb_host = __eb_matches[__eb_pick];
 
   var __eb_ownerFiber = __eb_owner(__eb_host);
   var __eb_pubi = __eb_pub(__eb_host);
