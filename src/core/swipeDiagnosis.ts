@@ -10,6 +10,12 @@ import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.j
  */
 export interface ScrollProbe {
     found: boolean;
+    /**
+     * The screen could not be inspected at all — no React Native connection, or the
+     * app did not answer. Distinct from `found: false`, which is a finding about the
+     * screen; this is the absence of one.
+     */
+    unavailable?: boolean;
     horizontal?: boolean;
     /** Current scroll position along the scrolling axis, in points. */
     offset?: number;
@@ -17,6 +23,18 @@ export interface ScrollProbe {
     maxOffset?: number;
     /** Component name of the scroll surface, for the message. */
     component?: string | null;
+}
+
+/**
+ * Run one probe expression, converting every failure mode — a thrown resolver error,
+ * a dead connection, a timeout — into `null`. The probe is diagnostic only.
+ */
+async function probeExec(expression: string, device?: string) {
+    try {
+        return await executeInApp(expression, false, { timeoutMs: 8000, originatingToolName: "swipe" }, device);
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -130,8 +148,14 @@ export async function probeScrollAt(
     return JSON.stringify({ dispatched: candidates.length });
 })()`;
 
-    const dispatched = await executeInApp(dispatch, false, { timeoutMs: 8000, originatingToolName: "swipe" }, device);
-    if (!dispatched.success) return { found: false };
+    // The gesture has already been delivered by the time this runs — `swipe` drives
+    // adb/simctl and needs no RN connection, while this probe reads the fiber tree and
+    // does. `executeInApp` throws (not returns) when an explicit device matches no
+    // connected app, so an optional explanation was replacing a successful swipe with
+    // an error on any non-RN screen. Enrichment never fails the thing it describes.
+    const dispatched = await probeExec(dispatch, device);
+    if (!dispatched) return { found: false, unavailable: true };
+    if (!dispatched.success) return { found: false, unavailable: true };
 
     await delay(250);
 
@@ -174,8 +198,8 @@ export async function probeScrollAt(
     });
 })()`;
 
-    const resolved = await executeInApp(resolve, false, { timeoutMs: 8000, originatingToolName: "swipe" }, device);
-    if (!resolved.success || !resolved.result) return { found: false };
+    const resolved = await probeExec(resolve, device);
+    if (!resolved || !resolved.success || !resolved.result) return { found: false, unavailable: true };
     try {
         return JSON.parse(resolved.result) as ScrollProbe;
     } catch {
@@ -198,6 +222,9 @@ export function explainNoOpSwipe(
     start: { x: number; y: number },
     gesture?: { dx: number; dy: number }
 ): string {
+    if (probe.unavailable) {
+        return `the swipe was delivered, but the screen could not be inspected to say why nothing moved — no React Native connection to this device. Take a screenshot to see the result, or run scan_metro if this is an RN app.`;
+    }
     if (!probe.found) {
         return `no scroll view found under (${Math.round(start.x)}, ${Math.round(start.y)}) — the gesture did not land on a scrollable surface. Take a screenshot or call get_screen_state, then aim at the list itself.`;
     }

@@ -962,7 +962,8 @@ async function tryAccessibilityStrategy(
     platform: "ios" | "android",
     udid?: string,
     sink?: EvidenceSink,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    deviceId?: string
 ): Promise<StrategyResult> {
     if (sink) sink.accessibility.ran = true;
     const startedAt = Date.now();
@@ -1126,9 +1127,9 @@ async function tryAccessibilityStrategy(
             // Same single-dump reuse as iOS above — a uiautomator hierarchy dump
             // is the most expensive step of an Android accessibility tap.
             const { androidGetUITree } = await import("../core/android.js");
-            const androidTree = await androidGetUITree(undefined, signal);
+            const androidTree = await androidGetUITree(deviceId, signal);
 
-            let result = await androidFindElement(searchOptions, undefined, signal, androidTree);
+            let result = await androidFindElement(searchOptions, deviceId, signal, androidTree);
 
             // If testID search via resourceId failed, try contentDescContains
             // (older RN versions map testID to content-description)
@@ -1136,7 +1137,7 @@ async function tryAccessibilityStrategy(
                 result = await androidFindElement({
                     contentDescContains: query.testID,
                     index
-                }, undefined, signal, androidTree);
+                }, deviceId, signal, androidTree);
             }
 
             if (sink && result.allMatches?.length) {
@@ -1190,7 +1191,13 @@ async function tryAccessibilityStrategy(
                 };
             }
 
-            await androidTap(match.center.x, match.center.y);
+            const a11yTap = await androidTap(match.center.x, match.center.y, deviceId);
+            if (!a11yTap.success) {
+                return {
+                    success: false,
+                    reason: `Accessibility found "${match.text ?? match.contentDesc ?? match.resourceId}" but tap failed: ${a11yTap.error}`
+                };
+            }
 
             return {
                 success: true,
@@ -1216,7 +1223,7 @@ async function tryAccessibilityStrategy(
  * `sink.ocr.bestCandidate` (matched text + tap coords) into the evidence sink,
  * which is serialized into the R2 failure bundle for diagnostics.
  */
-async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal): Promise<StrategyResult> {
+async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal, deviceId?: string): Promise<StrategyResult> {
     if (sink) sink.ocr.ran = true;
     const ocrStartedAt = Date.now();
     try {
@@ -1240,7 +1247,7 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             scaleFactor = screenshot.scaleFactor ?? 1;
         } else {
             const { androidScreenshot } = await import("../core/android.js");
-            const screenshot = await androidScreenshot(undefined, undefined, signal);
+            const screenshot = await androidScreenshot(undefined, deviceId, signal);
             if (!screenshot.success || !screenshot.data) {
                 return {
                     success: false,
@@ -1311,10 +1318,17 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             }
         } else {
             // Android: image-pixel → device-pixel (undo downscale), ADB accepts pixels
-            await androidTap(
+            const ocrTap = await androidTap(
                 Math.round(match.tapCenter.x * scaleFactor),
-                Math.round(match.tapCenter.y * scaleFactor)
+                Math.round(match.tapCenter.y * scaleFactor),
+                deviceId
             );
+            if (!ocrTap.success) {
+                return {
+                    success: false,
+                    reason: `OCR found "${match.text}" but tap failed: ${ocrTap.error}`
+                };
+            }
         }
 
         return {
@@ -1346,7 +1360,8 @@ async function tryCoordinateStrategy(
         originalHeight: number;
         scaleFactor: number;
     },
-    udid?: string
+    udid?: string,
+    deviceId?: string
 ): Promise<StrategyResult> {
     try {
         if (platform === "ios") {
@@ -1376,7 +1391,15 @@ async function tryCoordinateStrategy(
         } else {
             const scaleFactor = lastScreenshot?.scaleFactor ?? 1;
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "android", 1, scaleFactor);
-            await androidTap(converted.x, converted.y);
+            // The result is checked, not discarded: an unchecked failure here
+            // reported success for a tap adb never delivered.
+            const coordTap = await androidTap(converted.x, converted.y, deviceId);
+            if (!coordTap.success) {
+                return {
+                    success: false,
+                    reason: `Coordinate tap failed: ${coordTap.error}`
+                };
+            }
 
             return {
                 success: true,
@@ -1849,6 +1872,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         }
         const platform: "ios" | "android" = nativeResolved.target.platform;
         const nativeUdid: string | undefined = nativeResolved.target.iosUdid;
+        const nativeSerial: string | undefined = nativeResolved.target.androidSerial;
 
         const nativeShouldScreenshot = options.screenshot !== false;
         // Decoupled (I5, 2026-05-16): verify runs even when image bytes aren't returned.
@@ -1856,7 +1880,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         let nativeBeforeBuffer: Buffer | null = null;
         let nativeScreenshotMeta: { originalWidth: number; originalHeight: number; scaleFactor: number } | undefined;
         if (nativeShouldVerify) {
-            const before = await captureScreenshot(platform, nativeUdid);
+            const before = await captureScreenshot(platform, nativeUdid, nativeSerial);
             nativeBeforeBuffer = before?.buffer || null;
             if (before) {
                 nativeScreenshotMeta = {
@@ -1869,7 +1893,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
         // If no screenshot was taken for verification, take one just for scaleFactor
         if (!nativeScreenshotMeta) {
-            const ref = await captureScreenshot(platform, nativeUdid);
+            const ref = await captureScreenshot(platform, nativeUdid, nativeSerial);
             if (ref) {
                 nativeScreenshotMeta = {
                     originalWidth: ref.width,
@@ -1886,7 +1910,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         let result: StrategyResult;
         try {
             result = await withTimeout(
-                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta, nativeUdid),
+                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta, nativeUdid, nativeSerial),
                 remainingMs(),
                 "native-coordinate"
             );
@@ -1916,6 +1940,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     platform,
                     beforeBuffer: nativeBeforeBuffer,
                     udid: nativeUdid,
+                    deviceId: nativeSerial,
                     beforeScaleFactor: nativeScreenshotMeta?.scaleFactor,
                     markerPx: nativeMarker
                 }));
@@ -1927,6 +1952,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     shouldScreenshot: nativeShouldScreenshot,
                     beforeBuffer: nativeBeforeBuffer,
                     udid: nativeUdid,
+                    deviceId: nativeSerial,
                     beforeScaleFactor: nativeScreenshotMeta?.scaleFactor,
                     markerPx: nativeMarker
                 }));
@@ -1963,6 +1989,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const deviceNote = resolved.note;
     const platform: "ios" | "android" = resolved.target.platform;
     let targetUdid: string | undefined = resolved.target.iosUdid;
+    // Android's counterpart to targetUdid. Every adb call below takes it; without
+    // it adb falls back to its own default device, which on a multi-emulator
+    // setup is not the one the caller asked for.
+    const targetSerial: string | undefined = resolved.target.androidSerial;
 
     // Pick the connected app to bias strategy selection. Prefer the registry
     // entry whose identifier matches the resolved target; fall back to a
@@ -2159,7 +2189,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // otherwise shell out for a screenshot of its own to learn exactly this.
     let beforeDims: { width: number; height: number } | undefined;
     {
-        const before = await captureScreenshot(platform, targetUdid);
+        const before = await captureScreenshot(platform, targetUdid, targetSerial);
         beforeBuffer = before?.buffer || null;
         beforeScaleFactor = before?.scaleFactor;
         if (before && before.width > 0 && before.height > 0) {
@@ -2202,14 +2232,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     break;
                 case "accessibility":
                     result = await withCancelableTimeout(
-                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal),
+                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal, targetSerial),
                         budget,
                         `accessibility`
                     );
                     break;
                 case "ocr":
                     result = await withCancelableTimeout(
-                        (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal),
+                        (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal, targetSerial),
                         budget,
                         `ocr`
                     );
@@ -2230,7 +2260,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                                     scaleFactor: beforeScaleFactor
                                 }
                                 : app?.lastScreenshot,
-                            targetUdid
+                            targetUdid,
+                            targetSerial
                         ),
                         budget,
                         `coordinate`
@@ -2275,6 +2306,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     platform,
                     beforeBuffer,
                     udid: targetUdid,
+                    deviceId: targetSerial,
                     beforeScaleFactor,
                     markerPx: strategyMarker
                 }));
@@ -2291,6 +2323,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     shouldScreenshot: true,
                     beforeBuffer,
                     udid: targetUdid,
+                    deviceId: targetSerial,
                     beforeScaleFactor,
                     markerPx: strategyMarker
                 }));
@@ -2406,11 +2439,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     // Fabric returns dp — androidTap expects pixels
                     // Convert dp to pixels using device density
                     const { androidGetDensity } = await import("../core/android.js");
-                    const densityResult = await androidGetDensity();
+                    const densityResult = await androidGetDensity(targetSerial);
                     const densityScale = (densityResult.density || 420) / 160;
                     const pxX = Math.round(coords.x * densityScale);
                     const pxY = Math.round(coords.y * densityScale);
-                    await androidTap(pxX, pxY);
+                    const fiberTap = await androidTap(pxX, pxY, targetSerial);
+                    if (!fiberTap.success) {
+                        throw new Error(fiberTap.error || "adb tap failed");
+                    }
                     // Report the actual tap coords (pixels) the caller can pass straight
                     // to coordinate tools / verification — not the raw dp from fiber.
                     // Matches every other Android coord report in the tool (OB1, 2026-05-20).
@@ -2431,7 +2467,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 } else {
                     try {
                         const { androidGetDensity } = await import("../core/android.js");
-                        const d = await androidGetDensity();
+                        const d = await androidGetDensity(targetSerial);
                         fnDensity = (d.density || 420) / 160;
                     } catch { fnDensity = undefined; }
                 }
@@ -2448,6 +2484,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         platform,
                         beforeBuffer,
                         udid: targetUdid,
+                        deviceId: targetSerial,
                         beforeScaleFactor,
                         markerPx: fiberMarker
                     }));
@@ -2458,6 +2495,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         shouldScreenshot: true,
                         beforeBuffer,
                         udid: targetUdid,
+                        deviceId: targetSerial,
                         beforeScaleFactor,
                         markerPx: fiberMarker
                     }));
@@ -2494,7 +2532,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         // Do NOT fall through to other strategies (they can't resolve ambiguity).
         if (result.matches && result.ambiguous) {
             const { screenshot: matchScreenshot } = shouldScreenshot
-                ? await verifyAndCapture({ platform, shouldVerify: false, shouldScreenshot: true, beforeBuffer: null, udid: targetUdid })
+                ? await verifyAndCapture({ platform, shouldVerify: false, shouldScreenshot: true, beforeBuffer: null, udid: targetUdid, deviceId: targetSerial })
                 : { screenshot: undefined };
             if (matchScreenshot && app) {
                 app.lastScreenshot = {
@@ -2537,7 +2575,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         suggestion = `All strategies timed out — the element's presence is UNKNOWN. Retry the tap (transient slowness is common on dense screens), or try a different strategy explicitly (e.g. strategy='fiber' if accessibility timed out). ` + suggestion;
     }
     const { screenshot: failScreenshot } = shouldScreenshot
-        ? await verifyAndCapture({ platform, shouldVerify: false, shouldScreenshot: true, beforeBuffer: null, udid: targetUdid })
+        ? await verifyAndCapture({ platform, shouldVerify: false, shouldScreenshot: true, beforeBuffer: null, udid: targetUdid, deviceId: targetSerial })
         : { screenshot: undefined };
     if (failScreenshot && app) {
         app.lastScreenshot = {

@@ -120,7 +120,8 @@ export async function settleAndDiff(args: {
 
 export async function captureScreenshot(
     platform: "ios" | "android",
-    udid?: string
+    udid?: string,
+    deviceId?: string
 ): Promise<{
     buffer: Buffer;
     width: number;
@@ -128,7 +129,11 @@ export async function captureScreenshot(
     scaleFactor: number;
 } | null> {
     try {
-        const result = platform === "ios" ? await iosScreenshot(undefined, udid) : await androidScreenshot();
+        // `udid` addresses an iOS simulator, `deviceId` an adb serial. Passing
+        // neither means "whichever device adb/simctl picks", which on a
+        // multi-device setup is a coin flip — and a before/after diff taken
+        // from the wrong screen reports a confident false "no visual change".
+        const result = platform === "ios" ? await iosScreenshot(undefined, udid) : await androidScreenshot(undefined, deviceId);
         if (!result.success || !result.data) return null;
         return {
             buffer: result.data,
@@ -180,6 +185,7 @@ export async function verifyAndCapture(args: {
     shouldScreenshot: boolean;
     beforeBuffer: Buffer | null;
     udid?: string;
+    deviceId?: string;
     beforeScaleFactor?: number;
     markerPx?: { x: number; y: number };
     source?: string;
@@ -194,6 +200,7 @@ export async function verifyAndCapture(args: {
         shouldScreenshot,
         beforeBuffer,
         udid,
+        deviceId,
         beforeScaleFactor,
         markerPx,
     } = args;
@@ -222,14 +229,14 @@ export async function verifyAndCapture(args: {
         settle = await settleAndDiff({
             beforeBuffer: beforeBuffer!,
             statusBarHeight: settleStatusBarHeight,
-            capture: () => captureScreenshot(platform, udid),
+            capture: () => captureScreenshot(platform, udid, deviceId),
             noChangeConfirmMs: platform === "android" ? NO_CHANGE_CONFIRM_ANDROID_MS : NO_CHANGE_CONFIRM_MS
         });
     } else {
         await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_START_MS));
     }
 
-    let after = settle ? settle.frame : await captureScreenshot(platform, udid);
+    let after = settle ? settle.frame : await captureScreenshot(platform, udid, deviceId);
     if (!after) {
         if (shouldVerify) {
             return {
@@ -326,6 +333,7 @@ export async function burstCaptureAndVerify(args: {
     platform: "ios" | "android";
     beforeBuffer: Buffer | null;
     udid?: string;
+    deviceId?: string;
     beforeScaleFactor?: number;
     markerPx?: { x: number; y: number };
     source?: string;
@@ -334,7 +342,7 @@ export async function burstCaptureAndVerify(args: {
     verification?: TapVerification;
     afterWithMarkerBuffer?: Buffer;
 }> {
-    const { platform, beforeBuffer, udid, beforeScaleFactor, markerPx } = args;
+    const { platform, beforeBuffer, udid, deviceId, beforeScaleFactor, markerPx } = args;
     const source = args.source ?? "tap-burst";
     const groupIntent = source === "tap-burst" ? "tap-verification" : `${source.replace(/-burst$/, "")}-verification`;
     const action: "tap" | "swipe" = source.startsWith("swipe") ? "swipe" : "tap";
@@ -346,7 +354,7 @@ export async function burstCaptureAndVerify(args: {
 
     for (let i = 0; i < BURST_FRAME_COUNT; i++) {
         await new Promise((resolve) => setTimeout(resolve, BURST_FRAME_INTERVAL_MS));
-        const capture = await captureScreenshot(platform, udid);
+        const capture = await captureScreenshot(platform, udid, deviceId);
         if (capture) {
             frames.push(capture.buffer);
             if (i === 0) capturedScaleFactor = capture.scaleFactor || capturedScaleFactor;

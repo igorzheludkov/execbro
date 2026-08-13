@@ -397,7 +397,7 @@ export function registerInteractionTools(server: McpServer): void {
             // Capture before-screenshot only if we'll need it (verify or burst).
             const wantBefore = shouldVerify || shouldBurst;
             let beforeCapture = wantBefore
-                ? await captureScreenshot(resolvedPlatform!, resolvedUdid)
+                ? await captureScreenshot(resolvedPlatform!, resolvedUdid, resolved.target.androidSerial)
                 : null;
 
             // The frame this gesture's geometry is derived from. Held outside the
@@ -409,7 +409,7 @@ export function registerInteractionTools(server: McpServer): void {
                 // Need screen dimensions to compute the centered gesture. Reuse the
                 // before-frame if we captured one; otherwise grab one measurement frame.
                 if (!dims) {
-                    dims = await captureScreenshot(resolvedPlatform!, resolvedUdid);
+                    dims = await captureScreenshot(resolvedPlatform!, resolvedUdid, resolved.target.androidSerial);
                 }
                 if (!dims || !dims.width || !dims.height) {
                     return {
@@ -527,6 +527,7 @@ export function registerInteractionTools(server: McpServer): void {
                     platform: resolvedPlatform!,
                     beforeBuffer,
                     udid: resolvedUdid,
+                    deviceId: resolved.target.androidSerial,
                     beforeScaleFactor,
                     source: "swipe-burst",
                 })
@@ -536,6 +537,7 @@ export function registerInteractionTools(server: McpServer): void {
                     shouldScreenshot,
                     beforeBuffer,
                     udid: resolvedUdid,
+                    deviceId: resolved.target.androidSerial,
                     beforeScaleFactor,
                     source: "swipe-verify",
                 });
@@ -743,7 +745,7 @@ export function registerInteractionTools(server: McpServer): void {
             // a default focal point.
             const wantBefore = shouldVerify || shouldBurst || x === undefined || y === undefined;
             const beforeCapture = wantBefore
-                ? await captureScreenshot("android", undefined)
+                ? await captureScreenshot("android", undefined, resolved.target.androidSerial)
                 : null;
 
             if ((x === undefined || y === undefined) && (!beforeCapture || !beforeCapture.width || !beforeCapture.height)) {
@@ -808,6 +810,7 @@ export function registerInteractionTools(server: McpServer): void {
                     platform: "android",
                     beforeBuffer: beforeCapture?.buffer ?? null,
                     udid: undefined,
+                    deviceId: resolved.target.androidSerial,
                     beforeScaleFactor: beforeCapture?.scaleFactor,
                     source: "pinch-burst",
                 })
@@ -817,6 +820,7 @@ export function registerInteractionTools(server: McpServer): void {
                     shouldScreenshot,
                     beforeBuffer: beforeCapture?.buffer ?? null,
                     udid: undefined,
+                    deviceId: resolved.target.androidSerial,
                     beforeScaleFactor: beforeCapture?.scaleFactor,
                     source: "pinch-verify",
                 });
