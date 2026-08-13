@@ -21,7 +21,7 @@ import {
     inspectAtPoint,
     measureComponent,
     metroMissingHintIfAbsent,
-    hasMetro,
+    awaitMetro,
     getConnectedAppByDevice,
     getFirstConnectedApp,
 } from "../core/index.js";
@@ -105,7 +105,7 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ extended, summary, device, timeoutMs }) => {
-            if (!hasMetro()) {
+            if (!await awaitMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_layout");
                 return {
                     content: [{ type: "text", text: `Screen Layout unavailable.${hint}` }],
@@ -265,7 +265,7 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ device, pressablesOnly, fullText, fullParams, includeHistory }) => {
-            if (!hasMetro()) {
+            if (!await awaitMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_state");
                 return {
                     content: [{ type: "text", text: `get_screen_state unavailable.${hint}` }],
@@ -664,7 +664,7 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ componentName, index, device }) => {
-            if (!hasMetro()) {
+            if (!await awaitMetro()) {
                 const hint = await metroMissingHintIfAbsent("measure");
                 return {
                     content: [{ type: "text", text: `measure unavailable.${hint}` }],

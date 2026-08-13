@@ -200,6 +200,17 @@ export function getAndClearReconnectionTimer(
 }
 
 /**
+ * App keys with a reconnection scheduled right now.
+ *
+ * This is the difference between "the app is not running" and "the socket
+ * dropped a moment ago and is coming back" — states that look identical from
+ * `connectedApps.size`, because a disconnect deletes the entry either way.
+ */
+export function pendingReconnectionKeys(): string[] {
+    return Array.from(reconnectionTimers.keys());
+}
+
+/**
  * Cancel a reconnection timer if one exists
  */
 export function cancelReconnectionTimer(appKey: string): void {
