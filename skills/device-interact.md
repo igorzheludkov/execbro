@@ -72,6 +72,19 @@ tap(x=300, y=600, native=true, device="emulator-5554")  # pin the device
 ```
 Use `native=true` when tapping system dialogs, non-RN apps, or before establishing a React Native connection. Requires x/y coordinates. The platform is inferred from the resolved device.
 
+**Long press (hold the touch instead of releasing it):**
+```
+tap(testID="row-3", duration=800)     # context menus, drag starts, multi-select
+tap(x=300, y=600, duration=1500)      # coordinates work too, on either platform
+```
+React Native fires `onLongPress` at 500ms, so anything under 500 will not trigger it; 800 is a safe default. The response carries `longPress.handlerFound`:
+
+- `true` — the element really has an `onLongPress` handler (only the fiber strategy can see this)
+- `false` — the hold was delivered, but this element has none, so RN fired its `onPress` on release instead. The call still succeeds; the warning tells you the long-press action is not wired here
+- `null` — resolved via accessibility, OCR or coordinates, which cannot see handlers. Not "no handler", just not knowable from that strategy
+
+An element wired **only** for long press (`onLongPress` with no `onPress`) is invisible to an ordinary `tap` by design, since a short press on it does nothing. Passing `duration` is what makes it resolvable. `android_long_press` remains for Android coordinate holds with no RN connection.
+
 **Pin to a specific device when multiple are connected:**
 ```
 tap(text="Submit", device="iPhone SE")        # simulator/emulator or RN app name (substring)

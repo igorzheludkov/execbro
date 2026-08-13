@@ -154,6 +154,18 @@ Use tap — it tries multiple strategies automatically and returns a post-tap sc
 tap returns a screenshot after every action (screenshot=true by default) — no need to call ios_screenshot/android_screenshot after tapping.
 For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visual change (verify=true by default). Set screenshot=false for fastest execution.
 
+## Long Press
+Pass duration (milliseconds) to hold the touch instead of releasing it: tap(testID="row-3", duration=800). Use it for context menus, drag starts and multi-select. React Native fires onLongPress at 500ms, so anything under 500 will not trigger it; 800 is a safe default. Works on both platforms and with every targeting strategy (testID, text, component, coordinates).
+
+The response carries longPress.handlerFound:
+- true — the element really has an onLongPress handler (only the fiber strategy can see this)
+- false — the hold was delivered, but this element has no onLongPress, so React Native fired its onPress on release instead. The call still succeeds; the warning tells you the long-press action is not wired to this element
+- null — resolved by accessibility, OCR or coordinates, which cannot see handlers. Not "no handler", just not knowable from that strategy
+
+Elements wired ONLY for long press (onLongPress with no onPress) are invisible to an ordinary tap by design — a short press on them does nothing. Passing duration is what makes them resolvable.
+
+android_long_press still exists for coordinate holds on Android with no React Native connection; anything reachable through RN should use tap(duration=...).
+
 ## Pinch to Zoom (Android emulator only — iOS in progress)
 pinch sends REAL two-finger touch events through the Android emulator's multi-touch bridge, so it drives anything on screen — React Native, native views, WebViews, maps:
 1. pinch(direction="out") — fingers spread apart, zooms IN at screen centre
