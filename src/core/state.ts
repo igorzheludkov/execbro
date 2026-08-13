@@ -135,6 +135,24 @@ export const pendingExecutions: Map<number, PendingExecution> = new Map();
  * "Expression took too long" — which classifies as a logical timeout, so
  * auto-reconnect never runs. Failing it here surfaces the real transport cause.
  */
+/**
+ * True when a DIFFERENT socket now holds `appKey` — i.e. this one has been
+ * superseded by a reconnect and no longer owns the registry entry.
+ *
+ * A close handler captures its own socket, but the registry is keyed by device,
+ * so a replacement lands under the same key. Without this check a dead socket's
+ * close event evicts the live connection that replaced it, and the registry
+ * reports no Metro while a working socket is open.
+ *
+ * Deliberately false when NO entry exists: a socket that dies during setup —
+ * before it was ever registered — still has to run its own teardown and
+ * schedule the reconnect. That is the common flap case, not an edge case.
+ */
+export function isSupersededSocket(appKey: string, ws: unknown): boolean {
+    const current = connectedApps.get(appKey);
+    return !!current && current.ws !== ws;
+}
+
 export function failPendingExecutionsForSocket(ws: unknown, error: string): number {
     let failed = 0;
     for (const [messageId, pending] of pendingExecutions) {

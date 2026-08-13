@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
-import { connectedApps, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
+import { connectedApps, isSupersededSocket, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
 import { serializeRules } from "./mockRules.js";
@@ -26,6 +26,7 @@ import {
     getConnectionMetadata,
     saveReconnectionTimer,
     cancelReconnectionTimer,
+    shouldTerminateForMissedPong,
     calculateBackoffDelay,
     initContextHealth,
     markContextHealthy,
@@ -210,7 +211,14 @@ export function clearReconnectionSuppression(): void {
 }
 
 const STALE_ACTIVITY_THRESHOLD_MS = 30_000;
-const PING_INTERVAL_MS = 1_000; // WebSocket ping/pong keepalive interval
+// WebSocket ping/pong keepalive interval. Was 1s with a single missed tick
+// allowed, which terminated healthy sockets ~2s after connect while their own
+// post-connect setup was still in flight — the reconnect then hit the same
+// window, so one late pong became a self-sustaining flap.
+const PING_INTERVAL_MS = 5_000;
+// A socket that produced a CDP message this recently is alive whatever the pong
+// says. Two ping intervals, so a single stalled pong never decides it alone.
+const CDP_QUIET_WINDOW_MS = PING_INTERVAL_MS * 2;
 
 /**
  * Max time (ms) to wait for a Runtime.evaluate("1+1") reply during liveness probing.
@@ -1164,6 +1172,16 @@ export async function connectToDevice(
                     console.error(`[execbro] Failed ${failedCount} in-flight call(s) on closed socket for ${device.title}`);
                 }
 
+                // Everything below evicts state keyed by device, not by socket. A
+                // reconnect registers its replacement under the SAME key, so when a
+                // stale socket's close event lands late it would tear down the live
+                // connection that replaced it — and the registry would then report no
+                // Metro with a working socket open. Fail this socket's in-flight calls
+                // (done above, matched by socket), then stop.
+                if (isSupersededSocket(appKey, ws)) {
+                    return;
+                }
+
                 // Release connection lock if still held
                 connectionLocks.delete(appKey);
 
@@ -1368,8 +1386,13 @@ export async function connectToDevice(
             // handler can clear it; close/error handlers are already attached.
             let pongReceived = true;
             pingInterval = setInterval(() => {
-                if (!pongReceived) {
-                    console.error(`[execbro] No pong from ${device.title}, terminating connection`);
+                if (shouldTerminateForMissedPong({
+                    pongReceived,
+                    lastCdpMessageAt: getLastCDPMessageTime(appKey),
+                    now: Date.now(),
+                    quietWindowMs: CDP_QUIET_WINDOW_MS
+                })) {
+                    console.error(`[execbro] No pong from ${device.title} and no CDP traffic for ${CDP_QUIET_WINDOW_MS}ms, terminating connection`);
                     if (pingInterval) {
                         clearInterval(pingInterval);
                         pingInterval = null;

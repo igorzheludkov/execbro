@@ -206,6 +206,28 @@ export function getAndClearReconnectionTimer(
  * dropped a moment ago and is coming back" — states that look identical from
  * `connectedApps.size`, because a disconnect deletes the entry either way.
  */
+/**
+ * Whether a missed pong should cost the socket its life.
+ *
+ * A socket that is delivering CDP messages is alive by definition — a late pong
+ * says the process was busy, not that the link died. Terminating on the pong
+ * alone killed freshly-established connections ~2s in, while their own
+ * post-connect setup was still in flight, and the reconnect then walked into
+ * the same window. Traffic vouches for the socket; silence does not.
+ */
+export function shouldTerminateForMissedPong(args: {
+    pongReceived: boolean;
+    lastCdpMessageAt: Date | null;
+    now: number;
+    quietWindowMs: number;
+}): boolean {
+    if (args.pongReceived) return false;
+    if (args.lastCdpMessageAt && args.now - args.lastCdpMessageAt.getTime() < args.quietWindowMs) {
+        return false;
+    }
+    return true;
+}
+
 export function pendingReconnectionKeys(): string[] {
     return Array.from(reconnectionTimers.keys());
 }
