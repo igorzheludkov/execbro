@@ -173,6 +173,7 @@ pinch sends REAL two-finger touch events through the Android emulator's multi-to
 3. pinch(direction="out", x=..., y=...) — zoom pivots on that point (screenshot pixels, same space as tap and get_screen_state)
 4. pinch(direction="out", scale=8) — bigger ratio; values too large for one gesture chain automatically
 5. pinch(angle=90) — fingers on the vertical axis instead of horizontal
+6. pinch(durationMs=...) — slow the gesture down when a surface ignores a fast pinch
 
 Read verification.meaningful, exactly like swipe: false means nothing zoomed (surface is not zoomable, already at a zoom limit, or the focal point missed it).
 
@@ -211,7 +212,7 @@ For buttons that contain only an icon (no text):
 tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibility/OCR instead. For best results, use testID or coordinates.
 
 ## Other Interactions
-- swipe: cross-platform swipe/scroll. Easiest form: swipe({ direction: "up" }) scrolls to reveal more content (content-scroll semantics; "down"/"left"/"right" supported, bare swipe() defaults to "up"). Optional distance is in screenshot pixels (default 33% of the axis). For pixel-precise gestures pass all four startX/startY/endX/endY coordinates — they take precedence over direction. Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false the gesture had no visual effect (end-of-list, non-scrollable surface, or coordinates missed the scroll surface). Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path. Pass delta on iOS to control touch step size.
+- swipe: cross-platform swipe/scroll. Easiest form: swipe({ direction: "up" }) scrolls to reveal more content (content-scroll semantics; "down"/"left"/"right" supported, bare swipe() defaults to "up"). Optional distance is in screenshot pixels (default 33% of the axis). For pixel-precise gestures pass all four startX/startY/endX/endY coordinates — they take precedence over direction. Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false, warning names which no-op it was, by probing the scroll surface under the start point: already at top, already at end, content not scrollable, wrong axis, or no scroll view there at all. On a screen with no React Native connection it says it could not inspect the screen, rather than claiming the gesture missed — the gesture itself still went through, and swipe needs no RN connection to drive the device. Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path. Pass delta on iOS to control touch step size.
 - android_input_text / ios_input_text: type text (tap input field first to focus). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
 - dismiss_keyboard: blur the focused input, closing the keyboard.
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)

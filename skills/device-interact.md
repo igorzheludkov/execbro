@@ -125,12 +125,14 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 
 ### 4. Other Interactions
 
-**Long press:**
-- Android: `mcp__execbro__android_long_press` with x/y and optional duration
+**Long press** — `mcp__execbro__tap` with `duration` (both platforms). See the Long press section above. `mcp__execbro__android_long_press` remains for Android coordinate holds with no React Native connection.
 
-**Swipe/scroll:**
-- Android: `mcp__execbro__android_swipe` with start/end coordinates
-- iOS: no dedicated swipe tool — use `tap(x=, y=)` for interactions and scroll by tapping scroll targets, or rely on the app's own navigation
+**Swipe/scroll** — `mcp__execbro__swipe`, cross-platform:
+- `swipe(direction="up")` scrolls to reveal content below; `"down"`/`"left"`/`"right"` also work, and a bare `swipe()` defaults to `"up"`
+- `distance` is in screenshot pixels (default 33% of the axis); pass all four of `startX`/`startY`/`endX`/`endY` for a coordinate-precise gesture, which takes precedence over `direction`
+- Read `verification.meaningful`. When false, `warning` names which no-op it was — already at top, already at end, not scrollable, wrong axis, no scroll view under the start point, or (with no RN connection) that it could not inspect the screen
+- `burst:true` catches overscroll/bounce that settles before the after-frame; `verify:false, screenshot:false` is the fastest path
+- It drives the device through adb/simctl, so it works on non-RN screens too — only the no-op diagnosis needs a React Native connection
 
 **Pinch to zoom** — `mcp__execbro__pinch`. **Android emulator only; iOS in progress.**
 - `pinch(direction="out")` zooms in at screen centre, `direction="in"` zooms out
@@ -141,9 +143,11 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 - `span` is how much of the screen the gesture occupies — 1 by default for `"out"`, 0.5 for `"in"`, because a pinch-in starts with the fingers far apart and a full span would land them on a top bar or bottom sheet. Lower it further if a gesture still lands on surrounding UI
 - It sends real kernel touch events, so it drives native views, WebViews, and maps — not only React Native. Physical Android devices and iOS return an explicit error rather than a partial result
 
-**Type text:**
-- iOS: use `mcp__execbro__tap` with `text=` or `testID=` on the `TextInput` — the fiber tree strategy focuses the input natively. For the value itself, set it via state (e.g., `execute_in_app`) or rely on existing focus + native keyboard
-- Android: `mcp__execbro__android_input_text` (tap input field first)
+**Type text** — `mcp__execbro__input_text`, cross-platform:
+- Give it a `testID` and it focuses the field itself, types, then reads the value back and compares it, so a silent miss is reported rather than assumed
+- `replace:true` clears a pre-filled field first (Bridgeless/Fabric). The typing tools APPEND by default, which is the usual cause of `https://demo.example.comhttps://app.example.com`
+- `mcp__execbro__dismiss_keyboard` blurs the focused input when the keyboard covers what you need next
+- `ios_input_text` / `android_input_text` are the per-platform fallbacks; both take `replace`
 
 **Hardware buttons:**
 - iOS: `mcp__execbro__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
@@ -196,9 +200,9 @@ After interactions, verify the result:
 - `mcp__execbro__get_screen_state`
 - `mcp__execbro__get_screen_layout`
 - `mcp__execbro__inspect_at_point`
-- `mcp__execbro__android_long_press`
-- `mcp__execbro__android_swipe`
-- `mcp__execbro__android_input_text`
+- `mcp__execbro__swipe` / `mcp__execbro__pinch`
+- `mcp__execbro__input_text` / `mcp__execbro__dismiss_keyboard`
+- `mcp__execbro__android_long_press` (no-RN coordinate holds)
 - `mcp__execbro__ios_button` / `android_key_event`
 - `mcp__execbro__ios_open_url`
 

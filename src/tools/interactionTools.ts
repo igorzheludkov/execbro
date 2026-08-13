@@ -308,9 +308,9 @@ export function registerInteractionTools(server: McpServer): void {
                 primaryInteractionBanner() + "\n" +
                 "PURPOSE: Single unified swipe entry point. Easiest form: swipe({ direction: \"up\" }) scrolls to reveal more content (\"down\"/\"left\"/\"right\" also work; bare swipe() defaults to \"up\"). Optional distance in screenshot pixels (default 33% of axis). For precise control, pass all four coordinates (startX/startY/endX/endY) — they take precedence over direction.\n" +
                 "WHEN TO USE: Scrolling lists, paging carousels, pull-to-refresh, dismissing sheets, opening drawers. Especially useful in virtualized lists (FlatList/SectionList) where off-screen items aren't mounted in the fiber tree.\n" +
-                "VERIFICATION: verify=true (default) returns `verification.meaningful`. When false, `warning` names the actual cause — already at top, already at end, not scrollable, wrong axis, or no scroll view under the start point. burst=true catches transient feedback like overscroll bounce.\n" +
+                "VERIFICATION: verify=true (default) returns `verification.meaningful`. When false, `warning` names the cause — already at top/end, not scrollable, wrong axis, no scroll view there, or (no RN connection) that it could not inspect the screen. burst=true catches transient feedback like overscroll bounce.\n" +
                 "SAFETY: Android direction swipes stay clear of the system bars; `foregroundLost` appears if the app left the foreground anyway.\n" +
-                "WORKFLOW: swipe({ direction: \"up\" }) -> read response.verification.meaningful. Advanced: pass startX/startY/endX/endY for coordinate-precise gestures.\n" +
+                "WORKFLOW: swipe({ direction: \"up\" }) -> read response.verification.meaningful.\n" +
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific device — call list_devices for the inventory.\n",
             inputSchema: {
                 direction: z
