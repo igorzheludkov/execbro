@@ -68,6 +68,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "WORKFLOW: ios_screenshot or android_screenshot -> tap(testID=\"...\") | tap(text=\"...\") | tap(x, y) -> screenshot again to verify. Use burst=true when meaningful=false but visual feedback looks transient.\n" +
                 "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
                 "GOOD: tap({ testID: \"login-btn\" }); tap({ text: \"Submit\" }); tap({ x: 300, y: 600 }); tap({ x: 300, y: 600, native: true, device: \"emulator-5554\" })\n" +
+                "LONG PRESS: tap({ testID: \"row-3\", duration: 800 }) holds the touch.\n" +
                 "BAD: tap({ text: \"\" }) or tap({ x: 0, y: 0 }) — missing a target. tap({ text: \"Submit\" }) without first screenshotting an ambiguous screen.\n" +
                 "SOURCE: need the file:line that renders an element? inspect_at_point(x, y).\n",
             inputSchema: {
@@ -153,6 +154,16 @@ export function registerInteractionTools(server: McpServer): void {
                         "Independent of `screenshot` — verify can run with screenshot=false (the diff is computed internally; image bytes are dropped). " +
                         "When skipped, the response contains `verification: { skipped: true, skippedReason }` so callers can tell apart \"ran clean\" from \"never ran\"."
                     ),
+                duration: z.coerce
+                    .number()
+                    .optional()
+                    .describe(
+                        "Hold the touch for this many milliseconds instead of releasing it immediately — a long press. " +
+                        "Use for context menus, drag starts, multi-select. React Native fires onLongPress at 500ms, so 800 is a safe default " +
+                        "and anything under 500 will not trigger it. Omit for a normal tap. " +
+                        "The response carries `longPress.handlerFound`: true/false when the fiber strategy inspected the element, " +
+                        "null when the strategy that resolved it (accessibility, OCR, coordinates) cannot see handlers."
+                    ),
                 burst: z
                     .boolean()
                     .optional()
@@ -181,6 +192,7 @@ export function registerInteractionTools(server: McpServer): void {
                 screenshot: args.screenshot,
                 verify: args.verify,
                 burst: args.burst,
+                duration: args.duration,
             });
     
             const { screenshot: screenshotData, ...resultWithoutScreenshot } = result;
@@ -243,6 +255,7 @@ export function registerInteractionTools(server: McpServer): void {
                 _fiberPressableCount: result.fiberPressableCount,
                 _accessibilityMatchCount: result.accessibilityMatchCount,
                 _appRoute: result.appRoute,
+                _tapDuration: args.duration,
             };
         }
     );
@@ -255,9 +268,9 @@ export function registerInteractionTools(server: McpServer): void {
         "android_long_press",
         {
             description: "Long press at specific coordinates on an Android device/emulator screen" +
-                platformFallbackBanner("`tap` for short taps; keep android_long_press for long-press gestures specifically") +
+                platformFallbackBanner("`tap({ x, y, duration })` — it long-presses on both platforms and can resolve the target by testID/text/component") +
                 "\nPURPOSE: Emit a sustained touch at raw pixel coordinates to trigger long-press handlers (context menus, drag starts, multi-select)." +
-                "\nWHEN TO USE: Only when a long-press gesture is required — regular taps should go through `tap`.",
+                "\nWHEN TO USE: Android-only coordinate holds with no React Native connection. Anything reachable through RN should use `tap({ duration })`, which also reports whether the element has an onLongPress handler.",
             inputSchema: {
                 x: z.coerce.number().describe("X coordinate in pixels"),
                 y: z.coerce.number().describe("Y coordinate in pixels"),

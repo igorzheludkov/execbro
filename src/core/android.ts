@@ -623,7 +623,8 @@ export const ANDROID_KEY_EVENTS = {
 export async function androidTap(
     x: number,
     y: number,
-    deviceId?: string
+    deviceId?: string,
+    durationMs?: number
 ): Promise<AdbResult> {
     try {
         const adbMissing = await requireAdb();
@@ -636,6 +637,13 @@ export async function androidTap(
                 success: false,
                 error: "No Android device connected. Connect a device or start an emulator."
             };
+        }
+
+        // adb has no hold verb: a same-point swipe with a duration IS the long press,
+        // which is what androidLongPress has always done. Delegate rather than write a
+        // second implementation of the same gesture.
+        if (durationMs !== undefined) {
+            return androidLongPress(x, y, durationMs, device);
         }
 
         const deviceArgs = buildDeviceArgs(device);

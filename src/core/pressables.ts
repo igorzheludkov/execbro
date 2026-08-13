@@ -105,8 +105,13 @@ export async function pressElement(options: {
     index?: number;
     maxTraversalDepth?: number;
     device?: string;
+    /**
+     * Accept elements that only have `onLongPress`. Off by default: a short tap on
+     * such an element does nothing, so resolving it would be a confident miss.
+     */
+    longPress?: boolean;
 }): Promise<ExecutionResult> {
-    const { text, testID, component, index = 0, maxTraversalDepth = 15 } = options;
+    const { text, testID, component, index = 0, maxTraversalDepth = 15, longPress = false } = options;
 
     if (!text && !testID && !component) {
         return { success: false, error: "At least one of text, testID, or component must be provided." };
@@ -134,6 +139,20 @@ export async function pressElement(options: {
                 }
             }
             if (roots.length === 0) return { error: 'No fiber roots found. Is a React Native app mounted?' };
+
+            var wantLongPress = ${longPress ? "true" : "false"};
+
+            // One predicate, six call sites. The duplication is why long-press-only
+            // elements were invisible here while inspector.ts already counted them as
+            // pressable — fixing one copy would have left five.
+            function isPressableProps(p) {
+                if (!p) return false;
+                if (typeof p.onPress === 'function') return true;
+                return wantLongPress && typeof p.onLongPress === 'function';
+            }
+            function hasLongPressProps(p) {
+                return !!(p && typeof p.onLongPress === 'function');
+            }
 
             var searchText = ${textParam};
             var searchTestID = ${testIDParam};
@@ -292,7 +311,7 @@ export async function pressElement(options: {
 
                 if (isScreenHidden(name, props)) return;
 
-                var isPressable = props && typeof props.onPress === 'function';
+                var isPressable = isPressableProps(props);
                 var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
                 if (isPressable || isInput) {
@@ -321,6 +340,7 @@ export async function pressElement(options: {
                             path: path.join(' > '),
                             isInput: isInput,
                             isPressable: isPressable,
+                            hasLongPress: hasLongPressProps(props),
                             source: 'direct'
                         });
                     }
@@ -355,7 +375,7 @@ export async function pressElement(options: {
                     function findDescendantPressable(fiber, d) {
                         if (!fiber || d > 10) return null;
                         var fp = fiber.memoizedProps;
-                        var dIsPressable = fp && typeof fp.onPress === 'function';
+                        var dIsPressable = isPressableProps(fp);
                         var dIsInput = !dIsPressable && fp && (typeof fp.onChangeText === 'function' || typeof fp.onFocus === 'function');
                         if (dIsPressable || dIsInput) return { fiber: fiber, isPressable: dIsPressable, isInput: dIsInput };
                         var c = fiber.child;
@@ -375,7 +395,7 @@ export async function pressElement(options: {
 
                         var tid = props && (props.testID || props.nativeID || null);
                         if (tid === searchTestID) {
-                            var nIsPressable = props && typeof props.onPress === 'function';
+                            var nIsPressable = isPressableProps(props);
                             var nIsInput = !nIsPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
                             if (nIsPressable || nIsInput) {
@@ -392,6 +412,7 @@ export async function pressElement(options: {
                                         path: path.join(' > '),
                                         isInput: nIsInput,
                                         isPressable: nIsPressable,
+                                        hasLongPress: hasLongPressProps(props),
                                         source: 'testID-direct'
                                     });
                                 }
@@ -401,7 +422,7 @@ export async function pressElement(options: {
                                 var d = 0;
                                 while (parent && d < maxTraversalUp) {
                                     var pp = parent.memoizedProps;
-                                    var pIsPressable = pp && typeof pp.onPress === 'function';
+                                    var pIsPressable = isPressableProps(pp);
                                     var pIsInput = !pIsPressable && pp && (typeof pp.onChangeText === 'function' || typeof pp.onFocus === 'function');
                                     if (pIsPressable || pIsInput) {
                                         var pText = pIsPressable ? extractText(parent, 0) : (extractText(parent, 0) || (typeof pp.value === 'string' ? pp.value : '') || (typeof pp.defaultValue === 'string' ? pp.defaultValue : '') || (typeof pp.placeholder === 'string' ? pp.placeholder : ''));
@@ -417,6 +438,7 @@ export async function pressElement(options: {
                                                 path: path.join(' > '),
                                                 isInput: pIsInput,
                                                 isPressable: pIsPressable,
+                                                hasLongPress: hasLongPressProps(pp),
                                                 source: 'testID-ancestor'
                                             });
                                             foundAncestor = true;
@@ -444,6 +466,7 @@ export async function pressElement(options: {
                                                 path: path.join(' > '),
                                                 isInput: desc.isInput,
                                                 isPressable: desc.isPressable,
+                                                hasLongPress: hasLongPressProps(dp),
                                                 source: 'testID-descendant'
                                             });
                                         }
@@ -481,7 +504,7 @@ export async function pressElement(options: {
                     function findDescendantPressableOnly(fiber, d) {
                         if (!fiber || d > 10) return null;
                         var fp = fiber.memoizedProps;
-                        if (fp && typeof fp.onPress === 'function') return fiber;
+                        if (isPressableProps(fp)) return fiber;
                         var c = fiber.child;
                         while (c) {
                             var r = findDescendantPressableOnly(c, d + 1);
@@ -503,7 +526,7 @@ export async function pressElement(options: {
                             var d = 0;
                             while (parent && d < maxTraversalUp) {
                                 var pp = parent.memoizedProps;
-                                if (pp && typeof pp.onPress === 'function') {
+                                if (isPressableProps(pp)) {
                                     var text = extractText(parent, 0);
                                     var host = findFirstHost(parent, 0, false);
                                     if (host) {
@@ -517,6 +540,7 @@ export async function pressElement(options: {
                                             path: path.join(' > '),
                                             isInput: false,
                                             isPressable: true,
+                                            hasLongPress: hasLongPressProps(pp),
                                             source: 'component-ancestor'
                                         });
                                         foundAncestor = true;
@@ -544,6 +568,7 @@ export async function pressElement(options: {
                                             path: path.join(' > '),
                                             isInput: false,
                                             isPressable: true,
+                                            hasLongPress: hasLongPressProps(dp),
                                             source: 'component-descendant'
                                         });
                                     }
@@ -679,6 +704,7 @@ export async function pressElement(options: {
                         testID: info.testID,
                         path: info.path,
                         isInput: info.isInput,
+                        hasLongPress: info.hasLongPress,
                         x: Math.round(m.x + m.width / 2),
                         y: Math.round(m.y + m.height / 2)
                     });
@@ -742,7 +768,10 @@ export async function pressElement(options: {
                 text: target.text,
                 testID: target.testID,
                 path: target.path,
-                isInput: target.isInput
+                isInput: target.isInput,
+                // Only the fiber strategy can answer this; accessibility, OCR and
+                // coordinate taps have no view of the handlers.
+                hasLongPress: !!target.hasLongPress
             };
             if (matches.length > 1) {
                 result.allMatches = matches.map(function(m, i) {

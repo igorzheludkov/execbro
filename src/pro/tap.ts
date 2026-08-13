@@ -50,6 +50,11 @@ export interface TapOptions {
     native?: boolean;
     screenshot?: boolean;
     verify?: boolean;
+    /**
+     * Hold the touch this many milliseconds instead of releasing it immediately.
+     * Omitted means a normal tap. RN's onLongPress fires at 500ms.
+     */
+    duration?: number;
     burst?: boolean;
     /**
      * Target device. Accepts an iOS simulator UDID, an Android adb serial,
@@ -224,6 +229,18 @@ export async function analyzeBurstFrames(
     };
 }
 
+/** What a `duration` tap can say about the element it held. */
+export interface LongPressReport {
+    durationMs: number;
+    /**
+     * true / false when the fiber strategy inspected the element; null when the
+     * strategy that resolved it (accessibility, OCR, coordinates) has no view of
+     * the handlers. null means "not knowable here", never "no handler".
+     */
+    handlerFound: boolean | null;
+    warning?: string;
+}
+
 export interface TapResult {
     success: boolean;
     method?: string;
@@ -259,6 +276,8 @@ export interface TapResult {
      * `validation` bucket so it stops inflating tap's failure rate.
      */
     staleTag?: string;
+    /** Present only when `duration` was passed. */
+    longPress?: LongPressReport;
     /**
      * Why a coordinate tap changed nothing: what occupied the point, whether an
      * overlay covers it, and the nearest reachable pressable with re-tappable
@@ -269,6 +288,34 @@ export interface TapResult {
 }
 
 // --- Helpers ---
+
+/**
+ * Describe the hold that was just delivered. `handlerFound` is null wherever the
+ * strategy could not look — saying "no handler" on that evidence would be a claim
+ * about the app drawn from the tool's own blind spot.
+ */
+export function buildLongPressReport(args: {
+    durationMs: number | undefined;
+    hasLongPress?: boolean;
+    element?: string;
+}): LongPressReport | undefined {
+    if (args.durationMs === undefined) return undefined;
+    if (args.hasLongPress === undefined) {
+        return { durationMs: args.durationMs, handlerFound: null };
+    }
+    if (args.hasLongPress) {
+        return { durationMs: args.durationMs, handlerFound: true };
+    }
+    const what = args.element ? `<${args.element} />` : "the element";
+    return {
+        durationMs: args.durationMs,
+        handlerFound: false,
+        warning:
+            `Held for ${args.durationMs}ms, but ${what} has no onLongPress handler — ` +
+            `React Native will have fired its onPress on release instead. The gesture was ` +
+            `delivered; if you expected a long-press action, it is not wired to this element.`
+    };
+}
 
 export function buildQuery(options: TapOptions): TapQuery {
   const query: TapQuery = {};
@@ -698,6 +745,8 @@ interface StrategyResult {
     matches?: Array<{ index: number; component: string; text: string; testID?: string | null; x?: number; y?: number }>;
     ambiguous?: boolean;
     convertedTo?: { x: number; y: number; unit: string };
+    /** Fiber only: whether the resolved element actually has an onLongPress handler. */
+    hasLongPress?: boolean;
 }
 
 export interface EvidenceSink {
@@ -812,7 +861,7 @@ export function findClosestOcrText(
 
 // --- Strategy Functions ---
 
-async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number, sink?: EvidenceSink, device?: string): Promise<StrategyResult> {
+async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number, sink?: EvidenceSink, device?: string, longPress = false): Promise<StrategyResult> {
     if (sink) {
         sink.fiber.ran = true;
         sink.fiber.metroConnected = connectedApps.size > 0;
@@ -832,7 +881,7 @@ async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDep
         let lastResult: StrategyResult | null = null;
 
         for (const depth of depthAttempts) {
-            const result = await tryFiberAtDepth(query, index, depth, device);
+            const result = await tryFiberAtDepth(query, index, depth, device, longPress);
             if (sink && result.matches?.length) {
                 sink.fiber.pressables = result.matches.slice(0, 50).map(m => ({
                     label: m.text || undefined,
@@ -859,7 +908,8 @@ async function tryFiberAtDepth(
     query: TapQuery,
     index: number | undefined,
     maxTraversalDepth: number,
-    device?: string
+    device?: string,
+    longPress = false
 ): Promise<StrategyResult> {
     try {
         const result = await pressElement({
@@ -868,7 +918,8 @@ async function tryFiberAtDepth(
             component: query.component,
             index,
             maxTraversalDepth,
-            device
+            device,
+            longPress
         });
 
         if (!result.success) {
@@ -934,7 +985,8 @@ async function tryFiberAtDepth(
                         x: parsed.nativeTapTarget.x,
                         y: parsed.nativeTapTarget.y,
                         unit: parsed.nativeTapTarget.unit || "points"
-                    }
+                    },
+                    hasLongPress: !!parsed.hasLongPress
                 };
             }
             return {
@@ -963,7 +1015,8 @@ async function tryAccessibilityStrategy(
     udid?: string,
     sink?: EvidenceSink,
     signal?: AbortSignal,
-    deviceId?: string
+    deviceId?: string,
+    duration?: number
 ): Promise<StrategyResult> {
     if (sink) sink.accessibility.ran = true;
     const startedAt = Date.now();
@@ -1099,7 +1152,7 @@ async function tryAccessibilityStrategy(
                 };
             }
 
-            await iosTap(match.center.x, match.center.y, { udid });
+            await iosTap(match.center.x, match.center.y, { udid, duration });
 
             return {
                 success: true,
@@ -1191,7 +1244,7 @@ async function tryAccessibilityStrategy(
                 };
             }
 
-            const a11yTap = await androidTap(match.center.x, match.center.y, deviceId);
+            const a11yTap = await androidTap(match.center.x, match.center.y, deviceId, duration);
             if (!a11yTap.success) {
                 return {
                     success: false,
@@ -1223,7 +1276,7 @@ async function tryAccessibilityStrategy(
  * `sink.ocr.bestCandidate` (matched text + tap coords) into the evidence sink,
  * which is serialized into the R2 failure bundle for diagnostics.
  */
-async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal, deviceId?: string): Promise<StrategyResult> {
+async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid?: string, sink?: EvidenceSink, signal?: AbortSignal, deviceId?: string, duration?: number): Promise<StrategyResult> {
     if (sink) sink.ocr.ran = true;
     const ocrStartedAt = Date.now();
     try {
@@ -1308,7 +1361,7 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             const tapResult = await iosTap(
                 Math.round((match.tapCenter.x * scaleFactor) / dpr),
                 Math.round((match.tapCenter.y * scaleFactor) / dpr),
-                { udid }
+                { udid, duration }
             );
             if (!tapResult.success) {
                 return {
@@ -1321,7 +1374,8 @@ async function tryOcrStrategy(query: TapQuery, platform: "ios" | "android", udid
             const ocrTap = await androidTap(
                 Math.round(match.tapCenter.x * scaleFactor),
                 Math.round(match.tapCenter.y * scaleFactor),
-                deviceId
+                deviceId,
+                duration
             );
             if (!ocrTap.success) {
                 return {
@@ -1361,7 +1415,8 @@ async function tryCoordinateStrategy(
         scaleFactor: number;
     },
     udid?: string,
-    deviceId?: string
+    deviceId?: string,
+    duration?: number
 ): Promise<StrategyResult> {
     try {
         if (platform === "ios") {
@@ -1375,7 +1430,7 @@ async function tryCoordinateStrategy(
             const devicePixelRatio = await getDevicePixelRatio(udid, dprHint);
 
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "ios", devicePixelRatio, scaleFactor);
-            const tapResult = await iosTap(converted.x, converted.y, { udid });
+            const tapResult = await iosTap(converted.x, converted.y, { udid, duration });
             if (!tapResult.success) {
                 return {
                     success: false,
@@ -1393,7 +1448,7 @@ async function tryCoordinateStrategy(
             const converted = convertScreenshotToTapCoords(pixelX, pixelY, "android", 1, scaleFactor);
             // The result is checked, not discarded: an unchecked failure here
             // reported success for a tap adb never delivered.
-            const coordTap = await androidTap(converted.x, converted.y, deviceId);
+            const coordTap = await androidTap(converted.x, converted.y, deviceId, duration);
             if (!coordTap.success) {
                 return {
                     success: false,
@@ -1910,7 +1965,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         let result: StrategyResult;
         try {
             result = await withTimeout(
-                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta, nativeUdid, nativeSerial),
+                tryCoordinateStrategy(query.x!, query.y!, platform, nativeScreenshotMeta, nativeUdid, nativeSerial, options.duration),
                 remainingMs(),
                 "native-coordinate"
             );
@@ -1957,7 +2012,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     markerPx: nativeMarker
                 }));
             }
-            return formatTapSuccess({
+            const nativeSuccess = formatTapSuccess({
                 method: "native-coordinate",
                 query,
                 pressed: result.pressed,
@@ -1966,6 +2021,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 screenshot,
                 verification
             });
+            // hasLongPress stays undefined here: a coordinate tap inspects nothing.
+            const nativeLongPress = buildLongPressReport({ durationMs: options.duration });
+            if (nativeLongPress) nativeSuccess.longPress = nativeLongPress;
+            return nativeSuccess;
         }
         return formatTapFailure({
             query,
@@ -2228,18 +2287,18 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 case "fiber":
                     // Fiber is JS-only against a CDP target — no subprocess to cancel,
                     // so the cheaper non-cancellable wrapper is fine.
-                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence, deviceName), budget, `fiber`);
+                    result = await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence, deviceName, options.duration !== undefined), budget, `fiber`);
                     break;
                 case "accessibility":
                     result = await withCancelableTimeout(
-                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal, targetSerial),
+                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal, targetSerial, options.duration),
                         budget,
                         `accessibility`
                     );
                     break;
                 case "ocr":
                     result = await withCancelableTimeout(
-                        (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal, targetSerial),
+                        (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal, targetSerial, options.duration),
                         budget,
                         `ocr`
                     );
@@ -2261,7 +2320,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                                 }
                                 : app?.lastScreenshot,
                             targetUdid,
-                            targetSerial
+                            targetSerial,
+                            options.duration
                         ),
                         budget,
                         `coordinate`
@@ -2352,6 +2412,15 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 screenshot,
                 verification
             });
+            // `result.hasLongPress` is set only by the fiber strategy; for accessibility,
+            // OCR and coordinate taps it is undefined, which the report renders as
+            // "not knowable" rather than "no handler".
+            const strategyLongPress = buildLongPressReport({
+                durationMs: options.duration,
+                hasLongPress: result.hasLongPress,
+                element: result.pressed
+            });
+            if (strategyLongPress) successResult.longPress = strategyLongPress;
             // The guard already resolved what occupies this coordinate. Reporting it turns
             // "something responded" into "this element responded" for the one case where
             // the caller most likely meant something else.
@@ -2433,7 +2502,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     // measured y falls inside the safe-area band, shift it down by the inset.
                     const safeAreaTop = await getIOSSafeAreaTop(targetUdid);
                     const tapY = (safeAreaTop > 0 && coords.y < safeAreaTop) ? coords.y + safeAreaTop : coords.y;
-                    await iosTap(coords.x, tapY, { udid: targetUdid });
+                    await iosTap(coords.x, tapY, { udid: targetUdid, duration: options.duration });
                     coords.y = tapY;
                 } else {
                     // Fabric returns dp — androidTap expects pixels
@@ -2443,7 +2512,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     const densityScale = (densityResult.density || 420) / 160;
                     const pxX = Math.round(coords.x * densityScale);
                     const pxY = Math.round(coords.y * densityScale);
-                    const fiberTap = await androidTap(pxX, pxY, targetSerial);
+                    const fiberTap = await androidTap(pxX, pxY, targetSerial, options.duration);
                     if (!fiberTap.success) {
                         throw new Error(fiberTap.error || "adb tap failed");
                     }
@@ -2508,7 +2577,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         scaleFactor: screenshot.scaleFactor
                     };
                 }
-                return formatTapSuccess({
+                const fiberSuccess = formatTapSuccess({
                     method: "fiber+native",
                     query,
                     pressed: result.pressed,
@@ -2522,6 +2591,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     screenshot,
                     verification
                 });
+                const fiberLongPress = buildLongPressReport({
+                    durationMs: options.duration,
+                    hasLongPress: result.hasLongPress,
+                    element: result.pressed
+                });
+                if (fiberLongPress) fiberSuccess.longPress = fiberLongPress;
+                return fiberSuccess;
             } catch {
                 // Native tap at fiber coordinates failed — continue to next strategy
             }

@@ -438,6 +438,7 @@
             "burst",
             "component",
             "device",
+            "duration",
             "index",
             "maxTraversalDepth",
             "native",
