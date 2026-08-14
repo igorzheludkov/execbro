@@ -38,6 +38,13 @@ describe("buildRequestExpression", () => {
         expect(src).toContain('{\\"name\\":\\"Test\\"}');
     });
 
+    it("sends a string body verbatim instead of re-encoding it", () => {
+        const src = buildRequestExpression({ method: "POST", url: "https://api.test/x", body: '{"name":"Test"}' });
+        expect(src).toContain('var bodyText = "{\\"name\\":\\"Test\\"}"');
+        // The double-encoded form: the payload wrapped in escaped quotes.
+        expect(src).not.toContain('\\"{');
+    });
+
     it("escapes a url containing a quote rather than breaking the expression", () => {
         const src = buildRequestExpression({ method: "GET", url: 'https://api.test/a"b' });
         expect(src).toContain('\\"');
@@ -125,6 +132,33 @@ describe("buildRequestExpression — generated source behaviour", () => {
         });
         const { captured, result } = await runGenerated(src, { user: { accessToken: "tok-123" } });
         expect(captured.init.headers.Authorization).toBe("Bearer explicit");
+        expect(result.authNote).toBeUndefined();
+    });
+
+    it("honours a lower-case content-type instead of adding a second one", async () => {
+        const src = buildRequestExpression({
+            method: "POST",
+            url: "https://api.test/x",
+            body: "a=1&b=2",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            auth: "none"
+        });
+        const { captured } = await runGenerated(src, null);
+        expect(captured.init.body).toBe("a=1&b=2");
+        expect(captured.init.headers["Content-Type"]).toBeUndefined();
+        expect(captured.init.headers["content-type"]).toBe("application/x-www-form-urlencoded");
+    });
+
+    it("lets a lower-case authorization header win over auth=auto", async () => {
+        const src = buildRequestExpression({
+            method: "GET",
+            url: "https://api.test/me",
+            auth: "auto",
+            headers: { authorization: "Bearer explicit" }
+        });
+        const { captured, result } = await runGenerated(src, { user: { accessToken: "tok-123" } });
+        expect(captured.init.headers.Authorization).toBeUndefined();
+        expect(captured.init.headers.authorization).toBe("Bearer explicit");
         expect(result.authNote).toBeUndefined();
     });
 

@@ -86,7 +86,7 @@ export function registerRequestTools(server: McpServer): void {
                 body: z
                     .unknown()
                     .optional()
-                    .describe("JSON-serialisable request body. Sets Content-Type: application/json unless you override it."),
+                    .describe("Request body. An object is JSON-serialised for you; a string is sent verbatim (already-encoded JSON, urlencoded, raw). Sets Content-Type: application/json unless you override it."),
                 headers: z
                     .record(z.string())
                     .optional()
