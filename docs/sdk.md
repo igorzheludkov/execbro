@@ -40,4 +40,4 @@ if (__DEV__) {
 // ... rest of your imports
 ```
 
-`init()` alone (no arguments) already unlocks full log and network capture. Wiring `stores`, `navigation`, or `custom` references is what makes the agent able to read and reason about your app's state directly. See the [SDK README](https://github.com/igorzheludkov/execbro-sdk#readme) for every config option.
+`init()` alone (no arguments) already unlocks full log and network capture. Wiring `stores`, `navigation`, or `custom` references is what hands the agent direct control — it can read and act through any object you pass in, not just your state and navigation but AsyncStorage, MMKV, or any other reference you choose to expose. See the [SDK README](https://github.com/igorzheludkov/execbro-sdk#readme) for every config option.

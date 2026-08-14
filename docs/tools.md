@@ -46,7 +46,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `inspect_global`     | Inspect a global object to see its properties and callable methods                          |
 | `reload_app`         | Reload the app (auto-connects if needed). Use sparingly - Fast Refresh handles most changes |
 
-> **Tip:** Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for a more robust approach — it provides full network capture from app startup (including request/response bodies), enhanced log collection, and access to global variables for navigation, state management, and more.
+> **Tip:** Install the [SDK](https://www.npmjs.com/package/execbro-sdk) — optional, but recommended: full network capture from app startup (including request/response bodies), enhanced log collection, and direct agent control over navigation, state stores, and any custom reference you pass in.
 
 ## Layout & Component Inspection
 
