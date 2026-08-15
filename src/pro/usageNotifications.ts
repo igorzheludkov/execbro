@@ -6,12 +6,27 @@ import { getPricingInfo, formatPlanPrice, type UsageInfo } from "../core/license
 import { API_BASE_URL } from "../core/config.js";
 
 const NOTIFY_FILE = join(CONFIG_DIR, "usage-notify.json");
-const UPGRADE_URL = `${API_BASE_URL}/upgrade`;
+const UPGRADE_URL = `${API_BASE_URL}/pricing`;
+// Blocked (100%) links carry ?from=cap so the pricing page's headline matches
+// "you already hit the limit" instead of a generic pitch.
+const BLOCKED_UPGRADE_URL = `${UPGRADE_URL}?from=cap`;
+// LogBox renders every push under a red/yellow "Console Error/Warning" banner regardless
+// of content, which reads as the app itself broke. Lead with this so it's clearly a
+// tooling notification from the MCP server, not app breakage.
+const NOT_AN_APP_ERROR = "This is not an app error — it's a notification from the ExecBro MCP server. ";
 
 // Matches the fallback in ../pro/usageGate.ts — keep both in sync.
 function proPrice(): string {
     const pricing = getPricingInfo();
     return pricing?.pro ? formatPlanPrice(pricing.pro) : "$8.99/mo";
+}
+
+// Matches formatReset in ../pro/usageGate.ts — keep both in sync.
+function formatReset(usage: UsageInfo): string {
+    if (!usage.resetsAt) return "next month";
+    const d = new Date(usage.resetsAt);
+    if (Number.isNaN(d.getTime())) return "next month";
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
 interface NotifyState {
@@ -59,9 +74,14 @@ export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string)
 
         const askAgent = `Ask your AI assistant: "Check my ExecBro license status and help me link my account and upgrade to Pro."`;
         const msg =
-            threshold === 100
-                ? `ExecBro: free monthly limit reached (${usage.used}/${usage.limit}). Unlimited at ${UPGRADE_URL} — ${askAgent}`
-                : `ExecBro: ${usage.used}/${usage.limit} free calls used this month. Unlimited at ${UPGRADE_URL} — ${askAgent}`;
+            NOT_AN_APP_ERROR +
+            (threshold === 100
+                ? `ExecBro: free monthly limit reached (${usage.used}/${usage.limit} tool calls). ` +
+                  `Your AI assistant can no longer use ExecBro's tools until it resets on ${formatReset(usage)}. ` +
+                  `Unlock unlimited usage at ${BLOCKED_UPGRADE_URL} — ${askAgent}`
+                : `ExecBro: ${usage.used}/${usage.limit} free tool calls used this month, resets ${formatReset(usage)}. ` +
+                  `At ${usage.limit} your AI assistant will be blocked from using ExecBro until the reset. ` +
+                  `Unlock unlimited usage at ${UPGRADE_URL} — ${askAgent}`);
         // Persist the dedup state BEFORE awaiting the push so the check-and-set window is
         // synchronous. This closes a TOCTOU race where two concurrent tool calls both read
         // stale state and both fire. Trade-off: if pushLogBox later fails, we do not retry
@@ -84,6 +104,7 @@ export async function maybeNotifyDeferral(usage: UsageInfo | null, device?: stri
         if (Number.isNaN(enforcementDate.getTime())) return; // malformed date — skip, don't mark notified
         const date = enforcementDate.toLocaleDateString("en-GB", { day: "2-digit", month: "long" });
         const msg =
+            NOT_AN_APP_ERROR +
             `ExecBro becomes metered on ${date}: 600 free tool calls per month, ` +
             `unlimited with Pro (${proPrice()}) at ${UPGRADE_URL}. As a thank-you to existing users, ` +
             `you already have a free month before the cap applies — nothing changes until ${date}. ` +

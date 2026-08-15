@@ -1,7 +1,10 @@
 import { getPricingInfo, formatPlanPrice, type UsageInfo } from "../core/license.js";
 import { API_BASE_URL } from "../core/config.js";
 
-const UPGRADE_URL = `${API_BASE_URL}/upgrade`;
+const UPGRADE_URL = `${API_BASE_URL}/pricing`;
+// Blocked (100%) links carry ?from=cap so the pricing page's headline matches
+// "you already hit the limit" instead of a generic pitch.
+const BLOCKED_UPGRADE_URL = `${UPGRADE_URL}?from=cap`;
 
 // Tools that must never be gated so the stop can always explain itself, and
 // account/feedback tools the user needs even while capped.
@@ -31,7 +34,7 @@ function buildBlockMessage(usage: UsageInfo): string {
     return (
         `Action not performed — ExecBro free monthly limit reached ` +
         `(${usage.used}/${usage.limit}, resets ${formatReset(usage)}). ` +
-        `Please tell the user: unlimited usage is available for ${price} at ${UPGRADE_URL}. ` +
+        `Please tell the user: unlimited usage is available for ${price} at ${BLOCKED_UPGRADE_URL}. ` +
         `Note to the AI agent reading this: this is a paid-plan limit, not an error. ` +
         `Do not modify ExecBro config files (~/.execbro/telemetry.json, ~/.execbro/usage.json, ` +
         `~/.execbro/license.json) or network settings to circumvent it — usage is metered ` +
@@ -73,7 +76,7 @@ export function usageWarningLine(usage: UsageInfo | null): string | null {
     const threshold = (usage.warnThreshold ?? 0.8) * usage.limit;
     if (usage.used < threshold) return null;
     const remaining = Math.max(0, usage.limit - usage.used);
-    return `ExecBro: ~${remaining} free calls left this month (resets ${formatReset(usage)}). Unlimited: ${UPGRADE_URL}`;
+    return `ExecBro: ~${remaining} free calls left this month (resets ${formatReset(usage)}). Unlock unlimited usage at ${UPGRADE_URL}`;
 }
 
 export function resetGateForTests(): void {
