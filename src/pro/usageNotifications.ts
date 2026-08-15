@@ -88,7 +88,11 @@ export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string)
         // this threshold this month — "at most once" wins over "guaranteed delivery".
         state.lastThreshold = threshold;
         write(state);
-        await pushLogBox(msg, "warning", false, "logbox", "ExecBro", device);
+        // expanded=true (not level="error"): pushLogBox's own doc notes a "warning" push at
+        // expanded=false is stored but never visually shown unless LogBox is already open —
+        // this notification exists to be seen, so we force the full-screen view open instead
+        // of reaching for level="error", which would look like the app itself broke.
+        await pushLogBox(msg, "warning", true, "logbox", "ExecBro", device);
     } catch {
         /* best-effort — never throw into the caller */
     }
