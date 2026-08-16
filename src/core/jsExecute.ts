@@ -996,6 +996,34 @@ async function executeInAppInner(
  * expression is not a transport drop), so timeoutMs hits never trigger
  * reconnect.
  */
+/** Long enough for React to land a commit, short enough that a genuinely
+ *  unmounted app still gets its "no roots" answer inside the caller's budget. */
+const NO_FIBER_ROOTS_RETRY_MS = 300;
+
+/**
+ * True when an injected walker's payload is the "no fiber roots" error.
+ *
+ * Matches only our own `{ error: "No fiber roots found…" }` shape — as an object
+ * or as the JSON string CDP sometimes hands back. Deliberately not a substring
+ * search over arbitrary results: a user `execute_in_app` expression returning
+ * prose that mentions fiber roots must not be silently re-evaluated, since
+ * re-evaluating runs its side effects twice.
+ */
+export function fiberRootsMissing(value: unknown): boolean {
+    if (value && typeof value === "object") {
+        const e = (value as { error?: unknown }).error;
+        return typeof e === "string" && e.startsWith("No fiber roots found");
+    }
+    if (typeof value === "string" && value.includes("No fiber roots found")) {
+        try {
+            return fiberRootsMissing(JSON.parse(value));
+        } catch {
+            return false;
+        }
+    }
+    return false;
+}
+
 export async function executeInApp(
     expression: string,
     awaitPromise: boolean = true,
@@ -1015,7 +1043,22 @@ export async function executeInApp(
         return { ...r, _meta: { ...(r._meta ?? {}), timeoutClampedFrom: clampedFrom } };
     };
 
-    const first = await executeInAppInner(expression, awaitPromise, effectiveOptions, device);
+    let first = await executeInAppInner(expression, awaitPromise, effectiveOptions, device);
+
+    // A fiber walk evaluated between a navigation/reload and React's next commit
+    // finds no roots and says so. Every walker (inspect_component, find_components,
+    // get_screen_state, tap's resolver, …) then reports the app as unmounted —
+    // while the next call a second later walks the same tree fine. That
+    // contradiction was the single most-reported confusion in the July session
+    // logs, and it is a timing miss, not a real absence, so absorb it here rather
+    // than in each of the eight walkers. Bounded to one extra attempt: if the tree
+    // is genuinely not mounted, the second answer is the same and the caller still
+    // gets the honest error.
+    if (first.success && fiberRootsMissing(first.result)) {
+        await delay(NO_FIBER_ROOTS_RETRY_MS);
+        const second = await executeInAppInner(expression, awaitPromise, effectiveOptions, device);
+        if (second.success && !fiberRootsMissing(second.result)) first = second;
+    }
 
     if (first.success) {
         hasEverConnected = true;

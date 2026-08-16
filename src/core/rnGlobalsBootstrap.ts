@@ -1,4 +1,5 @@
 import { executeInApp } from "./jsExecute.js";
+import { buildRecorderInstallExpression } from "./fastRefreshRecorder.js";
 import { bootstrappedApps, connectedApps } from "./state.js";
 
 /**
@@ -84,9 +85,25 @@ export function buildRnGlobalsBootstrapExpression(): string {
 }
 
 /**
+ * Everything that has to be installed once per app session, as a single
+ * expression. Both halves are IIFEs, so an array literal evaluates them in one
+ * round trip instead of two.
+ */
+export function buildSessionBootstrapExpression(): string {
+    return `[${buildRnGlobalsBootstrapExpression()}, ${buildRecorderInstallExpression()}]`;
+}
+
+/**
  * Run the bootstrap once per app session. Failures are swallowed (the marker
  * on globalThis is enough for list_debug_globals). Uses skipBootstrap: true
  * on the inner executeInApp call to prevent infinite recursion.
+ *
+ * The Fast Refresh recorder rides along in the same round trip. It used to
+ * install lazily on the first get_refresh_status call, which meant that call
+ * could only ever answer `updateCount: 0 · recorder just installed` — it
+ * started recording after the refresh the caller was asking about. Installing
+ * it here moves the start line to the session's first JS evaluation, so by the
+ * time anyone asks, the recorder has been watching the whole time.
  */
 export async function ensureRnGlobalsBootstrap(device?: string): Promise<void> {
     let key: string;
@@ -107,7 +124,7 @@ export async function ensureRnGlobalsBootstrap(device?: string): Promise<void> {
         // best-effort no-op (the try/catch leaves __rn__ null), so a tight cap
         // is safe.
         await executeInApp(
-            buildRnGlobalsBootstrapExpression(),
+            buildSessionBootstrapExpression(),
             false,
             { maxRetries: 0, autoReconnect: false, skipBootstrap: true, timeoutMs: 1500 },
             device

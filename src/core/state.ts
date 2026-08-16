@@ -24,6 +24,17 @@ export function bumpEpoch(deviceName: string): number {
     // one place every restart path funnels through — keeps us from offering a
     // `collect` id that is guaranteed to come back "__missing__".
     clearHandlesForDevice(deviceName);
+    // The same runtime wipe takes globalThis.__rn__ and the Fast Refresh
+    // recorder with it, so the "already bootstrapped" markers now describe a
+    // context that no longer exists. Without this, a reload permanently
+    // un-installs both for the rest of the server's life — and reload is
+    // exactly when get_refresh_status is asked whether an edit landed.
+    //
+    // Cleared wholesale rather than per device: the marker set is keyed by
+    // device name in some paths and by appKey ("<port>-<id>") in others, so
+    // there is no reliable key to delete. Re-bootstrapping an unaffected
+    // device costs one evaluation.
+    bootstrappedApps.clear();
     return next;
 }
 

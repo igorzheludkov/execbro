@@ -1,4 +1,4 @@
-import { getEpoch, bumpEpoch, resetEpochs } from "../../core/state.js";
+import { getEpoch, bumpEpoch, resetEpochs, bootstrappedApps } from "../../core/state.js";
 import { logBufferSize, networkBufferSize } from "../../core/bufferConfig.js";
 
 describe("sessionEpoch", () => {
@@ -44,5 +44,15 @@ describe("bufferConfig", () => {
         expect(logBufferSize()).toBe(2000);
         process.env.EXECBRO_LOG_BUFFER_SIZE = "0";
         expect(logBufferSize()).toBe(2000);
+    });
+});
+
+describe("bumpEpoch invalidates the session bootstrap", () => {
+    it("clears the bootstrapped markers so a reloaded runtime is re-bootstrapped", () => {
+        // A reload wipes __rn__ and the Fast Refresh recorder in-app; the markers
+        // must not outlive them or neither is ever reinstalled.
+        bootstrappedApps.add("8081-abc");
+        bumpEpoch("some-device");
+        expect(bootstrappedApps.size).toBe(0);
     });
 });
