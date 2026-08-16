@@ -35,7 +35,9 @@ describe("session verdict freeze", () => {
         const r = isToolBlocked("tap");
         expect(r.blocked).toBe(true);
         expect(r.message).toMatch(/limit reached|monthly limit/i);
-        expect(r.message).toMatch(/upgrade/);
+        // The copy no longer says "upgrade"; what must survive is the paid-plan
+        // route the user is pointed at.
+        expect(r.message).toMatch(/execbro\.com\/pricing/);
     });
 
     it("exempt tools never blocked even over cap", () => {
