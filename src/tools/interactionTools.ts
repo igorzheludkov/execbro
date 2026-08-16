@@ -14,6 +14,8 @@ import {
     IOS_BUTTON_TYPES,
     getDevicePixelRatio,
     connectedApps,
+    getActiveOrBootedSimulatorUdid,
+    getDefaultAndroidDevice,
 } from "../core/index.js";
 import {
     tap,
@@ -34,7 +36,7 @@ import {
     verifyAndCapture,
     burstCaptureAndVerify,
 } from "../pro/verifyAction.js";
-import { clearFocusedInput, dismissKeyboard, inputTextWithReplace } from "../core/focusedInputTools.js";
+import { clearFocusedInput, dismissKeyboard } from "../core/focusedInputTools.js";
 import { enterText, textEntryAxes, type TextEntryResult } from "../core/textEntry.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
@@ -881,61 +883,6 @@ export function registerInteractionTools(server: McpServer): void {
         }
     );
 
-    // Tool: Android input text
-    registerToolWithTelemetry(
-        server,
-        "android_input_text",
-        {
-            description:
-                "Type text on an Android device/emulator." +
-                platformFallbackBanner("`input_text` — it targets, focuses, writes and verifies in one call") +
-                " The text will be input at the current focus point (tap an input field first)." +
-                "\nPURPOSE: Send keystrokes to whichever input currently has focus on Android — the tool does NOT focus a field itself." +
-                "\nWHEN TO USE: Only after an input is already focused, or when `tap(text=...)` on the input didn't take focus for some reason." +
-                "\nPREREQUISITE: A TextInput must already have focus. Tap the field first (e.g. tap({ testID: 'search' })) — `android_input_text` does NOT focus a field itself; replace:true also requires React focus." +
-                "\nREPLACE MODE: pass replace:true to clear the focused field first (via React onChangeText so controlled state stays consistent), then type the new value. Use for pre-filled fields where appending would corrupt the value.",
-            inputSchema: {
-                text: z.string().describe("Text to type"),
-                replace: z
-                    .boolean()
-                    .optional()
-                    .describe(
-                        "If true, clear the focused TextInput via React onChangeText before typing. Use to set a pre-filled field to an exact value without concatenation. Requires Bridgeless/Fabric."
-                    ),
-                device: z
-                    .string()
-                    .optional()
-                    .describe(
-                        "Optional RN device name (substring match) — needed by replace:true when multiple RN apps are connected, to disambiguate which device's focused input to clear. Single-device sessions can omit."
-                    ),
-                deviceId: z
-                    .string()
-                    .optional()
-                    .describe(ANDROID_ARG_DESC)
-            }
-        },
-        async ({ text, replace, device, deviceId }) => {
-            const r = await resolveAndroidDeviceId(deviceId);
-            if (!r.ok) return r.response;
-            const result = await inputTextWithReplace(
-                text,
-                replace === true,
-                (t) => androidInputText(t, r.serial),
-                () => clearFocusedInput(device)
-            );
-    
-            return {
-                content: [
-                    {
-                        type: "text",
-                        text: result.success ? result.result! : `Error: ${result.error}`
-                    }
-                ],
-                isError: !result.success
-            };
-        }
-    );
-    
     // Tool: Android key event
     registerToolWithTelemetry(
         server,
@@ -1061,81 +1008,23 @@ export function registerInteractionTools(server: McpServer): void {
         }
     );
     
-    // Tool: iOS input text
-    registerToolWithTelemetry(
-        server,
-        "ios_input_text",
-        {
-            description:
-                "Type text on an iOS simulator." +
-                platformFallbackBanner("`input_text` — it targets, focuses, writes and verifies in one call") +
-                " Types into whichever field has focus (tap an input first). Mirrors `android_input_text` so agents need not branch on the iOS driver shell-out." +
-                "\nPURPOSE: Send keystrokes to the focused field via the active UI driver (AXe — preferred — or IDB)." +
-                "\nWHEN TO USE: Only once an input is focused, or when `tap(testID=...)` didn't take focus. Prefer the testID-first flow — faster, and survives UI repositioning." +
-                "\nREPLACE MODE: replace:true clears the focused field first (via React onChangeText, so controlled state stays consistent), then types. Use for pre-filled fields where appending would corrupt the value." +
-                "\nVERIFICATION: the field is read back after typing and the result describes what LANDED, never what was requested. Formatting the field applies itself (autoCapitalize, trimming) still verifies; a genuine mismatch is an error carrying sent vs landed, and an unreadable field reports NOT verified rather than success." +
-                "\nLIMITATIONS: keystrokes go out as US-keyboard HID scancodes, but the SIMULATOR's active layout decides what arrives — under a Cyrillic/Hebrew/CJK layout even pure ASCII is rewritten. Non-ASCII cannot be sent at all. The read-back catches both; `input_text` avoids them by writing through React.",
-            inputSchema: {
-                text: z.string().describe("Text to type into the currently focused field."),
-                replace: z
-                    .boolean()
-                    .optional()
-                    .describe(
-                        "If true, clear the focused TextInput via React onChangeText before typing. Use to set a pre-filled field to an exact value without concatenation. Requires Bridgeless/Fabric."
-                    ),
-                device: z
-                    .string()
-                    .optional()
-                    .describe(
-                        "Optional RN device name (substring match) — needed by replace:true when multiple RN apps are connected, to disambiguate which device's focused input to clear. Single-device sessions can omit."
-                    ),
-                udid: z.string().optional().describe(IOS_ARG_DESC)
-            }
-        },
-        async ({ text, replace, device, udid }) => {
-            const r = await resolveIosUdid(udid);
-            if (!r.ok) return r.response;
-
-            // Typing is delivery; the read-back is the result. Echoing the
-            // requested string as a confirmation is what let a layout-mangled
-            // write pass for a clean one (issue #14).
-            const result = await typeAndVerify(
-                text,
-                { replace: replace === true },
-                {
-                    readFields: () => readNativeFields("ios", r.udid),
-                    type: async (t: string) => {
-                        const typed = await iosInputText(t, r.udid);
-                        return { success: typed.success, error: typed.error };
-                    },
-                    clear: () => clearFocusedInput(device),
-                    nonLatinKeyboards: () => nonLatinKeyboardsFor(r.udid)
-                }
-            );
-
-            return {
-                content: [{ type: "text", text: result.success ? result.message : `Error: ${result.message}` }],
-                isError: !result.success
-            };
-        }
-    );
-
     // Tool: cross-platform text entry
     registerToolWithTelemetry(
         server,
         "input_text",
         {
             description:
-                "Write text into a React Native TextInput and verify it landed." +
+                "Write text into a React Native TextInput, or the OS's currently focused field, and verify it landed." +
                 primaryInteractionBanner() +
-                "\nPURPOSE: Set a field's text and confirm, by reading the value back, that the field holds exactly what you sent." +
-                "\nWHEN TO USE: Any text entry in a React Native app. Pass testID (or component/textMatch) and this tool focuses the field itself — no separate tap needed." +
-                "\nWORKFLOW: get_screen_state to see the fields -> input_text({ testID, text }) -> read `verified`.\n" +
-                "VERIFICATION: the write is read back and compared EXACTLY. A mismatch retries once, then fails with `sent` vs `landed`. A success means the field really holds your string.\n" +
-                "AMBIGUITY: if the target matches several inputs the tool refuses and returns a numbered candidate list (label, placeholder, value, testID) — pick one with `index` rather than guessing. Forms routinely share a placeholder across every field.\n" +
-                "KEYBOARD: after the text is in, the software keyboard is raised on a best-effort basis so keyboard-up layout can be inspected. Failure there is reported, never fatal.\n" +
-                "LIMITATIONS: fields with no onChangeText (uncontrolled, or non-RN) fall back to the platform driver, which is US-keyboard only — non-ASCII fails there and the result may be verified:false.\n" +
+                "\nPURPOSE: Set a field's text and confirm, by reading the value back, that it holds exactly what you sent." +
+                "\nWHEN TO USE: Any text entry in a React Native app. Pass testID (or component/textMatch) and this focuses the field itself — no separate tap needed." +
+                "\nWORKFLOW: get_screen_state -> input_text({ testID, text }) -> read `verified`.\n" +
+                "VERIFICATION: the write is read back and compared EXACTLY. A mismatch retries once, then fails with `sent` vs `landed`.\n" +
+                "AMBIGUITY: several matching inputs -> the tool refuses and returns a numbered candidate list; pick one with `index`.\n" +
+                "NATIVE SCREENS: with no React fiber tree at all (system dialog, native onboarding, non-RN app) this falls back automatically to typing into whatever the OS reports as focused — tap it first. native:true forces that path, and ignores testID/component/textMatch: it cannot target, only type into what already has focus." +
+                "\nLIMITATIONS: fields with no onChangeText fall back to the platform driver, which is US-keyboard only — non-ASCII fails there. The native path shares that limit.\n" +
                 "GOOD: input_text({ testID: \"new-topic-title\", text: \"Q3 budget\", replace: true })\n" +
+                "GOOD: input_text({ text: \"1234\", native: true }) — a system PIN prompt, no RN screen behind it.\n" +
                 "BAD: input_text({ text: \"...\" }) with nothing focused — pass a target instead.\n",
             inputSchema: {
                 text: z.string().describe("The text to write into the field."),
@@ -1162,10 +1051,16 @@ export function registerInteractionTools(server: McpServer): void {
                 device: z
                     .string()
                     .optional()
-                    .describe("RN device name (substring match). Omit when one app is connected; see get_apps.")
+                    .describe("RN device name (substring match). Omit when one app is connected; see get_apps."),
+                native: z
+                    .boolean()
+                    .optional()
+                    .describe(
+                        "Skip React targeting and type directly into whichever field the OS reports as focused, via the platform accessibility tree. For system dialogs and non-RN screens. Ignores testID/component/textMatch/index. Auto-applied when no fiber tree is reachable at all, even without this flag."
+                    )
             }
         },
-        async ({ text, testID, component, textMatch, index, replace, device }) => {
+        async ({ text, testID, component, textMatch, index, replace, device, native }) => {
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
                 return {
@@ -1175,6 +1070,15 @@ export function registerInteractionTools(server: McpServer): void {
             }
 
             const { platform, iosUdid, androidSerial } = resolved.target;
+            const hasRnTarget = testID !== undefined || component !== undefined || textMatch !== undefined;
+
+            if (native === true) {
+                const r = await nativeTextEntry(text, replace === true, platform, iosUdid, androidSerial, device);
+                return {
+                    content: [{ type: "text", text: r.success ? r.message : `Error: ${r.message}` }],
+                    isError: !r.success
+                };
+            }
 
             const result = await enterText(
                 { text, testID, component, textMatch, index, replace, device },
@@ -1188,6 +1092,26 @@ export function registerInteractionTools(server: McpServer): void {
                 }
             );
 
+            // Auto-fallback: no RN instrumentation reachable at all (a system
+            // dialog, a non-RN screen, the JS bridge never mounted) — not a
+            // targeting miss, so falling back cannot type into the wrong field.
+            // Only untargeted calls qualify: a caller who named a testID meant
+            // to target a specific field, and native mode cannot honour that —
+            // it types into whatever already has focus, no targeting at all.
+            if (!result.success && !hasRnTarget &&
+                (result.error === "no devtools hook" || result.error === "no fiber roots")) {
+                const r = await nativeTextEntry(text, replace === true, platform, iosUdid, androidSerial, device);
+                return {
+                    content: [{
+                        type: "text",
+                        text: r.success
+                            ? `${r.message}\n  (no React Native screen found — fell back to native typing)`
+                            : `Error: ${r.message}`
+                    }],
+                    isError: !r.success
+                };
+            }
+
             return await decorateTextEntryTelemetry(
                 formatTextEntryResponse(result),
                 result,
@@ -1195,6 +1119,46 @@ export function registerInteractionTools(server: McpServer): void {
                 platform,
                 platform === "ios" ? iosUdid : androidSerial
             );
+        }
+    );
+}
+
+/**
+ * Type into whatever the OS reports as focused, with no RN targeting —
+ * the engine that used to be `ios_input_text`/`android_input_text`, now the
+ * fallback path `input_text` reaches for when there is no fiber tree to
+ * target (native:true), or none was found at all (auto-fallback).
+ *
+ * iOS needs its UDID resolved up front: readNativeFields has no "use the
+ * booted simulator" fallback the way iosInputText does internally, so an
+ * omitted UDID silently disabled verification until both were forced to
+ * agree here. Android's adb calls default to the sole attached device
+ * without help, so no equivalent resolve is needed there.
+ */
+async function nativeTextEntry(
+    text: string,
+    replace: boolean,
+    platform: "ios" | "android",
+    iosUdid: string | undefined,
+    androidSerial: string | undefined,
+    device: string | undefined
+): Promise<{ success: boolean; message: string }> {
+    const resolvedUdid =
+        platform === "ios" ? (iosUdid ?? (await getActiveOrBootedSimulatorUdid()) ?? undefined) : undefined;
+    const resolvedSerial = platform === "android" ? (androidSerial ?? (await getDefaultAndroidDevice()) ?? undefined) : undefined;
+
+    return typeAndVerify(
+        text,
+        { replace },
+        {
+            readFields: () => readNativeFields(platform, platform === "ios" ? resolvedUdid : resolvedSerial),
+            type: async (t: string) => {
+                const typed =
+                    platform === "ios" ? await iosInputText(t, resolvedUdid) : await androidInputText(t, resolvedSerial);
+                return { success: typed.success, error: typed.error };
+            },
+            clear: () => clearFocusedInput(device),
+            nonLatinKeyboards: () => (platform === "ios" ? nonLatinKeyboardsFor(resolvedUdid) : Promise.resolve([]))
         }
     );
 }

@@ -1,9 +1,8 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 62,
+    "count": 60,
     "tools": [
         "activate_license",
-        "android_input_text",
         "android_key_event",
         "android_launch_app",
         "android_list_packages",
@@ -40,7 +39,6 @@
         "inspect_global",
         "ios_boot_simulator",
         "ios_button",
-        "ios_input_text",
         "ios_launch_app",
         "ios_open_url",
         "ios_screenshot",
@@ -68,12 +66,6 @@
     "params": {
         "activate_license": [
             "token"
-        ],
-        "android_input_text": [
-            "device",
-            "deviceId",
-            "replace",
-            "text"
         ],
         "android_key_event": [
             "deviceId",
@@ -243,6 +235,7 @@
             "component",
             "device",
             "index",
+            "native",
             "replace",
             "testID",
             "text",
@@ -280,12 +273,6 @@
         "ios_button": [
             "button",
             "duration",
-            "udid"
-        ],
-        "ios_input_text": [
-            "device",
-            "replace",
-            "text",
             "udid"
         ],
         "ios_launch_app": [

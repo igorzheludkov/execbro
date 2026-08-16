@@ -145,9 +145,9 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 
 **Type text** — `mcp__execbro__input_text`, cross-platform:
 - Give it a `testID` and it focuses the field itself, types, then reads the value back and compares it, so a silent miss is reported rather than assumed
-- `replace:true` clears a pre-filled field first (Bridgeless/Fabric). The typing tools APPEND by default, which is the usual cause of `https://demo.example.comhttps://app.example.com`
+- `replace:true` clears a pre-filled field first (Bridgeless/Fabric). It APPENDs by default, which is the usual cause of `https://demo.example.comhttps://app.example.com`
 - `mcp__execbro__dismiss_keyboard` blurs the focused input when the keyboard covers what you need next
-- `ios_input_text` / `android_input_text` are the per-platform fallbacks; both take `replace`
+- `native:true` skips React targeting and types into whatever the OS reports as focused — system dialogs, non-RN screens; tap the field first. Ignores `testID`/`component`/`textMatch`. Auto-applied when no fiber tree is reachable at all, even without the flag
 
 **Hardware buttons:**
 - iOS: `mcp__execbro__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)

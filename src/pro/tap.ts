@@ -649,7 +649,7 @@ export function formatTapSuccess(data: {
         return /textfield|textinput|edittext|searchfield/i.test(name);
     })();
     const note = verification && !verification.skipped && verification.meaningful === false && isTextInputComponent
-        ? "TextInput focused but no visual change detected. If the simulator has a hardware keyboard connected (Cmd+K), the software keyboard is suppressed even though the input is focused — proceed with text entry via ios_input_text / android_input_text."
+        ? "TextInput focused but no visual change detected. If the simulator has a hardware keyboard connected (Cmd+K), the software keyboard is suppressed even though the input is focused — proceed with text entry via input_text."
         : undefined;
     return {
         success: true,
@@ -1472,6 +1472,33 @@ async function tryCoordinateStrategy(
 
 const TAP_TIMEOUT_MS = 25000;
 const MIN_STRATEGY_BUDGET_MS = 500;
+
+/** One React commit plus layout. Long enough for a just-navigated screen to paint. */
+const EMPTY_SCREEN_SETTLE_MS = 400;
+
+/**
+ * True when both element strategies ran cleanly and between them saw *nothing* —
+ * zero pressables and zero accessibility elements.
+ *
+ * That is not "the element isn't here", it is "the screen isn't here". A mounted
+ * RN screen always has something in at least one of the two trees, so this
+ * signature means the read landed in the gap right after a navigation or reload,
+ * before the new screen committed. It matters because OCR runs next and OCR does
+ * not fail quietly: it returns a confident closest-match for whatever text is
+ * painted, which is how `tap({text})` right after a reload taps the wrong thing
+ * and then succeeds unchanged on a manual retry.
+ *
+ * Both must have *run* — a strategy that timed out or was skipped proves nothing.
+ */
+export function screenLooksUnmounted(evidence: EvidenceSink | undefined): boolean {
+    if (!evidence) return false;
+    return (
+        evidence.fiber.ran &&
+        evidence.fiber.pressables.length === 0 &&
+        evidence.accessibility.ran &&
+        evidence.accessibility.elements.length === 0
+    );
+}
 /**
  * Ceiling for the pre-dispatch overlay check. It shares the tap's deadline with the
  * strategies that follow, so it must not be able to spend the whole budget on a fiber
@@ -2266,7 +2293,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // tiny minority. Removed 2026-06-02; the timeout-recovery path below still
     // salvages the perfect-match-past-cap case.
     // Execute strategies in order with per-strategy caps and overall budget
-    for (const strat of filteredStrategies) {
+    // `strat` is reassigned when the empty-screen replay below resolves the tap
+    // through a different strategy — every downstream use (marker geometry,
+    // reported method) must name the strategy that actually pressed.
+    let emptyScreenReplayed = false;
+    for (let strat of filteredStrategies) {
         const remaining = remainingMs();
         if (remaining < MIN_STRATEGY_BUDGET_MS) {
             attempted.push({
@@ -2296,13 +2327,57 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         `accessibility`
                     );
                     break;
-                case "ocr":
+                case "ocr": {
+                    // Before letting OCR answer for a screen that had no elements at
+                    // all, give the tree one settle and ask again. OCR cannot tell a
+                    // half-painted screen from a settled one, so without this the
+                    // caller gets a confident match against whatever was mid-paint.
+                    if (!emptyScreenReplayed && screenLooksUnmounted(evidence)) {
+                        emptyScreenReplayed = true;
+                        attempted.push({
+                            strategy: "settle",
+                            reason: `Screen had zero pressables and zero accessibility elements — not settled yet. Waited ${EMPTY_SCREEN_SETTLE_MS}ms and re-read before falling back to OCR.`,
+                            outcome: "not-found"
+                        });
+                        await new Promise((r) => setTimeout(r, EMPTY_SCREEN_SETTLE_MS));
+
+                        let replayed: StrategyResult | null = null;
+                        for (const replayStrat of ["fiber", "accessibility"] as const) {
+                            if (!filteredStrategies.includes(replayStrat)) continue;
+                            const replayBudget = Math.min(maxStrategyMs(replayStrat, platform), remainingMs());
+                            if (replayBudget < MIN_STRATEGY_BUDGET_MS) continue;
+                            let replayResult: StrategyResult;
+                            try {
+                                replayResult = replayStrat === "fiber"
+                                    ? await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence, deviceName, options.duration !== undefined), replayBudget, `fiber`)
+                                    : await withCancelableTimeout(
+                                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal, targetSerial, options.duration),
+                                        replayBudget,
+                                        `accessibility`
+                                    );
+                            } catch {
+                                // A replay that times out or throws is no worse than not
+                                // having replayed — fall through to OCR as before.
+                                continue;
+                            }
+                            if (replayResult.success) {
+                                strat = replayStrat;
+                                replayed = replayResult;
+                                break;
+                            }
+                        }
+                        if (replayed) {
+                            result = replayed;
+                            break;
+                        }
+                    }
                     result = await withCancelableTimeout(
                         (signal) => tryOcrStrategy(query, platform, targetUdid, evidence, signal, targetSerial, options.duration),
                         budget,
                         `ocr`
                     );
                     break;
+                }
                 case "coordinate":
                     // Prefer `beforeScaleFactor` (captured against `targetUdid` this turn)
                     // over `app.lastScreenshot.scaleFactor` (stale and may belong to a

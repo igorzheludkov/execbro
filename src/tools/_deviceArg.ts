@@ -15,8 +15,8 @@ function errResponse(text: string): ToolErrorResponse {
  * `adb -s <serial>` accepts.
  *
  * Mirrors the resolution behaviour of `tap`, `dismiss_keyboard`,
- * `inspect_at_point`, etc. so platform-specific tools (`android_input_text`,
- * `android_launch_app`, `android_screenshot`, …) accept the same hints
+ * `inspect_at_point`, etc. so platform-specific tools (`android_launch_app`,
+ * `android_screenshot`, …) accept the same hints
  * cross-platform tools do. Without this layer, agents who pass `"sdk_gphone"`
  * (which works for `tap`) get a cryptic `adb: device 'sdk_gphone' not found`
  * from a sibling Android tool.

@@ -102,6 +102,9 @@ looks wrong and isn't on the node itself, walk the ancestors it returns.
   - pressablesOnly=true for just the tappable list.
   - Elements under an open overlay or a raised keyboard are grouped separately — taps will
     not reach them until it closes.
+  - A LogBox banner is excluded from the listing (it mounts above the app and its own buttons
+    would otherwise be the only pressables returned). A note says so when one is up — the
+    banner still covers screen, so use logbox({action:"dismiss"}) before trusting edge taps.
 
 ## Coordinates
 All layout tools, tap() and the screenshots share ONE screen-space coordinate system. A frame
@@ -196,10 +199,10 @@ tap detects TextInput elements (onChangeText/onFocus) in the fiber tree and fall
 ### Replacing pre-filled values (Bridgeless/Fabric only)
 Inputs that already contain text are the most common verification-blocker. The typing tools APPEND by default — typing "https://app.example.com" into a field that already holds "https://demo.example.com" produces "https://demo.example.comhttps://app.example.com", not the intended replacement. Two tools handle this on Bridgeless/Fabric apps:
 
-- **ios_input_text / android_input_text with replace:true** — clear the focused field, then type, in a single call. This is the way to set a pre-filled field to an exact value.
+- **input_text with replace:true** — clear the focused field, then type, in a single call. This is the way to set a pre-filled field to an exact value. Works both by target (testID/component/textMatch) and, with native:true, on whatever already has focus.
 - **dismiss_keyboard** — blur the currently focused TextInput, closing the on-screen keyboard. Useful before tapping buttons hidden behind the keyboard, or to verify "tap outside dismisses" behavior.
 
-Both target whatever has focus (no testID needed). replace:true updates React state via onChangeText("") — controlled components (Formik, react-hook-form, useState) stay consistent. Calling publicInstance.clear() directly does NOT do this; it only updates the native side and leaves form state stale.
+dismiss_keyboard acts on whatever has focus; input_text focuses its own target unless native:true is passed. replace:true updates React state via onChangeText("") — controlled components (Formik, react-hook-form, useState) stay consistent. Calling publicInstance.clear() directly does NOT do this; it only updates the native side and leaves form state stale.
 
 Multi-device sessions: pass device="<rn-device-name>" (substring match) to disambiguate when replace:true is used. Single-device sessions can omit.
 
@@ -213,7 +216,7 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 
 ## Other Interactions
 - swipe: cross-platform swipe/scroll. Easiest form: swipe({ direction: "up" }) scrolls to reveal more content (content-scroll semantics; "down"/"left"/"right" supported, bare swipe() defaults to "up"). Optional distance is in screenshot pixels (default 33% of the axis). For pixel-precise gestures pass all four startX/startY/endX/endY coordinates — they take precedence over direction. Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false, warning names which no-op it was, by probing the scroll surface under the start point: already at top, already at end, content not scrollable, wrong axis, or no scroll view there at all. On a screen with no React Native connection it says it could not inspect the screen, rather than claiming the gesture missed — the gesture itself still went through, and swipe needs no RN connection to drive the device. Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path. Pass delta on iOS to control touch step size.
-- android_input_text / ios_input_text: type text (tap input field first to focus). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
+- input_text: type text — target with testID/component/textMatch (focuses itself), or pass native:true to type into whatever already has focus (system dialogs, non-RN screens). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
 - dismiss_keyboard: blur the focused input, closing the keyboard.
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)
 - ios_open_url: deep links and universal links
@@ -452,12 +455,12 @@ Suggested prompt the user can paste to trigger this:
  */
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_screen_state, get_screen_layout.",
-    "Platform-specific ios_* / android_* tools (ios_button, android_input_text, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible.",
+    "Platform-specific ios_* / android_* tools (ios_button, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible. input_text covers native-only text entry too, via native:true.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs        — console debugging (get_logs, search_logs)",
-    "  interact    — device interaction (tap, swipe, pinch, screenshots, android_input_text, dismiss_keyboard)",
+    "  interact    — device interaction (tap, swipe, pinch, screenshots, input_text, dismiss_keyboard)",
     "  layout      — on-screen layout check (get_screen_state, get_screen_layout)",
     "  inspect     — component inspection (find_components, inspect_component, inspect_at_point)",
     "  network     — network request inspection (get_network_requests, search_network)",

@@ -47,11 +47,12 @@ pinch with direction="in"                        # zoom out
 pinch with direction="out" x=250 y=650 scale=6   # zoom pivoting on a point
 pinch with direction="in" span=0.3               # even smaller footprint, if a gesture lands on surrounding UI
 
-# Text input on Android (tap input field first)
-tap with text="Email"
-android_input_text with text="hello@example.com"
+# Text input, either platform — targets and focuses the field itself, no tap needed
+input_text with testID="email" text="hello@example.com"
 
-# On iOS, tap a text field and use `tap(text=...)` — the fiber tree handles TextInput focus.
+# On a screen with no RN connection at all (system dialog, non-RN screen), type into
+# whatever the OS reports as focused — tap it first, then:
+input_text with text="hello@example.com" native=true
 
 # Key events
 android_key_event with key="BACK"
@@ -90,11 +91,10 @@ Swipe gesture:
 swipe with startX=540 startY=1500 endX=540 endY=500
 ```
 
-Type text (tap input field first):
+Type text:
 
 ```
-tap with x=540 y=400
-android_input_text with text="hello@example.com"
+input_text with testID="email" text="hello@example.com"
 ```
 
 Send key events:
