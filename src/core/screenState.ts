@@ -1209,7 +1209,38 @@ export async function getScreenState(
         return baseTestID || null;
     }
 
-    function isScreenHidden(name, props) {
+    // The single pruning choke point for all three collection walks
+    // (pressables, texts, images) — anything skipped here is skipped by all of
+    // them consistently.
+    //
+    // LogBox is pruned unconditionally, but only *counted* when its subtree
+    // actually holds a pressable. RN keeps LogBoxNotificationContainer mounted on
+    // every dev screen, and it still renders a wrapper when there are no entries,
+    // so neither "the fiber exists" nor "the fiber has a child" distinguishes a
+    // live banner from the permanent empty one — both were tried, both put the
+    // note on every screen read in dev, which is worse than the poisoning it was
+    // added to fix. What the note is actually about is LogBox contributing
+    // elements (the reported symptom was a screen answering with two LogBoxButtons
+    // and nothing else), and those buttons only exist while a banner is up. So ask
+    // that directly. Reading real LogBox state is the other option but costs a
+    // module-registry walk, which is far too much for a per-screen read.
+    var logBoxSkipped = 0;
+    function logBoxHasPressable(fiber, depth) {
+        if (!fiber || depth > 30) return false;
+        var p = fiber.memoizedProps;
+        if (p && (typeof p.onPress === 'function' || typeof p.onClick === 'function')) return true;
+        var c = fiber.child;
+        while (c) {
+            if (logBoxHasPressable(c, depth + 1)) return true;
+            c = c.sibling;
+        }
+        return false;
+    }
+    function isScreenHidden(name, props, fiber) {
+        if (isLogBoxSubtree(name)) {
+            if (fiber && logBoxHasPressable(fiber, 0)) logBoxSkipped++;
+            return true;
+        }
         return isHiddenNavigationScene(name, props);
     }
 
@@ -1223,14 +1254,14 @@ export async function getScreenState(
     // screen on any app with a drawer.
     function isHostHidden(hostFiber) {
         if (!hostFiber) return false;
-        return isScreenHidden(getComponentName(hostFiber), hostFiber.memoizedProps);
+        return isScreenHidden(getComponentName(hostFiber), hostFiber.memoizedProps, hostFiber);
     }
 
     function walkPressabilityDebugViews(fiber, depth, hidden, ovIdx) {
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
         var props = fiber.memoizedProps;
-        var nextHidden = hidden || isScreenHidden(name, props);
+        var nextHidden = hidden || isScreenHidden(name, props, fiber);
 
         // Track which overlay subtree we're inside — membership by ancestry, not
         // geometry. A bottom sheet's subtree includes a full-screen backdrop, so
@@ -1378,7 +1409,7 @@ export async function getScreenState(
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
         var props = fiber.memoizedProps;
-        var nextHidden = inHidden || isScreenHidden(name, props);
+        var nextHidden = inHidden || isScreenHidden(name, props, fiber);
 
         // Overlay membership by ancestry (same as the pressable walk) so a sheet's
         // text is grouped with the sheet, not flagged as blocked behind it.
@@ -1469,7 +1500,7 @@ export async function getScreenState(
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
         var props = fiber.memoizedProps;
-        var nextHidden = inHidden || isScreenHidden(name, props);
+        var nextHidden = inHidden || isScreenHidden(name, props, fiber);
         if (ovIdx == null) {
             for (var ofiI = 0; ofiI < overlayFiberMeta.length; ofiI++) {
                 if (overlayFiberMeta[ofiI].fiber === fiber) { ovIdx = ofiI; break; }
@@ -1512,6 +1543,9 @@ export async function getScreenState(
         while (c) { scanNative(c, depth + 1); c = c.sibling; }
     })(roots[0].current, 0);
     globalThis.__screenStateNativeMarkers = __nativeSheetMarkers;
+    // Handed to the collect expression, which runs in a separate evaluation and
+    // cannot see this scope — same channel the native markers use.
+    globalThis.__screenStateLogBoxSkipped = logBoxSkipped;
 
     // ------------------------------------------------------------------
     // 4. Store everything in globalThis for the resolve call
@@ -1638,7 +1672,9 @@ export async function getScreenState(
     var imageMeta = globalThis.__screenStateImageMeta || [];
     var imageMeasurements = globalThis.__screenStateImageMeasurements || [];
     var nativeMarkers = globalThis.__screenStateNativeMarkers || [];
+    var logBoxSkipped = globalThis.__screenStateLogBoxSkipped || 0;
     globalThis.__screenStateNativeMarkers = null;
+    globalThis.__screenStateLogBoxSkipped = null;
     globalThis.__screenStateTextContents = null;
     globalThis.__screenStateTextMeasurements = null;
     globalThis.__screenStateTextOverlayIdx = null;
@@ -2009,6 +2045,7 @@ export async function getScreenState(
     }
 
     return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages, nativeMarkers: nativeMarkers,
+        logBoxSkipped: logBoxSkipped,
         unmeasuredCount: unmeasuredCount, transformedCount: transformedCount,
         dispatchedCount: meta.length + textContents.length + imageMeta.length };
 })()
@@ -2019,7 +2056,12 @@ export async function getScreenState(
     if (!resolveResult.success) return resolveResult;
 
     let screenState: ScreenState | undefined;
-    let counts: { unmeasuredCount?: number; transformedCount?: number; dispatchedCount?: number } = {};
+    let counts: {
+        unmeasuredCount?: number;
+        transformedCount?: number;
+        dispatchedCount?: number;
+        logBoxSkipped?: number;
+    } = {};
     try {
         const parsed = JSON.parse(resolveResult.result || "{}");
         if (parsed.error) return { success: false, error: parsed.error };
@@ -2045,6 +2087,17 @@ export async function getScreenState(
             `${counts.transformedCount} element(s) are marked ⚠transformed. Their frames come from the layout tree, which does not include ` +
             `native-driven transforms (sticky headers, collapsing toolbars, animating sheets), so the coordinates may not be where the element ` +
             `is drawn. Confirm against a screenshot before tapping those.`
+        );
+    }
+    // LogBox's own controls used to be the only pressables a screen read returned
+    // whenever the banner was up, because it mounts above the app. Its subtree is
+    // pruned now — but a pruned list that does not say so reads as "the screen is
+    // empty", so name the banner and point at the tool that deals with it.
+    if ((counts.logBoxSkipped ?? 0) > 0) {
+        completenessNotes.push(
+            `A LogBox overlay (RN's red/yellow error banner) is mounted and was excluded from this snapshot — the elements below are the app's, not LogBox's. ` +
+            `The banner still covers part of the screen, so a bottom- or top-anchored element listed here may not be tappable where it says. ` +
+            `Use logbox({action:"detect"}) to read the error, or logbox({action:"dismiss"}) to read and clear it.`
         );
     }
     if (completenessNotes.length > 0) {

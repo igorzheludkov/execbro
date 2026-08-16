@@ -37,6 +37,25 @@ export function isHiddenNavigationScene(name: string | null, props: any): boolea
 }
 
 /**
+ * True for the root of a LogBox subtree — RN's own error/warning overlay.
+ *
+ * LogBox is visible, so this is deliberately NOT part of `isHiddenNavigationScene`:
+ * it is not hidden, it is *not the app*. A screen read that includes it answers
+ * "2 pressable elements: LogBoxButton, LogBoxButton" on a screen full of real
+ * buttons, because the banner is mounted above everything and its own controls are
+ * the only pressables the walk reaches before the app's. Callers that prune it must
+ * say they did — a silently shortened list is worse than a poisoned one.
+ *
+ * Matches every LogBox component RN ships (`LogBoxNotificationContainer`,
+ * `_LogBoxNotificationContainer`, `LogBoxInspectorContainer`, `LogBoxButton`, …) by
+ * prefix, since the set differs across RN versions.
+ */
+export function isLogBoxSubtree(name: string | null): boolean {
+    if (!name) return false;
+    return name.indexOf("LogBox") === 0 || name.indexOf("_LogBox") === 0;
+}
+
+/**
  * A single style object that makes its subtree invisible.
  *
  * `opacity: 0` matters because a closed react-navigation drawer leaves its scrim
@@ -58,7 +77,8 @@ export function isHiddenStyle(s: any): boolean {
  */
 export const VISIBILITY_HELPERS_JS = [
     `var isHiddenStyle = ${isHiddenStyle.toString()};`,
-    `var isHiddenNavigationScene = ${isHiddenNavigationScene.toString()};`
+    `var isHiddenNavigationScene = ${isHiddenNavigationScene.toString()};`,
+    `var isLogBoxSubtree = ${isLogBoxSubtree.toString()};`
 ].join("\n");
 
 /** Native-presented sheets whose measureInWindow geometry is untrustworthy. `openMarkers`

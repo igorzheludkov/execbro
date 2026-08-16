@@ -1,6 +1,7 @@
 import { describe, it, expect } from "@jest/globals";
 import {
     isHiddenNavigationScene,
+    isLogBoxSubtree,
     VISIBILITY_HELPERS_JS,
     detectNativeSheet,
     NATIVE_SHEET_MARKER_RE_SRC,
@@ -124,5 +125,29 @@ describe("NATIVE_SHEET_MARKER_RE_SRC", () => {
         expect(re.test("TrueSheetContainerView")).toBe(true);
         expect(re.test("TrueSheetContentView")).toBe(true);
         expect(re.test("TrueSheetView")).toBe(false);
+    });
+});
+
+describe("isLogBoxSubtree", () => {
+    it("matches every LogBox component RN ships", () => {
+        for (const n of [
+            "LogBoxNotificationContainer",
+            "_LogBoxNotificationContainer",
+            "LogBoxInspectorContainer",
+            "LogBoxButton",
+            "LogBoxLog",
+        ]) {
+            expect(isLogBoxSubtree(n)).toBe(true);
+        }
+    });
+
+    it("does not match app components that merely mention a log", () => {
+        for (const n of ["LoginScreen", "CatalogBoxItem", "Logo", null]) {
+            expect(isLogBoxSubtree(n)).toBe(false);
+        }
+    });
+
+    it("is emitted into the injected helpers", () => {
+        expect(VISIBILITY_HELPERS_JS).toContain("isLogBoxSubtree");
     });
 });
