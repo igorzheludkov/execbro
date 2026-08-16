@@ -327,7 +327,10 @@ export function registerLogTools(server: McpServer): void {
             // Return summary if requested
             if (summary) {
                 const buffer = resolveLogBuffer(device);
-                const summaryText = getLogSummary(buffer, { lastN: 5, maxMessageLength: 100 });
+                // `level` reaches the summary too. It used to be dropped here, so
+                // get_logs({summary:true, level:"error"}) sampled the same info
+                // spam as an unfiltered call and never showed the errors asked for.
+                const summaryText = getLogSummary(buffer, { lastN: 5, maxMessageLength: 100, level });
                 // Judge emptiness by the buffer this summary was actually built
                 // from, not the global count across every device.
                 const summaryEmpty = buffer.size === 0;

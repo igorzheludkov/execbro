@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { LogBuffer, mapConsoleType } from "../../core/logs.js";
+import { LogBuffer, getLogSummary, mapConsoleType } from "../../core/logs.js";
 import { LogEntry } from "../../core/types.js";
 
 function makeLog(message: string, level: LogEntry["level"] = "log"): Omit<LogEntry, "seq" | "epoch"> {
@@ -124,5 +124,36 @@ describe("LogBuffer seq assignment", () => {
         const buffer = new LogBuffer(10);
         buffer.add(makeLog("native crash", "fatal"));
         expect(buffer.getAll()[0].level).toBe("fatal");
+    });
+});
+
+describe("getLogSummary level filter", () => {
+    function busyBuffer(): LogBuffer {
+        const buffer = new LogBuffer(50);
+        buffer.add(makeLog("boom", "error"));
+        for (let i = 0; i < 10; i++) buffer.add(makeLog(`noise-${i}`, "log"));
+        return buffer;
+    }
+
+    it("samples only the requested level", () => {
+        const out = getLogSummary(busyBuffer(), { level: "error" });
+        expect(out).toContain("boom");
+        expect(out).not.toContain("noise-9");
+    });
+
+    it("still counts every level in the breakdown", () => {
+        const out = getLogSummary(busyBuffer(), { level: "error" });
+        expect(out).toContain("LOG: 10");
+        expect(out).toContain("ERROR: 1");
+    });
+
+    it("says so when the requested level is absent", () => {
+        const out = getLogSummary(busyBuffer(), { level: "fatal" });
+        expect(out).toContain("no fatal logs");
+    });
+
+    it("is unchanged without a level", () => {
+        const out = getLogSummary(busyBuffer());
+        expect(out).toContain("noise-9");
     });
 });

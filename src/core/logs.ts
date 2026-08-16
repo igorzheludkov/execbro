@@ -199,19 +199,30 @@ export function searchLogs(
 }
 
 // Get log summary (counts by level + last N messages)
+//
+// `level` narrows the sample messages only. The By-Level breakdown stays over
+// the whole buffer on purpose: it is the one number that tells the caller
+// whether the level they asked for is even present, and filtering it would
+// reduce it to a single self-evident row.
 export function getLogSummary(
     logBuffer: LogBuffer,
     options: {
         lastN?: number;
         maxMessageLength?: number;
+        level?: string;
     } = {}
 ): string {
-    const { lastN = 5, maxMessageLength = 100 } = options;
+    const { lastN = 5, maxMessageLength = 100, level: levelFilter } = options;
     const allLogs = logBuffer.getAll();
 
     if (allLogs.length === 0) {
         return "No logs captured yet.";
     }
+
+    // Same comparison LogBuffer.get uses, so summary and full reads agree on
+    // what "level" means.
+    const filtering = !!levelFilter && levelFilter !== "all";
+    const sampleSource = filtering ? allLogs.filter((log) => log.level === levelFilter) : allLogs;
 
     // Count by level
     const byLevel: Record<string, number> = {};
@@ -229,8 +240,12 @@ export function getLogSummary(
 
     // Last N messages
     lines.push("");
-    lines.push(`Last ${lastN} messages:`);
-    const recentLogs = allLogs.slice(-lastN);
+    const scope = filtering ? ` ${levelFilter!.toUpperCase()}` : "";
+    lines.push(`Last ${lastN}${scope} messages:`);
+    const recentLogs = sampleSource.slice(-lastN);
+    if (recentLogs.length === 0) {
+        lines.push(`  (none — no ${levelFilter} logs in the buffer)`);
+    }
     for (const log of recentLogs) {
         const time = log.timestamp.toLocaleTimeString();
         let message = log.message;

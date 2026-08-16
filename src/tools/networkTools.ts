@@ -251,18 +251,29 @@ export function registerNetworkTools(server: McpServer): void {
         async ({ urlPattern, maxResults, device }) => {
             await refreshMirror(device);
 
-            const matches = resolveNetworkBuffer(device).search(urlPattern, maxResults);
+            const networkBuffer = resolveNetworkBuffer(device);
+            const matches = networkBuffer.search(urlPattern, maxResults);
             const count = matches.length;
             const formatted = count === 0
                 ? "No network requests captured yet."
                 : withRestartDividers(matches, formatRequest);
 
-            // Check connection health
+            // Check connection health. Distinguish "buffer has data, urlPattern
+            // just didn't match" from "buffer is genuinely empty" — only the
+            // latter is a capture-reliability problem worth diagnosing/nudging
+            // the SDK for, same split get_network_requests already makes.
             let connectionWarning = "";
             if (count === 0) {
-                const status = await checkAndEnsureConnection(device);
-                connectionWarning = status.message ? `\n\n${status.message}` : "";
-                connectionWarning += await metroMissingHintIfAbsent("search_network");
+                if (networkBuffer.size > 0) {
+                    connectionWarning = await metroMissingHintIfAbsent("search_network");
+                } else {
+                    const diagnosis = await diagnoseEmptyResult(networkDiagnosisDeps(device));
+                    connectionWarning = diagnosis.warning;
+                    if (!(await isSDKInstalled(device))) {
+                        connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
+                    }
+                    connectionWarning += await metroMissingHintIfAbsent("search_network");
+                }
             } else {
                 const passive = getPassiveConnectionStatus();
                 connectionWarning = !passive.connected
