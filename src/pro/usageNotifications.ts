@@ -60,7 +60,16 @@ export function nextThreshold(usage: UsageInfo | null): 80 | 100 | null {
     return null;
 }
 
-// Fire the LogBox banner at most once per threshold per month.
+// The 100% (blocked) banner is otherwise invisible to the human once per-month
+// dedup has fired it once: every call after that just returns the block text in
+// the tool response, which goes to the agent, not necessarily surfaced to the
+// person watching the device. So on top of the monthly dedup, the cap banner
+// also fires once per process — i.e. once per new session — even in a month
+// where it already fired in an earlier session.
+let sessionCapNotified = false;
+
+// Fire the LogBox banner at most once per threshold per month — except the 100%
+// (blocked) banner, which additionally fires once per new session (see above).
 export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string): Promise<void> {
     try {
         const threshold = nextThreshold(usage);
@@ -70,7 +79,11 @@ export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string)
             state.monthKey = usage.monthKey;
             state.lastThreshold = undefined;
         }
-        if (state.lastThreshold === threshold || (state.lastThreshold === 100 && threshold === 80)) return;
+        const alreadyNotifiedThisMonth =
+            state.lastThreshold === threshold || (state.lastThreshold === 100 && threshold === 80);
+        const sessionNeedsCapBanner = threshold === 100 && !sessionCapNotified;
+        if (alreadyNotifiedThisMonth && !sessionNeedsCapBanner) return;
+        if (threshold === 100) sessionCapNotified = true;
 
         const askAgent = `Ask your AI assistant: "Check my ExecBro license status and help me link my account and upgrade to Pro."`;
         const msg =
@@ -85,9 +98,12 @@ export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string)
         // Persist the dedup state BEFORE awaiting the push so the check-and-set window is
         // synchronous. This closes a TOCTOU race where two concurrent tool calls both read
         // stale state and both fire. Trade-off: if pushLogBox later fails, we do not retry
-        // this threshold this month — "at most once" wins over "guaranteed delivery".
-        state.lastThreshold = threshold;
-        write(state);
+        // this threshold this month — "at most once" wins over "guaranteed delivery". Skipped
+        // when it's only the per-session cap refire, so the monthly record stays untouched.
+        if (!alreadyNotifiedThisMonth) {
+            state.lastThreshold = threshold;
+            write(state);
+        }
         // expanded=true (not level="error"): pushLogBox's own doc notes a "warning" push at
         // expanded=false is stored but never visually shown unless LogBox is already open —
         // this notification exists to be seen, so we force the full-screen view open instead
