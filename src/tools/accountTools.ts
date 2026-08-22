@@ -17,6 +17,41 @@ const API_TIMEOUT_MS = 10_000;
 const TELEMETRY_FILE = join(CONFIG_DIR, "telemetry.json");
 const LICENSE_FILE = join(CONFIG_DIR, "license.json");
 
+/**
+ * What the activation actually achieved, rather than just that the call succeeded.
+ *
+ * The endpoint returns 200 whenever the token is valid and the account gets linked, INCLUDING when that account carries no Pro subscription. The old text was `License activated. You're now on the ${tier} plan.` unconditionally, so linking a free account produced "License activated. You're now on the free plan." — which reads as a completed upgrade while nothing about the caller's entitlement changed. Someone already at the cap then keeps getting blocked with no idea why, having just been told activation worked. Observed on 2026-08-22 against a linked-but-free stage account.
+ *
+ * Pro keeps the plain confirmation. Anything else says what was linked, what it did NOT grant, and where the cap stands right now.
+ */
+export function describeActivation(tier: unknown): string {
+    if (tier === "pro") return "License activated. You're now on the Pro plan.";
+
+    const planName = typeof tier === "string" && tier.length > 0 ? tier : "free";
+    const usage = getUsageInfo();
+    const dashboardUrl = getDashboardUrl();
+
+    let text =
+        `Account linked to this installation, but it has no active Pro subscription — you are still on the ${planName} plan, ` +
+        `so the free monthly cap continues to apply.`;
+
+    if (usage) {
+        const resets = usage.resetsAt ? new Date(usage.resetsAt) : null;
+        const resetLabel =
+            resets && !Number.isNaN(resets.getTime())
+                ? resets.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+                : "next month";
+        text += ` Usage this month: ${usage.used}/${usage.limit}, resets ${resetLabel}.`;
+        if (!usage.canUse) {
+            text += " The cap is already reached, so tool calls stay blocked until then or until you upgrade.";
+        }
+    }
+
+    if (dashboardUrl) text += ` Unlock unlimited usage at ${dashboardUrl}/pricing.`;
+
+    return text;
+}
+
 export function getActivateLicenseConfig() {
     return {
         description:
@@ -83,7 +118,7 @@ export async function handleActivateLicense({ token }: { token: string }) {
             return {
                 content: [{
                     type: "text" as const,
-                    text: `License activated. You're now on the ${data.tier === "pro" ? "Pro" : data.tier} plan.`,
+                    text: describeActivation(data.tier),
                 }],
             };
         }
