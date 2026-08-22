@@ -393,4 +393,126 @@ describe("resolveDeviceTarget", () => {
             expect(r.target.androidSerial).toBe("emulator-5554");
         }
     });
+
+    // B1 (2026-08-22): ios_boot_simulator resolved its own UDID through the
+    // booted gate, so the tool that boots shut-down simulators was told to boot
+    // the simulator first — 10 of its 11 calls failed on that circular error.
+    // The pair below is the contract: the boot path opts out of the gate, every
+    // other tool keeps it.
+    describe("allowShutdown (ios_boot_simulator path)", () => {
+        const shutdownSim = {
+            ios: {
+                available: true,
+                simulators: [
+                    { name: "iPhone 17", udid: "ABCDEF12-3456-7890-ABCD-EF1234567890", state: "shutdown", runtime: "iOS 26.0" }
+                ]
+            },
+            android: { available: true, emulators: [], physical: [] },
+            summary: { booted: 0, total: 1 }
+        };
+
+        it("resolves a shut-down simulator UDID when allowShutdown is set", async () => {
+            listAllDevicesMock.mockResolvedValue(shutdownSim);
+
+            const r = await resolveDeviceTarget("ABCDEF12-3456-7890-ABCD-EF1234567890", { allowShutdown: true });
+            expect(r.ok).toBe(true);
+            if (r.ok) {
+                expect(r.target.platform).toBe("ios");
+                expect(r.target.iosUdid).toBe("ABCDEF12-3456-7890-ABCD-EF1234567890");
+                expect(r.target.deviceName).toBe("iPhone 17");
+                expect(r.target.source).toBe("udid");
+            }
+        });
+
+        it("still errors SIMULATOR_NOT_BOOTED for the same simulator without the flag", async () => {
+            listAllDevicesMock.mockResolvedValue(shutdownSim);
+
+            const r = await resolveDeviceTarget("ABCDEF12-3456-7890-ABCD-EF1234567890");
+            expect(r.ok).toBe(false);
+            if (!r.ok) expect(r.error.code).toBe("SIMULATOR_NOT_BOOTED");
+        });
+
+        it("still errors DEVICE_NOT_FOUND on a typo'd UDID even with allowShutdown", async () => {
+            listAllDevicesMock.mockResolvedValue(shutdownSim);
+
+            const r = await resolveDeviceTarget("11111111-2222-3333-4444-555555555555", { allowShutdown: true });
+            expect(r.ok).toBe(false);
+            if (!r.ok) expect(r.error.code).toBe("DEVICE_NOT_FOUND");
+        });
+    });
+
+    // B2 (2026-08-22): step 2 was gated on /^emulator-\d+$/, so a real serial
+    // skipped serial resolution entirely and died in name matching.
+    describe("physical Android serials", () => {
+        it("resolves an exact physical serial to an adb-serial target", async () => {
+            listAllDevicesMock.mockResolvedValue({
+                ...emptyDiscovery(),
+                android: {
+                    available: true,
+                    emulators: [],
+                    physical: [{ serial: "P2228K000422", model: "Pixel 8", state: "device" }]
+                }
+            });
+
+            const r = await resolveDeviceTarget("P2228K000422");
+            expect(r.ok).toBe(true);
+            if (r.ok) {
+                expect(r.target.platform).toBe("android");
+                expect(r.target.androidSerial).toBe("P2228K000422");
+                expect(r.target.deviceName).toBe("Pixel 8");
+                expect(r.target.source).toBe("adb-serial");
+            }
+        });
+
+        it("prefers the RN registry deviceName for a physical serial, as it already does for emulators", async () => {
+            listAllDevicesMock.mockResolvedValue({
+                ...emptyDiscovery(),
+                android: {
+                    available: true,
+                    emulators: [],
+                    physical: [{ serial: "29091FDH30061X", model: "Pixel 6a", state: "device" }]
+                }
+            });
+            getConnectedAppsMock.mockReturnValue([
+                {
+                    app: {
+                        platform: "android",
+                        adbSerial: "29091FDH30061X",
+                        deviceInfo: { deviceName: "Pixel 6a - 14 - API 34" }
+                    }
+                }
+            ]);
+
+            const r = await resolveDeviceTarget("29091FDH30061X");
+            expect(r.ok).toBe(true);
+            if (r.ok) {
+                expect(r.target.deviceName).toBe("Pixel 6a - 14 - API 34");
+                expect(r.target.source).toBe("adb-serial");
+            }
+        });
+
+        it("errors DEVICE_NOT_FOUND on an unknown physical serial", async () => {
+            listAllDevicesMock.mockResolvedValue({
+                ...emptyDiscovery(),
+                android: {
+                    available: true,
+                    emulators: [],
+                    physical: [{ serial: "P2228K000422", model: "Pixel 8", state: "device" }]
+                }
+            });
+
+            const r = await resolveDeviceTarget("P2228K000499");
+            expect(r.ok).toBe(false);
+            if (!r.ok) expect(r.error.code).toBe("DEVICE_NOT_FOUND");
+        });
+
+        it("keeps the precise serial error for an unknown emulator-NNNN argument", async () => {
+            const r = await resolveDeviceTarget("emulator-5559");
+            expect(r.ok).toBe(false);
+            if (!r.ok) {
+                expect(r.error.code).toBe("DEVICE_NOT_FOUND");
+                expect(r.error.message).toMatch(/No Android device with serial/);
+            }
+        });
+    });
 });

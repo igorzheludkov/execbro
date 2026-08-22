@@ -308,8 +308,13 @@ export function registerDeviceTools(server: McpServer): void {
             // simctl. Resolving it against the real device inventory matches the
             // rest of the surface and turns a typo into a useful error instead
             // of a raw simctl failure. The inventory includes shut-down
-            // simulators, which is exactly what this tool targets.
-            const r = await resolveIosUdid(udid);
+            // simulators, which is exactly what this tool targets — hence
+            // allowShutdown: without it the resolver answered a shut-down UDID
+            // with "not booted, boot it with ios_boot_simulator({...})", telling
+            // the boot tool to call itself. That circular error was 10 of this
+            // tool's 11 calls in the 7d telemetry (2026-08-22). Typos still
+            // error DEVICE_NOT_FOUND.
+            const r = await resolveIosUdid(udid, { allowShutdown: true });
             if (!r.ok) return r.response;
             const result = await iosBootSimulator(r.udid ?? udid);
     

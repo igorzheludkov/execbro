@@ -41,6 +41,19 @@ export type ResolveResult =
     | { ok: true; target: DeviceTarget; note?: string }
     | { ok: false; error: DeviceResolverError };
 
+export interface ResolveDeviceOptions {
+    /**
+     * Accept a simulator that is present in the inventory but not booted.
+     * Opt-in, and used by exactly one caller: `ios_boot_simulator`, whose whole
+     * job is booting a shut-down simulator. Without it, step 1 answered that
+     * tool's own UDID with "not booted — boot it with ios_boot_simulator({...})",
+     * i.e. the tool was told to call itself: 10 of 11 calls failed on that one
+     * circular error in the 7d telemetry (2026-08-22). Every other tool needs a
+     * device it can actually talk to, so the booted gate stays on by default.
+     */
+    allowShutdown?: boolean;
+}
+
 const UDID_REGEX = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 const ADB_SERIAL_REGEX = /^emulator-\d+$/;
 
@@ -84,13 +97,16 @@ export function formatResolverError(error: DeviceResolverError): string {
  * sim/emu name, or undefined) into a structured DeviceTarget.
  *
  * Resolution order:
- *   1. UDID format → iOS simulator lookup (errors if shutdown).
- *   2. emulator-NNNN format → Android serial lookup.
+ *   1. UDID format → iOS simulator lookup (errors if shutdown, unless `allowShutdown`).
+ *   2. Exact adb serial match against attached emulators and physical devices.
  *   3. Substring match against the RN-connected registry.
  *   4. Substring match against booted iOS sims and online Android devices.
  *   5. No `device` argument → pick the single running device, or error.
  */
-async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult> {
+async function resolveDeviceTargetInner(
+    device?: string,
+    options: ResolveDeviceOptions = {}
+): Promise<ResolveResult> {
     const trimmed = device?.trim();
 
     // Step 1: UDID match.
@@ -103,7 +119,7 @@ async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult>
                 `No iOS simulator with UDID "${trimmed}". Call list_devices to see available identifiers.`
             );
         }
-        if (sim.state !== "booted") {
+        if (sim.state !== "booted" && !options.allowShutdown) {
             return err(
                 "SIMULATOR_NOT_BOOTED",
                 `Simulator "${sim.name}" (${sim.udid}) is not booted. Boot it with ios_boot_simulator({ udid: "${sim.udid}" }).`
@@ -117,8 +133,23 @@ async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult>
         });
     }
 
-    // Step 2: adb serial format.
-    if (trimmed && ADB_SERIAL_REGEX.test(trimmed)) {
+    // Step 2: exact adb serial match.
+    //
+    // This step used to be gated on ADB_SERIAL_REGEX (`/^emulator-\d+$/`), which
+    // only ever matches emulators. Real physical serials ("P2228K000422",
+    // "29091FDH30061X") never reached serial resolution at all: they fell
+    // through to step-3 substring matching against device *names* and died with
+    // `"P2228K000422" did not match any connected RN app, booted simulator, or
+    // attached Android device` — so the physical branch below was unreachable
+    // for exactly the devices it was written for. 3 failures/wk in the 7d
+    // telemetry, but a complete dead end for anyone on a physical Android
+    // device (2026-08-22).
+    //
+    // The shape test is gone; what identifies a serial is that the inventory
+    // actually reports it, so we probe for an exact match and fall through when
+    // there is none. The extra probe is cheap: `listAllDevices` is cached with a
+    // 30s TTL, and step 4 queries the same inventory anyway.
+    if (trimmed) {
         const inv = await listAllDevices();
         const emu = inv.android.emulators.find((e) => e.serial === trimmed);
         if (emu) {
@@ -149,10 +180,15 @@ async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult>
                 source: "adb-serial"
             });
         }
-        return err(
-            "DEVICE_NOT_FOUND",
-            `No Android device with serial "${trimmed}". Call list_devices to see attached devices.`
-        );
+        // No exact serial match. An `emulator-NNNN` argument is unambiguously a
+        // serial and nothing else, so it keeps its precise error instead of
+        // falling through to name matching and reporting a generic miss.
+        if (ADB_SERIAL_REGEX.test(trimmed)) {
+            return err(
+                "DEVICE_NOT_FOUND",
+                `No Android device with serial "${trimmed}". Call list_devices to see attached devices.`
+            );
+        }
     }
 
     // Step 3: Registry substring match.
@@ -366,8 +402,11 @@ async function resolveDeviceTargetInner(device?: string): Promise<ResolveResult>
  * device to project memory (best-effort, never throws). The inner function also
  * consults project memory to auto-default on no-hint ambiguity (see Step 5).
  */
-export async function resolveDeviceTarget(device?: string): Promise<ResolveResult> {
-    let result = await resolveDeviceTargetInner(device);
+export async function resolveDeviceTarget(
+    device?: string,
+    options: ResolveDeviceOptions = {}
+): Promise<ResolveResult> {
+    let result = await resolveDeviceTargetInner(device, options);
 
     // The device inventory is cached (see deviceDiscovery), so a device booted
     // or plugged in moments ago can be missing from it. Every "I can't find it"
@@ -376,7 +415,7 @@ export async function resolveDeviceTarget(device?: string): Promise<ResolveResul
     // ~150ms on a genuine miss, but never a wrong answer.
     if (!result.ok && STALE_INVENTORY_RETRY_CODES.has(result.error.code)) {
         resetDeviceDiscoveryCache();
-        result = await resolveDeviceTargetInner(device);
+        result = await resolveDeviceTargetInner(device, options);
     }
 
     if (result.ok) {

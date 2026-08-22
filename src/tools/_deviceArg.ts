@@ -1,4 +1,5 @@
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
+import type { ResolveDeviceOptions } from "../core/deviceResolver.js";
 
 export type ToolErrorResponse = {
     content: [{ type: "text"; text: string }];
@@ -50,12 +51,17 @@ export async function resolveAndroidDeviceId(
  *
  * Mirrors `resolveAndroidDeviceId` for the iOS side. Empty hint → undefined
  * so the caller's existing "use booted simulator" path takes over.
+ *
+ * `options.allowShutdown` is for `ios_boot_simulator` only — see
+ * ResolveDeviceOptions in deviceResolver.ts. Everything else needs a simulator
+ * it can actually drive, so it keeps the default booted requirement.
  */
 export async function resolveIosUdid(
-    hint?: string
+    hint?: string,
+    options?: ResolveDeviceOptions
 ): Promise<{ ok: true; udid: string | undefined } | { ok: false; response: ToolErrorResponse }> {
     if (!hint) return { ok: true, udid: undefined };
-    const resolved = await resolveDeviceTarget(hint);
+    const resolved = await resolveDeviceTarget(hint, options);
     if (!resolved.ok) {
         return { ok: false, response: errResponse(`Error: ${formatResolverError(resolved.error)}`) };
     }
