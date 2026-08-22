@@ -27,10 +27,10 @@ const DASHBOARD_URL = API_BASE_URL;
 
 export type LicenseTier = "free" | "pro" | "team";
 
+// No `accountStatus` here on purpose. It used to declare "anonymous" | "linked" while every assignment hardcoded "anonymous", so it always claimed the installation was unlinked even straight after a successful link, and /api/license/validate never returns linkage state for it to read anyway (2026-08-22). The real, correctly computed one lives server-side in the web app's account dashboard (`linkedInstallationIds.length > 0`) and is what the profile page renders; this was a second copy of that concept sharing its name and always lying. If a client-side consumer ever needs it, add it to the validate response and read it, rather than reviving a hardcoded field.
 export interface LicenseStatus {
     installationId: string;
     tier: LicenseTier;
-    accountStatus: "anonymous" | "linked";
     validatedAt: string;
     cacheExpiresAt: string;
     plan?: {
@@ -168,7 +168,6 @@ function createDefaultStatus(installationId: string): LicenseStatus {
     return {
         installationId,
         tier: "free",
-        accountStatus: "anonymous",
         validatedAt: now,
         cacheExpiresAt: now, // Already expired — will trigger API call next startup
     };
@@ -294,7 +293,6 @@ async function resolveLicense(): Promise<LicenseResult> {
         currentStatus = {
             installationId,
             tier: apiResponse.tier,
-            accountStatus: "anonymous",
             validatedAt: apiResponse.validatedAt || now.toISOString(),
             cacheExpiresAt: apiResponse.cacheExpiresAt || expiresAt.toISOString(),
             plan: apiResponse.plan || undefined,
