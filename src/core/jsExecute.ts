@@ -1098,6 +1098,20 @@ export async function executeInApp(
         return withClampMeta(first);
     }
 
+    // A caller that passes `autoReconnect: false` is asking for exactly one
+    // attempt. `executeInAppInner` honours it, but this outer block never read
+    // the option, so every background caller reconnected-and-retried on every
+    // transport failure anyway. Production cost of that gap in one week:
+    // 2192 of 2233 `_auto_reconnect` failures came from the SDK mirror poller
+    // (`_sdk_mirror`, one poll every 3-10s), 2093 of them from a single install
+    // hammering a dead simulator unattended from 19:23 to 07:55.
+    // The option is only respected when explicitly false — absent still means
+    // true, so every normal tool keeps today's reconnect behaviour.
+    if (options.autoReconnect === false) {
+        trackAutoReconnect("not_needed", toolName);
+        return withClampMeta(first);
+    }
+
     const currentApp = getConnectedAppByDevice(device);
     const preferredPort = currentApp?.port;
 

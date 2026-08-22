@@ -3,7 +3,7 @@ import { jest } from "@jest/globals";
 const executeInApp = jest.fn<any>();
 jest.unstable_mockModule("../../core/executor.js", () => ({ executeInApp }));
 
-const { mirrorOnce, __resetMirrorState } = await import("../../core/sdkMirrorPoller.js");
+const { mirrorOnce, __resetMirrorState, startSdkMirrorPoller, isSdkMirrorPollerRunning, ACTIVE_INTERVAL_MS, IDLE_INTERVAL_MS } = await import("../../core/sdkMirrorPoller.js");
 const { getLogBuffer, getNetworkBuffer, resetEpochs, bumpEpoch, getEpoch, connectedApps, logBuffers, networkBuffers } = await import("../../core/state.js");
 const { __resetLogSeq } = await import("../../core/logs.js");
 
@@ -160,18 +160,92 @@ describe("mirrorOnce", () => {
         }
     });
 
-    it("returns zeroes when the eval fails", async () => {
+    // `failed` is what lets the poller tell a dead target from a quiet app —
+    // both used to return a bare {logs:0, network:0}.
+    it("reports a failed eval as a transport failure", async () => {
         executeInApp.mockResolvedValue({ success: false, error: "disconnected" });
-        expect(await mirrorOnce("dev")).toEqual({ logs: 0, network: 0 });
+        expect(await mirrorOnce("dev")).toEqual({ logs: 0, network: 0, failed: true });
     });
 
-    it("returns zeroes on malformed JSON", async () => {
+    // Garbage came back over a working socket: not a transport failure, so it
+    // must not push the poller toward giving up.
+    it("returns zeroes on malformed JSON without flagging a failure", async () => {
         executeInApp.mockResolvedValue({ success: true, result: "not json" });
         expect(await mirrorOnce("dev")).toEqual({ logs: 0, network: 0 });
     });
 
-    it("swallows a thrown eval", async () => {
+    it("swallows a thrown eval and reports it as a failure", async () => {
         executeInApp.mockRejectedValue(new Error("boom"));
-        expect(await mirrorOnce("dev")).toEqual({ logs: 0, network: 0 });
+        expect(await mirrorOnce("dev")).toEqual({ logs: 0, network: 0, failed: true });
+    });
+});
+
+/**
+ * The poller rescheduled forever no matter what came back. One unattended
+ * install produced 2093 of the 2233 `_auto_reconnect` failures in a single
+ * production week by polling a shut-down simulator every 3-10s from 19:23 to
+ * 07:55 — nothing in the loop could ever conclude the target was gone.
+ */
+describe("startSdkMirrorPoller give-up", () => {
+    const failedPoll = { success: false, error: "disconnected" };
+    let errorSpy: any;
+
+    beforeEach(() => {
+        executeInApp.mockReset();
+        __resetMirrorState();
+        __resetLogSeq();
+        resetEpochs();
+        getLogBuffer("dev").clear();
+        getNetworkBuffer("dev").clear();
+        errorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+        jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+        __resetMirrorState();
+        jest.useRealTimers();
+        errorSpy.mockRestore();
+    });
+
+    it("stops the timer after five consecutive transport failures", async () => {
+        executeInApp.mockResolvedValue(failedPoll);
+        startSdkMirrorPoller("dev");
+
+        await jest.advanceTimersByTimeAsync(ACTIVE_INTERVAL_MS);
+        for (let i = 0; i < 3; i++) await jest.advanceTimersByTimeAsync(IDLE_INTERVAL_MS);
+        expect(isSdkMirrorPollerRunning("dev")).toBe(true);
+        expect(executeInApp).toHaveBeenCalledTimes(4);
+
+        await jest.advanceTimersByTimeAsync(IDLE_INTERVAL_MS);
+        expect(isSdkMirrorPollerRunning("dev")).toBe(false);
+        expect(errorSpy.mock.calls.some((c: any[]) => String(c[0]).includes("SDK mirror poller stopped for dev"))).toBe(true);
+
+        // And it really is stopped: no further polls, however long we wait.
+        await jest.advanceTimersByTimeAsync(IDLE_INTERVAL_MS * 10);
+        expect(executeInApp).toHaveBeenCalledTimes(5);
+    });
+
+    it("resets the counter on any poll that reaches the app", async () => {
+        executeInApp
+            .mockResolvedValueOnce(failedPoll)
+            .mockResolvedValueOnce(failedPoll)
+            .mockResolvedValueOnce(failedPoll)
+            .mockResolvedValueOnce(failedPoll)
+            .mockResolvedValueOnce(payload([netEntry("n1")], []))
+            .mockResolvedValue(failedPoll);
+        startSdkMirrorPoller("dev");
+
+        await jest.advanceTimersByTimeAsync(ACTIVE_INTERVAL_MS);
+        for (let i = 0; i < 4; i++) await jest.advanceTimersByTimeAsync(IDLE_INTERVAL_MS);
+        // Poll 5 mirrored an entry, so the poller went back to the active cadence.
+        expect(executeInApp).toHaveBeenCalledTimes(5);
+        expect(isSdkMirrorPollerRunning("dev")).toBe(true);
+
+        await jest.advanceTimersByTimeAsync(ACTIVE_INTERVAL_MS);
+        await jest.advanceTimersByTimeAsync(IDLE_INTERVAL_MS);
+        // Without the reset these would have been failures 5 and 6 and the
+        // poller would already be stopped.
+        expect(executeInApp).toHaveBeenCalledTimes(7);
+        expect(isSdkMirrorPollerRunning("dev")).toBe(true);
     });
 });

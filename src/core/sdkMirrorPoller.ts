@@ -11,6 +11,12 @@ const mirrored = new Map<string, Set<string>>();
 // Per device: the JS runtime nonce seen on the last successful poll. A change
 // means the app process was replaced.
 const lastRunId = new Map<string, string>();
+// Per device: polls in a row that never reached the app. The poller used to
+// reschedule forever no matter what came back, which in one production week
+// turned a single unattended install into 2093 of the 2233 `_auto_reconnect`
+// failures — polling a dead simulator every 3-10s from 19:23 to 07:55.
+const consecutiveFailures = new Map<string, number>();
+const MAX_CONSECUTIVE_FAILURES = 5;
 
 interface RawNetworkEntry {
     id: string;
@@ -73,6 +79,7 @@ export function __resetMirrorState(): void {
     timers.clear();
     mirrored.clear();
     lastRunId.clear();
+    consecutiveFailures.clear();
 }
 
 // Both SDK buffers in one round-trip, plus a per-runtime nonce. The accessor
@@ -108,11 +115,17 @@ const READ_EXPRESSION = `JSON.stringify((function(){
  * Idempotent: the epoch-scoped seen-set means re-reading the same entries adds
  * nothing. After an app restart the epoch changes, so the same SDK ids mirror
  * again as a distinct run rather than overwriting the previous one.
+ *
+ * `failed` separates "the read never reached the app" from the far more common
+ * "reached it, nothing new" — both used to return a bare `{logs:0, network:0}`,
+ * which is why the poller below could not tell a quiet app from a dead one.
+ * It stays optional so callers that only want the counts (refreshMirror) are
+ * unaffected.
  */
-export async function mirrorOnce(device: string): Promise<{ logs: number; network: number }> {
-    let parsed: { runId?: string; network?: RawNetworkEntry[]; console?: RawConsoleEntry[] };
+export async function mirrorOnce(device: string): Promise<{ logs: number; network: number; failed?: boolean }> {
+    let raw;
     try {
-        const raw = await executeInApp(
+        raw = await executeInApp(
             READ_EXPRESSION,
             false,
             {
@@ -123,9 +136,17 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
             },
             device
         );
-        if (!raw.success || !raw.result) return { logs: 0, network: 0 };
+    } catch {
+        return { logs: 0, network: 0, failed: true };
+    }
+    if (!raw.success || !raw.result) return { logs: 0, network: 0, failed: true };
+
+    let parsed: { runId?: string; network?: RawNetworkEntry[]; console?: RawConsoleEntry[] };
+    try {
         parsed = JSON.parse(raw.result);
     } catch {
+        // Garbage over a live socket: the transport is fine, so this must not
+        // count toward the give-up counter.
         return { logs: 0, network: 0 };
     }
 
@@ -235,12 +256,31 @@ export function startSdkMirrorPoller(device: string): void {
     const schedule = (delay: number): void => {
         const timer = setTimeout(async () => {
             let active = false;
+            let failed = false;
             try {
                 const result = await mirrorOnce(device);
                 active = result.logs > 0 || result.network > 0;
+                failed = result.failed === true;
             } catch {
-                active = false;
+                failed = true;
             }
+
+            // Any poll that reaches the app clears the tally, so a transient
+            // drop costs nothing. Five in a row means the target is gone for
+            // good (app killed, simulator shut down) and every further poll is
+            // a guaranteed failed exec — the overnight runaway above.
+            // stopSdkMirrorPoller drops the timer, and the next successful
+            // connect restarts the poller from scratch.
+            const failures = failed ? (consecutiveFailures.get(device) ?? 0) + 1 : 0;
+            consecutiveFailures.set(device, failures);
+            if (failures >= MAX_CONSECUTIVE_FAILURES) {
+                console.error(
+                    `[execbro] SDK mirror poller stopped for ${device} after ${failures} consecutive failed polls — restarts on the next connect.`
+                );
+                stopSdkMirrorPoller(device);
+                return;
+            }
+
             if (timers.has(device)) {
                 schedule(active ? ACTIVE_INTERVAL_MS : IDLE_INTERVAL_MS);
             }
@@ -256,6 +296,7 @@ export function stopSdkMirrorPoller(device: string): void {
     const timer = timers.get(device);
     if (timer) clearTimeout(timer);
     timers.delete(device);
+    consecutiveFailures.delete(device);
 }
 
 export function stopAllSdkMirrorPollers(): void {
