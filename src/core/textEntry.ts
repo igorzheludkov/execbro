@@ -248,6 +248,16 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     }
     if (!target.found) return missResult(target, args.device);
 
+    // Pin the field we just resolved, by native tag, for every operation that follows.
+    //
+    // A query is a DESCRIPTION and a write changes the thing being described. `textMatch` matching a field's value stops matching the instant the value is replaced, so the write, the read-back and the retry each re-resolved from scratch against a predicate the write itself had destroyed — and a landed write came back as "no TextInput matched that target". Telemetry 2026-08-22: 83 of the 145 bad_target failures in 7 days, the single largest bucket, all textMatch=<the value being replaced> with replace=true (5.99, 2.85, 10.00, 55534). Reproduced on the simulator: set cents-input to "42.50" by testID, then {textMatch:"42.50", text:"99.00", replace:true} — the field ends up holding "99.00" and the tool reports a targeting failure.
+    //
+    // InputQuery.nativeTag documents exactly this and has since it was added; wantTag was injected into the resolver and never read, and nothing ever set it. Both ends existed, the middle did not.
+    //
+    // The rest of the query is kept alongside the tag on purpose: the resolver falls back to it when the tag is gone, which is what a genuine remount looks like. Verified live 2026-08-22 on RN 0.85 with newArchEnabled: __eb_pub resolves to a ReactNativeElement whose __nativeTag is a real number, so the pin works on both architectures. A field that still yields no tag simply keeps today's behaviour.
+    const opQuery: InputQuery | undefined =
+        target.nativeTag != null ? { ...(q ?? {}), nativeTag: target.nativeTag } : q;
+
     // The resolve succeeded, so this is the last moment the screen is known to
     // have been in a state the agent could work with — the baseline the next
     // miss is judged against.
@@ -261,7 +271,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // 2. Focus it ourselves if needed. A tap reporting success does not
     //    guarantee React focus — reproduced on device.
     if (!target.focused) {
-        const focused = await deps.runOp({ kind: "focus" }, q, args.device);
+        const focused = await deps.runOp({ kind: "focus" }, opQuery, args.device);
         // Forward the candidate list exactly as the resolve path does. A
         // re-render between the two resolves (a keyboard raise is enough) makes
         // this miss where the first hit, and returning the bare reason leaves
@@ -311,14 +321,14 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // would lose whatever came before.
     const write = async (fromEmpty: boolean): Promise<{ path: WritePath; ok: boolean; error?: string }> => {
         if (target.controlled) {
-            const r = await deps.runOp({ kind: "setValue", value: desired }, q, args.device);
+            const r = await deps.runOp({ kind: "setValue", value: desired }, opQuery, args.device);
             return { path: "react", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
         }
         if (target.hasOnChangeText && isHidTypeable(args.text)) {
             const r = await deps.typeHid(fromEmpty ? desired : args.text);
             return { path: "hid", ok: r.success, error: r.error };
         }
-        const r = await deps.runOp({ kind: "setNative", value: desired }, q, args.device);
+        const r = await deps.runOp({ kind: "setNative", value: desired }, opQuery, args.device);
         return { path: "native", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
     };
 
@@ -327,8 +337,10 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // always-null read produced before.
     const readBack = async (): Promise<string | null | undefined> => {
         if (target.controlled) {
-            const r = await deps.runOp({ kind: "read" }, q, args.device);
-            return r.found ? r.value : null;
+            const r = await deps.runOp({ kind: "read" }, opQuery, args.device);
+            // A re-resolve that MISSES is "unknown", never "empty". Reading it as an empty field is what turned a landed write into a reported failure: the read-back re-resolves with the caller's original query, and a textMatch aimed at the value just overwritten cannot match any more, so this returned null, null compared unequal to the desired text, and the retry mutated the field a SECOND time. Telemetry 2026-08-22: 83 of the 145 bad_target failures in 7 days are that shape, all of them textMatch=<a value the call itself had just replaced>.
+            // `undefined` routes it to the "could not be read back" path below, which is the honest answer. Independent of the pin: it holds wherever the field has no native tag to pin.
+            return r.found ? r.value : undefined;
         }
         if (!usesNativeReadBack) return undefined;
         // A native write updates the view asynchronously, and the accessibility
@@ -355,14 +367,14 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     const needsClearFirst =
         args.replace === true && !target.controlled && target.hasOnChangeText &&
         isHidTypeable(args.text) && previous.length > 0;
-    if (needsClearFirst) await deps.runOp({ kind: "clear" }, q, args.device);
+    if (needsClearFirst) await deps.runOp({ kind: "clear" }, opQuery, args.device);
 
     const first = await write(needsClearFirst);
     if (!first.ok) {
         // A failed replace already cleared the field. Put it back rather than
         // leaving the user's data destroyed with no mention of it.
         if (args.replace && target.hasOnChangeText && previous.length > 0) {
-            const restored = await deps.runOp({ kind: "setValue", value: previous }, q, args.device);
+            const restored = await deps.runOp({ kind: "setValue", value: previous }, opQuery, args.device);
             return {
                 success: false,
                 path: first.path,
@@ -403,7 +415,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         // follows and wipes it, which made every non-ASCII retry land empty.
         const clearedForRetry = first.path === "hid";
         if (clearedForRetry) {
-            await deps.runOp({ kind: "clear" }, q, args.device);
+            await deps.runOp({ kind: "clear" }, opQuery, args.device);
         } else {
             // A native write immediately after another input operation is
             // sometimes swallowed — the value simply does not change. Give the

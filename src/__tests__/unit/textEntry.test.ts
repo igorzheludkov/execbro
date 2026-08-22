@@ -1,6 +1,6 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import { enterText, isHidTypeable, type TextEntryDeps } from "../../core/textEntry.js";
-import type { InputOp, InputResult } from "../../core/inputTarget.js";
+import type { InputOp, InputQuery, InputResult } from "../../core/inputTarget.js";
 
 const found = (over: Partial<Extract<InputResult, { found: true }>> = {}): InputResult => ({
     found: true,
@@ -441,5 +441,92 @@ describe("resolving through a screen transition", () => {
         const r = await enterText({ text: "hi" }, d);
         expect(r.success).toBe(false);
         expect(opsOf(d).filter((k) => k === "find")).toHaveLength(1);
+    });
+});
+
+/**
+ * The pin, end to end.
+ *
+ * Live sequence 2026-08-22: set cents-input to "42.50" by testID, then
+ * {textMatch:"42.50", text:"99.00", replace:true}. The field ended up holding
+ * "99.00" and the tool reported "no TextInput matched that target" — because
+ * every op after the resolve re-derived the field from a predicate that the
+ * write itself had just destroyed. 83 of the 145 bad_target failures in 7 days
+ * are that shape.
+ */
+describe("pinning the resolved field across the write", () => {
+    // A miniature resolver: a field that answers to its current value or its
+    // placeholder, and to its native tag. The value predicate stops matching
+    // the instant a write lands, exactly as the real one does.
+    const app = (startValue: string, tag: number | null = 42, placeholder = "Cents") => {
+        let current = startValue;
+        let writes = 0;
+        const queries: (InputQuery | undefined)[] = [];
+        const runOp = jest.fn(async (op: InputOp, q?: InputQuery): Promise<InputResult> => {
+            queries.push(q);
+            const byTag = tag !== null && q?.nativeTag === tag;
+            const byText = q?.textMatch != null && (current.includes(q.textMatch) || placeholder.includes(q.textMatch));
+            if (q !== undefined && !byTag && !byText) {
+                return { found: false, reason: "no TextInput matched that target", candidates: [], totalInputs: 1 };
+            }
+            if (op.kind === "setValue" || op.kind === "setNative") {
+                current = op.value;
+                writes += 1;
+            }
+            if (op.kind === "clear") {
+                current = "";
+                writes += 1;
+            }
+            return found({ nativeTag: tag, value: current });
+        });
+        return { runOp: runOp as TextEntryDeps["runOp"], queries, writes: () => writes, value: () => current };
+    };
+
+    it("writes ONCE and verifies, where the same call used to report a targeting miss", async () => {
+        const a = app("42.50");
+        const d = deps([], { runOp: a.runOp });
+        const r = await enterText({ text: "99.00", replace: true, textMatch: "42.50" }, d);
+
+        expect(r).toMatchObject({ success: true, value: "99.00", verified: true });
+        // The one assertion that matters: the double mutation is what damages a
+        // user's app state, and a retry is a second write into a live field.
+        expect(a.writes()).toBe(1);
+        expect(r.retried).toBeFalsy();
+        expect(a.value()).toBe("99.00");
+    });
+
+    it("carries the tag on every op after the resolve, and never on the resolve itself", async () => {
+        const a = app("42.50");
+        await enterText({ text: "99.00", replace: true, textMatch: "42.50" }, deps([], { runOp: a.runOp }));
+
+        expect(a.queries[0]?.nativeTag).toBeUndefined();
+        expect(a.queries.slice(1).length).toBeGreaterThan(0);
+        expect(a.queries.slice(1).every((q) => q?.nativeTag === 42)).toBe(true);
+    });
+
+    it("reports UNVERIFIED rather than mutating twice when there is no tag to pin", async () => {
+        // The field exposes no native tag, so the pin is unavailable and the
+        // read-back re-resolves with the dead predicate. A miss there is
+        // "unknown", not "empty" — the honest answer is an unverified success,
+        // and crucially still ONE write.
+        const a = app("42.50", null);
+        const r = await enterText({ text: "99.00", replace: true, textMatch: "42.50" }, deps([], { runOp: a.runOp }));
+
+        expect(r).toMatchObject({ success: true, verified: false });
+        expect(r.error).toContain("could not be read back");
+        expect(a.writes()).toBe(1);
+        expect(a.value()).toBe("99.00");
+    });
+
+    it("leaves a placeholder-matched target behaving exactly as before", async () => {
+        // A write does not invalidate a placeholder, so this path was never
+        // broken and must not change.
+        const a = app("42.50");
+        const d = deps([], { runOp: a.runOp });
+        const r = await enterText({ text: "99.00", replace: true, textMatch: "Cents" }, d);
+
+        expect(r).toMatchObject({ success: true, value: "99.00", verified: true });
+        expect(a.writes()).toBe(1);
+        expect(r.retried).toBeFalsy();
     });
 });

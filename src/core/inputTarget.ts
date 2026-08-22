@@ -151,6 +151,17 @@ function prelude(query: InputQuery | undefined): string {
   var RN_PRIMITIVES = ${RN_PRIMITIVES_SRC};
   var GENERIC_COMPONENT = ${GENERIC_COMPONENT_SRC};
 
+  // Is the component target the name of a PRIMITIVE rather than of anything the app authored? Used far below, and only to decide what a ZERO-match component filter means.
+  //
+  // Verified live on device 2026-08-22, six mounted inputs: component: "TextInput" matched all six, because the match is a case-insensitive SUBSTRING over the collected authored names and wrappers called InternalTextInput / StyledTextInput contain it. RN's own TextInput fiber never reaches that list (RN_PRIMITIVES filters it, and it is a forwardRef whose name __eb_name cannot read), so on an app whose wrappers are named otherwise the same target matches nothing at all — that is the production shape (VisitSearchBarV2, SheetPriceCardV2, StepperV2). App-dependent, not universal, so the filter itself stays exactly as it is.
+  //
+  // The two injected filters list neither TextInput nor AndroidTextInput (verified 2026-08-22 — RCT* is covered by RN_PRIMITIVES, those two by nothing), so the host list this file already declares carries the rest.
+  //
+  // Only when the caller ALSO gave no testID and no textMatch: those run their own branch, and a fall-through there would resolve a field they never described.
+  var __eb_primitiveComponent = wantTestID === null && wantText === null && wantComponent !== null &&
+    (RN_PRIMITIVES.test(wantComponent) || GENERIC_COMPONENT.test(wantComponent) ||
+     HOSTS.indexOf(wantComponent) !== -1 || String(wantComponent).toLowerCase() === "textinput");
+
   // The fiber whose onChangeText we call and whose value we read: the INNERMOST
   // composite carrying it. Host fibers are skipped — props are spread down to
   // them, so the host's onChangeText is the same function reached one level up,
@@ -334,31 +345,54 @@ function prelude(query: InputQuery | undefined): string {
   // exact class of confident-but-wrong result this tool exists to remove.
   var __eb_matches = [];
   var i;
-  if (wantTestID !== null) {
+
+  // The pin, tried FIRST: the native tag of a field already resolved by an earlier op in the same call.
+  //
+  // A query is a description and a write changes the thing being described, so every predicate below is destroyed by the very write it was used to aim. The tag is not — it survives the value being replaced, which is the whole reason it exists. Telemetry 2026-08-22: 83 of the 145 bad_target failures in 7 days are a textMatch aimed at a value the same call had just overwritten.
+  //
+  // Verified live 2026-08-22 on RN 0.85 with newArchEnabled: __eb_pub resolves to a ReactNativeElement carrying a real __nativeTag, so this works on Fabric as well as on the legacy architecture. A host that yields no tag matches nothing here and falls straight through, which is also what a genuine remount does — the fall-through IS the safety net, and no other fallback is wanted.
+  if (wantTag !== null) {
     for (i = 0; i < __eb_inputs.length; i++) {
-      if (__eb_testIDOf(__eb_inputs[i]) === wantTestID) __eb_matches.push(__eb_inputs[i]);
+      var tp = __eb_pub(__eb_inputs[i]);
+      if (tp && tp.__nativeTag === wantTag) __eb_matches.push(__eb_inputs[i]);
     }
-  } else if (wantComponent !== null) {
-    var wc = String(wantComponent).toLowerCase();
-    for (i = 0; i < __eb_inputs.length; i++) {
-      var cns = __eb_componentNames(__eb_inputs[i]);
-      var hit = false;
-      for (var ci = 0; ci < cns.length; ci++) {
-        if (cns[ci].toLowerCase().indexOf(wc) !== -1) { hit = true; break; }
+  }
+  var __eb_pinned = __eb_matches.length > 0;
+
+  if (!__eb_pinned) {
+    if (wantTestID !== null) {
+      for (i = 0; i < __eb_inputs.length; i++) {
+        if (__eb_testIDOf(__eb_inputs[i]) === wantTestID) __eb_matches.push(__eb_inputs[i]);
       }
-      if (hit) __eb_matches.push(__eb_inputs[i]);
+    } else if (wantComponent !== null) {
+      var wc = String(wantComponent).toLowerCase();
+      for (i = 0; i < __eb_inputs.length; i++) {
+        var cns = __eb_componentNames(__eb_inputs[i]);
+        var hit = false;
+        for (var ci = 0; ci < cns.length; ci++) {
+          if (cns[ci].toLowerCase().indexOf(wc) !== -1) { hit = true; break; }
+        }
+        if (hit) __eb_matches.push(__eb_inputs[i]);
+      }
+    } else if (wantText !== null) {
+      var wt = String(wantText).toLowerCase();
+      for (i = 0; i < __eb_inputs.length; i++) {
+        var mp3 = __eb_props(__eb_inputs[i]);
+        var hay = String(
+          (mp3.value || "") + " " + (mp3.placeholder || "") + " " +
+          (mp3.accessibilityLabel || "") + " " + (__eb_labelOf(__eb_inputs[i]) || "")
+        ).toLowerCase();
+        if (hay.indexOf(wt) !== -1) __eb_matches.push(__eb_inputs[i]);
+      }
     }
-  } else if (wantText !== null) {
-    var wt = String(wantText).toLowerCase();
-    for (i = 0; i < __eb_inputs.length; i++) {
-      var mp3 = __eb_props(__eb_inputs[i]);
-      var hay = String(
-        (mp3.value || "") + " " + (mp3.placeholder || "") + " " +
-        (mp3.accessibilityLabel || "") + " " + (__eb_labelOf(__eb_inputs[i]) || "")
-      ).toLowerCase();
-      if (hay.indexOf(wt) !== -1) __eb_matches.push(__eb_inputs[i]);
-    }
-  } else {
+  }
+
+  // Untargeted — or a component filter that named a primitive and matched NOTHING.
+  //
+  // The second case is C1. A component: "TextInput" target selects every input on an app whose wrappers happen to contain that substring, and that 6-way "pass index to choose one" answer is correct and useful, so it is left alone. On an app whose wrappers do not, the same target selected zero and the caller was told "no TextInput matched that target (6 input(s) mounted)" — which reads as the field being absent when six of them are right there. Telemetry 2026-08-22: 145 bad_target failures in 7 days, 32 targeted by component, 12 of those on that one literal string.
+  //
+  // A primitive name describes nothing the app authored, so it cannot be evidence that the field is missing. Falling through resolves it the way an untargeted call would, and still refuses to guess when there is a real choice to get wrong.
+  if (__eb_matches.length === 0 && (__eb_primitiveComponent || (wantTestID === null && wantComponent === null && wantText === null))) {
     for (i = 0; i < __eb_inputs.length; i++) {
       var pf = __eb_pub(__eb_inputs[i]);
       if (pf && pf.isFocused && pf.isFocused()) __eb_matches.push(__eb_inputs[i]);
@@ -371,24 +405,42 @@ function prelude(query: InputQuery | undefined): string {
     if (__eb_matches.length === 0 && __eb_inputs.length === 1) __eb_matches.push(__eb_inputs[0]);
   }
 
-  var targeted = (wantTestID !== null || wantComponent !== null || wantText !== null);
+  // A primitive component target that matched nothing was never a description of a field, so the miss it produces is the no-focus miss, not a "your target is wrong" miss.
+  var targeted = (wantTestID !== null || wantComponent !== null || wantText !== null) && !__eb_primitiveComponent;
 
   if (__eb_matches.length === 0) {
     var candidates = [];
     for (var c = 0; c < __eb_inputs.length && candidates.length < 12; c++) {
       candidates.push(__eb_describe(__eb_inputs[c], c));
     }
+    var reason = targeted
+      ? ("no TextInput matched that target (" + __eb_inputs.length + " input(s) mounted)")
+      : ${JSON.stringify(NO_FOCUS_REASON)};
+
+    // C3, and error-message quality ONLY: no matcher is loosened, nothing is guessed, the miss is still a miss. Verified live 2026-08-22 — testID "name-inpu" against a mounted "name-input" returned the bare "no TextInput matched that target" plus the candidate list, and the list pushes everything useful past the 200-char truncation telemetry applies to the message, so the closest match goes at the FRONT of the string.
+    //
+    // Telemetry 2026-08-22: 26 of the 145 bad_target failures in 7 days are strict-equality testID misses (login.username.input, search-input, church-search-list-search-input) — names that plainly belong to the screen the caller was looking at, off by a prefix. Containment either way catches those for one lowercase compare per mounted input, which is what this can afford: it runs inside the user's app on every failed call.
+    if (wantTestID !== null) {
+      var wid = String(wantTestID).toLowerCase();
+      for (var h = 0; h < candidates.length; h++) {
+        var cid = candidates[h].testID ? String(candidates[h].testID).toLowerCase() : "";
+        if (cid && (cid.indexOf(wid) !== -1 || wid.indexOf(cid) !== -1)) {
+          reason = 'did you mean testID "' + candidates[h].testID + '" (index ' + candidates[h].index + ')? no mounted input has testID "' + wantTestID + '" (' + __eb_inputs.length + " input(s) mounted)";
+          break;
+        }
+      }
+    }
     return {
       found: false,
-      reason: targeted
-        ? ("no TextInput matched that target (" + __eb_inputs.length + " input(s) mounted)")
-        : ${JSON.stringify(NO_FOCUS_REASON)},
+      reason: reason,
       candidates: candidates,
       totalInputs: __eb_inputs.length
     };
   }
 
   var __eb_index = ${typeof query?.index === "number" ? String(query.index) : "null"};
+  // A pinned tag already names ONE field, so an index carried over from the original query does not apply to it — the index chose among the PREDICATE's matches, and there is only ever one match for a tag. Left in, "index 2" against a single pinned match reports "index 2 is out of range — 1 input(s) matched": a failure invented by the pin, on a call that had just resolved correctly. The index keeps its meaning on the fall-through, where the predicate is doing the matching again.
+  if (__eb_pinned) __eb_index = null;
   var __eb_pick = __eb_index === null ? 0 : __eb_index;
   if (__eb_index !== null) {
     if (__eb_index < 0 || __eb_index >= __eb_matches.length) {
