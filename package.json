@@ -1,6 +1,6 @@
 {
     "name": "execbro",
-    "version": "2.9.1",
+    "version": "2.9.2",
     "mcpName": "com.execbro/execbro",
     "description": "ExecBro — MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
     "type": "module",
