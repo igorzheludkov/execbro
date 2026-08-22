@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { createWebSocketWithOriginFallback } from "./connection.js";
+import { createWebSocketWithOriginFallback, describeConnectionFailure } from "./connection.js";
 
 // Bundle error entry
 export interface BundleError {
@@ -282,7 +282,8 @@ export async function connectMetroBuildEvents(port: number): Promise<string> {
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             if (!metroBuildEventReconnecting) {
-                reject(`Failed to connect to Metro build events: ${errorMsg}`);
+                // Same authenticating-proxy failure the inspector socket hits: this reaches the SAME Metro through the same createWebSocketWithOriginFallback, so a corporate proxy or Expo tunnel that 401s the inspector upgrade 401s /hot too, and get_bundle_status / get_bundle_errors went opaque for exactly the users ensure_connection did (2026-08-22). Only 401/403 is rewritten; every other string passes through untouched.
+                reject(`Failed to connect to Metro build events: ${describeConnectionFailure(errorMsg)}`);
             }
         }
     });

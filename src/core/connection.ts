@@ -298,6 +298,17 @@ export function createWebSocketWithOriginFallback(url: string, timeoutMs = 5000)
     });
 }
 
+/**
+ * Turns a raw transport error from the inspector WebSocket into something the agent can act on.
+ *
+ * Only HTTP 401/403 is rewritten; every other string passes through byte-for-byte. 7d production telemetry on 2026-08-22: ensure_connection sat at 79.6% success, and 20 of its failures across 15 distinct installs were all the same raw `ws` string, "Unexpected server response: 401" (com.remitly.internal, com.remitly.androidapp.internal, com.squadra.squadra). That is not a missing or dead Metro, which is what the agent assumes when it sees a bare connect failure: it is an authenticating proxy or tunnel in front of Metro rejecting the WebSocket upgrade. With the raw string passed through, 15 separate installs hit the same dead end in one week with nothing to try next.
+ */
+export function describeConnectionFailure(errorMsg: string): string {
+    const status = /(?:Unexpected server response|HTTP)[:\s]+(401|403)\b/i.exec(errorMsg)?.[1];
+    if (!status) return errorMsg;
+    return `Metro rejected the inspector WebSocket with HTTP ${status} (authentication required). Metro is behind an authenticating proxy or tunnel, typically a corporate HTTP proxy or an Expo tunnel that requires a login. Connect to Metro directly instead of through it (run Metro locally and target localhost:<port>, or use "adb reverse tcp:8081 tcp:8081" for Android), or exclude the Metro port from the proxy (check HTTP_PROXY / HTTPS_PROXY / NO_PROXY). Original error: ${errorMsg}`;
+}
+
 // Helper to find appKey from device info by searching connectedApps
 function findAppKeyForDevice(device: DeviceInfo): string | null {
     for (const [key, app] of connectedApps.entries()) {
@@ -1428,7 +1439,7 @@ export async function connectToDevice(
 
             const errorMsg = error instanceof Error ? error.message : String(error);
             if (!isReconnection) {
-                reject(`Failed to connect to ${device.title}: ${errorMsg}`);
+                reject(`Failed to connect to ${device.title}: ${describeConnectionFailure(errorMsg)}`);
             } else {
                 console.error(`[execbro] Reconnection error: ${errorMsg}`);
             }
