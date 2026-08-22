@@ -362,10 +362,13 @@ export function registerScreenshotTools(server: McpServer): void {
             if (!resolved.ok) return resolved.response;
             // Same parallelisation as iOS: the capture, the two adb metric probes
             // and the fiber screen-state are independent legs of one snapshot.
-            const androidTargetApp = getConnectedAppByAndroidDeviceId(deviceId);
+            // Every device lookup below keys off `resolved.serial`, never the raw
+            // argument: a caller may pass a fuzzy hint ("Pixel") that only
+            // resolveAndroidDeviceId can turn into the adb serial the app is linked to.
+            const androidTargetApp = getConnectedAppByAndroidDeviceId(resolved.serial);
             const capturePromise = androidScreenshot(outputPath, resolved.serial);
-            const statusBarPromise = androidGetStatusBarHeight(deviceId).catch(() => null);
-            const densityPromise = androidGetDensity(deviceId).catch(() => null);
+            const statusBarPromise = androidGetStatusBarHeight(resolved.serial).catch(() => null);
+            const densityPromise = androidGetDensity(resolved.serial).catch(() => null);
             const screenStatePromise = androidTargetApp
                 ? getScreenState({ device: androidTargetApp.deviceInfo.deviceName }).catch(() => null)
                 : Promise.resolve(null);
@@ -392,7 +395,7 @@ export function registerScreenshotTools(server: McpServer): void {
     
                 // Resolve the RN app running on THIS Android device so enrichment
                 // pulls data from the right app (not whichever app is "first").
-                const targetApp = getConnectedAppByAndroidDeviceId(deviceId);
+                const targetApp = getConnectedAppByAndroidDeviceId(resolved.serial);
                 const targetDeviceName = targetApp?.deviceInfo.deviceName;
     
                 // Store screenshot metadata on the matching app (not an arbitrary one)

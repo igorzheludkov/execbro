@@ -1585,10 +1585,18 @@ export function getConnectedAppBySimulatorUdid(udid: string): ConnectedApp | nul
 
 /**
  * Find the connected RN app running on a specific Android device.
- * Falls back to the sole connected Android app when `deviceId` is not provided
- * or cannot be resolved via deviceName substring match — this keeps the common
- * single-device case working while preventing cross-device data leakage when
- * multiple Android apps are connected.
+ *
+ * With no `deviceId`, the sole connected Android app is returned — the common
+ * single-emulator case. With a `deviceId`, the match is strict: a miss returns
+ * null instead of falling back to "the only Android app".
+ *
+ * Reproduced live on 2026-08-22: a physical Samsung handset (adb serial
+ * RFCX20CLX3F) sat on its launcher with no RN app running, while an emulator
+ * (emulator-5554) ran the RN test app. `android_screenshot({ deviceId: "RFCX20CLX3F" })`
+ * returned the handset's home screen but appended the emulator app's route,
+ * elements and pixel coordinates, then told the caller to tap those coordinates
+ * — a different device's layout. Returning null degrades to a screenshot without
+ * RN enrichment, which is correct; enriching from the wrong device is confidently wrong.
  */
 export function getConnectedAppByAndroidDeviceId(deviceId?: string): ConnectedApp | null {
     const androidApps: ConnectedApp[] = [];
@@ -1601,18 +1609,17 @@ export function getConnectedAppByAndroidDeviceId(deviceId?: string): ConnectedAp
     }
 
     if (androidApps.length === 0) return null;
-    if (androidApps.length === 1) return androidApps[0];
+    if (!deviceId) return androidApps.length === 1 ? androidApps[0] : null;
 
-    if (deviceId) {
-        const lower = deviceId.toLowerCase();
-        const match = androidApps.find(a => {
-            const name = (a.deviceInfo.deviceName || a.deviceInfo.title || "").toLowerCase();
-            return name.includes(lower) || lower.includes(name);
-        });
-        if (match) return match;
-    }
-
-    return null;
+    // Same haystack matching resolveConnectedAppByDevice uses: adb serial (what
+    // callers pass once resolveAndroidDeviceId has canonicalised their hint) plus
+    // the RN-reported device name, normalized so separator drift doesn't matter.
+    const normDevice = normalizeDeviceId(deviceId);
+    const match = androidApps.find(app =>
+        [normalizeDeviceId(app.adbSerial), normalizeDeviceId(deviceLabel(app))]
+            .some(h => h.length > 0 && h.includes(normDevice))
+    );
+    return match ?? null;
 }
 
 /**
