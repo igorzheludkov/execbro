@@ -110,6 +110,8 @@ Production users are unaffected — the default transport remains stdio, and `--
 
 This is a release-channel gate, not a security boundary — `build/*.js` is editable. It exists so ordinary users cannot expose the dev surface by accident.
 
+**The dev server can serve stale code while looking completely healthy.** If a save does not seem to take effect, check `ps -o ppid= -p $(lsof -ti:8600)` before anything else: a PPID of `1` means an orphaned server is squatting the port and nodemon's rebuilds are dying against it. This happened for 15 hours on 2026-08-23. `dev:mcp` runs `npm run build && exec node build/bin.js --http` — the `exec` is load-bearing. Without it nodemon kills the wrapping shell on restart and the `node` grandchild survives, re-parented to launchd, holding 8600 forever; every later rebuild then spawns a server that dies on `EADDRINUSE` while the orphan keeps answering. Three things now make that visible instead of silent: the `exec` (no orphan is created), an `httpServer.on("error")` handler in `src/index.ts` that names the port conflict and exits 1 (a failed bind is an emitter event, so `main().catch()` never saw it), and the log at `~/.execbro/dev-server.log` rather than `/tmp`, which macOS reaps after 3 days — nodemon had been writing into a deleted inode. Note that `already_running()` in `dev-server.sh` still checks existence rather than health, so the SessionStart hook will not repair a wedged server: kill the holder of 8600 by hand and save a file.
+
 ### Dev Tool (`dev`)
 
 In HTTP mode, a `dev` meta-tool is registered for full hot-reload testing. It proxies calls to any tool using the latest server code, so new/modified/removed tools are immediately testable without restarting the Claude Code session.
