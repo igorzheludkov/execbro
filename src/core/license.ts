@@ -54,6 +54,12 @@ export interface UsageInfo {
     enforcementStartsAt?: string | null;
     // Stamped locally at write time; drives the fail-closed grace window.
     verdictFreshUntil?: string;
+    // Server-set, UNSIGNED. Selects the block message only; `canUse` is the
+    // signed field that actually blocks, so forging or deleting this can change
+    // wording and nothing else. Deliberately outside canonicalVerdictPayload:
+    // signing it would need a payload v2 and a coordinated two-repo deploy to
+    // buy nothing.
+    blockReason?: "flagged";
 }
 
 export interface PlanPricing {

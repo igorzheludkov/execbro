@@ -105,3 +105,36 @@ describe("agent-resistance", () => {
         expect(r.message).toContain(".execbro");
     });
 });
+
+describe("revoked installation message", () => {
+    it("flagged verdict gets the review message, not the cap message", () => {
+        freezeSessionVerdict(usage({ used: 0, canUse: false, blockReason: "flagged" }));
+        const r = isToolBlocked("tap");
+        expect(r.blocked).toBe(true);
+        expect(r.message).toMatch(/flagged for review/i);
+        expect(r.message).toContain("zigor535@gmail.com");
+        expect(r.message).not.toMatch(/limit reached/i);
+        expect(r.message).not.toContain("/pricing");
+    });
+
+    it("flagged message tells the agent the state is server-side", () => {
+        freezeSessionVerdict(usage({ used: 0, canUse: false, blockReason: "flagged" }));
+        expect(isToolBlocked("tap").message).toMatch(/server.?side/i);
+    });
+
+    it("a flagged verdict still exempts the tools that explain it", () => {
+        freezeSessionVerdict(usage({ used: 0, canUse: false, blockReason: "flagged" }));
+        expect(isToolBlocked("get_license_status").blocked).toBe(false);
+        expect(isToolBlocked("send_feedback").blocked).toBe(false);
+        expect(isToolBlocked("activate_license").blocked).toBe(false);
+    });
+
+    it("no blockReason still renders the cap message", () => {
+        freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        expect(isToolBlocked("tap").message).toMatch(/limit reached/i);
+    });
+
+    it("a flagged verdict emits no 80% warning line", () => {
+        expect(usageWarningLine(usage({ used: 0, limit: 600, canUse: false, blockReason: "flagged" }))).toBeNull();
+    });
+});

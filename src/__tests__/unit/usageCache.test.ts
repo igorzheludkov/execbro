@@ -129,3 +129,26 @@ describe("usage cache v2", () => {
         expect(getUsageCacheState()).toBe("missing");
     });
 });
+
+describe("blockReason round-trip", () => {
+    // blockReason is unsigned, so it must survive as an `unsigned` extra with no
+    // cache-format change. If this breaks, the offline revocation in
+    // computeOfflineUsage silently stops working: the verdict comes back with
+    // canUse:false but no reason, and the client renders the cap message.
+    it("survives write/read as an unsigned extra", () => {
+        const u = usage({ used: 0, canUse: false, blockReason: "flagged" });
+        writeUsageCache(u, sigFor(u, INSTALL_ID), INSTALL_ID, file);
+        const out = readUsageCache(INSTALL_ID, file);
+        expect(out!.blockReason).toBe("flagged");
+        expect(out!.canUse).toBe(false);
+        expect(getUsageCacheState()).toBe("valid");
+    });
+
+    it("is stored outside the signed block, so it cannot invalidate the signature", () => {
+        const u = usage({ used: 0, canUse: false, blockReason: "flagged" });
+        writeUsageCache(u, sigFor(u, INSTALL_ID), INSTALL_ID, file);
+        const raw = JSON.parse(readFileSync(file, "utf-8"));
+        expect(raw.signed.blockReason).toBeUndefined();
+        expect(raw.unsigned.blockReason).toBe("flagged");
+    });
+});
