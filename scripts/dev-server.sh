@@ -5,7 +5,10 @@
 
 PORT=8600
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LOG_FILE="/tmp/execbro-dev-server.log"
+# NOT /tmp: macOS's daily periodic job deletes /tmp entries that go untouched
+# for 3 days. On 2026-08-23 nodemon was found writing 235KB into a deleted
+# inode, so every EADDRINUSE from a failed rebind was invisible for 15 hours.
+LOG_FILE="$HOME/.execbro/dev-server.log"
 LOCK_DIR="/tmp/execbro-dev-server.lock"
 NODEMON="$REPO_DIR/node_modules/.bin/nodemon"
 
@@ -44,6 +47,7 @@ already_running && exit 0
 export EXECBRO_API_URL="https://execbro.com"
 
 cd "$REPO_DIR" || exit 1
+mkdir -p "$(dirname "$LOG_FILE")"
 nohup npm run dev:mcp >"$LOG_FILE" 2>&1 &
 disown
 

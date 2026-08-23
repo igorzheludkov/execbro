@@ -228,6 +228,30 @@ async function main() {
             res.end("Not found");
         });
 
+        // A failed bind arrives as an 'error' EVENT, not a rejected promise, so
+        // main().catch() below never sees it: without this handler the process
+        // died on an unhandled emitter error with no usable message.
+        //
+        // EADDRINUSE here is not a race, it is the symptom of an orphaned
+        // server squatting the port. nodemon used to run the exec chain through
+        // a shell and kill only the shell, leaving `node build/bin.js`
+        // re-parented to launchd and holding 8600 forever; every rebuild then
+        // spawned a server that died here, silently, while the orphan kept
+        // serving stale code. `exec` in the dev:mcp script stops the orphan
+        // being created, and this message names the problem if it ever recurs.
+        httpServer.on("error", (err: NodeJS.ErrnoException) => {
+            if (err.code === "EADDRINUSE") {
+                console.error(
+                    `[execbro] Port ${httpPort} is already in use, so this server did not start. ` +
+                        `Another dev server is probably still holding it: ` +
+                        `\`lsof -ti:${httpPort}\` to find it, \`kill\` that pid, then save a file to rebuild.`,
+                );
+            } else {
+                console.error(`[execbro] MCP HTTP server failed to start:`, err);
+            }
+            process.exit(1);
+        });
+
         // Bind loopback explicitly: listen(port) with no host binds 0.0.0.0,
         // which puts an unauthenticated device-control surface on the LAN.
         httpServer.listen(httpPort, "127.0.0.1", () => {

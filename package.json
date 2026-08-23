@@ -13,7 +13,7 @@
         "inject-token": "node scripts/inject-build-token.mjs",
         "start": "node build/bin.js",
         "dev": "nodemon --watch src --ext ts --exec 'npm run build && node build/bin.js'",
-        "dev:mcp": "nodemon --watch src --ext ts --exec 'npm run build && node build/bin.js --http'",
+        "dev:mcp": "nodemon --watch src --ext ts --exec 'npm run build && exec node build/bin.js --http'",
         "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
         "test:unit": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/unit'",
         "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testPathPatterns='__tests__/integration'",
