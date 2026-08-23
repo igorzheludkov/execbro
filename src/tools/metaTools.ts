@@ -16,6 +16,26 @@ export interface MetaToolOptions {
     httpMode: boolean;
 }
 
+/**
+ * Render a plan expiry for display, or null when there is nothing sane to show.
+ *
+ * Two failure modes this exists to prevent, both of which shipped:
+ * - `new Date(null)` is the epoch, NOT NaN, so a null expiry rendered as
+ *   "Plan expires: 1/1/1970".
+ * - The old fallback was `String(expiresAt)`, so a non-string (a Firestore
+ *   Timestamp serialized as {_seconds,_nanoseconds} by an older backend)
+ *   rendered as "Plan expires: [object Object]".
+ *
+ * The server-side root cause is fixed in web (validate now sends an ISO string
+ * or null), but published clients in the field outlive any single deploy, so
+ * this stays defensive: omit the line rather than print a wrong date.
+ */
+export function formatPlanExpiry(expiresAt: unknown): string | null {
+    if (typeof expiresAt !== "string" || expiresAt === "") return null;
+    const exp = new Date(expiresAt);
+    return Number.isNaN(exp.getTime()) ? null : exp.toLocaleDateString();
+}
+
 export function registerMetaTools(server: McpServer, opts: MetaToolOptions): void {
     // Tool: Usage guide for agents
     registerToolWithTelemetry(
@@ -83,11 +103,8 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
             lines.push(`License: ${status.tier.charAt(0).toUpperCase() + status.tier.slice(1)}`);
 
             if (status.plan) {
-                const exp = new Date(status.plan.expiresAt);
-                const expStr = Number.isNaN(exp.getTime())
-                    ? String(status.plan.expiresAt)
-                    : exp.toLocaleDateString();
-                lines.push(`Plan expires: ${expStr}`);
+                const expStr = formatPlanExpiry(status.plan.expiresAt);
+                if (expStr) lines.push(`Plan expires: ${expStr}`);
             }
 
             lines.push(`Cache valid until: ${status.cacheExpiresAt}`);
