@@ -69,3 +69,41 @@ describe("computeOfflineUsage (fail-closed after grace)", () => {
         expect(computeOfflineUsage(cached, laterMonth)!.canUse).toBe(true);
     });
 });
+
+describe("revoked verdict offline", () => {
+    it("past grace: a flagged verdict keeps blocking even though used < limit", () => {
+        const cached = base({
+            used: 0,
+            canUse: false,
+            blockReason: "flagged",
+            verdictFreshUntil: new Date(NOW - 1000).toISOString(),
+        });
+        expect(computeOfflineUsage(cached, NOW)!.canUse).toBe(false);
+    });
+
+    it("a flagged verdict is not cleared by a month rollover", () => {
+        const cached = base({
+            used: 0,
+            canUse: false,
+            blockReason: "flagged",
+            monthKey: "2001-08",
+            verdictFreshUntil: new Date(NOW - 1000).toISOString(),
+        });
+        expect(computeOfflineUsage(cached, NOW)!.canUse).toBe(false);
+    });
+
+    it("the reason survives so the offline message stays correct", () => {
+        const cached = base({
+            used: 0,
+            canUse: false,
+            blockReason: "flagged",
+            verdictFreshUntil: new Date(NOW - 1000).toISOString(),
+        });
+        expect(computeOfflineUsage(cached, NOW)!.blockReason).toBe("flagged");
+    });
+
+    it("a cap verdict is unaffected: past grace and under cap still allows", () => {
+        const cached = base({ used: 100, canUse: true, verdictFreshUntil: new Date(NOW - 1000).toISOString() });
+        expect(computeOfflineUsage(cached, NOW)!.canUse).toBe(true);
+    });
+});

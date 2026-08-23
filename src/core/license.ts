@@ -119,6 +119,13 @@ export function computeOfflineUsage(cached: UsageInfo | null, now: number): Usag
     if (!cached) return null;
     const fresh = cached.verdictFreshUntil ? new Date(cached.verdictFreshUntil).getTime() : 0;
     if (now < fresh) return cached;
+    // A revocation is not month-scoped and does not expire with the grace
+    // window, so neither the rollover branch below nor the used-vs-limit rule
+    // may clear it. Without this a flagged user pulls the network cable and is
+    // unblocked 72h later, because a revoked verdict carries used: 0.
+    // Accepted cost: someone unblocked while offline stays blocked until they
+    // reconnect, which is what unblocks them anyway.
+    if (cached.blockReason) return { ...cached, canUse: false };
     // The cap is monthly — if we've rolled into a new calendar month (UTC) since
     // the cached verdict, the counter has reset server-side even though we can't
     // reach the API to confirm it, so don't keep blocking on last month's usage.
