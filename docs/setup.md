@@ -15,12 +15,14 @@ The npm package was previously published as `react-native-ai-devtools` and befor
 ## Claude Code
 
 ```bash
+# Project-specific (recommended) — writes .mcp.json, commit it for the team
+claude mcp add execbro --scope project -- npx -y execbro@latest
+
 # Global (all projects)
 claude mcp add execbro --scope user -- npx -y execbro@latest
-
-# Project-specific
-claude mcp add execbro --scope project -- npx -y execbro@latest
 ```
+
+Prefer project scope. ExecBro does nothing without a Metro server, so a global registration starts it in every session you open, including backend and web repos where there is no simulator to talk to.
 
 Or edit `~/.claude.json` (user) / `.mcp.json` (project) manually:
 

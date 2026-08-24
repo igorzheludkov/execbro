@@ -70,10 +70,12 @@ Linking your installation here is also **required to unlock [ExecBro Pro](#prici
 Add ExecBro to Claude Code in one command — no installation, `npx` fetches the latest version on demand:
 
 ```bash
-claude mcp add execbro --scope user -- npx -y execbro@latest
+claude mcp add execbro --scope project -- npx -y execbro@latest
 ```
 
 Then fully restart the client (quit and relaunch) so it picks up the new server.
+
+Project scope writes a `.mcp.json` you can commit, so the whole team picks ExecBro up in this repo and nowhere else. Swap `project` for `user` to register it globally instead — convenient if you work in React Native all day, but it starts ExecBro in every session you open, including repos with no Metro server to connect to.
 
 **Using a different client or need platform setup?** The [full setup guide](docs/setup.md) covers Claude Desktop, Codex CLI, Cursor, VS Code Copilot, Windsurf, Zed, and Gemini CLI, plus [Android](docs/setup.md#android) and [iOS simulator UI automation](docs/setup.md#ios-simulator--ui-automation-setup) requirements.
 
