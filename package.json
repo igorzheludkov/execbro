@@ -2,7 +2,7 @@
     "name": "execbro",
     "version": "2.9.3",
     "mcpName": "com.execbro/execbro",
-    "description": "ExecBro — MCP server giving AI agents eyes and hands into React Native apps. Logs, REPL, state inspection, tap, screenshot.",
+    "description": "ExecBro: React Native AI debugger and devtools MCP server. Gives AI agents eyes and hands in your running app (logs, network, state inspection, tap, screenshot).",
     "type": "module",
     "main": "build/index.js",
     "bin": {
@@ -23,12 +23,23 @@
     },
     "keywords": [
         "mcp",
+        "mcp-server",
         "react-native",
+        "react-native-mcp",
+        "react-native-debugger",
+        "react-native-devtools",
         "metro",
+        "metro-mcp",
         "debugging",
+        "debugger",
+        "devtools",
         "ai",
+        "ai-agent",
         "claude",
-        "expo"
+        "claude-code",
+        "cursor",
+        "expo",
+        "automation"
     ],
     "author": "Ihor Zheludkov <500griven@gmail.com>",
     "license": "MIT",

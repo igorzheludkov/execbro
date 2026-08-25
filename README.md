@@ -17,7 +17,7 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 1. [Setup ExecBro as an MCP server for your agent of choice](#setup)
 2. [Setup UI automation helpers](docs/setup.md#ios-simulator--ui-automation-setup)
 3. [Install the SDK in your React Native app](#install-the-sdk-recommended) — optional, but recommended for the most robust log, network, and state experience
-4. [Authorize and link to the web dashboard](#see-your-usage--execbrocom) — optional for usage stats and session history, **required to unlock unlimited usage via ExecBro Pro**
+4. [Authorize and link to the web dashboard](#see-your-usage--execbrocom) — optional, for usage stats and session history
 5. Start your React Native app (`npm start` / `expo start`)
 6. [Ask your AI assistant](#usage) in plain language — e.g. "Connect to the simulator and investigate what caused the error on the screen"
 
@@ -25,7 +25,7 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 
 Log in at **[execbro.com](https://execbro.com)** to see your ExecBro activity rendered back to you: which tools you use most, tool **error rates**, and your **session history** — so you can spot flaky tools, track usage over time, and understand how your agent drives the app across sessions. It's built from the same anonymous telemetry described in [Telemetry & Privacy](#telemetry--privacy), tied to your installation ID.
 
-Linking your installation here is also **required to unlock [ExecBro Pro](#pricing)** — signing in and authorizing your installation is what lets the unlimited-usage plan take effect; without it, the free tier's monthly cap applies even after subscribing.
+Linking is also how [ExecBro Pro](#pricing) attaches to your installation, if you ever subscribe.
 
 ## Features
 
@@ -206,12 +206,14 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 
 ## Telemetry & Privacy
 
-ExecBro sends two separate signals, not one:
+**No source code, file paths, or app content is ever sent.** Your app and your repo stay on your machine.
 
-- **Usage metering** (required, always on) — a counted tool-call signal that powers the free tier and enforces its monthly cap. This stays on whenever you're using the free tier; it cannot be disabled and still use ExecBro's free tools.
-- **Product analytics** (optional) — tool names, success/failure, and durations, used to improve the product. **No source code, file paths, or app content is ever sent.** This is what powers your [usage dashboard](#see-your-usage--execbrocom). Disable it with `EXECBRO_TELEMETRY=false` in your MCP server config. Doing so turns off analytics only — it does **not** disable usage metering, which keeps counting tool calls against the free-tier cap regardless.
+ExecBro sends two small signals:
 
-See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full breakdown of what's collected, auto-registration, and how to opt out, and [PRIVACY.md](./PRIVACY.md) for the complete privacy policy.
+- **Product analytics** (optional) — tool names, success/failure, and durations. This is what powers your [usage dashboard](#see-your-usage--execbrocom) and tells me which tools are flaky and worth fixing. Turn it off any time with `EXECBRO_TELEMETRY=false` in your MCP server config.
+- **Usage count** — a running tally of how many tool calls you've made, so the free tier knows where you stand against its monthly allowance. It's a number, not content, and it's the one signal that keeps running when analytics is off.
+
+See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full field-by-field breakdown, and [PRIVACY.md](./PRIVACY.md) for the complete privacy policy.
 
 ## Supported React Native Versions
 
@@ -225,7 +227,7 @@ See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full brea
 
 ## Pricing
 
-ExecBro is **free to use** — every feature, fully intelligent — up to **600 tool calls per month**. That covers evaluation and everyday debugging. Heavy users can remove the cap with **ExecBro Pro** ($8.99/mo) for unlimited calls and every future hosted feature. See [execbro.com/pricing](https://execbro.com/pricing).
+ExecBro is **free** — every tool, full power, no feature gates, no account needed to start. The free tier covers **600 tool calls a month**, which is evaluation plus everyday debugging; most people never reach it. If you drive your agent hard all day, **ExecBro Pro** ($8.99/mo) lifts the cap and includes every hosted feature as it ships. See [execbro.com/pricing](https://execbro.com/pricing).
 
 > [!NOTE]
 > **Grandfather notice:** the 600-call monthly cap starts applying **2026-08-01** for new installs. If you already had ExecBro installed before then, you get a free month on top — your cap doesn't start until **2026-08-31**. You'll also see this as an in-app notice. No action needed unless you want to [link your account and upgrade to Pro](#see-your-usage--execbrocom) ahead of time. Questions? [zigor535@gmail.com](mailto:zigor535@gmail.com).

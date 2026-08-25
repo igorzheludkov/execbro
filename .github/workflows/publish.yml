@@ -39,6 +39,7 @@ jobs:
       - name: Mirror publish to legacy react-native-ai-devtools
         run: |
           npm pkg set name=react-native-ai-devtools
+          npm pkg set description="React Native AI devtools: MCP server giving AI agents eyes and hands in your running app (logs, network, state inspection, tap, screenshot). Published as ExecBro."
           npm pkg set bin.react-native-ai-devtools=./build/index.js
           npm pkg delete bin.execbro
           npm publish --provenance
@@ -47,8 +48,10 @@ jobs:
 
       - name: Mirror publish to deprecated react-native-ai-debugger
         run: |
-          # Inherits bin.react-native-ai-devtools from the previous mirror step; only the name changes.
+          # Inherits bin.react-native-ai-devtools from the previous mirror step; name and
+          # description change so each legacy listing leads with its own searchable name.
           npm pkg set name=react-native-ai-debugger
+          npm pkg set description="React Native AI debugger: MCP server giving AI agents eyes and hands in your running app (logs, network, state inspection, tap, screenshot). Published as ExecBro."
           npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
