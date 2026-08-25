@@ -17,13 +17,14 @@ export function registerReduxTools(server: McpServer): void {
                 "WHY THIS EXISTS: __RN_AI_DEVTOOLS__.stores.redux often holds a different store reference than the one passed to <Provider>, so dispatching through it updates state but does NOT notify react-redux subscribers. This tool dispatches through the actual Provider store, so views re-render.\n" +
                 "WHEN TO USE: Verify state-driven UI by seeding redux state directly. Example: dispatch app/setIsLoading: true, then ios_screenshot to confirm the loader rendered.\n" +
                 "WORKFLOW: redux_dispatch({ action: { type: 'app/setIsLoading', payload: true } }) -> ios_screenshot -> redux_dispatch({ action: { type: 'app/setIsLoading', payload: false } }).\n" +
+                "BATCH: action accepts an array — dispatched in order, one round trip.\n" +
                 "LIMITATIONS: Requires React DevTools hook (dev mode). Action must be plain JSON-serializable (no thunks/functions). If the app has multiple <Provider> roots, pass storeIndex (default 0).\n" +
                 "GOOD: redux_dispatch({ action: { type: 'app/setIsLoading', payload: true } })\n" +
                 "BAD: redux_dispatch({ action: () => ... }) — actions must be plain objects; for thunks use execute_in_app to call your action creator.",
             inputSchema: {
                 action: z
-                    .record(z.unknown())
-                    .describe("Plain JSON-serializable Redux action object, e.g. { type: 'app/setIsLoading', payload: true }."),
+                    .union([z.record(z.unknown()), z.array(z.record(z.unknown()))])
+                    .describe("Plain JSON-serializable Redux action object, e.g. { type: 'app/setIsLoading', payload: true }. Pass an ARRAY to dispatch several in order in one round trip — restoring a 17-field settings slice is one call, not 17."),
                 storeIndex: z
                     .number()
                     .int()
@@ -41,14 +42,15 @@ export function registerReduxTools(server: McpServer): void {
             }
         },
         async ({ action, storeIndex, returnPath, device }) => {
-            const result = await reduxDispatch({ action: action as Record<string, unknown>, storeIndex, returnPath, device });
+            const result = await reduxDispatch({ action: action as Record<string, unknown> | Record<string, unknown>[], storeIndex, returnPath, device });
             if (!result.success) {
                 return {
                     content: [{ type: "text", text: `Error: ${result.error ?? "Unknown error"}` }],
                     isError: true
                 };
             }
-            const ack = `Dispatched to store ${result.storeIndex} of ${result.storeCount}: ${JSON.stringify(result.previousAction)}`;
+            const count = Array.isArray(action) ? action.length : 1;
+            const ack = `Dispatched ${count > 1 ? `${count} actions ` : ""}to store ${result.storeIndex} of ${result.storeCount}: ${JSON.stringify(result.previousAction)}`;
             const stateLine = returnPath
                 ? `\n\nState at '${returnPath}':\n${JSON.stringify(result.state, null, 2)}`
                 : "";

@@ -85,6 +85,15 @@ React Native fires `onLongPress` at 500ms, so anything under 500 will not trigge
 
 An element wired **only** for long press (`onLongPress` with no `onPress`) is invisible to an ordinary `tap` by design, since a short press on it does nothing. Passing `duration` is what makes it resolvable. `android_long_press` remains for Android coordinate holds with no RN connection.
 
+**Switches and checkboxes.** A `Switch` has no `onPress` — its state is a `value` prop — so reaching one used to mean guessing an x off a screenshot and pairing it with the row label's y, which lands on the neighbouring row about as often as not. Target it like anything else:
+
+```
+tap(testID="notifications-switch")
+tap(component="Switch", index=2)      # get_screen_state lists them in order, with values
+```
+
+The response carries `switch.before` / `switch.after` / `switch.changed`, read back from the element after the gesture. Read it: a pixel diff reports `meaningful:true` with the same tiny change rate whether you flipped the right row or the wrong one, so the value is the only thing that tells those apart. `changed:false` means the gesture landed and the value did not move — disabled, controlled-and-rejected, or a miss.
+
 **Pin to a specific device when multiple are connected:**
 ```
 tap(text="Submit", device="iPhone SE")        # simulator/emulator or RN app name (substring)

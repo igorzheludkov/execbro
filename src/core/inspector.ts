@@ -4,6 +4,7 @@ import { resolveStacksToSource, buildDebugStackHarvestExpression } from "./compo
 import type { RawComponentStack } from "./componentSource.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
+import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 
 // ============================================================================
 // Coordinate-Based Element Inspection (via DevTools Inspector API)
@@ -164,9 +165,33 @@ export async function inspectAtPoint(
             for (var hi = 0; hi < hostFibers.length; hi++) hostIndex.set(hostFibers[hi], hi);
 
             var measurements = new Array(hostFibers.length).fill(null);
-            var pending = hostFibers.length;
             var settled = false;
             var timedOut = false;
+
+            ${SCREEN_SPACE_HELPER_JS}
+            ${SHEET_HELPERS_JS}
+            var SCREEN_SPACE = ${JSON.stringify(metrics)};
+
+            // Sheet boundaries — see injected/sheetOffset.ts. Without this the hit
+            // test runs against frames that are short by the sheet's inset, so a
+            // point on a modal resolves to the screen *underneath* it: the same
+            // symptom the host cap used to produce, from a different cause.
+            var sheetFibers = [];
+            var sheetIdxByHost = [];
+            for (var sf = 0; sf < hostFibers.length; sf++) {
+                var bnd = modalBoundaryOf(hostFibers[sf]);
+                var at = -1;
+                if (bnd) {
+                    for (var sj = 0; sj < sheetFibers.length; sj++) {
+                        if (sheetFibers[sj] === bnd) { at = sj; break; }
+                    }
+                    if (at < 0) { sheetFibers.push(bnd); at = sheetFibers.length - 1; }
+                }
+                sheetIdxByHost.push(at);
+            }
+            var sheetMeasurements = new Array(sheetFibers.length).fill(null);
+
+            var pending = hostFibers.length + sheetFibers.length;
 
             function done() {
                 if (settled) return;
@@ -174,8 +199,16 @@ export async function inspectAtPoint(
                 resolve(buildResult(hostFibers, measurements));
             }
 
-            ${SCREEN_SPACE_HELPER_JS}
-            var SCREEN_SPACE = ${JSON.stringify(metrics)};
+            sheetFibers.forEach(function(fiber, i) {
+                try {
+                    getMeasurable(fiber).measureInWindow(function(fx, fy, fw, fh) {
+                        sheetMeasurements[i] = { x: fx, y: fy, width: fw, height: fh };
+                        if (--pending === 0) done();
+                    });
+                } catch(e) {
+                    if (--pending === 0) done();
+                }
+            });
 
             hostFibers.forEach(function(fiber, i) {
                 try {
@@ -197,6 +230,13 @@ export async function inspectAtPoint(
             var measureBudgetMs = Math.min(3000, 400 + hostFibers.length * 2);
             setTimeout(function() { timedOut = true; done(); }, measureBudgetMs);
 
+            /** The window rect, from the app's own root host — the same node the band rule below assumes. */
+            function viewportForSheets(ms) {
+                var r = ms[0];
+                if (!r || !(r.width > 0) || !(r.height > 0)) return null;
+                return { width: r.width, height: r.height + (r.y > 0 ? r.y : 0) };
+            }
+
             function buildResult(fibers, measurements) {
                 // The caller speaks canonical delivered pixels; measureInWindow speaks
                 // points/dp. Hit-testing stays in point space (that is where the
@@ -207,6 +247,18 @@ export async function inspectAtPoint(
                 var inputY = ${y};
                 var targetX = inputX / PX;
                 var targetY = inputY / PX;
+
+            // Sheet correction first — derived from the sheet's own height, so
+            // where it applies the band rule below has nothing left to guess.
+            var sheetShifts = [];
+            for (var ssI = 0; ssI < sheetMeasurements.length; ssI++) {
+                sheetShifts.push(sheetShiftY(sheetMeasurements[ssI], viewportForSheets(measurements)));
+            }
+            for (var msI = 0; msI < measurements.length; msI++) {
+                var siI = sheetIdxByHost[msI] == null ? -1 : sheetIdxByHost[msI];
+                var dyI = siI >= 0 && sheetShifts[siI] ? sheetShifts[siI] : 0;
+                if (dyI && measurements[msI]) measurements[msI].y += dyI;
+            }
 
             // Lift measurements into screen space once, before anything reads them, so the
             // hit-test, the element frame, hitFrame and the hierarchy all share the caller's

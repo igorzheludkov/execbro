@@ -83,7 +83,7 @@ export function registerInteractionTools(server: McpServer): void {
                 testID: z
                     .string()
                     .optional()
-                    .describe("Exact match on the element's testID prop."),
+                    .describe("Exact match on the element's testID prop. Also resolves Switch/checkbox elements (onValueChange), which have no onPress — the response then carries `switch.before/after/changed`, read back from the element after the gesture. Read it: a pixel diff looks identical for a correct toggle and one that flipped the neighbouring row."),
                 component: z
                     .string()
                     .optional()

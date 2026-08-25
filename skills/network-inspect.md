@@ -48,8 +48,10 @@ Based on the task, narrow down to relevant requests:
 
 For specific requests that need deeper investigation:
 - Use `mcp__execbro__get_request_details` with the `requestId` from the list
-- Use `verbose=true` to see full JSON payloads
-- Increase `maxBodyLength` for large request/response bodies
+- The first call returns the body's shape (key paths, array sizes) — then narrow with `query="data.orders[0].status"`, which returns that field in full
+- A `query` renders only the queried body; pass `include:"request"` / `"response"` / `"both"` when you need headers or the other side
+- Authorization and Cookie headers print as scheme + length. `verbose=true` unredacts them and drops all bounding — it writes a live token into the transcript, so use it only when the token itself is what you are checking
+- Increase `maxBodyLength` when you want a bigger shape rather than a single field
 
 ### 5. Clear and Re-capture (if needed)
 

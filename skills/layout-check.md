@@ -60,6 +60,7 @@ If a screenshot reveals a layout issue and you need precise measurements:
   - **Style question** ("why is the borderRadius wrong?", "what padding does this card have?") → `mcp__execbro__inspect_at_point(x, y)`. Returns the node's own style object plus every ancestor's frame, and `source: {file, line, column}` so you can open the owning file directly rather than searching for the component. Style is not a merged cascade — when a value isn't on the node itself, walk the ancestors it returns.
 - Both tools work on Bridgeless / new arch and on Paper/Fabric.
 - Coordinates need no conversion: `get_screen_state`, `get_screen_layout`, `measure`, `inspect_at_point`, screenshots and `tap` all share one screen-space coordinate system, so a coordinate from any of them goes to any other unchanged.
+- On a modal-sheet screen (`presentation:'modal'`) UIKit insets the screen from the top of the window and React Native's measurements do not include that inset. All of these tools correct for it, derived from the sheet's own measured height, so they keep agreeing with each other and with the screenshot; `get_screen_state` names the correction when it applies.
 
 ### 6. Optional: Compare with Design
 

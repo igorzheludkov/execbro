@@ -45,10 +45,17 @@ globalThis.__REDUX_STORE__.getState().personalData
 - Use `mcp__execbro__execute_in_app` with the expression above
 
 **Dispatch Redux actions:**
+- Prefer `mcp__execbro__redux_dispatch` — it resolves the store bound to the app's `<Provider>` by walking the fiber tree, so `useSelector` subscribers actually re-render:
+```
+redux_dispatch({ action: { type: 'app/setIsLoading', payload: true } })
+redux_dispatch({ action: [a, b, c], returnPath: 'settings' })   # array = in order, ONE round trip
+```
+- The array form is what to use for a batch: restoring a settings slice to its defaults is one call, not one per field.
+- `mcp__execbro__redux_get_state({ path: 'cart' })` reads a slice back through the same store.
+- Falling back to `execute_in_app` still works when the app exposes its own helpers:
 ```javascript
 globalThis.__dispatch__(globalThis.__REDUX_ACTIONS__.locale.setLocale('en'))
 ```
-- Use `mcp__execbro__execute_in_app` to dispatch
 
 **Navigate:**
 ```javascript

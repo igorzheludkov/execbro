@@ -113,6 +113,7 @@ export {
   runQuickHealthCheck,
   ensureConnection,
   getPassiveConnectionStatus,
+  passiveConnectionBanner,
   checkAndEnsureConnection,
   suppressReconnection,
   suppressReconnectionForKey,

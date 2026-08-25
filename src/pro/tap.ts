@@ -241,6 +241,14 @@ export interface LongPressReport {
     warning?: string;
 }
 
+/** What a tap on a Switch-like element (onValueChange) actually did to its value. */
+export interface SwitchReport {
+    before: boolean;
+    after: boolean | null;
+    changed: boolean | null;
+    warning?: string;
+}
+
 export interface TapResult {
     success: boolean;
     method?: string;
@@ -279,6 +287,12 @@ export interface TapResult {
     /** Present only when `duration` was passed. */
     longPress?: LongPressReport;
     /**
+     * Present only when the fiber strategy resolved a Switch-like element. A pixel
+     * diff reads identically for a correct toggle and one that flipped the wrong
+     * row, so the value is read back and compared instead.
+     */
+    switch?: SwitchReport;
+    /**
      * Why a coordinate tap changed nothing: what occupied the point, whether an
      * overlay covers it, and the nearest reachable pressable with re-tappable
      * coordinates. Populated only on unmeaningful coordinate taps with a live
@@ -315,6 +329,54 @@ export function buildLongPressReport(args: {
             `React Native will have fired its onPress on release instead. The gesture was ` +
             `delivered; if you expected a long-press action, it is not wired to this element.`
     };
+}
+
+/**
+ * Read a Switch-like element's value back after the tap and compare.
+ *
+ * Re-resolving through pressElement is deliberate reuse: it only measures, never
+ * presses, so the same query returns the same element with a fresh value — no
+ * second matcher to keep in sync with the first. Costs one fiber walk, and only
+ * on the taps that landed on a switch.
+ */
+export async function buildSwitchReport(args: {
+    before: boolean | null | undefined;
+    query: TapQuery;
+    index?: number;
+    device?: string;
+    element?: string;
+}): Promise<SwitchReport | undefined> {
+    if (typeof args.before !== "boolean") return undefined;
+    let after: boolean | null = null;
+    try {
+        const res = await pressElement({
+            text: args.query.text,
+            testID: args.query.testID,
+            component: args.query.component,
+            index: args.index,
+            device: args.device
+        });
+        if (res.success && res.result) {
+            const parsed = JSON.parse(res.result);
+            if (typeof parsed.switchValue === "boolean") after = parsed.switchValue;
+        }
+    } catch {
+        // Read-back failed — after stays null, which reports "unknown", not "unchanged".
+    }
+    const changed = after === null ? null : after !== args.before;
+    const what = args.element ? `<${args.element} />` : "the switch";
+    if (changed === false) {
+        return {
+            before: args.before,
+            after,
+            changed,
+            warning:
+                `${what} still reads ${String(after)} after the tap. The gesture was delivered, but the ` +
+                `value did not change — a controlled Switch whose parent rejected the new value, a disabled ` +
+                `switch, or the tap landed on a neighbouring element.`
+        };
+    }
+    return { before: args.before, after, changed };
 }
 
 export function buildQuery(options: TapOptions): TapQuery {
@@ -747,6 +809,8 @@ interface StrategyResult {
     convertedTo?: { x: number; y: number; unit: string };
     /** Fiber only: whether the resolved element actually has an onLongPress handler. */
     hasLongPress?: boolean;
+    /** Fiber only: the Switch-like element's value BEFORE the tap. null when not a switch. */
+    switchValue?: boolean | null;
 }
 
 export interface EvidenceSink {
@@ -986,7 +1050,8 @@ async function tryFiberAtDepth(
                         y: parsed.nativeTapTarget.y,
                         unit: parsed.nativeTapTarget.unit || "points"
                     },
-                    hasLongPress: !!parsed.hasLongPress
+                    hasLongPress: !!parsed.hasLongPress,
+                    switchValue: parsed.switchValue ?? null
                 };
             }
             return {
@@ -2496,6 +2561,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 element: result.pressed
             });
             if (strategyLongPress) successResult.longPress = strategyLongPress;
+            const strategySwitch = await buildSwitchReport({
+                before: result.switchValue,
+                query,
+                index: options.index,
+                device: options.device,
+                element: result.pressed
+            });
+            if (strategySwitch) successResult.switch = strategySwitch;
             // The guard already resolved what occupies this coordinate. Reporting it turns
             // "something responded" into "this element responded" for the one case where
             // the caller most likely meant something else.
@@ -2672,6 +2745,14 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     element: result.pressed
                 });
                 if (fiberLongPress) fiberSuccess.longPress = fiberLongPress;
+                const fiberSwitch = await buildSwitchReport({
+                    before: result.switchValue,
+                    query,
+                    index: options.index,
+                    device: options.device,
+                    element: result.pressed
+                });
+                if (fiberSwitch) fiberSuccess.switch = fiberSwitch;
                 return fiberSuccess;
             } catch {
                 // Native tap at fiber coordinates failed — continue to next strategy

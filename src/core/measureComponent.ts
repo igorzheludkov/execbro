@@ -18,11 +18,14 @@ export type MeasureToolResult =
     | ({ success: true; outcome: "measured" } & MeasureBounds)
     | { success: false; outcome: Exclude<MeasureOutcome, "measured">; error: string };
 
+import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
+
 export function buildMeasureComponentExpression(componentName: string, index: number): string {
     const escapedName = componentName.replace(/'/g, "\\'");
     const safeIndex = typeof index === "number" && Number.isFinite(index) ? index : 0;
     return `new Promise((resolve) => {
   try {
+    ${SHEET_HELPERS_JS}
     const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
     if (!hook) { resolve({ outcome: "error", error: "React DevTools hook not found." }); return; }
     let root = null;
@@ -121,20 +124,54 @@ export function buildMeasureComponentExpression(componentName: string, index: nu
     // app's runtime after every successful measure — harmless, but it is a timer per call
     // that exists only to be ignored.
     let timeoutId = null;
-    target.instance.measureInWindow((x, y, width, height) => {
-      if (done) return;
-      done = true;
-      if (timeoutId !== null) { try { clearTimeout(timeoutId); } catch (e) {} }
-      resolve({
-        outcome: "measured",
-        x: x,
-        y: y,
-        width: width,
-        height: height,
-        name: matchedName,
-        nativeTag: typeof target.nativeTag === "number" ? target.nativeTag : undefined,
+    // Sheet correction — see injected/sheetOffset.ts. Without it this tool's promise
+    // of "the same space as get_screen_layout and inspect_at_point" breaks on a
+    // modally-presented screen, where those two now agree and this one would not.
+    //
+    // The probes are chained ahead of the target's rather than fired alongside it:
+    // measureInWindow answers on its own schedule, and reading a shift that has not
+    // landed yet would silently emit the uncorrected frame.
+    const measureTarget = (sheetDy) => {
+      target.instance.measureInWindow((x, y, width, height) => {
+        if (done) return;
+        done = true;
+        if (timeoutId !== null) { try { clearTimeout(timeoutId); } catch (e) {} }
+        resolve({
+          outcome: "measured",
+          x: x,
+          y: y + sheetDy,
+          width: width,
+          height: height,
+          name: matchedName,
+          nativeTag: typeof target.nativeTag === "number" ? target.nativeTag : undefined,
+        });
       });
-    });
+    };
+
+    const firstHost = (f, d) => {
+      if (!f || d > 40) return null;
+      if (typeof f.type === "string" && getMeasurable(f)) return f;
+      let c = f.child;
+      while (c) { const h = firstHost(c, d + 1); if (h) return h; c = c.sibling; }
+      return null;
+    };
+    const sheetBoundary = modalBoundaryOf(matched);
+    const boundaryM = sheetBoundary ? getMeasurable(sheetBoundary) : null;
+    const rootM = sheetBoundary ? getMeasurable(firstHost(root.current, 0)) : null;
+    if (boundaryM && rootM) {
+      try {
+        rootM.instance.measureInWindow((rx, ry, rw, rh) => {
+          const viewport = { width: rw, height: rh + (ry > 0 ? ry : 0) };
+          try {
+            boundaryM.instance.measureInWindow((bx, by, bw, bh) => {
+              measureTarget(sheetShiftY({ x: bx, y: by, width: bw, height: bh }, viewport));
+            });
+          } catch (e) { measureTarget(0); }
+        });
+      } catch (e) { measureTarget(0); }
+    } else {
+      measureTarget(0);
+    }
     timeoutId = setTimeout(() => {
       if (done) return;
       done = true;

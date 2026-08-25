@@ -187,10 +187,31 @@ export const DEFAULT_BODY_BUDGET = 2000;
 export interface FormatRequestDetailsOptions {
     /** Byte target for a bounded body render. 0 = unlimited. */
     maxBodyLength?: number;
-    /** Disable all bounding. */
+    /** Disable all bounding, and print credential headers in full. */
     verbose?: boolean;
     /** Dot-path into the JSON body — see jsonProjection. */
     query?: string;
+    /** Which side to render. Defaults to the queried side when `query` is given, "both" otherwise. */
+    include?: "request" | "response" | "both";
+}
+
+/**
+ * Headers whose value is a live credential.
+ *
+ * A bearer JWT runs ~1.5KB, and get_request_details is called repeatedly on the
+ * same request while narrowing a query — so the same token was re-written into
+ * the transcript on every call. It is both the bulk of the tokens and a secret
+ * that outlives the session in anything that stores the transcript. Print the
+ * scheme and the length, which is all that "is a token attached, and is it the
+ * one I expect" needs; verbose:true still prints the value.
+ */
+const CREDENTIAL_HEADERS = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)$/i;
+
+export function redactHeaderValue(name: string, value: string): string {
+    if (!CREDENTIAL_HEADERS.test(name)) return value;
+    const scheme = /^(bearer|basic|digest)\s/i.exec(value);
+    const prefix = scheme ? `${scheme[1]} ` : "";
+    return `${prefix}[redacted, ${value.length} chars — verbose:true to see it]`;
 }
 
 /**
@@ -219,7 +240,7 @@ export function formatRequestDetails(
     request: NetworkRequest,
     options: FormatRequestDetailsOptions = {}
 ): string {
-    const { maxBodyLength = DEFAULT_BODY_BUDGET, verbose = false, query } = options;
+    const { maxBodyLength = DEFAULT_BODY_BUDGET, verbose = false, query, include } = options;
     const lines: string[] = [];
 
     lines.push(`=== ${request.method} ${request.url} ===`);
@@ -256,20 +277,30 @@ export function formatRequestDetails(
         lines.push(`Mock warning: ${request.mockWarning}`);
     }
 
-    // Request headers
-    if (Object.keys(request.headers).length > 0) {
-        lines.push("\n--- Request Headers ---");
-        for (const [key, value] of Object.entries(request.headers)) {
-            lines.push(`${key}: ${value}`);
-        }
-    }
-
     // Post data. The query targets the response body when there is one — that
     // is where the bulk lives — and falls back to the request body otherwise,
     // so a query on a GET that never returned still lands somewhere useful.
     const queryTarget: "response" | "request" = request.responseBody ? "response" : "request";
 
-    if (request.postData) {
+    // A narrowing query asks for a handful of characters; re-dumping the other
+    // side's headers and the whole GraphQL query text alongside it defeats the
+    // point of the parameter. Default to the side being queried, and say so.
+    const side = include ?? (query ? queryTarget : "both");
+    const wantRequest = side !== "response";
+    const wantResponse = side !== "request";
+    // Headers are metadata, not the thing the query asked for. A 700-char CSP
+    // header on every narrowing call is the same waste as the request body was.
+    const wantHeaders = !query || include !== undefined;
+
+    // Request headers
+    if (wantRequest && wantHeaders && Object.keys(request.headers).length > 0) {
+        lines.push("\n--- Request Headers ---");
+        for (const [key, value] of Object.entries(request.headers)) {
+            lines.push(`${key}: ${verbose ? value : redactHeaderValue(key, value)}`);
+        }
+    }
+
+    if (wantRequest && request.postData) {
         lines.push("\n--- Request Body ---");
         lines.push(renderBody(request.postData, {
             maxBodyLength,
@@ -280,15 +311,15 @@ export function formatRequestDetails(
     }
 
     // Response headers
-    if (request.responseHeaders && Object.keys(request.responseHeaders).length > 0) {
+    if (wantResponse && wantHeaders && request.responseHeaders && Object.keys(request.responseHeaders).length > 0) {
         lines.push("\n--- Response Headers ---");
         for (const [key, value] of Object.entries(request.responseHeaders)) {
-            lines.push(`${key}: ${value}`);
+            lines.push(`${key}: ${verbose ? value : redactHeaderValue(key, value)}`);
         }
     }
 
     // Response body (SDK mirror and the JS interceptor's XHR layer — CDP does not capture it)
-    if (request.responseBody) {
+    if (wantResponse && request.responseBody) {
         lines.push("\n--- Response Body ---");
         lines.push(renderBody(request.responseBody, {
             maxBodyLength,
@@ -296,6 +327,12 @@ export function formatRequestDetails(
             query: queryTarget === "response" ? query : undefined,
             hint: "Raise maxBodyLength, pass verbose:true, or query a narrower path."
         }));
+    }
+
+    if (!include && query) {
+        lines.push(
+            `\n[showing the ${side} body only — query narrows to it. include:"${side}" adds that side's headers, include:"both" adds the other side.]`
+        );
     }
 
     return lines.join("\n");

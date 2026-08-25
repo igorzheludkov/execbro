@@ -1,5 +1,6 @@
 import { executeInApp, delay } from "./jsExecute.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
+import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 
 /**
  * What the scroll surface under a gesture looks like right now.
@@ -101,6 +102,7 @@ export async function probeScrollAt(
     // so the geometry it produced was meaningless and the verdict confidently wrong. The
     // host is unambiguous: RN renders exactly one scroll host per scroll surface, and its
     // first host child is the content view whose offset we need.
+    ${SHEET_HELPERS_JS}
     var SCROLL_HOST = /^(RCTScrollView|AndroidHorizontalScrollView|AndroidHorizontalScrollContentView|RCTScrollViewComponentView)$/;
     var candidates = [];
     (function walk(f, d) {
@@ -129,10 +131,32 @@ export async function probeScrollAt(
     })(roots[0].current, 0);
 
     globalThis.__swipeProbe = candidates.map(function(c) {
-        return { horizontal: c.horizontal, name: c.name, layout: null, content: null };
+        return { horizontal: c.horizontal, name: c.name, layout: null, content: null, sheet: null };
     });
+    // The window rect, for the sheet correction below. A scroll surface on a
+    // modally-presented screen measures from the sheet's own container, so without
+    // this the probe compares the caller's screen coordinate against a frame that
+    // is short by the inset and reports "no scroll view there" — about a screen it
+    // did in fact see.
+    globalThis.__swipeProbeViewport = null;
+    try {
+        var vpHost = firstHost(roots[0].current, 0);
+        if (vpHost) {
+            getMeasurable(vpHost).measureInWindow(function(mx, my, mw, mh) {
+                globalThis.__swipeProbeViewport = { width: mw, height: mh + (my > 0 ? my : 0) };
+            });
+        }
+    } catch (e) {}
     for (var i = 0; i < candidates.length; i++) {
         (function(idx) {
+            try {
+                var bnd = modalBoundaryOf(candidates[idx].host);
+                if (bnd) {
+                    getMeasurable(bnd).measureInWindow(function(mx, my, mw, mh) {
+                        globalThis.__swipeProbe[idx].sheet = { x: mx, y: my, width: mw, height: mh };
+                    });
+                }
+            } catch (e) {}
             try {
                 getMeasurable(candidates[idx].host).measureInWindow(function(mx, my, mw, mh) {
                     globalThis.__swipeProbe[idx].layout = { x: mx, y: my, width: mw, height: mh };
@@ -162,9 +186,12 @@ export async function probeScrollAt(
     const resolve = `
 (function() {
     ${SCREEN_SPACE_HELPER_JS}
+    ${SHEET_HELPERS_JS}
     var SCREEN_SPACE = ${JSON.stringify(screenSpace ?? { platform: "ios", topInset: 0 })};
     var probes = globalThis.__swipeProbe || [];
+    var viewport = globalThis.__swipeProbeViewport;
     globalThis.__swipeProbe = null;
+    globalThis.__swipeProbeViewport = null;
 
     // The caller's coordinates are delivered-screenshot pixels — the space every tool
     // speaks — while measureInWindow answers in points/dp and, on Android, from below the
@@ -180,7 +207,9 @@ export async function probeScrollAt(
         if (!p.layout || !p.content) continue;
         var L = p.layout;
         if (L.width <= 0 || L.height <= 0) continue;
-        var ly = SCREEN_SPACE.topInset > 0 ? toScreenSpaceY(L.y, SCREEN_SPACE) : L.y;
+        // Sheet correction first, band rule second — see injected/sheetOffset.ts.
+        var ly = L.y + sheetShiftY(p.sheet, viewport);
+        if (SCREEN_SPACE.topInset > 0) ly = toScreenSpaceY(ly, SCREEN_SPACE);
         if (px < L.x || px > L.x + L.width || py < ly || py > ly + L.height) continue;
         // Innermost wins: later entries are deeper in the DFS.
         best = p;

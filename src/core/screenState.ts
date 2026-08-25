@@ -3,6 +3,7 @@ import { executeInApp, delay } from "./jsExecute.js";
 import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
+import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 import type { KeyboardState } from "./keyboardMetrics.js";
 
 // ============================================================================
@@ -20,6 +21,13 @@ export interface ScreenStatePressable {
     icon?: string | null;
     /** True for TextInput-like elements (onChangeText/onFocus) — tap to focus, then type. */
     isInput?: boolean;
+    /**
+     * Current value of a Switch/Checkbox-like element (onValueChange). Absent on
+     * everything else. Without it a settings row read as text at the label's
+     * coordinates and the control itself was invisible, so the only way to flip
+     * one was to guess an x from a screenshot.
+     */
+    switchValue?: boolean | null;
     /**
      * The input's current text, from props.value/defaultValue. Null when empty.
      * Kept separate from `inputPlaceholder` so a placeholder can never be read
@@ -249,6 +257,12 @@ export function partitionByKeyboard<T extends { center: { x: number; y: number }
  * Renders an input's state so the value is unmistakably the value and the
  * placeholder is unmistakably a placeholder. Returns "" for non-inputs.
  */
+/** " [switch:ON]" for a Switch-like element; "" for everything else. */
+export function formatSwitchState(p: ScreenStatePressable): string {
+    if (p.switchValue === undefined || p.switchValue === null) return "";
+    return ` [switch:${p.switchValue ? "ON" : "OFF"}]`;
+}
+
 export function formatInputState(p: ScreenStatePressable): string {
     if (!p.isInput) return "";
     if (p.inputValue) return ` [input] value:${JSON.stringify(p.inputValue)}`;
@@ -335,7 +349,7 @@ export function formatScreenStateSummary(
         const marker = opts.pressablesOnly ? "" : " 🔘";
         return `  (${center.x}, ${center.y})${marker}${p.component ? ` <${p.component} />` : ""} ${p.label ? `"${p.label}"` : "(unlabeled)"}` +
             `${p.nearbyText ? ` near "${p.nearbyText}"` : ""}${p.onPressHint ? ` ${p.onPressHint}` : ""}` +
-            `${p.testID ? ` testID="${p.testID}"` : ""}${formatInputState(p)}` +
+            `${p.testID ? ` testID="${p.testID}"` : ""}${formatInputState(p)}${formatSwitchState(p)}` +
             ` frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})${formatTransformTag(p)}`;
     };
 
@@ -521,6 +535,7 @@ export async function getScreenState(
     }
 
     ${VISIBILITY_HELPERS_JS}
+    ${SHEET_HELPERS_JS}
 
     function getMeasurable(fiber) {
         var sn = fiber.stateNode;
@@ -1370,6 +1385,35 @@ export async function getScreenState(
             }
         }
 
+        // Switches / checkboxes — no onPress, no onChangeText, so none of the three
+        // branches above sees them. They stayed out of the listing entirely, which
+        // left guessing an x from a screenshot as the only way to reach one — and a
+        // guess that lands on the neighbouring row is indistinguishable from a
+        // correct toggle in the tap's pixel diff.
+        //
+        // Identity is the component, NOT the handler. Verified on device (RN 0.83):
+        // an app renders <Switch value={x} /> with no onValueChange and drives it
+        // from a gesture-handler row, so the fiber carries a value and nothing else.
+        // Requiring onValueChange would have left that switch invisible — which is
+        // the exact case this came from.
+        var isSwitchHere = !nextHidden && props && typeof props.onPress !== 'function' &&
+            typeof props.onChangeText !== 'function' &&
+            (typeof props.onValueChange === 'function' ||
+             (typeof fiber.type !== 'string' && name === 'Switch'));
+        if (isSwitchHere) {
+            var hostsS = [];
+            findHostsInSubtree(fiber, 0, hostsS, 8);
+            if (hostsS.length > 0 && !isHostHidden(hostsS[0])) {
+                var pS = fiber.memoizedProps || {};
+                var testIDS = pS.testID || pS.nativeID || null;
+                var baseLabelS = pS.accessibilityLabel || null;
+                var labelS = resolveLabel(fiber, hostsS[0], baseLabelS, testIDS);
+                var hostIdxS = hostFibers.length;
+                hostFibers.push(hostsS[0]);
+                fiberMeta.push({ label: labelS, testID: testIDS, hostIdx: hostIdxS, icon: null, overlayIdx: ovIdx, component: resolveComponentName(fiber), hasOwnLabel: !!baseLabelS, switchValue: typeof pS.value === 'boolean' ? pS.value : null, transform: transformStateOf(hostsS[0]) });
+            }
+        }
+
         var child = fiber.child;
         while (child) {
             walkPressabilityDebugViews(child, depth + 1, nextHidden, ovIdx);
@@ -1579,6 +1623,42 @@ export async function getScreenState(
         hostFibers.push(rootHostFiber);
     }
 
+    // Sheet boundaries. A modally-presented screen is laid out by UIKit at an
+    // offset RN's own measurements do not include (see injected/sheetOffset.ts),
+    // so every frame beneath one needs the same vertical correction. Resolved
+    // from the measured host rather than the push sites: the boundary is a
+    // property of where a fiber sits, and asking the fiber keeps the six
+    // collection branches out of it.
+    var sheetFibers = [];
+    function sheetIndexFor(fiber) {
+        var b = modalBoundaryOf(fiber);
+        if (!b) return -1;
+        for (var sfi = 0; sfi < sheetFibers.length; sfi++) {
+            if (sheetFibers[sfi] === b) return sfi;
+        }
+        sheetFibers.push(b);
+        return sheetFibers.length - 1;
+    }
+    function sheetIndexesOf(list) {
+        var out = [];
+        for (var li = 0; li < list.length; li++) out.push(sheetIndexFor(list[li]));
+        return out;
+    }
+    globalThis.__screenStateSheetIdx = sheetIndexesOf(hostFibers);
+    globalThis.__screenStateTextSheetIdx = sheetIndexesOf(textFibers);
+    globalThis.__screenStateImageSheetIdx = sheetIndexesOf(imageFibers);
+    globalThis.__screenStateOverlaySheetIdx = sheetIndexesOf(overlayHostFibers);
+    globalThis.__screenStateSheetMeasurements = new Array(sheetFibers.length).fill(null);
+    for (var shi = 0; shi < sheetFibers.length; shi++) {
+        try {
+            (function(idx) {
+                getMeasurable(sheetFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                    globalThis.__screenStateSheetMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                });
+            })(shi);
+        } catch(e) {}
+    }
+
     globalThis.__screenStateFibers = hostFibers;
     globalThis.__screenStateMeta = fiberMeta;
     globalThis.__screenStateMeasurements = new Array(hostFibers.length).fill(null);
@@ -1658,6 +1738,7 @@ export async function getScreenState(
 
     const resolveExpression = `
 (function() {
+    ${SHEET_HELPERS_JS}
     var hostFibers = globalThis.__screenStateFibers;
     var meta = globalThis.__screenStateMeta;
     var measurements = globalThis.__screenStateMeasurements;
@@ -1671,6 +1752,16 @@ export async function getScreenState(
     var textTransforms = globalThis.__screenStateTextTransforms || [];
     var imageMeta = globalThis.__screenStateImageMeta || [];
     var imageMeasurements = globalThis.__screenStateImageMeasurements || [];
+    var sheetMeasurements = globalThis.__screenStateSheetMeasurements || [];
+    var sheetIdx = globalThis.__screenStateSheetIdx || [];
+    var textSheetIdx = globalThis.__screenStateTextSheetIdx || [];
+    var imageSheetIdx = globalThis.__screenStateImageSheetIdx || [];
+    var overlaySheetIdx = globalThis.__screenStateOverlaySheetIdx || [];
+    globalThis.__screenStateSheetMeasurements = null;
+    globalThis.__screenStateSheetIdx = null;
+    globalThis.__screenStateTextSheetIdx = null;
+    globalThis.__screenStateImageSheetIdx = null;
+    globalThis.__screenStateOverlaySheetIdx = null;
     var nativeMarkers = globalThis.__screenStateNativeMarkers || [];
     var logBoxSkipped = globalThis.__screenStateLogBoxSkipped || 0;
     globalThis.__screenStateNativeMarkers = null;
@@ -1702,6 +1793,22 @@ export async function getScreenState(
         viewportH = rootM.height + (rootM.y > 0 ? rootM.y : 0);
     }
 
+    // Sheet correction. UIKit presents a modal screen inset from the top of the
+    // window and RN's measurements do not include that inset, so every frame on
+    // such a screen is short by exactly one number — recoverable because the
+    // sheet is bottom-anchored and its own host measures its real height.
+    var sheetShifts = [];
+    var sheetShiftApplied = 0;
+    for (var ssi = 0; ssi < sheetMeasurements.length; ssi++) {
+        var dyS = sheetShiftY(sheetMeasurements[ssi], { width: viewportW, height: viewportH });
+        sheetShifts.push(dyS);
+        if (dyS > sheetShiftApplied) sheetShiftApplied = dyS;
+    }
+    function shiftFor(idxList, i) {
+        var si = idxList && idxList[i] != null ? idxList[i] : -1;
+        return si >= 0 && sheetShifts[si] ? sheetShifts[si] : 0;
+    }
+
     // Build overlay bounds by unioning their host measurements.
     // blockBounds: union of ALL hosts (incl. full-screen backdrop) — what the overlay
     //   visually blocks; used to exclude unreachable root pressables.
@@ -1714,7 +1821,7 @@ export async function getScreenState(
         var bMinX = Infinity, bMinY = Infinity, bMaxX = -Infinity, bMaxY = -Infinity, bValid = false;
         var cMinX = Infinity, cMinY = Infinity, cMaxX = -Infinity, cMaxY = -Infinity, cValid = false;
         for (var hi = om.hostStart; hi < om.hostEnd; hi++) {
-            var mm = overlayMeasurements[hi];
+            var mm = shiftRect(overlayMeasurements[hi], shiftFor(overlaySheetIdx, hi));
             if (!mm || mm.width <= 0 || mm.height <= 0) continue;
             bValid = true;
             if (mm.x < bMinX) bMinX = mm.x;
@@ -1826,7 +1933,7 @@ export async function getScreenState(
         if (i === rootIdx) continue;
         var m0 = measurements[i];
         if (!m0) { unmeasuredCount++; continue; }
-        var tr = withTransform(m0, meta[i].transform);
+        var tr = withTransform(shiftRect(m0, shiftFor(sheetIdx, i)), meta[i].transform);
         var m = tr.m;
         if (!keepElement(m, tr.unreliable)) continue;
         allPressables.push({
@@ -1841,6 +1948,7 @@ export async function getScreenState(
             testID: meta[i].testID,
             icon: meta[i].icon || null,
             isInput: !!meta[i].isInput,
+            switchValue: (meta[i].switchValue != null ? meta[i].switchValue : undefined),
             inputValue: (meta[i].inputValue != null ? meta[i].inputValue : null),
             inputPlaceholder: (meta[i].inputPlaceholder != null ? meta[i].inputPlaceholder : null),
             overlayIdx: (meta[i].overlayIdx != null ? meta[i].overlayIdx : null),
@@ -1857,7 +1965,7 @@ export async function getScreenState(
         var tm0 = textMeasurements[tmi];
         var tc = textContents[tmi];
         if (!tm0 || !tc) continue;
-        var ttr = withTransform(tm0, textTransforms[tmi]);
+        var ttr = withTransform(shiftRect(tm0, shiftFor(textSheetIdx, tmi)), textTransforms[tmi]);
         var tm = ttr.m;
         if (!keepElement(tm, ttr.unreliable)) continue;
         textBoxes.push({ text: tc, x: tm.x, y: tm.y, width: tm.width, height: tm.height, cx: tm.x + tm.width / 2, cy: tm.y + tm.height / 2 });
@@ -1990,7 +2098,7 @@ export async function getScreenState(
     for (var ti = 0; ti < textContents.length; ti++) {
         var tmA = textMeasurements[ti];
         if (!tmA) { unmeasuredCount++; continue; }
-        var tTr = withTransform(tmA, textTransforms[ti]);
+        var tTr = withTransform(shiftRect(tmA, shiftFor(textSheetIdx, ti)), textTransforms[ti]);
         var tm2 = tTr.m;
         if (!keepElement(tm2, tTr.unreliable)) continue;
         pushClassified({ text: textContents[ti],
@@ -2001,7 +2109,7 @@ export async function getScreenState(
     for (var ii = 0; ii < imageMeta.length; ii++) {
         var imA = imageMeasurements[ii];
         if (!imA) { unmeasuredCount++; continue; }
-        var iTr = withTransform(imA, imageMeta[ii].transform);
+        var iTr = withTransform(shiftRect(imA, shiftFor(imageSheetIdx, ii)), imageMeta[ii].transform);
         var im = iTr.m;
         if (!keepElement(im, iTr.unreliable)) continue;
         pushClassified({ src: imageMeta[ii].src, alt: imageMeta[ii].alt,
@@ -2046,7 +2154,7 @@ export async function getScreenState(
 
     return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages, nativeMarkers: nativeMarkers,
         logBoxSkipped: logBoxSkipped,
-        unmeasuredCount: unmeasuredCount, transformedCount: transformedCount,
+        unmeasuredCount: unmeasuredCount, transformedCount: transformedCount, sheetShift: Math.round(sheetShiftApplied),
         dispatchedCount: meta.length + textContents.length + imageMeta.length };
 })()
     `;
@@ -2059,6 +2167,7 @@ export async function getScreenState(
     let counts: {
         unmeasuredCount?: number;
         transformedCount?: number;
+        sheetShift?: number;
         dispatchedCount?: number;
         logBoxSkipped?: number;
     } = {};
@@ -2087,6 +2196,14 @@ export async function getScreenState(
             `${counts.transformedCount} element(s) are marked ⚠transformed. Their frames come from the layout tree, which does not include ` +
             `native-driven transforms (sticky headers, collapsing toolbars, animating sheets), so the coordinates may not be where the element ` +
             `is drawn. Confirm against a screenshot before tapping those.`
+        );
+    }
+    // A corrected coordinate that says nothing is still a coordinate the caller
+    // cannot check against a screenshot, so name the correction and its size.
+    if ((counts.sheetShift ?? 0) > 0) {
+        completenessNotes.push(
+            `This screen is presented as a modal sheet, which UIKit insets from the top of the window. React Native's measurements do not include ` +
+            `that inset, so every frame below has been corrected by +${counts.sheetShift}pt to match what is actually on screen.`
         );
     }
     // LogBox's own controls used to be the only pressables a screen read returned

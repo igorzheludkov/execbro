@@ -2,6 +2,7 @@ import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
+import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 
 export interface ComponentSummary {
     component: string;
@@ -383,6 +384,7 @@ export async function getScreenLayout(
             }
 
             ${VISIBILITY_HELPERS_JS}
+            ${SHEET_HELPERS_JS}
 
             // Find the first measurable host descendant of a fiber
             function findFirstHost(fiber, depth) {
@@ -532,6 +534,35 @@ export async function getScreenLayout(
             globalThis.__layoutMeta = fiberMeta;
             globalThis.__layoutMeasurements = new Array(hostFibers.length).fill(null);
 
+            // Sheet boundaries — see injected/sheetOffset.ts. A modally-presented
+            // screen measures from its own container, so every frame beneath one
+            // needs the same correction before it can be compared with anything
+            // else in this tree.
+            var sheetFibers = [];
+            var sheetIdxByHost = [];
+            for (var sf = 0; sf < hostFibers.length; sf++) {
+                var bnd = modalBoundaryOf(hostFibers[sf]);
+                var at = -1;
+                if (bnd) {
+                    for (var sj = 0; sj < sheetFibers.length; sj++) {
+                        if (sheetFibers[sj] === bnd) { at = sj; break; }
+                    }
+                    if (at < 0) { sheetFibers.push(bnd); at = sheetFibers.length - 1; }
+                }
+                sheetIdxByHost.push(at);
+            }
+            globalThis.__layoutSheetIdx = sheetIdxByHost;
+            globalThis.__layoutSheetMeasurements = new Array(sheetFibers.length).fill(null);
+            for (var shl = 0; shl < sheetFibers.length; shl++) {
+                try {
+                    (function(idx) {
+                        getMeasurable(sheetFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                            globalThis.__layoutSheetMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                        });
+                    })(shl);
+                } catch(e) {}
+            }
+
             // Dispatch measureInWindow on all host fibers
             for (var i = 0; i < hostFibers.length; i++) {
                 try {
@@ -594,9 +625,13 @@ export async function getScreenLayout(
             var fibers = globalThis.__layoutFibers;
             var meta = globalThis.__layoutMeta;
             var measurements = globalThis.__layoutMeasurements;
+            var sheetIdxByHost = globalThis.__layoutSheetIdx || [];
+            var sheetMeasurements = globalThis.__layoutSheetMeasurements || [];
             globalThis.__layoutFibers = null;
             globalThis.__layoutMeta = null;
             globalThis.__layoutMeasurements = null;
+            globalThis.__layoutSheetIdx = null;
+            globalThis.__layoutSheetMeasurements = null;
 
             if (!fibers || !measurements || !meta) {
                 return { error: 'No measurement data. Run get_screen_layout again.' };
@@ -633,7 +668,22 @@ export async function getScreenLayout(
             // leaves, but a full-screen root legitimately starts at y=0 and shifting it pushes
             // it off the bottom of the screen.
             ${SCREEN_SPACE_HELPER_JS}
+            ${SHEET_HELPERS_JS}
             var SCREEN_SPACE = ${JSON.stringify(screenSpace)};
+
+            // Sheet correction first: it is derived from the sheet's own measured
+            // height, so where it applies the band rule below has nothing left to
+            // guess at (a corrected frame can no longer land in the band).
+            var sheetShifts = [];
+            for (var ssl = 0; ssl < sheetMeasurements.length; ssl++) {
+                sheetShifts.push(sheetShiftY(sheetMeasurements[ssl], { width: viewportW, height: viewportH }));
+            }
+            for (var msl = 0; msl < measurements.length; msl++) {
+                var siL = sheetIdxByHost[msl] == null ? -1 : sheetIdxByHost[msl];
+                var dyL = siL >= 0 && sheetShifts[siL] ? sheetShifts[siL] : 0;
+                if (dyL && measurements[msl]) measurements[msl].y += dyL;
+            }
+
             if (SCREEN_SPACE.topInset > 0) {
                 var rootMinH = viewportH < 9999 ? viewportH * 0.9 : Infinity;
                 for (var sm = 0; sm < measurements.length; sm++) {

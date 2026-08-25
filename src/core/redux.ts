@@ -39,7 +39,8 @@ function buildExpression(body: string): string {
 }
 
 export interface ReduxDispatchOptions {
-    action: Record<string, unknown>;
+    /** One action, or several dispatched in order in a single round trip. */
+    action: Record<string, unknown> | Record<string, unknown>[];
     storeIndex?: number;
     returnPath?: string;
     device?: string;
@@ -91,8 +92,9 @@ export async function reduxDispatch(options: ReduxDispatchOptions): Promise<Redu
             return JSON.stringify({ ok: false, error: 'storeIndex ' + idx + ' out of range; ' + found.length + ' Provider store(s) found.', storeCount: found.length });
         }
         var store = found[idx];
-        var action = JSON.parse(${JSON.stringify(actionJson)});
-        store.dispatch(action);
+        var actions = JSON.parse(${JSON.stringify(actionJson)});
+        if (!Array.isArray(actions)) actions = [actions];
+        for (var a = 0; a < actions.length; a++) { store.dispatch(actions[a]); }
         var pathStr = ${pathLiteral};
         var state;
         if (pathStr) {
@@ -104,7 +106,7 @@ export async function reduxDispatch(options: ReduxDispatchOptions): Promise<Redu
             }
             try { state = JSON.parse(JSON.stringify(slice)); } catch (e) { state = { __error: 'state slice not JSON-serializable: ' + e.message }; }
         }
-        return JSON.stringify({ ok: true, storeCount: found.length, storeIndex: idx, action: action, state: state });
+        return JSON.stringify({ ok: true, storeCount: found.length, storeIndex: idx, action: actions.length === 1 ? actions[0] : actions, dispatched: actions.length, state: state });
     `;
     return runReduxExpression(buildExpression(body), "redux_dispatch", device);
 }

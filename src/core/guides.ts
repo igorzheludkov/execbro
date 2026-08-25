@@ -100,6 +100,9 @@ looks wrong and isn't on the node itself, walk the ancestors it returns.
   open overlays, and every on-screen element with a tap-ready (x, y) and frame. Reads screen
   content (prices, labels, which image loaded) without a screenshot+OCR round-trip.
   - pressablesOnly=true for just the tappable list.
+  - Switches and checkboxes are listed with their current value as [switch:ON] / [switch:OFF].
+    They carry no onPress, so tap them by testID or component — never by guessing an x from a
+    screenshot, which lands on the neighbouring row about as often as not.
   - Elements under an open overlay or a raised keyboard are grouped separately — taps will
     not reach them until it closes.
   - A LogBox banner is excluded from the listing (it mounts above the app and its own buttons
@@ -110,6 +113,12 @@ looks wrong and isn't on the node itself, walk the ancestors it returns.
 All layout tools, tap() and the screenshots share ONE screen-space coordinate system. A frame
 read from get_screen_state, get_screen_layout, measure or inspect_at_point can be passed to
 tap(x, y) unchanged. Do not divide by the device pixel ratio.
+
+On a screen presented as a modal sheet (presentation:'modal'), UIKit insets the screen from the
+top of the window and React Native's measurements do not include that inset. Every one of these
+tools now corrects for it — derived from the sheet's own measured height, not assumed — so they
+still agree with each other and with a screenshot. get_screen_state names the correction and its
+size in a note when it applies.
 
 ## Verify UI Changes
 1. ios_screenshot / android_screenshot — capture current screen
@@ -168,6 +177,18 @@ The response carries longPress.handlerFound:
 Elements wired ONLY for long press (onLongPress with no onPress) are invisible to an ordinary tap by design — a short press on them does nothing. Passing duration is what makes them resolvable.
 
 android_long_press still exists for coordinate holds on Android with no React Native connection; anything reachable through RN should use tap(duration=...).
+
+## Switches and Checkboxes
+A Switch has no onPress — its state lives in a value prop — so it used to be unreachable except
+by guessing coordinates off a screenshot. tap resolves one like anything else:
+tap(testID="notifications-switch") or tap(component="Switch", index=N). get_screen_state lists
+every switch with its current value, so you know which one you are about to flip.
+
+The response carries switch.before / switch.after / switch.changed, read back off the element
+after the gesture. Read it. A pixel diff reports meaningful:true with the same ~0.4% change rate
+whether you flipped the right row or the one above it, so the value is the only signal that tells
+those apart. changed:false with a warning means the gesture landed but the value did not move —
+a disabled switch, a controlled one whose parent rejected the change, or a miss.
 
 ## Pinch to Zoom (Android emulator only — iOS in progress)
 pinch sends REAL two-finger touch events through the Android emulator's multi-touch bridge, so it drives anything on screen — React Native, native views, WebViews, maps:
@@ -309,7 +330,14 @@ If network tools return no data or you need startup requests, recommend the SDK 
 2. Filter by what you need:
    - get_network_requests with urlPattern, method, or status filters
    - search_network with urlPattern for text search
-3. get_request_details with requestId — full headers, body, timing for a specific request
+3. get_request_details with requestId — headers, body, timing for one request
+   - The first call returns the body's SHAPE (key paths, array sizes), not the whole thing
+   - Then narrow: get_request_details({requestId, query:"data.orders[0].status"})
+   - A query renders ONLY the queried body — no headers, no other side. Pass
+     include:"request" | "response" | "both" when you want the rest
+   - Authorization, Cookie and api-key headers print as scheme + length. verbose:true
+     shows the value — it also puts a live token in the transcript, so only when you
+     actually need to compare it
 4. clear_network — reset buffer, then re-capture
 
 ## Changing what the network returns
@@ -329,7 +357,7 @@ changed body or header, without driving the UI back to the screen that made it.
 ## Key Tools
 - get_network_requests: list requests with filters (urlPattern, method, status, summary)
 - search_network: search by URL pattern
-- get_request_details: full request/response details (use verbose=true for large payloads). With SDK installed, includes full request/response bodies.
+- get_request_details: one request's headers, body, timing. Shape first, then query="dotted.path" to pull a field in full. With SDK installed, includes full request/response bodies.
 - clear_network: reset the request buffer
 - network_mock: replace or tamper with responses (add / list / remove / clear)
 - network_condition: offline / slow / normal
@@ -337,7 +365,8 @@ changed body or header, without driving the UI back to the screen that made it.
 
 ## Tips
 - Start with summary=true to see the request landscape
-- Use get_request_details with verbose=true for full JSON payloads
+- Narrow with query, not verbose: on a GraphQL response verbose is the 40KB dump query exists to avoid, and it re-prints the bearer token on every call
+- A query costs a few hundred characters because it drops the other side and the headers; add include:"both" only when you need them
 - If no network data appears, the app may be on a Bridgeless target — suggest installing the SDK
 - With SDK: response bodies show full GraphQL responses, useful for debugging data issues
 - Mock rules are per-device and survive reload_app. Every network read carries a banner while any rule is active — clear them when done, or the next investigation starts against altered traffic
@@ -361,6 +390,12 @@ If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths
 - Inspect navigation ref: inspect_global("__RN_AI_DEVTOOLS__.navigation")
 - Inspect a custom object (e.g. mmkv, api client): inspect_global("__RN_AI_DEVTOOLS__.custom.mmkv")
 - Read state: execute_in_app("__RN_AI_DEVTOOLS__.stores.redux.getState().sliceName")
+
+## Redux
+- redux_get_state({path:"cart"}) — read a slice, resolved through the app's <Provider> store
+- redux_dispatch({action:{type:"app/setIsLoading",payload:true}}) — dispatch through that same store, so useSelector subscribers re-render
+- redux_dispatch({action:[a, b, c], returnPath:"settings"}) — an ARRAY dispatches in order in ONE round trip. Restoring a settings slice is one call, not one per field
+- To reach an error branch, mock the response instead — redux_dispatch writes the post-failure state directly and skips the request builder, the error branch and the retry
 
 ## Common Patterns (no SDK)
 - Read Redux: execute_in_app("globalThis.__REDUX_STORE__.getState().sliceName")

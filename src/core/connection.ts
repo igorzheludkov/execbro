@@ -2234,6 +2234,26 @@ export function getPassiveConnectionStatus(targetAppKey?: string): PassiveConnec
     return { connected: true, needsPing: false, reason: "ok" };
 }
 
+/**
+ * Banner for a read that returned data while the passive status says something
+ * is off.
+ *
+ * Only `no_connection` is a MEASURED verdict — the socket is gone from the
+ * registry or not OPEN. `context_stale` and `no_activity` are inferences: a
+ * destroyed execution context with no create seen yet, or no CDP traffic
+ * recorded. Both survive a perfectly healthy app, and reporting them as
+ * "Disconnected" pushed agents into a needless scan_metro, which throws away
+ * navigation stack, auth and in-memory caches. Say what is actually known.
+ */
+export function passiveConnectionBanner(targetAppKey?: string): string {
+    const passive = getPassiveConnectionStatus(targetAppKey);
+    if (passive.connected) return "";
+    if (passive.reason === "no_connection") {
+        return "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured.";
+    }
+    return `\n\n[CONNECTION] Status unknown for this read (${passive.reason}) — inferred, not measured. The data above is real; if you suspect capture stopped, call ensure_connection({healthCheck:true}) rather than scan_metro.`;
+}
+
 export async function checkAndEnsureConnection(device?: string): Promise<ConnectionCheckResult> {
     // Resolve targeted device to appKey if specified
     let targetAppKey: string | undefined;

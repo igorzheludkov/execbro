@@ -2,6 +2,7 @@ import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC } from "./injectedFilters.js";
+import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 
 // ============================================================================
 // Pressable Elements & onPress invocation
@@ -148,7 +149,29 @@ export async function pressElement(options: {
             function isPressableProps(p) {
                 if (!p) return false;
                 if (typeof p.onPress === 'function') return true;
+                // Switch/Checkbox: no onPress anywhere on the fiber, so these used to be
+                // untargetable — the only way to flip one was to guess an x from a
+                // screenshot and pair it with the row label's y, which silently flips the
+                // neighbouring row when the guess is off.
+                if (typeof p.onValueChange === 'function') return true;
                 return wantLongPress && typeof p.onLongPress === 'function';
+            }
+            /**
+             * A Switch is not identified by its handlers. Verified on device
+             * (RN 0.83, iPhone Air): the app renders <Switch value={x} /> with no
+             * onValueChange at all and drives it from a gesture-handler row, so the
+             * fiber carries value and nothing else. Keying off onValueChange alone
+             * would leave exactly the switch that prompted this untargetable.
+             */
+            function isSwitchFiber(fiber, p) {
+                if (p && typeof p.onValueChange === 'function') return true;
+                if (!fiber || typeof fiber.type === 'string') return false;
+                return getComponentName(fiber) === 'Switch';
+            }
+            /** Current value of a Switch-like element; null when this is not one. */
+            function switchValueOf(fiber, p) {
+                if (!isSwitchFiber(fiber, p)) return null;
+                return p && typeof p.value === 'boolean' ? p.value : null;
             }
             function hasLongPressProps(p) {
                 return !!(p && typeof p.onLongPress === 'function');
@@ -167,6 +190,7 @@ export async function pressElement(options: {
             }
 
             ${VISIBILITY_HELPERS_JS}
+            ${SHEET_HELPERS_JS}
 
             // When a fiber holds a string/number child via memoizedProps.children, return it
             // without recursing — Text > RCTText > NativeText all carry the same string,
@@ -311,7 +335,7 @@ export async function pressElement(options: {
 
                 if (isScreenHidden(name, props)) return;
 
-                var isPressable = isPressableProps(props);
+                var isPressable = isPressableProps(props) || isSwitchFiber(fiber, props);
                 var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
                 if (isPressable || isInput) {
@@ -341,6 +365,7 @@ export async function pressElement(options: {
                             isInput: isInput,
                             isPressable: isPressable,
                             hasLongPress: hasLongPressProps(props),
+                            switchValue: switchValueOf(fiber, props),
                             source: 'direct'
                         });
                     }
@@ -375,7 +400,7 @@ export async function pressElement(options: {
                     function findDescendantPressable(fiber, d) {
                         if (!fiber || d > 10) return null;
                         var fp = fiber.memoizedProps;
-                        var dIsPressable = isPressableProps(fp);
+                        var dIsPressable = isPressableProps(fp) || isSwitchFiber(fiber, fp);
                         var dIsInput = !dIsPressable && fp && (typeof fp.onChangeText === 'function' || typeof fp.onFocus === 'function');
                         if (dIsPressable || dIsInput) return { fiber: fiber, isPressable: dIsPressable, isInput: dIsInput };
                         var c = fiber.child;
@@ -395,7 +420,7 @@ export async function pressElement(options: {
 
                         var tid = props && (props.testID || props.nativeID || null);
                         if (tid === searchTestID) {
-                            var nIsPressable = isPressableProps(props);
+                            var nIsPressable = isPressableProps(props) || isSwitchFiber(fiber, props);
                             var nIsInput = !nIsPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
                             if (nIsPressable || nIsInput) {
@@ -413,6 +438,7 @@ export async function pressElement(options: {
                                         isInput: nIsInput,
                                         isPressable: nIsPressable,
                                         hasLongPress: hasLongPressProps(props),
+                                        switchValue: switchValueOf(fiber, props),
                                         source: 'testID-direct'
                                     });
                                 }
@@ -422,7 +448,7 @@ export async function pressElement(options: {
                                 var d = 0;
                                 while (parent && d < maxTraversalUp) {
                                     var pp = parent.memoizedProps;
-                                    var pIsPressable = isPressableProps(pp);
+                                    var pIsPressable = isPressableProps(pp) || isSwitchFiber(parent, pp);
                                     var pIsInput = !pIsPressable && pp && (typeof pp.onChangeText === 'function' || typeof pp.onFocus === 'function');
                                     if (pIsPressable || pIsInput) {
                                         var pText = pIsPressable ? extractText(parent, 0) : (extractText(parent, 0) || (typeof pp.value === 'string' ? pp.value : '') || (typeof pp.defaultValue === 'string' ? pp.defaultValue : '') || (typeof pp.placeholder === 'string' ? pp.placeholder : ''));
@@ -439,6 +465,7 @@ export async function pressElement(options: {
                                                 isInput: pIsInput,
                                                 isPressable: pIsPressable,
                                                 hasLongPress: hasLongPressProps(pp),
+                                                switchValue: switchValueOf(parent, pp),
                                                 source: 'testID-ancestor'
                                             });
                                             foundAncestor = true;
@@ -467,6 +494,7 @@ export async function pressElement(options: {
                                                 isInput: desc.isInput,
                                                 isPressable: desc.isPressable,
                                                 hasLongPress: hasLongPressProps(dp),
+                                                switchValue: switchValueOf(desc.fiber, dp),
                                                 source: 'testID-descendant'
                                             });
                                         }
@@ -504,7 +532,7 @@ export async function pressElement(options: {
                     function findDescendantPressableOnly(fiber, d) {
                         if (!fiber || d > 10) return null;
                         var fp = fiber.memoizedProps;
-                        if (isPressableProps(fp)) return fiber;
+                        if (isPressableProps(fp) || isSwitchFiber(fiber, fp)) return fiber;
                         var c = fiber.child;
                         while (c) {
                             var r = findDescendantPressableOnly(c, d + 1);
@@ -526,7 +554,7 @@ export async function pressElement(options: {
                             var d = 0;
                             while (parent && d < maxTraversalUp) {
                                 var pp = parent.memoizedProps;
-                                if (isPressableProps(pp)) {
+                                if (isPressableProps(pp) || isSwitchFiber(parent, pp)) {
                                     var text = extractText(parent, 0);
                                     var host = findFirstHost(parent, 0, false);
                                     if (host) {
@@ -541,6 +569,7 @@ export async function pressElement(options: {
                                             isInput: false,
                                             isPressable: true,
                                             hasLongPress: hasLongPressProps(pp),
+                                            switchValue: switchValueOf(parent, pp),
                                             source: 'component-ancestor'
                                         });
                                         foundAncestor = true;
@@ -569,6 +598,7 @@ export async function pressElement(options: {
                                             isInput: false,
                                             isPressable: true,
                                             hasLongPress: hasLongPressProps(dp),
+                                            switchValue: switchValueOf(descFiber, dp),
                                             source: 'component-descendant'
                                         });
                                     }
@@ -596,10 +626,58 @@ export async function pressElement(options: {
                 return { error: 'No pressable or focusable elements found. Searched for: ' + criteria.join(', ') };
             }
 
+            // Sheet boundaries and the true viewport.
+            //
+            // A modally-presented screen is laid out by UIKit at an offset RN's
+            // measurements do not include (injected/sheetOffset.ts). Without this,
+            // fiber coordinates inside a sheet are short by that inset — and the
+            // viewport heuristic below, which picks whatever measured first at
+            // x=0, sized the sheet rather than the window and reported every
+            // element on it as "below-viewport". Both come from the same gap.
+            var sheetFibers = [];
+            var sheetIdxByHost = [];
+            for (var sfi2 = 0; sfi2 < hostFibers.length; sfi2++) {
+                var bnd = modalBoundaryOf(hostFibers[sfi2]);
+                var at = -1;
+                if (bnd) {
+                    for (var sfj = 0; sfj < sheetFibers.length; sfj++) {
+                        if (sheetFibers[sfj] === bnd) { at = sfj; break; }
+                    }
+                    if (at < 0) { sheetFibers.push(bnd); at = sheetFibers.length - 1; }
+                }
+                sheetIdxByHost.push(at);
+            }
+
             // Store host fibers and metadata globally for step 2, dispatch measureInWindow
             globalThis.__tapHostFibers = hostFibers;
             globalThis.__tapMeta = tapMeta;
             globalThis.__tapMeasurements = new Array(hostFibers.length).fill(null);
+            globalThis.__tapSheetIdx = sheetIdxByHost;
+            globalThis.__tapSheetMeasurements = new Array(sheetFibers.length).fill(null);
+            globalThis.__tapViewport = null;
+            for (var shi2 = 0; shi2 < sheetFibers.length; shi2++) {
+                try {
+                    (function(idx) {
+                        getMeasurable(sheetFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                            globalThis.__tapSheetMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                        });
+                    })(shi2);
+                } catch(e) {}
+            }
+            try {
+                var viewportHost = null;
+                (function findRootHost(f, d) {
+                    if (viewportHost || !f || d > 40) return;
+                    if (typeof f.type === 'string' && getMeasurable(f)) { viewportHost = f; return; }
+                    var c = f.child;
+                    while (c && !viewportHost) { findRootHost(c, d + 1); c = c.sibling; }
+                })(roots[0].current, 0);
+                if (viewportHost) {
+                    getMeasurable(viewportHost).measureInWindow(function(fx, fy, fw, fh) {
+                        globalThis.__tapViewport = { x: fx, y: fy, width: fw, height: fh };
+                    });
+                }
+            } catch(e) {}
 
             for (var mi = 0; mi < hostFibers.length; mi++) {
                 try {
@@ -631,12 +709,19 @@ export async function pressElement(options: {
     // --- Step 2: Read measurements, filter visible, match by query ---
     const resolveExpression = `
         (function() {
+            ${SHEET_HELPERS_JS}
             var hostFibers = globalThis.__tapHostFibers;
             var meta = globalThis.__tapMeta;
             var measurements = globalThis.__tapMeasurements;
+            var sheetIdxByHost = globalThis.__tapSheetIdx || [];
+            var sheetMeasurements = globalThis.__tapSheetMeasurements || [];
+            var viewportM = globalThis.__tapViewport;
             globalThis.__tapHostFibers = null;
             globalThis.__tapMeta = null;
             globalThis.__tapMeasurements = null;
+            globalThis.__tapSheetIdx = null;
+            globalThis.__tapSheetMeasurements = null;
+            globalThis.__tapViewport = null;
 
             if (!hostFibers || !measurements || !meta) {
                 return { error: 'No measurement data. Dispatch step may have failed.' };
@@ -647,9 +732,14 @@ export async function pressElement(options: {
             var searchComponent = ${componentParam};
             var targetIndex = ${index};
 
-            // Determine viewport bounds
+            // Determine viewport bounds. The app's own root host is the honest
+            // answer; the scan below is the fallback for when it did not measure.
             var viewportW = 9999, viewportH = 9999;
-            for (var v = 0; v < measurements.length; v++) {
+            if (viewportM && viewportM.width > 0 && viewportM.height > 0) {
+                viewportW = viewportM.width;
+                viewportH = viewportM.height + (viewportM.y > 0 ? viewportM.y : 0);
+            }
+            for (var v = 0; viewportW === 9999 && v < measurements.length; v++) {
                 if (measurements[v] && measurements[v].x === 0 && measurements[v].y <= 0 &&
                     measurements[v].width > 0 && measurements[v].height > 0) {
                     viewportW = measurements[v].width;
@@ -663,8 +753,16 @@ export async function pressElement(options: {
             // not laid out" from "doesn't exist in the fiber tree at all".
             var matches = [];
             var invisibleMatches = [];
+            // Correct sheet-relative measurements before anything reads them: the
+            // visibility test and the tap target must share one space.
+            var sheetShifts = [];
+            for (var ssi = 0; ssi < sheetMeasurements.length; ssi++) {
+                sheetShifts.push(sheetShiftY(sheetMeasurements[ssi], { width: viewportW, height: viewportH }));
+            }
+
             for (var i = 0; i < measurements.length; i++) {
-                var m = measurements[i];
+                var si = sheetIdxByHost[i] == null ? -1 : sheetIdxByHost[i];
+                var m = shiftRect(measurements[i], si >= 0 && sheetShifts[si] ? sheetShifts[si] : 0);
                 if (!m) continue;
 
                 var info = meta[i];
@@ -705,6 +803,7 @@ export async function pressElement(options: {
                         path: info.path,
                         isInput: info.isInput,
                         hasLongPress: info.hasLongPress,
+                        switchValue: info.switchValue,
                         x: Math.round(m.x + m.width / 2),
                         y: Math.round(m.y + m.height / 2)
                     });
@@ -771,7 +870,11 @@ export async function pressElement(options: {
                 isInput: target.isInput,
                 // Only the fiber strategy can answer this; accessibility, OCR and
                 // coordinate taps have no view of the handlers.
-                hasLongPress: !!target.hasLongPress
+                hasLongPress: !!target.hasLongPress,
+                // null unless the resolved element is Switch-like — lets tap report
+                // the value it actually changed instead of a pixel diff that reads
+                // identically for a correct and an incorrect toggle.
+                switchValue: target.switchValue === undefined ? null : target.switchValue
             };
             if (matches.length > 1) {
                 result.allMatches = matches.map(function(m, i) {

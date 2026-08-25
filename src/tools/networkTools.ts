@@ -10,6 +10,7 @@ import {
     metroMissingHintIfAbsent,
     checkAndEnsureConnection,
     getPassiveConnectionStatus,
+    passiveConnectionBanner,
     getRecentGaps,
     formatDuration,
     getNetworkBuffer,
@@ -190,10 +191,7 @@ export function registerNetworkTools(server: McpServer): void {
                     connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
                 }
             } else {
-                const passive = getPassiveConnectionStatus();
-                connectionWarning = !passive.connected
-                    ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
-                    : "";
+                connectionWarning = passiveConnectionBanner();
             }
     
             // Check for recent connection gaps
@@ -275,10 +273,7 @@ export function registerNetworkTools(server: McpServer): void {
                     connectionWarning += await metroMissingHintIfAbsent("search_network");
                 }
             } else {
-                const passive = getPassiveConnectionStatus();
-                connectionWarning = !passive.connected
-                    ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
-                    : "";
+                connectionWarning = passiveConnectionBanner();
             }
     
             return {
@@ -303,6 +298,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: get id -> read the shape -> get_request_details({ requestId, query }) for the subtree you need.\n" +
                 "SHAPE FIRST: a large JSON body returns as its structure — key paths kept, arrays and objects annotated with real sizes, leaves clipped. The first call already answers 'is there an errors array' and 'does this field exist'.\n" +
                 "QUERY: dot-path into the JSON body, returned in full. Supports a.b.c, [0], [-1], [*], [\"key.with.dots\"]. Targets the response body, or the request body when there is none. No match returns the shape plus what IS there — retry from that.\n" +
+                "SIDES: with a query, only the queried body is rendered (no headers, no other side) — include:\"response\"/\"request\"/\"both\" overrides. Credential headers are redacted to scheme + length; verbose:true prints them.\n" +
                 "LIMITATIONS: Bodies need the execbro-sdk; CDP-only targets have no response body. Non-JSON is clipped at maxBodyLength, not projected.\n" +
                 "GOOD: get_request_details({ requestId: \"42\", query: \"data.approvals.single.basicInfo\" }) | query: \"errors[*].message\"\n" +
                 "BAD: verbose:true to find one field — that is the 40KB dump this avoids. Or guessing requestIds.\n",
@@ -321,15 +317,19 @@ export function registerNetworkTools(server: McpServer): void {
                     .describe(
                         `Byte target for each rendered body (default: ${DEFAULT_BODY_BUDGET}, 0 for unlimited). JSON is bounded structurally, so this trades depth and array width for size rather than cutting the text off.`
                     ),
+                include: z
+                    .enum(["request", "response", "both"])
+                    .optional()
+                    .describe("Which side to render (headers + body). Defaults to the side `query` targets, or \"both\" when there is no query — so narrowing with query no longer re-dumps the request headers and the whole GraphQL query text on every call."),
                 verbose: z
                     .boolean()
                     .optional()
                     .default(false)
-                    .describe("Return bodies raw and unbounded. Prefer query — verbose on a large JSON body is the 40KB dump this tool exists to avoid."),
+                    .describe("Return bodies raw and unbounded, and print credential headers (Authorization, Cookie, …) in full instead of redacted. Prefer query — verbose on a large JSON body is the 40KB dump this tool exists to avoid."),
                 device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
-        async ({ requestId, query, maxBodyLength, verbose, device }) => {
+        async ({ requestId, query, maxBodyLength, verbose, include, device }) => {
             // Single source: the buffer holds mirrored SDK entries (with bodies),
             // CDP entries and interceptor entries, across every app run. get()
             // falls back across epochs so a pre-restart id still resolves.
@@ -374,7 +374,7 @@ export function registerNetworkTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: formatRequestDetails(request, { maxBodyLength, verbose, query }) + activeMockBanner()
+                        text: formatRequestDetails(request, { maxBodyLength, verbose, query, include }) + activeMockBanner()
                     }
                 ]
             };

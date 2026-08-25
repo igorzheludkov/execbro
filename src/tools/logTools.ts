@@ -13,6 +13,7 @@ import {
     logBuffers,
     verifyLogPipeline,
     getPassiveConnectionStatus,
+    passiveConnectionBanner,
     connectedApps,
     getRecentGaps,
     formatDuration,
@@ -444,10 +445,7 @@ export function registerLogTools(server: McpServer): void {
 
                 connectionWarning += await metroMissingHintIfAbsent("get_logs");
             } else {
-                const passive = getPassiveConnectionStatus();
-                connectionWarning = !passive.connected
-                    ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
-                    : "";
+                connectionWarning = passiveConnectionBanner();
             }
     
             // Check for recent connection gaps
@@ -544,10 +542,7 @@ export function registerLogTools(server: McpServer): void {
                 connectionWarning = status.message ? `\n\n${status.message}` : "";
                 connectionWarning += await metroMissingHintIfAbsent("search_logs");
             } else {
-                const passive = getPassiveConnectionStatus();
-                connectionWarning = !passive.connected
-                    ? "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured."
-                    : "";
+                connectionWarning = passiveConnectionBanner();
             }
     
             return {

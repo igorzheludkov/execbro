@@ -258,7 +258,7 @@ export function registerComponentTools(server: McpServer): void {
                 "SEE ALSO: get_screen_layout for the full component tree; this is a flat, tap-ready content list.",
             inputSchema: {
                 device: z.string().optional().describe(DEVICE_ARG_DESC),
-                pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false."),
+                pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false. Pressables include Switch/checkbox elements (onValueChange), each rendered with its current value as [switch:ON] / [switch:OFF] — tap those by testID or component instead of guessing an x from a screenshot."),
                 fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false."),
                 fullParams: z.boolean().optional().describe("Emit the route params' values. Default false — only the param key names are listed, because the full blob is usually hundreds of characters of ids and image URLs."),
                 includeHistory: z.boolean().optional().describe("Append the route trail — which screens the app has been on, most recent first, with dwell time and the route each was entered from. Recorded from connection time; an app restart shows an epoch divider. If no navigation listener could be attached the trail reports itself as sampled, meaning transitions between calls may be missing. Default false.")
