@@ -77,6 +77,20 @@ function networkDiagnosisDeps(device?: string) {
     };
 }
 
+/**
+ * What an empty buffer means, given whether the SDK is present.
+ *
+ * Printing the install tip when the SDK IS installed sends the reader down a
+ * false trail: the SDK sets __RN_NET_DISABLED__ to stop the server duplicating
+ * its capture, so an empty buffer there means no request has fired, not that
+ * capture is missing.
+ */
+function sdkCaptureNote(sdkAvailable: boolean): string {
+    return sdkAvailable
+        ? "\n\n[NOTE] execbro-sdk capture is active — the buffer is empty because no matching request has fired since the app started or the buffer was last cleared."
+        : "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
+}
+
 export function registerNetworkTools(server: McpServer): void {
     // Tool: Get network requests
     registerToolWithTelemetry(
@@ -134,9 +148,7 @@ export function registerNetworkTools(server: McpServer): void {
                     const diagnosis = await diagnoseEmptyResult(networkDiagnosisDeps(device));
                     connectionWarning = diagnosis.warning;
                     emptyReason = diagnosis.reason;
-                    if (!sdkAvailable) {
-                        connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
-                    }
+                    connectionWarning += sdkCaptureNote(sdkAvailable);
                     connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
                 }
                 return {
@@ -185,9 +197,7 @@ export function registerNetworkTools(server: McpServer): void {
                     const diagnosis = await diagnoseEmptyResult(networkDiagnosisDeps(device));
                     connectionWarning = diagnosis.warning;
                     emptyReason = diagnosis.reason;
-                    if (!sdkAvailable) {
-                        connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
-                    }
+                    connectionWarning += sdkCaptureNote(sdkAvailable);
                     connectionWarning += await metroMissingHintIfAbsent("get_network_requests");
                 }
             } else {
@@ -267,9 +277,7 @@ export function registerNetworkTools(server: McpServer): void {
                 } else {
                     const diagnosis = await diagnoseEmptyResult(networkDiagnosisDeps(device));
                     connectionWarning = diagnosis.warning;
-                    if (!(await isSDKInstalled(device))) {
-                        connectionWarning += "\n\n[TIP] For full network capture including startup requests and response bodies, install the SDK: npm install execbro-sdk";
-                    }
+                    connectionWarning += sdkCaptureNote(await isSDKInstalled(device));
                     connectionWarning += await metroMissingHintIfAbsent("search_network");
                 }
             } else {

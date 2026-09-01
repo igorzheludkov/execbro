@@ -33,6 +33,14 @@ type SDKResult<T> = { success: true; data: T } | { success: false; error: string
 
 export async function isSDKInstalled(device?: string): Promise<boolean> {
     if (connectedApps.size === 0) return false;
+    // The connect-time probe loop already maintains this per app. Trusting it
+    // first avoids a round trip that can time out under load and report the SDK
+    // as absent — which is how "install the SDK" got printed to a developer who
+    // had it installed, and whose empty buffer was caused by that very SDK
+    // suppressing server-side capture.
+    for (const app of connectedApps.values()) {
+        if (app.sdkPresent === true) return true;
+    }
     const result = await executeInApp(
         'typeof (globalThis.__EXECBRO__ ?? globalThis.__RN_AI_DEVTOOLS__)?.getNetworkEntries === "function"',
         false,

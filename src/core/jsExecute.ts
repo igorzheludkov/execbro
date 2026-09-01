@@ -777,6 +777,28 @@ function executeCDP(
 }
 
 /**
+ * Spaced-out poll delays that add up to `budgetMs`: the original 100/300/600/
+ * 1000/2000/3000 ladder, then 3s steps for whatever budget remains.
+ */
+export function buildPollDelays(budgetMs: number): number[] {
+    const ladder = [100, 300, 600, 1000, 2000, 3000];
+    const out: number[] = [];
+    let spent = 0;
+    for (const d of ladder) {
+        if (spent + d > budgetMs) break;
+        out.push(d);
+        spent += d;
+    }
+    while (budgetMs - spent >= 3000) {
+        out.push(3000);
+        spent += 3000;
+    }
+    // A budget smaller than the first rung still deserves one look.
+    if (out.length === 0) out.push(Math.max(50, budgetMs));
+    return out;
+}
+
+/**
  * Hermes workaround for awaitPromise: execute the expression, and if it
  * returns a Promise, store the resolved/rejected value in a temp global
  * and read it back with a small number of spaced-out retries.
@@ -807,7 +829,10 @@ else{return __v}})()`;
 
     // Read the settled value with a few spaced-out retries (not aggressive polling).
     // Most Promises resolve within a microtask or a single event loop tick.
-    const RETRY_DELAYS_MS = [100, 300, 600, 1000, 2000, 3000];
+    // The budget is the caller's timeoutMs: it used to be a fixed ~7s ladder, so
+    // execute_in_app({ timeoutMs: 90000 }) still gave up after 7s and turned one
+    // call into four.
+    const RETRY_DELAYS_MS = buildPollDelays(timeoutMs);
     const readExpr = `(function(){var s=globalThis['${slotId}'];if(!s||s.s==='pending')return '__pending__';delete globalThis['${slotId}'];return{status:s.s,value:s.v}})()`;
 
     for (const delayMs of RETRY_DELAYS_MS) {
@@ -849,7 +874,7 @@ else{return __v}})()`;
         error:
             `Promise did not settle within ${budgetMs}ms — but the result is NOT lost. ` +
             `Collect it once the operation has had time to finish: ` +
-            `execute_in_app({ collect: "${slotId}" }).`
+            `execute_in_app({ collect: "${slotId}", waitMs: 30000 }) blocks until it settles.`
     };
 }
 

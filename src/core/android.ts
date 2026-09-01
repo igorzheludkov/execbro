@@ -1906,3 +1906,48 @@ export async function androidTapElement(
         };
     }
 }
+
+/**
+ * adb serial for the device an RN target reports as `deviceName`.
+ *
+ * `getAdbIdForAvd` only matches when that name IS the AVD name. On RN 0.83 it
+ * is "<ro.product.model> - <release> - API <sdk>" instead, so the AVD lookup
+ * misses, `adbSerial` stays null for the whole session, and every screenshot
+ * taken by serial loses its pressable enrichment (nothing maps the serial back
+ * to the connected app). Fall back to the device's own `ro.product.model`,
+ * which is the prefix of that name.
+ */
+export async function resolveAdbSerialForDeviceName(deviceName: string): Promise<string | null> {
+    const byAvd = await getAdbIdForAvd(deviceName).catch(() => null);
+    if (byAvd) return byAvd;
+
+    if (await requireAdb()) return null;
+    try {
+        const { stdout } = await execFileAsync("adb", ["devices"], { timeout: ADB_TIMEOUT });
+        const serials = stdout
+            .trim()
+            .split("\n")
+            .slice(1)
+            .map((line) => line.trim().split(/\s+/))
+            .filter((parts) => parts[1] === "device")
+            .map((parts) => parts[0]);
+
+        const name = deviceName.trim();
+        for (const serial of serials) {
+            try {
+                const { stdout: model } = await execFileAsync(
+                    "adb",
+                    ["-s", serial, "shell", "getprop", "ro.product.model"],
+                    { timeout: ADB_TIMEOUT }
+                );
+                const m = model.trim();
+                if (m && name.startsWith(m)) return serial;
+            } catch {
+                // skip this serial
+            }
+        }
+    } catch {
+        // adb unavailable — best effort
+    }
+    return null;
+}

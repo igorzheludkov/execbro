@@ -6,6 +6,7 @@ import { getRefreshStatus } from "../core/fastRefreshTools.js";
 import { applyResultBudget, DEFAULT_MAX_BYTES } from "../core/truncate.js";
 import { projectJsonText, formatProjectionNote } from "../core/jsonProjection.js";
 import { buildCollectExpression, dropHandle } from "../core/promiseHandles.js";
+import { buildPollDelays } from "../core/jsExecute.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
 
 export function registerExecutionTools(server: McpServer): void {
@@ -31,6 +32,12 @@ export function registerExecutionTools(server: McpServer): void {
                     .optional()
                     .describe(
                         "Collect a deferred promise result by handle. When a promise outlives its poll budget the result is kept in the app and its handle returned; pass it here to retrieve the settled value. Use instead of `expression`, not alongside it."
+                    ),
+                waitMs: z.coerce
+                    .number()
+                    .optional()
+                    .describe(
+                        "collect only: block up to this long (ms, capped at 120000) waiting for the handle to settle, instead of returning 'Still pending' immediately. Default 0 — one look, no wait."
                     ),
                 expression: z
                     .string()
@@ -64,20 +71,33 @@ export function registerExecutionTools(server: McpServer): void {
                     )
             }
         },
-        async ({ expression, collect, awaitPromise, maxResultLength, verbose, device, timeoutMs }) => {
+        async ({ expression, collect, awaitPromise, maxResultLength, verbose, device, timeoutMs, waitMs }) => {
             if (collect) {
-                const collected = await executeInApp(
+                // Poll server-side for up to waitMs. Without this the only way to
+                // wait for a slow promise was to burn turns re-calling collect.
+                const delays = waitMs ? buildPollDelays(Math.min(waitMs, 120000)) : [];
+                let collected = await executeInApp(
                     buildCollectExpression(collect),
                     false,
                     { originatingToolName: "execute_in_app" },
                     device
                 );
+                for (const delayMs of delays) {
+                    if (!collected.success || collected.result !== "__pending__") break;
+                    await new Promise((r) => setTimeout(r, delayMs));
+                    collected = await executeInApp(
+                        buildCollectExpression(collect),
+                        false,
+                        { originatingToolName: "execute_in_app" },
+                        device
+                    );
+                }
                 if (!collected.success) {
                     return { content: [{ type: "text", text: `Error: ${collected.error}` }], isError: true };
                 }
                 if (collected.result === "__pending__") {
                     return {
-                        content: [{ type: "text", text: `Still pending. Retry execute_in_app({ collect: "${collect}" }) shortly.` }]
+                        content: [{ type: "text", text: `Still pending. Retry execute_in_app({ collect: "${collect}", waitMs: 30000 }) to block until it settles.` }]
                     };
                 }
                 dropHandle(collect);

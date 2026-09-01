@@ -6,7 +6,7 @@ import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyI
 import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
-import { getAdbIdForAvd } from "./android.js";
+import { resolveAdbSerialForDeviceName } from "./android.js";
 import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
@@ -1355,13 +1355,13 @@ export async function connectToDevice(
 
             // Resolve native identifiers from the device name in parallel:
             //   - iOS: simulator UDID via findSimulatorByName
-            //   - Android: adb serial via getAdbIdForAvd (maps AVD name → emulator-NNNN)
+            //   - Android: adb serial via resolveAdbSerialForDeviceName (AVD name, else model)
             // Both are best-effort; failures are swallowed. Identifiers enable
             // automatic device scoping and power the registry-first resolver fast path.
             if (device.deviceName) {
                 const [simulatorUdid, adbSerial] = await Promise.all([
                     findSimulatorByName(device.deviceName).catch(() => null),
-                    getAdbIdForAvd(device.deviceName).catch(() => null)
+                    resolveAdbSerialForDeviceName(device.deviceName).catch(() => null)
                 ]);
 
                 const connectedApp = connectedApps.get(appKey);

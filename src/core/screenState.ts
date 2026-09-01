@@ -820,7 +820,20 @@ export async function getScreenState(
             }
             return out;
         }
-        return typeof s === 'object' ? s : null;
+        if (typeof s !== 'object') return null;
+        // Copy rather than return the prop as-is. A Reanimated animated style
+        // throws ReanimatedError("Perhaps you are trying to pass an animated
+        // style to a non-animated component") from its own property getters, so
+        // handing it back would move the throw into every caller that reads
+        // .zIndex / .position — which aborted the whole traversal and returned
+        // nothing for a screen a screenshot could read fine.
+        var copy = {};
+        try {
+            for (var ck in s) copy[ck] = s[ck];
+        } catch (e) {
+            return null;
+        }
+        return copy;
     }
 
     // RN's own sticky-header implementation. It leaves the header at its natural layout

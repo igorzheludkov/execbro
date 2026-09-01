@@ -87,6 +87,7 @@
             "y"
         ],
         "android_screenshot": [
+            "device",
             "deviceId",
             "outputPath"
         ],
@@ -129,7 +130,8 @@
             "expression",
             "maxResultLength",
             "timeoutMs",
-            "verbose"
+            "verbose",
+            "waitMs"
         ],
         "find_components": [
             "device",

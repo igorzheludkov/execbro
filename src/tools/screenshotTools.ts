@@ -354,10 +354,15 @@ export function registerScreenshotTools(server: McpServer): void {
                     .optional()
                     .describe(
                         ANDROID_ARG_DESC
-                    )
+                    ),
+                device: z
+                    .string()
+                    .optional()
+                    .describe("Alias for `deviceId` — same accepted values. Provided for consistency with tap/get_screen_state/ios_screenshot, which all accept `device`. If both are given, `deviceId` wins.")
             }
         },
-        async ({ outputPath, deviceId }) => {
+        async ({ outputPath, deviceId: deviceIdArg, device }) => {
+            const deviceId = deviceIdArg ?? device;
             const resolved = await resolveAndroidDeviceId(deviceId);
             if (!resolved.ok) return resolved.response;
             // Same parallelisation as iOS: the capture, the two adb metric probes
