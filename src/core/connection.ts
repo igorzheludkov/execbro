@@ -1266,9 +1266,19 @@ export async function connectToDevice(
                 ws.off("close", handleClose);
                 connectionLocks.delete(appKey);
                 try { ws.terminate(); } catch { /* ignore */ }
-                clearConnectionMetadata(appKey);
                 console.error(`[execbro] Rejecting stale CDP target for ${device.title} (no probe response)`);
                 recordConnectionEvent("stale-target", appKey, device.title, `no probe response within ${PROBE_TIMEOUT_MS}ms${isReconnection ? " (during reconnect)" : ""}`);
+                // Entering this function cancelled any pending reconnect timer, so a
+                // stale reject used to leave nothing scheduled: the device stayed
+                // detached while the state still read "reconnecting", and clearing the
+                // metadata made even a later attempt impossible. A just-reloaded runtime
+                // is stale for a second or two and Metro advertises it throughout — so
+                // if this key ever had a live connection, re-arm the backoff loop instead.
+                if (reconnectionConfig.enabled && getConnectionState(appKey) && !reconnectionSuppressed.has(appKey)) {
+                    scheduleReconnection(appKey, reconnectionConfig);
+                } else {
+                    clearConnectionMetadata(appKey);
+                }
                 resolve(`Skipped ${device.deviceName || device.title} (stale CDP target — no response from JS context)`);
                 return;
             }

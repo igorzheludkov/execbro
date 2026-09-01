@@ -4,7 +4,7 @@ import type { DeviceInfo } from "./types.js";
 import { connectedApps, getNextMessageId } from "./state.js";
 import { resolveConnectedAppByDevice, describeDeviceResolution, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
 import { fetchDevices, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
-import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
+import { cancelReconnectionTimer } from "./connectionState.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { isSDKInstalled } from "./sdkBridge.js";
 import { mirrorOnce } from "./sdkMirrorPoller.js";
@@ -421,10 +421,22 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
             || devices.find(d => d.deviceName === app.deviceInfo.deviceName);
 
         if (targetDevice) {
-            await connectToDevice(targetDevice, port, {
-                isReconnection: false,
-                reconnectionConfig: { ...DEFAULT_RECONNECTION_CONFIG, enabled: false }
-            });
+            // Reconnection stays ENABLED: the 2.5s wait above can beat the reload
+            // itself, so this socket is often attached to the dying runtime and
+            // dies seconds after reload_app returns "reconnected". With reconnect
+            // disabled that drop was terminal — get_apps then reported nothing and
+            // the agent had to run scan_metro by hand.
+            const connectResult = await connectToDevice(targetDevice, port, { isReconnection: false });
+            // A runtime that is still booting answers no CDP probe, so this connect
+            // is routinely rejected as stale. connectToDevice resolves (it does not
+            // throw) on that path, which is how reload_app came to report
+            // "reconnected" for a device get_apps then showed as absent.
+            if (!connectedApps.has(`${port}-${targetDevice.id}`)) {
+                return {
+                    success: true,
+                    result: `App reloaded. Reconnect is still in progress (${connectResult}); the background loop retries with backoff — re-check with get_apps in a few seconds, or run ensure_connection.`
+                };
+            }
 
             // If the SDK was the source before reload, wait for the new context
             // to re-run init() and re-expose __RN_AI_DEVTOOLS__ before returning,
