@@ -179,9 +179,9 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `network_replay`: Re-issue a captured request with optional overrides, through the app's own network stack
 
 **App State & Execution:**
-- `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations)
+- `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations). `timeoutMs` sizes the promise poll ladder, and a promise that outlives it hands back a handle for `collect` (with `waitMs` to block server-side instead of polling)
 - `list_debug_globals` / `inspect_global`: Discover and inspect global debugging objects
-- `reload_app`: Reload the React Native app (triggers JS bundle reload)
+- `reload_app`: Reload the React Native app (triggers JS bundle reload). It reconnects itself — no `scan_metro` afterwards. The fresh runtime often answers no CDP probe within the tool's own wait, so the reply then says reconnect is still in progress and the backoff loop finishes it a few seconds later; `get_apps` right after such a reply can legitimately be empty
 - `logbox`: Interact with React Native's LogBox overlay (dev mode only). Actions: "dismiss" clears entries and returns content, "push" displays a message in the error banner, "ignore" adds patterns to suppress future entries, "detect" reads current state.
 
 **UI Interaction:**

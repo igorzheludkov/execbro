@@ -403,6 +403,10 @@ If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths
 - Navigate: execute_in_app("globalThis.__navigate__('ScreenName')")
 - Current route: execute_in_app("globalThis.__getCurrentRoute__()")
 
+## Long-Running Expressions
+- Pass timeoutMs to raise the 10s default (capped at 120000) — the promise poll ladder is derived from it, so a big budget is actually used
+- A promise that outlives the budget is kept in the app and its handle returned: execute_in_app({collect:"<handle>", waitMs:30000}) blocks server-side until it settles instead of making you poll
+
 ## Hermes Limitations
 - NO require() or import — only pre-existing globals
 - NO async/await — use simple expressions or .then() chains
