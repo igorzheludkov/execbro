@@ -2,7 +2,12 @@ import { describe, expect, it, jest } from "@jest/globals";
 import { pickWrittenField, typeAndVerify, type HidTypeDeps } from "../../core/hidTypeVerify.js";
 import type { NativeField, NativeFieldsResult } from "../../core/nativeInputValue.js";
 
-const field = (text: string | null, id: string | null = null): NativeField => ({ id, text, focused: false });
+const field = (text: string | null, id: string | null = null, secure = false): NativeField => ({
+    id,
+    text,
+    focused: false,
+    secure
+});
 
 function deps(reads: NativeFieldsResult[], over: Partial<HidTypeDeps> = {}): HidTypeDeps {
     const queue = [...reads];
@@ -21,7 +26,7 @@ describe("pickWrittenField", () => {
     it("picks the single field whose text changed", () => {
         expect(
             pickWrittenField([field("a"), field("")], [field("a"), field("hello")])
-        ).toEqual({ previous: "", landed: "hello" });
+        ).toEqual({ previous: "", landed: "hello", secure: false, id: null });
     });
 
     it("refuses to guess when several fields changed", () => {
@@ -35,8 +40,39 @@ describe("pickWrittenField", () => {
     it("answers for a single field even when nothing changed", () => {
         expect(pickWrittenField([field("same")], [field("same")])).toEqual({
             previous: "same",
-            landed: "same"
+            landed: "same",
+            secure: false,
+            id: null
         });
+    });
+});
+
+describe("naming the field that actually received the text", () => {
+    it("reports which field the OS had focused", async () => {
+        // Verified on an Android emulator: a fiber tap on password-input fires
+        // its onPress WITHOUT moving focus, so this path typed into the
+        // still-focused nested-input and reported "verified" against that
+        // field's contents. The value was right; the field was not.
+        const d = deps([
+            { fields: [field("xyz", "nested-input")] },
+            { fields: [field("xyzXY", "nested-input")] }
+        ]);
+        const r = await typeAndVerify("XY", {}, d);
+        expect(r.message).toContain("nested-input");
+    });
+});
+
+describe("a masked field", () => {
+    it("reports the write unverified instead of calling the mask a mismatch", async () => {
+        // Telemetry 2026-08-24..09-02: every password write failed this way —
+        // sent "password123", "field now reads ••••••••••". The bullets are the
+        // mask; there is nothing to compare them against.
+        const d = deps([{ fields: [field("", null, true)] }, { fields: [field("•••••••••••", null, true)] }]);
+        const r = await typeAndVerify("password123", {}, d);
+        expect(r.success).toBe(true);
+        expect(r.verdict?.status).toBe("unverified");
+        expect(r.message).toContain("masked");
+        expect(r.message).not.toContain("did NOT land");
     });
 });
 
@@ -46,7 +82,7 @@ describe("typeAndVerify", () => {
         const r = await typeAndVerify("hello", {}, d);
         expect(r.success).toBe(true);
         expect(r.verdict?.status).toBe("verified");
-        expect(r.message).toContain('the field now reads "hello"');
+        expect(r.message).toContain('now reads "hello"');
     });
 
     it("fails loudly when the layout remaps ASCII into another script", async () => {

@@ -36,6 +36,7 @@ import {
 } from "../core/screenSpace.js";
 import { resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
+import { formatKeyboardLine, isBehindKeyboardPx } from "../core/screenState.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
 import type { ExecutionResult } from "../core/types.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
@@ -115,13 +116,24 @@ export function registerComponentTools(server: McpServer): void {
 
             const effectiveTimeoutMs = timeoutMs ?? (extended ? 15000 : 5000);
             const layoutMetrics = await resolveScreenSpaceMetricsFor(device);
-            const result = await getScreenLayout({
-                extended,
-                summary,
-                device,
-                timeoutMs: effectiveTimeoutMs,
-                screenSpace: layoutMetrics
-            });
+            // This tool emits coordinates too, and a raised keyboard covers the
+            // bottom of the screen — a y taken from here can land on the
+            // keyboard instead of the app. get_screen_state has said so since
+            // the keyboard line was added; the layout view emitted the same
+            // coordinates with no such warning. Read in parallel, exactly as
+            // get_screen_state does: it is a second CDP round trip with no
+            // reason to queue behind the fiber walk, and it degrades to
+            // { visible: false, error } rather than failing this call.
+            const [result, keyboard] = await Promise.all([
+                getScreenLayout({
+                    extended,
+                    summary,
+                    device,
+                    timeoutMs: effectiveTimeoutMs,
+                    screenSpace: layoutMetrics
+                }),
+                readKeyboardState(device)
+            ]);
 
             const metaNotes = collectMetaNotes(result);
 
@@ -135,9 +147,13 @@ export function registerComponentTools(server: McpServer): void {
 
             const layoutScaleNote = unresolvedScaleNote(layoutMetrics);
             const layoutNotes = layoutScaleNote ? [layoutScaleNote, ...metaNotes] : metaNotes;
+            // Same line, same units, same position as in get_screen_state, so a
+            // reader can compare it against any node's y without conversion.
+            const kbLine = formatKeyboardLine(keyboard, layoutMetrics.pixelScale);
+            const header = kbLine ? `Screen Layout:\n${kbLine}` : "Screen Layout:";
             const body = layoutNotes.length > 0
-                ? `Screen Layout:\n\n${result.result}\n\n${layoutNotes.join("\n")}`
-                : `Screen Layout:\n\n${result.result}`;
+                ? `${header}\n\n${result.result}\n\n${layoutNotes.join("\n")}`
+                : `${header}\n\n${result.result}`;
             return { content: [{ type: "text", text: body }] };
         }
     );
@@ -557,12 +573,16 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ x, y, includeProps, includeFrame, device, source = true }) => {
-            const result = await inspectAtPoint(x, y, {
-                includeProps,
-                includeFrame,
-                device,
-                screenSpace: await resolveScreenSpaceMetricsFor(device)
-            });
+            const pointMetrics = await resolveScreenSpaceMetricsFor(device);
+            const [result, keyboard] = await Promise.all([
+                inspectAtPoint(x, y, {
+                    includeProps,
+                    includeFrame,
+                    device,
+                    screenSpace: pointMetrics
+                }),
+                readKeyboardState(device)
+            ]);
     
             if (!result.success) {
                 return {
@@ -623,11 +643,21 @@ export function registerComponentTools(server: McpServer): void {
                 }
             }
 
+            // The point came from the caller, so the useful statement is about
+            // THAT point: an element found under the keyboard is inspectable but
+            // not tappable, which is exactly the confusion this prevents.
+            const pointKbLine = formatKeyboardLine(keyboard, pointMetrics.pixelScale);
+            const kbNote = pointKbLine
+                ? `\n${isBehindKeyboardPx(keyboard, y, pointMetrics.pixelScale)
+                    ? `${pointKbLine} — (${x}, ${y}) IS BEHIND IT: this element is inspectable but a tap` +
+                      ` there will hit the keyboard. Dismiss it first (dismiss_keyboard) or target by testID.`
+                    : pointKbLine}`
+                : "";
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Element at (${x}, ${y}):\n\n${result.result}${sourceLine}`
+                        text: `Element at (${x}, ${y}):${kbNote}\n\n${result.result}${sourceLine}`
                     }
                 ]
             };
@@ -672,7 +702,13 @@ export function registerComponentTools(server: McpServer): void {
                 };
             }
 
-            const result = await measureComponent(componentName, index ?? 0, device);
+            // Parallel, like get_screen_state: the keyboard read is a second CDP
+            // round trip with no reason to queue behind the measurement, and it
+            // degrades to { visible: false, error } rather than failing this call.
+            const [result, keyboard] = await Promise.all([
+                measureComponent(componentName, index ?? 0, device),
+                readKeyboardState(device)
+            ]);
 
             if (!result.success) {
                 return {
@@ -701,6 +737,18 @@ export function registerComponentTools(server: McpServer): void {
             ];
             if (typeof result.nativeTag === "number") {
                 lines.push(`nativeTag: ${result.nativeTag}`);
+            }
+            // This tool's own workflow says "measure -> tap(x, y) at the center",
+            // so a center behind the keyboard is a tap that will not reach the
+            // app. Report it here, where the coordinate is produced.
+            const kbLine = formatKeyboardLine(keyboard, measureMetrics.pixelScale);
+            if (kbLine) {
+                lines.push(
+                    isBehindKeyboardPx(keyboard, my + mh / 2, measureMetrics.pixelScale)
+                        ? `${kbLine} — this component's CENTER IS BEHIND IT: a tap there will hit the` +
+                          ` keyboard, not the app. Dismiss it first (dismiss_keyboard) or target by testID.`
+                        : kbLine
+                );
             }
             const measureScaleNote = unresolvedScaleNote(measureMetrics);
             if (measureScaleNote) lines.push(measureScaleNote);

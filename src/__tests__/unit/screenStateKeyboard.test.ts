@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 import {
     formatKeyboardLine,
+    isBehindKeyboardPx,
     partitionByKeyboard,
     formatScreenStateSummary,
     type ScreenState,
@@ -31,6 +32,23 @@ describe("formatKeyboardLine", () => {
 
     it("renders nothing when visible is true but metrics are missing", () => {
         expect(formatKeyboardLine({ visible: true, height: null, screenY: null, width: null })).toBe("");
+    });
+});
+
+describe("isBehindKeyboardPx", () => {
+    // measure and inspect_at_point report one point, in DELIVERED PIXELS, while
+    // the keyboard reports screen-space POINTS — comparing them raw is how a
+    // coordinate ends up judged against a number three times too small.
+    it("scales the keyboard edge into the caller's pixel space", () => {
+        // screenY 567pt at scale 3 is 1701px: 1700 is above it, 1800 below.
+        expect(isBehindKeyboardPx(up, 1700, 3)).toBe(false);
+        expect(isBehindKeyboardPx(up, 1800, 3)).toBe(true);
+    });
+
+    it("blocks nothing when the keyboard is down or unreadable", () => {
+        expect(isBehindKeyboardPx(down, 5000, 3)).toBe(false);
+        expect(isBehindKeyboardPx({ ...down, error: "no Keyboard module" }, 5000, 3)).toBe(false);
+        expect(isBehindKeyboardPx({ visible: true, height: null, screenY: null, width: null }, 5000, 3)).toBe(false);
     });
 });
 

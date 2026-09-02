@@ -10,8 +10,21 @@ describe("parseIosFields", () => {
             ]
         });
         expect(parseIosFields(json)).toEqual([
-            { id: "name-input", text: "Alice", focused: false },
-            { id: null, text: "Email", focused: false }
+            { id: "name-input", text: "Alice", focused: false, secure: false },
+            { id: null, text: "Email", focused: false, secure: false }
+        ]);
+    });
+
+    it("marks a secure field by its subrole, not by the bullets it shows", () => {
+        // "•••" is also a perfectly legal value for an ordinary field, so the
+        // mask has to be read from the platform, not inferred from the text.
+        const json = JSON.stringify({
+            children: [
+                { type: "TextField", AXUniqueId: "password-input", AXValue: "•••••", subrole: "AXSecureTextField" }
+            ]
+        });
+        expect(parseIosFields(json)).toEqual([
+            { id: "password-input", text: "•••••", focused: false, secure: true }
         ]);
     });
 
@@ -25,14 +38,19 @@ describe("parseAndroidFields", () => {
 
     it("reads resource-id, text and focused", () => {
         const xml = node('resource-id="name-input" text="Alice" hint="Enter name" focused="true"');
-        expect(parseAndroidFields(xml)).toEqual([{ id: "name-input", text: "Alice", focused: true }]);
+        expect(parseAndroidFields(xml)).toEqual([{ id: "name-input", text: "Alice", focused: true, secure: false }]);
     });
 
     it("treats text equal to the hint as empty", () => {
         // An empty Android EditText reports its hint in `text`; taking that at
         // face value would verify a write that never happened.
         const xml = node('resource-id="email-input" text="Email" hint="Email" focused="false"');
-        expect(parseAndroidFields(xml)).toEqual([{ id: "email-input", text: "", focused: false }]);
+        expect(parseAndroidFields(xml)).toEqual([{ id: "email-input", text: "", focused: false, secure: false }]);
+    });
+
+    it("reads android:password as the mask flag", () => {
+        const xml = node('resource-id="pw" text="••••" hint="Password" password="true" focused="true"');
+        expect(parseAndroidFields(xml)).toEqual([{ id: "pw", text: "••••", focused: true, secure: true }]);
     });
 
     it("ignores non-EditText nodes", () => {
@@ -41,16 +59,21 @@ describe("parseAndroidFields", () => {
 });
 
 describe("resolveWrittenField", () => {
-    const f = (id: string | null, text: string | null, focused = false) => ({ id, text, focused });
+    const f = (id: string | null, text: string | null, focused = false, secure = false) => ({
+        id,
+        text,
+        focused,
+        secure
+    });
 
     it("prefers the testID when there is one", () => {
         const after = [f("a", "one"), f("b", "two")];
-        expect(resolveWrittenField(after, after, "b")).toEqual({ text: "two", via: "testID" });
+        expect(resolveWrittenField(after, after, "b")).toEqual({ text: "two", via: "testID", secure: false });
     });
 
     it("falls back to the focused field when there is no testID", () => {
         const after = [f(null, "one"), f(null, "two", true)];
-        expect(resolveWrittenField(after, after, null)).toEqual({ text: "two", via: "focused" });
+        expect(resolveWrittenField(after, after, null)).toEqual({ text: "two", via: "focused", secure: false });
     });
 
     it("falls back to the single changed field when nothing identifies it", () => {
@@ -58,7 +81,7 @@ describe("resolveWrittenField", () => {
         // by what changed.
         const before = [f(null, "one"), f(null, "")];
         const after = [f(null, "one"), f(null, "Alice")];
-        expect(resolveWrittenField(before, after, null)).toEqual({ text: "Alice", via: "changed" });
+        expect(resolveWrittenField(before, after, null)).toEqual({ text: "Alice", via: "changed", secure: false });
     });
 
     it("returns null when several fields changed", () => {

@@ -27,6 +27,12 @@ export function registerExecutionTools(server: McpServer): void {
                 "BAD examples: `await fetch(...)` (bare top-level await), `require('react-native')`\n" +
                 "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n",
             inputSchema: {
+                expression: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "REQUIRED unless `collect` is used. JavaScript expression to execute. Must be valid Hermes syntax — no require(), no `await`/`async` (use `Promise.resolve(foo()).then(function(r){ return r; })`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
+                    ),
                 collect: z
                     .string()
                     .optional()
@@ -38,12 +44,6 @@ export function registerExecutionTools(server: McpServer): void {
                     .optional()
                     .describe(
                         "collect only: block up to this long (ms, capped at 120000) waiting for the handle to settle, instead of returning 'Still pending' immediately. Default 0 — one look, no wait."
-                    ),
-                expression: z
-                    .string()
-                    .optional()
-                    .describe(
-                        "JavaScript expression to execute. Must be valid Hermes syntax — no require(), no `await`/`async` (use `Promise.resolve(foo()).then(function(r){ return r; })`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
                     ),
                 awaitPromise: z.coerce
                     .boolean()
@@ -112,8 +112,21 @@ export function registerExecutionTools(server: McpServer): void {
             }
 
             if (!expression) {
+                // Naming the arguments that DID arrive is the only clue the
+                // caller gets about why this refused — 66 events over 30d, 17
+                // installations, all retrying blind without it. Only the
+                // non-defaulted ones say anything: the rest are always present.
+                const passed = Object.entries({ device, timeoutMs, waitMs })
+                    .filter(([, v]) => v !== undefined)
+                    .map(([k]) => k);
                 return {
-                    content: [{ type: "text", text: "Error: provide either `expression` to run, or `collect` with a deferred promise handle." }],
+                    content: [{
+                        type: "text",
+                        text: "Error: `expression` is required — the JavaScript to run, as a string" +
+                            " (e.g. execute_in_app({ expression: \"__DEV__\" }))." +
+                            " The only alternative is `collect` with a deferred promise handle from an earlier call." +
+                            (passed.length > 0 ? ` Received only: ${passed.join(", ")}.` : " Neither was present in this call.")
+                    }],
                     isError: true
                 };
             }

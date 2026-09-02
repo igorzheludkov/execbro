@@ -66,6 +66,30 @@ export type InputFound = {
     /** The resolved field's testID, so a native read-back can find the same one. */
     testID: string | null;
     /**
+     * The field's placeholder. iOS reports an EMPTY field's AXValue as its
+     * placeholder and exposes no placeholder attribute to subtract, so without
+     * this the accessibility read of an empty field is indistinguishable from
+     * one holding that word — which is how an append to an empty field came to
+     * write the placeholder into it for real.
+     */
+    placeholder: string | null;
+    /**
+     * The field's maxLength, when it declares one. Without it a truncated write
+     * is indistinguishable from a HID keystroke race — and the race is what the
+     * retry exists for, so retrying a field that is simply full clears it and
+     * types the same truncated text again.
+     */
+    maxLength: number | null;
+    /**
+     * The keyboard the field asks for. Both write paths bypass it — React
+     * writes call onChangeText directly, HID types hardware scancodes — so a
+     * numeric field accepts letters no user could have entered. Verified on an
+     * iPhone Air simulator against the test app's numeric-input: writing "abc"
+     * into keyboardType="number-pad" reported verified, and the app's own
+     * onChangeText received "abc".
+     */
+    keyboardType: string | null;
+    /**
      * True when the field's value prop mirrors its text — the only way to read
      * it back from JS, and therefore the only way a write can be verified.
      */
@@ -492,6 +516,13 @@ function prelude(query: InputQuery | undefined): string {
     typeof __eb_ownerFiber.memoizedProps.value === "string");
   var __eb_value = __eb_controlled
     ? String(__eb_ownerFiber.memoizedProps.value) : null;
+  var __eb_props_host = __eb_props(__eb_host);
+  var __eb_placeholder = __eb_props_host && __eb_props_host.placeholder != null
+    ? String(__eb_props_host.placeholder) : null;
+  var __eb_maxLength = __eb_props_host && typeof __eb_props_host.maxLength === "number"
+    ? __eb_props_host.maxLength : null;
+  var __eb_keyboardType = __eb_props_host && __eb_props_host.keyboardType != null
+    ? String(__eb_props_host.keyboardType) : null;
   var __eb_focused = !!(__eb_pubi && __eb_pubi.isFocused && __eb_pubi.isFocused());
   var __eb_tag = __eb_pubi && __eb_pubi.__nativeTag != null ? __eb_pubi.__nativeTag : null;
 `;
@@ -504,6 +535,9 @@ const BASE = `
     nativeTag: __eb_tag,
     value: __eb_value,
     testID: __eb_testIDOf(__eb_host),
+    placeholder: __eb_placeholder,
+    maxLength: __eb_maxLength,
+    keyboardType: __eb_keyboardType,
     controlled: __eb_controlled,
     hasOnChangeText: !!__eb_ownerFiber`;
 
