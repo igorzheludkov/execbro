@@ -177,6 +177,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `network_mock`: Replace or tamper with HTTP responses so an error branch is reached through the app's real code. `add` / `list` / `remove` / `clear`; `times:N` for retry tests; slash-wrapped `url` for regex. Rules are per-device and survive `reload_app`
 - `network_condition`: Simulate `offline` / `slow` / `normal`. Owns one rule per device and replaces only its own, so it never clears the agent's mocks. `offline` also self-verifies a NetInfo patch and reports honestly what it achieved
 - `network_replay`: Re-issue a captured request with optional overrides, through the app's own network stack
+- `app_request`: Issue a NEW request from inside the app, as the logged-in user — the app's real network stack, TLS trust and proxy config. `auth="auto"` resolves the token in-app, so the credential never lands in the transcript the way a hand-written `fetch` through `execute_in_app` does
 
 **App State & Execution:**
 - `execute_in_app`: Execute simple JS expressions using globals (no require/async/emoji — Hermes limitations). `timeoutMs` sizes the promise poll ladder, and a promise that outlives it hands back a handle for `collect` (with `waitMs` to block server-side instead of polling)
@@ -195,6 +196,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `android_key_event`: Send Android key events (HOME, BACK, ENTER, DEL, MENU, etc.)
 - `android_long_press`: Long press at raw coordinates on Android, for holds with no React Native connection. Anything reachable through RN should use `tap(duration=...)`, which resolves the target by testID/text/component and reports whether it has an `onLongPress` handler
 - `ios_open_url`: Open deep links or universal links on iOS simulator
+- `navigate`: Drive the app's router directly and verify the route actually moved. Expo Router takes paths (`/event-details?id=1`), React Navigation takes route names (`TarotNav`) — the response says which resolved, and unknown React Navigation names are rejected before dispatch with nearest-match suggestions. It exists because a hand-written router call reports success whenever nothing throws: a path sent to a React Navigation ref changes nothing and warns only in LogBox, so a no-op reads as a success
 
 **Screenshots & OCR:**
 - `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
@@ -242,6 +244,7 @@ For React Native UI inspection, prefer the cross-platform tools: `get_screen_sta
 
 **Bundle & Errors:**
 - `get_bundle_status`: Check Metro build state
+- `get_refresh_status`: Did the running JS runtime ACCEPT a Fast Refresh update since `since`? A different question from whether Metro compiled. Capture a `Date.now()` before the edit, wait ~2s after saving, then read `updateCount` — it answers "did my edit land" without polling logs or screenshots, and without reloading on a hunch
 - `get_bundle_errors`: Compilation/bundling errors with screenshot+OCR fallback. Pass `clear=true` to reset the buffer after reading
 
 **Account:**

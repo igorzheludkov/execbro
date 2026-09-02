@@ -33,7 +33,17 @@ const guides: Guide[] = [
 - list_devices — iOS simulators, Android emulators, and physical devices in one call
 - ios_boot_simulator — boot an iOS simulator if needed
 - ios_launch_app / android_launch_app — launch the app
+- ios_terminate_app — kill an app that is in a bad state before relaunching
+- android_list_packages — find the package name when you only know the app by sight
 - Wait 2-3 seconds, then scan_metro
+
+## Stale Bundle After a Metro Restart
+scan_metro detects that the process serving a port CHANGED (pid via lsof) and says so. It means
+Fast Refresh history is discontinuous: edits made while Metro was down are NOT in the running
+bundle, and reconnecting does not reconcile them. Devices attached on a restarted port are
+flagged, and tap, swipe and get_screen_state carry a staleBundle warning until reload_app clears
+it. Believe the warning — every other signal reads healthy, so stale behaviour otherwise looks
+exactly like "my fix didn't work".
 
 ## Switch to Native Debugger
 - disconnect_metro — closes all CDP connections and stops auto-reconnect
@@ -45,7 +55,8 @@ const guides: Guide[] = [
 - connect_metro: connect to specific port (when you know it)
 - disconnect_metro: close all connections (free CDP slot for native debugger)
 - ensure_connection: health check with healthCheck=true
-- get_connection_status: check uptime and gaps`
+- get_connection_status: check uptime and gaps
+- get_license_status: installation id and license tier (activate_license / delete_account manage it)`
     },
     {
         id: "inspect",
@@ -54,9 +65,9 @@ const guides: Guide[] = [
         content: `# Component Inspection
 
 ## Recommended Workflow: Identify a Component on Screen
-1. Take a screenshot (ios_screenshot / android_screenshot) or use ocr_screenshot
-2. Identify the target element visually, estimate its coordinates
-3. Pass those coordinates straight through — every layout tool, tap() and the screenshots share one screen-space coordinate system, so no conversion is needed
+1. get_screen_state — screenshot-free, and every element comes back with a ready (x, y). Start here; only fall back to a screenshot (ios_screenshot / android_screenshot / ocr_screenshot) when you need to see the element to pick it out
+2. Take the coordinate from that listing, or estimate it off the screenshot
+3. Pass it straight through — every layout tool, tap() and the screenshots share one screen-space coordinate system, so no conversion is needed
 4. Pick the right tool (see decision below) and call it with (x, y)
 
 ### inspect_at_point(x, y)
@@ -65,7 +76,7 @@ NO overlay, zero visual side effect, safe to call rapidly or across a transition
 
 Returns:
 - element name and full owner-tree path
-- FRAME PER ANCESTOR (position/size in dp for every ancestor that hit-tested the point)
+- FRAME PER ANCESTOR (position/size for every ancestor that hit-tested the point, in delivered-screenshot pixels — the same space as screenshots and tap)
 - PROPS of the innermost component (handlers as [Function], refs, testID, custom props)
 - the node's own style object
 - source {file, line, column} plus the owner chain as "Source ancestors" (set source=false to skip in tight loops)
@@ -84,6 +95,7 @@ looks wrong and isn't on the node itself, walk the ancestors it returns.
 - find_components(pattern) — regex search by component name across the fiber tree.
 - get_component_tree — compact names-only structure by default; pass structureOnly=false only when you genuinely need props/styles for the whole tree.
 - inspect_component(name) — deep dive into a specific component's props, state, and hooks.
+- measure(componentName) — the reverse of inspect_at_point: geometry {x, y, width, height} for a component you can name, without hand-rolling a fiber walk in execute_in_app.
 
 ## Tips
 - Works on Paper, Fabric, and Bridgeless / new arch.
@@ -137,16 +149,22 @@ size in a note when it applies.
   - Style is the node's own style object, not a merged cascade — walk the returned ancestors when a value isn't on the node itself.
 
 ## Full Screen Layout
-- get_screen_layout — full layout data for all components
-- Use componentsOnly=true to hide host components (View, Text) and see only custom components
+- get_screen_layout — full layout data for all components. Host components (View, Text) are
+  already filtered out; the tree is custom components only, so there is nothing to switch off
+- Use extended=true for layout styles (padding, margin, flex, backgroundColor)
 - find_components with includeLayout=true for targeted layout info
+- measure(componentName) — geometry for one named component, when you know the name and only
+  want its frame
 
 ## Key Tools
 - get_screen_state: route + overlays + every element, screenshot-free (start here)
 - ios_screenshot / android_screenshot: visual capture
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - ocr_screenshot: screenshot with text recognition and tap coordinates
-- inspect_at_point: frames per ancestor + props + source file:line (no overlay, fast)`
+- inspect_at_point: frames per ancestor + props + source file:line (no overlay, fast)
+- measure: geometry for one named component
+- get_images: re-read any screenshot already captured (including tap burst frames) instead of taking another
+- logbox: dismiss / ignore / push / detect the LogBox overlay — dismiss returns the full error content, so nothing is lost by clearing it`
     },
     {
         id: "interact",
@@ -170,6 +188,13 @@ Use tap — it tries multiple strategies automatically and returns a post-tap sc
 
 tap returns a screenshot after every action (screenshot=true by default) — no need to call ios_screenshot/android_screenshot after tapping.
 For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visual change (verify=true by default). Set screenshot=false for fastest execution.
+
+### When verification says meaningful:false but you think the tap landed
+Retry with burst=true. It captures 4 rapid screenshots after the tap, catching press animations
+and highlights that settle before the ordinary after-screenshot. Then read
+verification.transientChangeDetected, and pull the individual frames with
+get_images({groupId: verification.burstGroupId}) — the frames are already in the shared image
+buffer, so inspecting them costs no extra capture.
 
 ## Long Press
 Pass duration (milliseconds) to hold the touch instead of releasing it: tap(testID="row-3", duration=800). Use it for context menus, drag starts and multi-select. React Native fires onLongPress at 500ms, so anything under 500 will not trigger it; 800 is a safe default. Works on both platforms and with every targeting strategy (testID, text, component, coordinates).
@@ -255,6 +280,17 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 - dismiss_keyboard: blur the focused input, closing the keyboard.
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)
 - ios_open_url: deep links and universal links
+- get_images: retrieve screenshots already captured by any tool, including tap burst frames
+
+## Jumping Straight to a Screen
+navigate drives the app's router instead of tapping through the UI, and checks the route
+actually moved: navigate({to:"/settings"}) -> read changed -> get_screen_state.
+Destinations are NOT interchangeable — Expo Router takes paths ("/event-details?id=1"),
+React Navigation takes route names ("TarotNav"); the response says which router resolved, and
+unknown React Navigation names are rejected before dispatch with nearest-match suggestions.
+navigate({action:"back"}) and {action:"reset"} are available too. changed=false means it settled
+without moving; indeterminate=true means no settled reading. Prefer this over a hand-written
+router call through execute_in_app, which reports success whenever nothing throws.
 
 ## After Interactions
 - Take a screenshot to verify the result`
@@ -274,9 +310,17 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 3. clear_logs — reset buffer, then re-capture after a specific action
 
 ## Key Tools
-- get_logs: retrieve logs with filtering (level, maxLogs, summary, verbose, startFromText)
+- get_logs: retrieve logs with filtering (level, maxLogs, summary, verbose, startFromText, epoch)
 - search_logs: text search across all captured logs
 - clear_logs: reset the log buffer
+
+## App Restarts (epochs)
+Every log and network entry carries a per-device epoch that increments on each new app run, and
+the output draws a "── app restarted (epoch N) ──" divider at each boundary. The default is
+epoch="all", so pre-restart data is never hidden from you — pass epoch="current" to read only the
+run in front of you, or a number for one specific run. get_network_requests takes the same
+parameter. When a crash and its aftermath sit in one read, the divider is what tells you which
+side of the restart a message came from.
 
 ## NATIVE LOGS (crashes the JS console cannot see)
 
@@ -368,6 +412,12 @@ are trying to fix.
 network_replay({requestId}) re-issues a captured request, optionally with a
 changed body or header, without driving the UI back to the screen that made it.
 
+app_request issues a NEW request from inside the app, as the logged-in user — through the app's
+real network stack, TLS trust and proxy config. Use it to reproduce a 4xx, check what an endpoint
+returns for an edge case, or clean up test records the UI cannot reach. auth="auto" resolves the
+token in-app, so the credential never enters the transcript; a hand-written fetch in
+execute_in_app either digs the token out of redux or embeds a JWT literal, which does.
+
 ## Key Tools
 - get_network_requests: list requests with filters (urlPattern, method, status, summary)
 - search_network: search by URL pattern
@@ -376,6 +426,7 @@ changed body or header, without driving the UI back to the screen that made it.
 - network_mock: replace or tamper with responses (add / list / remove / clear)
 - network_condition: offline / slow / normal
 - network_replay: re-issue a captured request, with optional overrides
+- app_request: issue a new request from inside the app, authenticated, without putting the token in the transcript
 
 ## Tips
 - Start with summary=true to see the request landscape
@@ -414,8 +465,11 @@ If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths
 ## Common Patterns (no SDK)
 - Read Redux: execute_in_app("globalThis.__REDUX_STORE__.getState().sliceName")
 - Dispatch action: execute_in_app("globalThis.__dispatch__(globalThis.__REDUX_ACTIONS__.slice.action(args))")
-- Navigate: execute_in_app("globalThis.__navigate__('ScreenName')")
 - Current route: execute_in_app("globalThis.__getCurrentRoute__()")
+
+Note: do NOT navigate this way. A router call through execute_in_app reports success whenever
+nothing throws — a path sent to a React Navigation ref changes nothing and warns only in LogBox.
+Use the navigate tool, which verifies the route actually moved (see the "interact" guide).
 
 ## Long-Running Expressions
 - Pass timeoutMs to raise the 10s default (capped at 120000) — the promise poll ladder is derived from it, so a big budget is actually used
@@ -445,20 +499,35 @@ If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths
 4. get_bundle_errors({ clear: true }) — read, then reset the error buffer
 5. reload_app — trigger full JS bundle reload (only if needed)
 
+## Did My Edit Land? (ask before reloading)
+get_refresh_status answers whether the JS runtime ACCEPTED a Fast Refresh update, which is a
+different question from whether Metro compiled (get_bundle_status). Capture a Date.now() BEFORE
+editing, wait ~2s after saving, then get_refresh_status({since: <that timestamp>}) — updateCount
+> 0 means the edit is in the running app. Use it instead of reloading on a hunch, and instead of
+polling logs or screenshots. A full reload resets its ring buffer, so the next call reports
+"recorder just installed".
+
 ## When to Reload
 React Native has Fast Refresh by default. Only reload_app when:
-- Changes aren't appearing after a few seconds
+- get_refresh_status shows no update accepted after a few seconds
 - App is in a broken/error state
 - Need to reset full app state (navigation, context)
 - Made changes to native code or config files
+
+reload_app reconnects itself — do NOT follow it with scan_metro. The fresh runtime often answers
+no CDP probe within the tool's own wait, so the reply says reconnect is still in progress and a
+backoff loop finishes it a few seconds later; get_apps immediately after such a reply can
+legitimately come back empty. A reflexive scan_metro there throws away the navigation stack, auth
+and in-memory caches for nothing.
 
 ## Red Screen Errors
 If no errors captured via CDP, use get_bundle_errors with platform="ios" or "android" — this triggers screenshot+OCR fallback to read errors from the device screen.
 
 ## Key Tools
-- get_bundle_status: Metro health check
+- get_bundle_status: Metro health check (did it compile?)
+- get_refresh_status: did the running runtime accept the Fast Refresh update?
 - get_bundle_errors: compilation errors
-- reload_app: full JS bundle reload
+- reload_app: full JS bundle reload — reconnects itself, no scan_metro afterwards
 - ensure_connection: verify connection with healthCheck=true`
     },
     {
