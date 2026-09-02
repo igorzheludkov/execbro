@@ -157,6 +157,9 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 - `replace:true` clears a pre-filled field first (Bridgeless/Fabric). It APPENDs by default, which is the usual cause of `https://demo.example.comhttps://app.example.com`
 - `mcp__execbro__dismiss_keyboard` blurs the focused input when the keyboard covers what you need next
 - `native:true` skips React targeting and types into whatever the OS reports as focused — system dialogs, non-RN screens; tap the field first. Ignores `testID`/`component`/`textMatch`. Auto-applied when no fiber tree is reachable at all, even without the flag
+- A masked field (`secureTextEntry`) exposes bullets, not text, so the write is reported as delivered but NOT verified. That is the ceiling, not a bug
+- Differences the FIELD introduced — `autoCapitalize` turning `abc` into `Abc`, autocorrect respacing, a display mask — count as verified, not as a failed write. A `maxLength` truncation is named as the cause instead of retried
+- `keyboardType`: both write paths bypass the on-screen keyboard, so letters land in a `number-pad` field. Allowed, and noted in the response
 
 **Hardware buttons:**
 - iOS: `mcp__execbro__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
