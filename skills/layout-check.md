@@ -28,6 +28,7 @@ First, check what devices are available:
 Before capturing anything, get a screenshot-free read of what's on screen:
 
 - Use `mcp__execbro__get_screen_state` — returns the active route + navigation stack, groups elements behind an open overlay or raised keyboard (taps will NOT reach those until it closes), and lists every on-screen element — pressables (component tag, label, testID, onPress hint), text, images — each with a tap-ready `(x, y)` centre and frame
+- `get_screen_layout`, `measure` and `inspect_at_point` print the same keyboard line, and the latter two say when the coordinate they return sits behind it — inspectable, but a tap there hits the keyboard. Use `dismiss_keyboard` first, or target by `testID`
 - This answers "which screen am I on, what text/prices are rendered, which image loaded" without a screenshot + OCR round trip, and it is the right call after any tap or navigation to orient
 - Use `pressablesOnly=true` for the lean tappable-only list, `fullText=true` to disable the 80-char text truncation
 

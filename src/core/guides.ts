@@ -114,6 +114,11 @@ All layout tools, tap() and the screenshots share ONE screen-space coordinate sy
 read from get_screen_state, get_screen_layout, measure or inspect_at_point can be passed to
 tap(x, y) unchanged. Do not divide by the device pixel ratio.
 
+A raised keyboard covers the bottom of the screen, and a coordinate under it is inspectable but
+not tappable. get_screen_state groups those elements separately; get_screen_layout, measure and
+inspect_at_point print the same keyboard line, and the latter two say outright when the point or
+the component's centre is behind it. Dismiss it first (dismiss_keyboard) or target by testID.
+
 On a screen presented as a modal sheet (presentation:'modal'), UIKit insets the screen from the
 top of the window and React Native's measurements do not include that inset. Every one of these
 tools now corrects for it — derived from the sheet's own measured height, not assumed — so they
@@ -226,6 +231,15 @@ Inputs that already contain text are the most common verification-blocker. The t
 dismiss_keyboard acts on whatever has focus; input_text focuses its own target unless native:true is passed. replace:true updates React state via onChangeText("") — controlled components (Formik, react-hook-form, useState) stay consistent. Calling publicInstance.clear() directly does NOT do this; it only updates the native side and leaves form state stale.
 
 Multi-device sessions: pass device="<rn-device-name>" (substring match) to disambiguate when replace:true is used. Single-device sessions can omit.
+
+### Reading the result — the field transforms text, and that is not a failure
+input_text reads the field back and compares. Several differences are the FIELD doing its job, and are reported as verified rather than as a mismatch:
+- autoCapitalize (RN defaults to "sentences", so "abc" lands as "Abc"), autocorrect respacing, and a formatted/decorated value.
+- maxLength: a full field truncates every attempt identically, so this is named as the cause instead of being retried — retrying would clear the field and type the same truncated text again. A one-character-per-box OTP input needs one call per box.
+- A masked field (secureTextEntry / android:password) exposes bullets, never its text. The write is reported as DELIVERED BUT NOT VERIFIED — that is the ceiling, not a bug, and no read-back can lift it. replace:true still clears first, since "it looked empty" is not evidence that it was.
+- A value that gained formatting ("5551234567" -> "(555) 123-4567") is either a display mask (the write landed) or a field reinterpreting the number ("3700" -> "37.00", a different value). The text alone cannot tell these apart, so read the app's own state to decide.
+- keyboardType: both write paths bypass the on-screen keyboard, so letters do reach a number-pad field. The write is allowed and noted — a test that passes only because the harness typed the untypeable is worth knowing about.
+- native:true types into whatever the OS reports as FOCUSED, which a fiber tap on a TextInput does not necessarily move. The verdict names the field it wrote, so a mis-target reads as one instead of as a wrong value.
 
 ## Icon-Only Buttons
 For buttons that contain only an icon (no text):
