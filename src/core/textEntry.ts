@@ -40,6 +40,8 @@ export type TextEntryResult = {
      */
     formatted?: boolean;
     retried?: boolean;
+    /** Something true about the write that is neither success nor failure. */
+    note?: string;
     keyboard?: RaiseResult;
     error?: string;
     sent?: string;
@@ -141,6 +143,50 @@ export function isDecoratedValue(sent: string, landed: string | null): boolean {
 }
 
 /**
+ * Whether the difference is the FIELD transforming input rather than the write
+ * going wrong: its decoration, its autoCapitalize, its autocorrect spacing.
+ *
+ * Every case here leaves the characters intact and in order, so the corruption
+ * this comparison exists to catch — a HID reorder, CASEB landing as CSEBA —
+ * still fails all of them. What it stops is failing a write the field itself
+ * completed: RN defaults autoCapitalize to "sentences", so an uncontrolled
+ * field turns a typed "abc" into "Abc" and the exact compare then reported a
+ * landed write as a mismatch AND spent the retry clearing the field to type it
+ * again — producing the same "Abc" the second time.
+ */
+export function isFieldTransform(sent: string, landed: string | null): boolean {
+    if (landed === null || sent.length === 0) return false;
+    if (isDecoratedValue(sent, landed)) return true;
+    if (landed.toLowerCase() === sent.toLowerCase()) return true;
+    // iOS smart punctuation and autocorrect respace text; the characters are
+    // all there. An inserted non-space character (a phone mask's brackets, a
+    // decimal point) is NOT covered — that can change the value.
+    return landed.replace(/\s+/gu, "") === sent.replace(/\s+/gu, "");
+}
+
+/** Letters and digits only, case-folded — the characters a mask leaves alone. */
+function alphanumericsOf(s: string): string {
+    return s.replace(/[^\p{L}\p{N}]+/gu, "").toLowerCase();
+}
+
+/** Keyboards that cannot produce a letter, whatever the layout. */
+const DIGIT_ONLY_KEYBOARDS = new Set(["number-pad", "numeric", "decimal-pad", "phone-pad"]);
+
+/**
+ * A note when the tool wrote something the field's own keyboard could not
+ * produce. Not a failure — the write landed and the app received it — but a
+ * test that passes only because the harness typed the untypeable is worth
+ * saying out loud. Verified on an iPhone Air simulator: "abc" into a
+ * keyboardType="number-pad" field reaches the app's onChangeText intact.
+ */
+export function keyboardTypeNote(keyboardType: string | null, text: string): string {
+    if (keyboardType === null || !DIGIT_ONLY_KEYBOARDS.has(keyboardType)) return "";
+    if (!/\p{L}/u.test(text)) return "";
+    return ` NOTE: this field asks for keyboardType="${keyboardType}", which cannot produce letters —` +
+        ` a user could not have entered this text. Both write paths bypass the on-screen keyboard.`;
+}
+
+/**
  * Names the likely cause of a mismatch. The field's own keyboard settings
  * transform text on the way in, and "landed differently" alone sends the
  * reader hunting for a bug in the write when the write was fine.
@@ -153,6 +199,26 @@ export function diagnoseMismatch(sent: string, landed: string | null): string {
     }
     if (landed.replace(/\s+/g, "") === sent.replace(/\s+/g, "")) {
         return " — only whitespace differs, which is usually iOS smart punctuation or autocorrect spacing";
+    }
+    // Every character present, in order, with extra ones inserted. Telemetry
+    // over 2026-06..09: 17 failures of this shape, and they are two different
+    // things in one bucket — roughly two-thirds display masks (the write
+    // landed) and one-third a field reinterpreting the number (it did not).
+    // Nothing in the two strings separates them: "5551234567" -> "(555)
+    // 123-4567" and "3700" -> "37.00" have identical characters and identical
+    // lengths. So this names both and hands the choice to the only party that
+    // can make it.
+    if (landed.length > sent.length && alphanumericsOf(landed) === alphanumericsOf(sent) &&
+        alphanumericsOf(sent).length > 0) {
+        return " — every character you sent is present, in order, with formatting inserted. That is" +
+            " either a display mask (a phone or thousands separator: the write landed and the app holds" +
+            " what you sent) or a field that reinterpreted the value (a cents field renders \"3700\" as" +
+            " \"37.00\" — a different number). The text alone cannot tell these apart: read the app's own" +
+            " state to decide";
+    }
+    if (landed.length > 0 && landed.length < sent.length && sent.startsWith(landed)) {
+        return ` — the field kept only the first ${landed.length} of ${sent.length} characters, which is a` +
+            ` maxLength (or a one-character-per-box OTP input: write each box separately)`;
     }
     if (landed.length === sent.length && [...landed].sort().join("") === [...sent].sort().join("")) {
         return " — the same characters arrived in a different order, which is the HID keystroke race;" +
@@ -290,11 +356,33 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     const usesNativeReadBack = !target.controlled && deps.readNativeFields !== undefined;
     let previous = target.value ?? "";
     let previousKnown = target.controlled;
+    // A masked field reports its mask, not its text: reading "•••••••" as the
+    // prior value made `desired` a string of bullets, which no write can ever
+    // match — and the mismatch then spent the retry CLEARING the field and
+    // typing the bullets-plus-text into it for real.
+    let maskedField = false;
+    // iOS reports an EMPTY field's AXValue as its PLACEHOLDER and exposes no
+    // placeholder attribute to subtract, so the accessibility read of an empty
+    // field is indistinguishable from one holding that word. The fiber target
+    // knows the placeholder, so subtract it here — the same rule
+    // parseAndroidFields already applies to `hint`.
+    //
+    // Verified on an iPhone Air simulator: appending "abc" to the empty
+    // name-input read "Enter name" as the prior text, so the retry cleared the
+    // field and typed "Enter nameabc" — the app's own onChangeText received
+    // that string — and the call reported success.
+    //
+    // The tradeoff, taken knowingly and shared with Android: a field whose real
+    // content happens to equal its placeholder reads as empty.
+    const kbNote = keyboardTypeNote(target.keyboardType, args.text);
+    const asFieldText = (t: string | null): string | null =>
+        t !== null && target.placeholder !== null && t === target.placeholder ? "" : t;
     if (usesNativeReadBack) {
         nativeBefore = (await deps.readNativeFields!()).fields;
         const current = resolveWrittenField(nativeBefore, nativeBefore, target.testID);
-        if (current && current.text !== null) {
-            previous = current.text;
+        if (current?.secure === true) maskedField = true;
+        if (current && current.text !== null && current.secure !== true) {
+            previous = asFieldText(current.text) ?? "";
             previousKnown = true;
         }
     }
@@ -357,16 +445,22 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
                 continue;
             }
             const hit = resolveWrittenField(nativeBefore, after.fields, target.testID);
-            last = hit ? hit.text : undefined;
+            if (hit?.secure === true) {
+                maskedField = true;
+                return undefined;
+            }
+            last = hit ? asFieldText(hit.text) : undefined;
             if (last === desired) return last;
         }
         return last;
     };
 
     // HID appends at the caret, so a replace must clear first or it concatenates.
+    // A masked field's prior text is unreadable, so "it looked empty" is not
+    // evidence that it was: a replace must clear it anyway or it appends.
     const needsClearFirst =
         args.replace === true && !target.controlled && target.hasOnChangeText &&
-        isHidTypeable(args.text) && previous.length > 0;
+        isHidTypeable(args.text) && (previous.length > 0 || maskedField);
     if (needsClearFirst) await deps.runOp({ kind: "clear" }, opQuery, args.device);
 
     const first = await write(needsClearFirst);
@@ -393,21 +487,35 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         const keyboard = await deps.raise();
         return {
             success: true,
+            ...(kbNote ? { note: kbNote } : {}),
             path: first.path,
             verified: false,
             keyboard,
-            error: target.controlled
-                ? "the value could not be read back"
-                : "this field is uncontrolled and could not be located in the accessibility tree" +
-                  (target.testID ? "" : " (it has no testID, and no single field's text changed)")
+            error: maskedField
+                ? "the text was typed but CANNOT be verified: this field is masked (secureTextEntry)," +
+                  " so the accessibility tree exposes bullets instead of its contents"
+                : target.controlled
+                  ? "the value could not be read back"
+                  : "this field is uncontrolled and could not be located in the accessibility tree" +
+                    (target.testID ? "" : " (it has no testID, and no single field's text changed)")
         };
     }
 
     let retried = false;
+    // A field that is simply FULL truncates every attempt identically, so the
+    // retry cannot recover anything — and on the HID path it clears the field
+    // first, destroying what is there to type the same truncated text again.
+    // maxLength is what separates this from the keystroke race the retry does
+    // fix. Verified against the test app's maxLength={1} otp-input.
+    const atMaxLength =
+        target.maxLength != null &&
+        landed !== undefined && landed !== null &&
+        landed.length === target.maxLength &&
+        desired.length > target.maxLength;
     // A decorated value is the write having landed, not having gone wrong, so
     // it must not burn the retry either — rewriting only makes the field
     // decorate it again.
-    if (landed !== desired && !isDecoratedValue(desired, landed)) {
+    if (landed !== desired && !isFieldTransform(desired, landed) && !atMaxLength) {
         retried = true;
         // Clear only for HID, which appends at the caret. The other paths set
         // the whole value, so a clear is redundant — and actively harmful:
@@ -434,10 +542,11 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // The field holds what it was asked to hold, plus its own formatting. The
     // exact comparison above is deliberately strict, but reporting this as a
     // failure sent callers retrying a write that had already landed.
-    if (landed !== undefined && landed !== desired && isDecoratedValue(desired, landed)) {
+    if (landed !== undefined && landed !== desired && isFieldTransform(desired, landed)) {
         const keyboard = await deps.raise();
         return {
             success: true,
+            ...(kbNote ? { note: kbNote } : {}),
             value: landed ?? undefined,
             path: first.path,
             verified: true,
@@ -453,7 +562,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         if (landed === undefined) {
             const keyboard = await deps.raise();
             return {
-                success: true, path: first.path, verified: false, retried, keyboard,
+                success: true, ...(kbNote ? { note: kbNote } : {}), path: first.path, verified: false, retried, keyboard,
                 error: "the rewrite could not be read back, so the result is unconfirmed"
             };
         }
@@ -464,7 +573,12 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
             retried,
             sent: desired,
             landed,
-            error: `text landed differently than it was sent${diagnoseMismatch(desired, landed)}` +
+            error: `text landed differently than it was sent${
+                atMaxLength
+                    ? ` — the field's maxLength is ${target.maxLength}, so only ${JSON.stringify(landed)} of` +
+                      ` ${JSON.stringify(desired)} can ever be entered; write one character per box, or shorten the text`
+                    : diagnoseMismatch(desired, landed)
+            }` +
                 (!previousKnown && !args.replace
                     ? " — note the field's prior text could not be read, so the appended result was predicted from an empty starting point; pass replace:true to write an exact value"
                     : "")
@@ -475,6 +589,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     const keyboard = await deps.raise();
     return {
         success: true,
+        ...(kbNote ? { note: kbNote } : {}),
         value: landed,
         path: first.path,
         verified: true,

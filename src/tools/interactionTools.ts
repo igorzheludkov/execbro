@@ -1254,6 +1254,10 @@ export function formatTextEntryResponse(r: TextEntryResult): {
                     ? `Set to ${JSON.stringify(r.value)} (${r.path}, verified${r.retried ? ", retried once" : ""}).`
                     : `Wrote via ${r.path} but UNVERIFIED — ${r.error ?? "the value could not be read back"}.`
         );
+        // The write landed; this says something about it the caller cannot see
+        // from the value alone (e.g. the field's keyboard could not have
+        // produced the text).
+        if (r.note) lines.push(` ${r.note.trim()}`);
     } else {
         lines.push(`Error: ${r.error ?? "text entry failed"}`);
         if (r.sent !== undefined) lines.push(`  sent:   ${JSON.stringify(r.sent)}`);

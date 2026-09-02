@@ -1,5 +1,5 @@
 import { describe, expect, it, jest } from "@jest/globals";
-import { enterText, isHidTypeable, type TextEntryDeps } from "../../core/textEntry.js";
+import { diagnoseMismatch, enterText, isFieldTransform, isHidTypeable, keyboardTypeNote, type TextEntryDeps } from "../../core/textEntry.js";
 import type { InputOp, InputQuery, InputResult } from "../../core/inputTarget.js";
 
 const found = (over: Partial<Extract<InputResult, { found: true }>> = {}): InputResult => ({
@@ -8,6 +8,9 @@ const found = (over: Partial<Extract<InputResult, { found: true }>> = {}): Input
     nativeTag: 1,
     value: null,
     testID: null,
+    placeholder: null,
+    maxLength: null,
+    keyboardType: null,
     controlled: true,
     hasOnChangeText: true,
     ok: true,
@@ -376,6 +379,148 @@ describe("append and replace on an uncontrolled field", () => {
         expect(r.verified).toBe(true);
         const ops = (d.runOp as jest.Mock).mock.calls.map((c) => (c[0] as InputOp).kind);
         expect(ops).not.toContain("clear");
+    });
+});
+
+describe("a numeric keyboard is a restriction on the USER, not on the write", () => {
+    // Verified on an iPhone Air simulator against the test app's numeric-input
+    // (keyboardType="number-pad"): input_text wrote "abc" and the field's own
+    // onChangeText received "abc". Neither write path goes through the
+    // on-screen keyboard, so the field cannot refuse what it displays.
+    it("notes text the field's own keyboard could not have produced", () => {
+        expect(keyboardTypeNote("number-pad", "abc")).toContain("could not have entered");
+        expect(keyboardTypeNote("decimal-pad", "12a3")).toContain("decimal-pad");
+    });
+
+    it("says nothing about digits, or about a keyboard that takes letters", () => {
+        expect(keyboardTypeNote("number-pad", "4815")).toBe("");
+        expect(keyboardTypeNote("email-address", "a@b.c")).toBe("");
+        expect(keyboardTypeNote(null, "abc")).toBe("");
+    });
+
+    it("does not retry a field that is simply full", async () => {
+        // maxLength truncates every attempt identically, and the HID retry
+        // CLEARS the field first — so retrying destroys the box's content to
+        // land the same character again. Verified against the test app's
+        // maxLength={1} otp-input with "512210".
+        const d = deps([found({
+            controlled: false, hasOnChangeText: true, testID: "otp", value: null, maxLength: 1
+        })], {
+            readNativeFields: jest.fn(async () => ({ fields: [{ id: "otp", text: "5", focused: true }] }))
+        });
+        const r = await enterText({ text: "512210", testID: "otp", replace: true }, d);
+        expect(r.success).toBe(false);
+        expect(r.retried).toBeFalsy();
+        expect(r.error).toContain("maxLength is 1");
+    });
+});
+
+describe("field transforms vs. real corruption", () => {
+    it("accepts the case the field applied itself", () => {
+        // RN defaults autoCapitalize to "sentences": every uncontrolled field
+        // turns a typed "abc" into "Abc". Reproduced on the test app's
+        // name-input once the placeholder bug stopped hiding it.
+        expect(isFieldTransform("abc", "Abc")).toBe(true);
+    });
+
+    it("accepts autocorrect respacing", () => {
+        expect(isFieldTransform("50 000", "50000")).toBe(true);
+    });
+
+    it("still rejects the HID reorder it exists to catch", () => {
+        expect(isFieldTransform("CASEB", "CSEBA")).toBe(false);
+    });
+
+    it("still rejects a value the field reinterpreted", () => {
+        // The test app's cents-input: "3700" means 37.00, a different number.
+        expect(isFieldTransform("3700", "37.00")).toBe(false);
+        // A phone mask inserts characters, so it cannot be told apart from the
+        // above by the digits alone — it stays a mismatch.
+        expect(isFieldTransform("5551234567", "(555) 123-4567")).toBe(false);
+    });
+
+    it("names both readings of an inserted-formatting mismatch", () => {
+        const phone = diagnoseMismatch("5551234567", "(555) 123-4567");
+        expect(phone).toContain("display mask");
+        expect(phone).toContain("reinterpreted");
+        // The cents field produces the same shape, which is exactly why the
+        // message hands the decision to the caller instead of guessing.
+        expect(diagnoseMismatch("3700", "37.00")).toContain("read the app's own state");
+    });
+
+    it("says nothing of the sort when characters were actually lost", () => {
+        expect(diagnoseMismatch("CASEB", "CSEBA")).not.toContain("display mask");
+        expect(diagnoseMismatch("abc", "")).not.toContain("display mask");
+    });
+
+    it("names a truncation instead of calling it a corruption", () => {
+        expect(diagnoseMismatch("512210", "5")).toContain("maxLength");
+    });
+});
+
+describe("an iOS placeholder read back as the field's text", () => {
+    // Reproduced on an iPhone Air simulator against the test app's name-input
+    // (placeholder "Enter name", empty): the append read the placeholder as the
+    // prior text, the retry cleared the field and typed "Enter nameabc", and
+    // the app's own onChangeText confirmed it received that string — while the
+    // call reported "verified".
+    const placeholderDeps = (text: string) =>
+        deps([found({ controlled: false, hasOnChangeText: true, testID: "f", value: null, placeholder: "Enter name" })], {
+            readNativeFields: jest.fn(async () => ({
+                fields: [{ id: "f", text, focused: true, secure: false }]
+            }))
+        });
+
+    it("does not prepend the placeholder to an append", async () => {
+        const d = placeholderDeps("Enter name");
+        await enterText({ text: "abc", testID: "f" }, d);
+        expect(d.typeHid).toHaveBeenCalledWith("abc");
+        expect(d.typeHid).not.toHaveBeenCalledWith("Enter nameabc");
+    });
+
+    it("reads a cleared field as empty instead of failing the clear", async () => {
+        // An emptied field reports its placeholder again, which compared
+        // unequal to "" and failed a replace that had worked.
+        const d = placeholderDeps("Enter name");
+        const r = await enterText({ text: "", testID: "f", replace: true }, d);
+        expect(r.success).toBe(true);
+        expect(r.verified).toBe(true);
+    });
+});
+
+describe("a masked (secureTextEntry) field", () => {
+    // Reproduced on an iPhone Air simulator against the test app's
+    // password-input: iOS reports AXValue "•••••••" with subrole
+    // AXSecureTextField. Read as prior text, that made `desired` bullets +
+    // text, which nothing can match — so the retry cleared the field and typed
+    // the bullets in for real, then failed the call anyway.
+    const secureDeps = () =>
+        deps([found({ controlled: false, hasOnChangeText: true, testID: "pw", value: null })], {
+            readNativeFields: jest.fn(async () => ({
+                fields: [{ id: "pw", text: "•••••••••••", focused: true, secure: true }]
+            }))
+        });
+
+    it("types only what was asked, never the mask it read back", async () => {
+        const d = secureDeps();
+        await enterText({ text: "password123", testID: "pw" }, d);
+        expect(d.typeHid).toHaveBeenCalledWith("password123");
+        expect(d.typeHid).toHaveBeenCalledTimes(1);
+    });
+
+    it("succeeds as unverified rather than failing on the mask", async () => {
+        const d = secureDeps();
+        const r = await enterText({ text: "password123", testID: "pw" }, d);
+        expect(r.success).toBe(true);
+        expect(r.verified).toBe(false);
+        expect(r.error).toContain("masked");
+        expect(opsOf(d)).not.toContain("clear");
+    });
+
+    it("still clears before a replace, since an unreadable field may hold text", async () => {
+        const d = secureDeps();
+        await enterText({ text: "password123", testID: "pw", replace: true }, d);
+        expect(opsOf(d)).toContain("clear");
     });
 });
 

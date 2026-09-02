@@ -135,6 +135,9 @@ describe("validateAndPreprocessExpression", () => {
         expect(result.valid).toBe(false);
         expect(result.error).toContain("Multi-statement");
         expect(result.error).toContain("IIFE");
+        // Naming the blocking statement is what makes this fixable without
+        // re-reading a 500-character script.
+        expect(result.error).toContain("if (x) { x++ }");
     });
 
     it("does not auto-wrap when the final statement is a declaration", () => {

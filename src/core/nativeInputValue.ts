@@ -21,6 +21,14 @@ export type NativeField = {
     id: string | null;
     text: string | null;
     focused: boolean;
+    /**
+     * The field masks its own content (secureTextEntry / android:password), so
+     * `text` is the mask, not the text. Both platforms say so explicitly — iOS
+     * with subrole AXSecureTextField, Android with password="true" — which is
+     * why this is read rather than guessed from bullet characters a real value
+     * could also contain.
+     */
+    secure?: boolean;
 };
 
 export type NativeFieldsResult = { fields: NativeField[]; error?: string };
@@ -47,7 +55,8 @@ function parseIosFields(json: string): NativeField[] {
                 id: typeof node.AXUniqueId === "string" ? node.AXUniqueId : null,
                 text: typeof node.AXValue === "string" ? node.AXValue : null,
                 // iOS exposes no focus flag; callers must not rely on it here.
-                focused: false
+                focused: false,
+                secure: node.subrole === "AXSecureTextField"
             });
         }
         for (const v of Object.values(node)) walk(v);
@@ -75,7 +84,8 @@ function parseAndroidFields(xml: string): NativeField[] {
         out.push({
             id: attr(s, "resource-id"),
             text: text !== null && hint !== null && text === hint ? "" : text,
-            focused: attr(s, "focused") === "true"
+            focused: attr(s, "focused") === "true",
+            secure: attr(s, "password") === "true"
         });
     }
     return out;
@@ -123,21 +133,21 @@ export function resolveWrittenField(
     before: NativeField[],
     after: NativeField[],
     testID: string | null
-): { text: string | null; via: "testID" | "focused" | "changed" } | null {
+): { text: string | null; via: "testID" | "focused" | "changed"; secure: boolean } | null {
     if (testID) {
         const hit = after.find((f) => f.id === testID);
-        if (hit) return { text: hit.text, via: "testID" };
+        if (hit) return { text: hit.text, via: "testID", secure: hit.secure === true };
     }
 
     const focused = after.filter((f) => f.focused);
-    if (focused.length === 1) return { text: focused[0].text, via: "focused" };
+    if (focused.length === 1) return { text: focused[0].text, via: "focused", secure: focused[0].secure === true };
 
     // No identity available: exactly one field must have changed.
     const changed = after.filter((f, i) => {
         const b = before[i];
         return b === undefined || b.text !== f.text;
     });
-    if (changed.length === 1) return { text: changed[0].text, via: "changed" };
+    if (changed.length === 1) return { text: changed[0].text, via: "changed", secure: changed[0].secure === true };
 
     return null;
 }

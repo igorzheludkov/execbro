@@ -159,14 +159,21 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
 
     // More than one statement, but the last one can't yield a value — we can't
     // synthesize a sensible `return`, so explain rather than guess.
-    if (splitTopLevelStatements(trimmed).length > 1) {
+    const statements = splitTopLevelStatements(trimmed);
+    if (statements.length > 1) {
+        // Name the statement that blocked the rewrite. Without it the caller
+        // has to re-read their own script to find which of ten lines the
+        // engine objected to, and the telemetry shows them re-sending scripts
+        // that are hundreds of characters long.
+        const last = statements[statements.length - 1];
+        const shown = last.length > 80 ? `${last.slice(0, 80)}…` : last;
         return {
             valid: false,
             expression: escaped,
             error:
                 "Multi-statement expressions are not supported by Hermes Runtime.evaluate " +
                 "(compiles input as a single expression), and the final statement does not " +
-                "produce a value to return. " +
+                `produce a value to return: \`${shown}\`. ` +
                 "Wrap the body in an IIFE with an explicit result: " +
                 "`(function(){ stmt1; stmt2; return result; })()`."
         };

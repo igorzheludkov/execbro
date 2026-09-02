@@ -234,6 +234,24 @@ export function formatKeyboardLine(k: KeyboardState, pixelScale: number = 1): st
 }
 
 /**
+ * Whether a delivered-pixel y sits behind the raised keyboard.
+ *
+ * Same question partitionByKeyboard asks of a list, for the tools that report a
+ * single point: measure hands back a center the caller is told to feed to
+ * tap(), and inspect_at_point is handed one. A point under the keyboard is not
+ * tappable, and saying so where the coordinate is produced beats saying it only
+ * in get_screen_state.
+ *
+ * `k.screenY` is screen-space POINTS; callers here work in delivered pixels, so
+ * the scale is applied to the keyboard rather than to the caller's coordinate.
+ */
+export function isBehindKeyboardPx(k: KeyboardState, yPx: number, pixelScale: number = 1): boolean {
+    if (!k.visible || k.screenY == null) return false;
+    const s = pixelScale > 0 ? pixelScale : 1;
+    return yPx >= k.screenY * s;
+}
+
+/**
  * Splits elements the keyboard covers from those still reachable.
  *
  * Mirrors the existing overlay handling rather than inventing a second notion

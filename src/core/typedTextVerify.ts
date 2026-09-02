@@ -92,6 +92,19 @@ export type TypedTextInput = {
     landed: string | null;
     /** Why the read-back failed, when it did. */
     readError?: string;
+    /** The field masks its contents, so no read-back can ever confirm them. */
+    masked?: boolean;
+    /**
+     * Which field received the text (Android resource-id, iOS AXUniqueId —
+     * both carry the testID). This path types into whatever the OS reports as
+     * FOCUSED, which is not necessarily the field the caller last tapped: a
+     * fiber tap on a TextInput fires its onPress without moving focus. Naming
+     * the field turns that from a wrong-looking value into an obvious
+     * mis-target. Verified on an Android emulator: a tap on password-input
+     * left focus on nested-input, and the write reported "verified" against
+     * the wrong field's contents.
+     */
+    fieldId?: string | null;
     /** Non-Latin keyboards configured on this simulator, pre-formatted for display. */
     nonLatinKeyboards: string[];
 };
@@ -106,7 +119,28 @@ function keyboardNote(nonLatinKeyboards: string[]): string {
 }
 
 export function verdictForTypedText(input: TypedTextInput): TypedTextVerdict {
-    const { sent, expected, landed, readError, nonLatinKeyboards } = input;
+    const { sent, expected, landed, readError, masked, fieldId, nonLatinKeyboards } = input;
+    const which = fieldId ? ` (${JSON.stringify(fieldId)})` : "";
+
+    // A mask is not a failed read — it is a field that will never expose its
+    // text to anyone. Say that once, plainly, instead of listing read-back
+    // troubleshooting the caller cannot act on.
+    if (masked === true) {
+        return {
+            status: "unverified",
+            sent,
+            message:
+                `Typed ${JSON.stringify(sent)} into the masked field${which} (secureTextEntry) — delivered,` +
+                ` but NOT` +
+                ` verified: the accessibility tree exposes bullets, so no read-back can confirm the` +
+                ` characters.` +
+                keyboardNote(nonLatinKeyboards) +
+                (nonLatinKeyboards.length > 0
+                    ? ` A non-Latin active layout rewrites ASCII keystrokes silently, and a mask hides that.` +
+                      ` ${REMEDY}`
+                    : "")
+        };
+    }
 
     if (landed === null) {
         const why = readError ? `: ${readError}` : "";
@@ -114,7 +148,7 @@ export function verdictForTypedText(input: TypedTextInput): TypedTextVerdict {
             status: "unverified",
             sent,
             message:
-                `Sent ${JSON.stringify(sent)} to the focused field — NOT verified. The field could not be` +
+                `Sent ${JSON.stringify(sent)} to the focused field${which} — NOT verified. It could not be` +
                 ` read back${why}, so this is a report of what was sent, not of what the field received.` +
                 keyboardNote(nonLatinKeyboards) +
                 (nonLatinKeyboards.length > 0
@@ -135,7 +169,8 @@ export function verdictForTypedText(input: TypedTextInput): TypedTextVerdict {
             sent,
             landed,
             message:
-                `Typed ${JSON.stringify(sent)} — verified: the field now reads ${JSON.stringify(landed)}.` +
+                `Typed ${JSON.stringify(sent)} — verified: the focused field${which} now reads` +
+                ` ${JSON.stringify(landed)}.` +
                 normalized
         };
     }
@@ -154,7 +189,7 @@ export function verdictForTypedText(input: TypedTextInput): TypedTextVerdict {
         sent,
         landed,
         message:
-            `Text did NOT land as sent. Sent ${JSON.stringify(sent)}, field now reads` +
+            `Text did NOT land as sent. Sent ${JSON.stringify(sent)}, the focused field${which} now reads` +
             ` ${JSON.stringify(landed)}${expected !== sent ? ` (expected ${JSON.stringify(expected)})` : ""}.` +
             cause
     };

@@ -42,7 +42,7 @@ export type HidTypeResult = {
 export function pickWrittenField(
     before: NativeField[],
     after: NativeField[]
-): { previous: string; landed: string } | null {
+): { previous: string; landed: string; secure: boolean; id: string | null } | null {
     if (after.length === 0) return null;
 
     if (before.length === after.length) {
@@ -51,12 +51,17 @@ export function pickWrittenField(
             .filter(({ i, f }) => before[i].text !== f.text);
         if (changed.length === 1) {
             const { i, f } = changed[0];
-            return { previous: before[i].text ?? "", landed: f.text ?? "" };
+            return { previous: before[i].text ?? "", landed: f.text ?? "", secure: f.secure === true, id: f.id };
         }
         // Nothing changed at all: only meaningful when there is a single field,
         // where "unchanged" is still an answer about that field.
         if (changed.length === 0 && after.length === 1) {
-            return { previous: before[0].text ?? "", landed: after[0].text ?? "" };
+            return {
+                previous: before[0].text ?? "",
+                landed: after[0].text ?? "",
+                secure: after[0].secure === true,
+                id: after[0].id
+            };
         }
         return null;
     }
@@ -64,7 +69,12 @@ export function pickWrittenField(
     // The tree changed shape (a keyboard or an overlay mounted). One field is
     // still unambiguous; more than one is not.
     if (after.length === 1) {
-        return { previous: before.length === 1 ? before[0].text ?? "" : "", landed: after[0].text ?? "" };
+        return {
+            previous: before.length === 1 ? before[0].text ?? "" : "",
+            landed: after[0].text ?? "",
+            secure: after[0].secure === true,
+            id: after[0].id
+        };
     }
     return null;
 }
@@ -103,6 +113,8 @@ export async function typeAndVerify(
 
     let landed: string | null = null;
     let previous = "";
+    let masked = false;
+    let fieldId: string | null = null;
     let readError = beforeRead.error;
 
     for (const ms of SETTLE_MS) {
@@ -120,6 +132,15 @@ export async function typeAndVerify(
                     : "could not tell which field received the text (more than one changed)";
             continue;
         }
+        // A masked field exposes bullets, never its text. There is nothing to
+        // compare, so this is unverified — reporting the mask as a mismatch
+        // failed every password write that in fact landed.
+        fieldId = hit.id;
+        if (hit.secure) {
+            masked = true;
+            landed = null;
+            break;
+        }
         readError = undefined;
         previous = hit.previous;
         landed = hit.landed;
@@ -131,6 +152,8 @@ export async function typeAndVerify(
         expected: previousAfterClear(previous) + text,
         landed,
         readError,
+        masked,
+        fieldId,
         nonLatinKeyboards: keyboards
     });
 
