@@ -52,7 +52,8 @@ For layout debugging:
 - Use `mcp__execbro__get_screen_state` for a screenshot-free orientation pass — active route + navigation stack, any open overlay or raised keyboard (taps will NOT reach elements grouped behind those), and every on-screen element (pressables with component tag/label/testID/onPress hint, text, images) with a tap-ready `(x, y)` centre and frame. Call it after any tap or navigation before drilling in
 - Use `mcp__execbro__get_screen_layout` for full layout data of all screen components
 - Use `mcp__execbro__find_components` with `includeLayout=true` for targeted layout info
-- Use `componentsOnly=true` on `get_screen_layout` to hide host components (View, Text) and see only custom components
+- `get_screen_layout` already filters host components (View, Text) out — the tree is custom components only, there is no flag for it
+- Use `mcp__execbro__measure` when you know a component's name and only want its frame
 
 ### 5. When to use which inspection tool
 
