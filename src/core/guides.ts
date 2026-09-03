@@ -120,6 +120,10 @@ looks wrong and isn't on the node itself, walk the ancestors it returns.
   - A LogBox banner is excluded from the listing (it mounts above the app and its own buttons
     would otherwise be the only pressables returned). A note says so when one is up — the
     banner still covers screen, so use logbox({action:"dismiss"}) before trusting edge taps.
+  - Press targets the walk drops are counted and attributed to a rule (pruned as hidden,
+    not yet measurable, or dropped for zero size / off-viewport). An overlay listed with no
+    pressables inside it means treat that as a grouping fault in this tool, not an empty sheet
+    — screenshot and tap by coordinates instead of trusting the empty group.
 
 ## Coordinates
 All layout tools, tap() and the screenshots share ONE screen-space coordinate system. A frame
