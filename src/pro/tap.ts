@@ -2655,11 +2655,24 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 } else {
                     // Fabric returns dp — androidTap expects pixels
                     // Convert dp to pixels using device density
-                    const { androidGetDensity } = await import("../core/android.js");
-                    const densityResult = await androidGetDensity(targetSerial);
+                    const { androidGetDensity, androidGetStatusBarHeight } = await import("../core/android.js");
+                    const [densityResult, statusBar] = await Promise.all([
+                        androidGetDensity(targetSerial),
+                        androidGetStatusBarHeight(targetSerial).catch(() => null)
+                    ]);
                     const densityScale = (densityResult.density || 420) / 160;
+                    // measureInWindow is window-relative and RN content starts below the
+                    // status bar, but `adb input tap` speaks screen pixels — so the dp has
+                    // to be shifted down by the inset or every tap lands one status bar
+                    // too high, reporting success while changing nothing. This is the same
+                    // unconditional +topInset that screenSpace.ts applies on Android for
+                    // every layout tool, and the mirror of the iOS branch above.
+                    // Verified on Pixel_9 (1080x2424, 420dpi, status bar 142px): the Scroll
+                    // nav button measured at dp y=80 was tapped at y=210 with 0 changed
+                    // pixels; its real centre is y=352 (OB1, 2026-09-03).
+                    const topInsetPx = statusBar?.success ? (statusBar.heightPixels ?? 0) : 0;
                     const pxX = Math.round(coords.x * densityScale);
-                    const pxY = Math.round(coords.y * densityScale);
+                    const pxY = Math.round(coords.y * densityScale) + topInsetPx;
                     const fiberTap = await androidTap(pxX, pxY, targetSerial, options.duration);
                     if (!fiberTap.success) {
                         throw new Error(fiberTap.error || "adb tap failed");
