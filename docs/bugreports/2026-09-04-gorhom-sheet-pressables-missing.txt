@@ -1,0 +1,183 @@
+OPEN BUG: a Gorhom bottom sheet reports "(no pressables)" while its button is on screen
+========================================================================================
+
+Status:      open, not started
+Found:       2026-09-04, on the RN test app (execbro-test-app), Modals screen
+Reproduces:  every time, Android emulator (Pixel_9, API 36, Fabric / new arch)
+Severity:    the sheet's contents are unreachable to an agent. There is a workaround
+             (tap by coordinates) and get_screen_state now says so out loud, so this is
+             wrong-but-loud rather than wrong-and-silent.
+
+Related work already landed on branch fix/android-tap-inset-and-pressable-audit:
+  614d64c  fix(tap): Android fiber+native taps landed one status bar too high
+  e695c61  feat(screen-state): report the press targets the walk drops   <- surfaced this
+  647a996  fix(screen-state): stop an overlay adopting the screen behind it
+  01cd0ca  build: fail the build on escapes that injected JS will not survive
+647a996 is a DIFFERENT bug found while investigating this one. It is fixed and does not
+fix this one. Do not assume they are the same.
+
+
+HOW TO REPRODUCE
+----------------
+
+1. Android emulator, execbro-test-app running, Metro on 8081.
+2. Navigate to the "Modals" screen (drawer > Modals).
+3. Tap "OPEN GORHOM SHEET (50%)" (testID open-gorhom-half).
+4. The sheet slides up. It visibly contains the text "Gorhom Sheet - 50%" and a blue
+   CLOSE button.
+5. get_screen_state(device: <emulator>, pressablesOnly: true)
+
+Observed:
+
+    BottomSheet:
+      (no pressables)
+    Root pressables: (none reachable)
+    Blocked by overlay: <the 7 buttons on the screen behind, correctly>
+
+Expected: the BottomSheet group contains the CLOSE button.
+
+The RN <Modal> on the same screen (testID open-rn-modal) works correctly and is a good
+A/B control: same screen, same tool call, correct output. Use it to check whether a
+change breaks the working path.
+
+
+WHAT IS ALREADY RULED OUT
+-------------------------
+
+Each of these was measured on the device, not reasoned about. Do not re-do them.
+
+1. NOT hidden-pruning.
+   The CLOSE marker's full 48-level ancestor chain to the root carries no Screen at all
+   (the sheet is portaled to PortalProviderComponent, outside the navigator), no
+   display:none, no opacity, no aria-hidden, no accessibilityElementsHidden, no
+   importantForAccessibility. isScreenHidden cannot be returning true for it.
+
+2. NOT unmeasurable.
+   markerUnmeasurableCount is 0 for the whole screen. getMeasurable resolves the host
+   through its third path (stateNode.node + nativeFabricUIManager.measureInWindow).
+   NOTE: a naive getMeasurable that only checks measureInWindow and canonical.publicInstance
+   DOES return null here, which will mislead you if you write your own probe.
+
+3. NOT the geometry filter (keepElement).
+   The dropped-by-geometry list is 39 entries collapsing to 7 distinct ids, all of them
+   the parked drawer (x = -1054) and the Buoy floating menu (x = 1199). CLOSE is not
+   among them.
+
+4. NOT the portal.
+   Portals keep the React fiber return chain, so BottomSheet IS a genuine ancestor of
+   CLOSE, at chain indices 28 and 29 (there are two nested BottomSheet fibers).
+
+5. NOT dead ancestry code, and NOT a tool-wide fault.
+   With the RN <Modal> open, the histogram of overlayIdx across allPressables is
+   {"0": 3, "null": 22} — rn-modal-close is correctly tagged by ancestry, three times
+   (it is collected three times and the formatter collapses the duplicates). So the
+   ancestry branch works. The Gorhom failure is narrow.
+
+6. NOT the overlay being missed.
+   The overlay IS detected and IS rendered: {origIdx: 2, type: "BottomSheet",
+   hasContent: false, geometric: false}. hasContent is false because Gorhom's hosts all
+   measure backdrop-sized, which is intended (see the comment above the contentBounds
+   assignment) and means geometric adoption is correctly disabled for it. With ancestry
+   also failing, nothing can populate the group.
+
+
+THE TWO HARD FACTS TO EXPLAIN
+-----------------------------
+
+With the Gorhom sheet open:
+
+  A. Every collected pressable has overlayIdx null. The histogram is {"null": 22}. So
+     ovIdx was never set for anything inside the sheet subtree, even though the walk
+     must descend through the BottomSheet fiber to reach CLOSE.
+
+  B. CLOSE is not in allPressables at all. It is not in the 22, and not in the
+     geometry-drop list. Yet its PressabilityDebugView marker is provably in the tree:
+     counting markers by 5-hop ancestor chain gives exactly 7 of
+     "RCTView<View<TouchableNativeFeedback<Button<RCTView", which is the 6 visible screen
+     buttons plus CLOSE.
+
+B is the stranger of the two and probably the real lead. A press target whose marker is
+in the tree, which is not hidden, not unmeasurable, and not geometry-dropped, should be
+in meta. Find where it leaves.
+
+
+WHERE TO LOOK FIRST
+-------------------
+
+All line numbers are src/core/screenState.ts on the branch above.
+
+1. ovIdx assignment in walkPressabilityDebugViews (~line 1400).
+   Membership is by fiber identity:
+       if (overlayFiberMeta[ofi].fiber === fiber) ovIdx = ofi;
+   Hypothesis, UNTESTED: the fiber recorded by walkForOverlays is not the same object
+   the pressable walk descends through — current vs alternate. React double-buffers, and
+   the two walks are separate traversals. If that is it, both A and B could follow from
+   one cause, and the fix is to compare fiber AND fiber.alternate.
+   Check it by recording, in walkForOverlays, whether each stored fiber is ever
+   encountered again by the second walk.
+
+2. The accounting gap.
+   collectedCount (hostFibers.length) is 62 while only 13 markers survive pruning
+   (35 total minus 22 hidden). So hostFibers is fed by more than the marker branch —
+   the TextInput/Switch branch at ~1551 and the onPress fallback at ~1484 also push.
+   Confirm which branch, if any, is claiming CLOSE's host first and pushing it with
+   different meta, because that would explain a marker that is "collected" but never
+   appears as itself.
+
+3. The 22 -> 7 collapse.
+   allPressables holds 22 entries and the output shows 7. Some of that is the formatter
+   collapsing duplicates (as with rn-modal-close x3), but it has not been accounted for
+   end to end. Verify it before trusting any count in this file.
+
+
+HOW TO INSTRUMENT
+-----------------
+
+The globals the dispatch pass sets are cleared by the resolve pass, so reading them after
+a get_screen_state call returns empty. Two options that worked:
+
+  - globalThis.__screenStateAudit survives (nothing clears it) and already carries
+    markerTotal, markerHiddenCount, markerUnmeasurableCount, markerSkipped,
+    collectedCount. Read it with execute_in_app straight after a get_screen_state call.
+
+  - For anything else, add a temporary globalThis.__ebDebug = {...} in the resolve pass
+    just after "overlays = keptOverlays;", rebuild, call get_screen_state, then read it
+    with execute_in_app. Include a literal buildMarker string and assert you can see it,
+    otherwise you cannot tell a stale build from a wrong hypothesis. This cost time.
+
+Talking to the app directly over CDP is often faster than through the MCP server. Metro
+rejects the websocket without an Origin header:
+
+    const ws = new WebSocket(target.webSocketDebuggerUrl,
+                             { headers: { Origin: 'http://localhost:8081' } });
+
+Get targets from http://localhost:8081/json/list and pick the one whose title matches the
+emulator, NOT the physical device or the iPhone, all three of which run the same app.
+
+
+DO NOT
+------
+
+- Do not "fix" hasContent:false for Gorhom. It is deliberate and correct; the comment
+  above contentBounds explains that its hosts measure backdrop-sized and geometric
+  adoption would swallow the underlying screen.
+- Do not add another name-based special case for BottomSheet components. The detection
+  side already works; the bug is in collection and membership.
+- Do not put backticks in a comment inside an injected template literal. It terminates
+  the string and tsc blames a line far from the cause. check-injected-js.mjs now guards
+  the related escape hazard but not this one.
+
+
+DEFINITION OF DONE
+------------------
+
+1. With the Gorhom 50% sheet open, get_screen_state lists the CLOSE button under the
+   BottomSheet group.
+2. The RN <Modal> control case still lists only rn-modal-close under its Modal group,
+   with the six background buttons under Blocked.
+3. The empty-overlay warning from formatPressabilityAudit stops firing on that screen.
+4. A unit test covers the rule that was wrong. If it lives in the injected script, extract
+   it to src/core/injected/ the way overlayAdoption.ts does, so it is testable in Node and
+   injected from the same source.
+5. Full suite green (1848 tests at the time of writing) and the on-device check repeated
+   on both the emulator and a physical device if one is attached.
