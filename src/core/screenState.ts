@@ -522,6 +522,83 @@ export function parseScreenStateResponse(raw: unknown): ScreenState | null {
 // Main function (dispatch phase — Task 3; resolve phase added in Task 4)
 // ============================================================================
 
+export interface PressabilityAuditCounts {
+    markerTotal?: number;
+    markerHiddenCount?: number;
+    markerUnmeasurableCount?: number;
+    markerSkipped?: Array<{ id: string; why: string }>;
+    collectedCount?: number;
+    emittedCount?: number;
+    emptyOverlayGroups?: string[];
+    droppedByGeometry?: number;
+    droppedIds?: Array<{ id: string; why: string }>;
+}
+
+/**
+ * React Native mounts a `PressabilityDebugView` inside every press target it owns —
+ * `Pressable`, every `Touchable*`, and gesture-handler's `Pressable`. It renders nothing
+ * unless "Show Touchables" is on, but the fiber exists either way, which makes the marker
+ * count RN's own answer to "how many press targets are on this screen". The screen-state
+ * walk starts from those markers, so its output is always a subset, and every difference
+ * is a decision this tool made rather than an absence in the app.
+ *
+ * Two of those decisions are worth reporting and one is not:
+ *
+ *  - Not measurable: anomalous. A press target RN believes exists whose host view cannot
+ *    be measured is exactly the shape of the misses that keep turning up (a sheet whose
+ *    content is mounted but not laid out yet). Always surfaced.
+ *  - Pruned as hidden: usually correct and usually large. A tab navigator keeps every
+ *    inactive route mounted, so most screens legitimately prune dozens. Reported as a
+ *    count with the responsible rule, never as a warning, because warning on it would
+ *    fire on every healthy screen and train the reader to skip the line.
+ *
+ * Returns null when nothing was dropped — the common case, and silence is the correct
+ * output for it.
+ */
+export function formatPressabilityAudit(counts: PressabilityAuditCounts): string | null {
+    const total = counts.markerTotal ?? 0;
+    const hidden = counts.markerHiddenCount ?? 0;
+    const unmeasurable = counts.markerUnmeasurableCount ?? 0;
+    const emptyGroups = counts.emptyOverlayGroups ?? [];
+    if (total === 0 || (hidden === 0 && unmeasurable === 0 && emptyGroups.length === 0)) return null;
+
+    const samples = (counts.markerSkipped ?? []).slice(0, 6).map((s) => `${s.id} (${s.why})`);
+    const detail = samples.length > 0 ? ` Skipped: ${samples.join("; ")}.` : "";
+
+    // The loss that matters most is the one with no other symptom: a press target that
+    // passed the walk and then fell out of the response, which surfaces as an overlay
+    // group rendering "(no pressables)" and nothing else. Report it first and by name.
+    const droppedGeom = counts.droppedByGeometry ?? 0;
+    const droppedDetail = (counts.droppedIds ?? []).slice(0, 6).map((d) => `${d.id} (${d.why})`).join("; ");
+
+    if (emptyGroups.length > 0 && droppedGeom > 0) {
+        return (
+            `${emptyGroups.join(", ")} is reported below with no pressables, and ${droppedGeom} press target(s) were dropped before grouping. ` +
+            `The two are not necessarily the same elements — an overlay listed with nothing in it is a grouping fault in this tool either way, ` +
+            `not evidence that the sheet is empty. Dropped: ${droppedDetail}. Screenshot the screen and tap by coordinates if you can see a control inside it.`
+        );
+    }
+    if (emptyGroups.length > 0) {
+        return (
+            `${emptyGroups.join(", ")} is reported below with no pressables, but React Native has ${total} press target(s) mounted on this screen. ` +
+            `An overlay detected confidently enough to be listed, holding nothing, is far more likely to be a grouping fault in this tool than a genuinely ` +
+            `empty sheet — screenshot the screen, and tap by coordinates if you can see a control inside it.`
+        );
+    }
+
+    if (unmeasurable > 0) {
+        return (
+            `${unmeasurable} of ${total} press target(s) React Native reports on this screen have no measurable host view and are NOT listed ` +
+            `below${hidden > 0 ? `, and ${hidden} more were pruned as hidden` : ""}. An unmeasurable press target is usually one that is mounted but ` +
+            `not laid out yet (sheet content mid-animation), so it may appear on a second call — re-read before concluding it is absent.${detail}`
+        );
+    }
+    return (
+        `${hidden} of ${total} press target(s) React Native reports were pruned as hidden and are not listed below. This is normally correct — ` +
+        `inactive navigator routes stay mounted — but if something you expected is missing, this names the rule that dropped it.${detail}`
+    );
+}
+
 export async function getScreenState(
     options: { device?: string } = {}
 ): Promise<ExecutionResult & { screenState?: ScreenState }> {
@@ -1103,6 +1180,11 @@ export async function getScreenState(
 
     var hostFibers = [];
     var fiberMeta = [];
+    // Audit accumulators — see the PressabilityDebugView branch in the walk below.
+    var markerTotal = 0;
+    var markerHiddenCount = 0;
+    var markerUnmeasurableCount = 0;
+    var markerSkipped = [];
     // overlayFiberMeta index -> fiberMeta index at which that overlay's subtree was entered.
     var overlayEnterIdx = [];
     // A count badge ("1", "99+") is the only text on icon buttons like a cart — treat it
@@ -1303,11 +1385,16 @@ export async function getScreenState(
         return isScreenHidden(getComponentName(hostFiber), hostFiber.memoizedProps, hostFiber);
     }
 
-    function walkPressabilityDebugViews(fiber, depth, hidden, ovIdx) {
+    function walkPressabilityDebugViews(fiber, depth, hidden, ovIdx, hiddenBy) {
         if (!fiber || depth > 5000) return;
         var name = getComponentName(fiber);
         var props = fiber.memoizedProps;
-        var nextHidden = hidden || isScreenHidden(name, props, fiber);
+        var becameHidden = isScreenHidden(name, props, fiber);
+        var nextHidden = hidden || becameHidden;
+        // Which rule pruned this subtree. Every marker dropped below here is
+        // attributed to it, so an unexpected pruner is legible in the audit instead
+        // of presenting as a silently shorter list.
+        var nextHiddenBy = hiddenBy || (becameHidden ? (name || 'unnamed') : null);
 
         // Track which overlay subtree we're inside — membership by ancestry, not
         // geometry. A bottom sheet's subtree includes a full-screen backdrop, so
@@ -1324,6 +1411,33 @@ export async function getScreenState(
                     // toast over a dialog.
                     if (overlayEnterIdx[ofi] == null) overlayEnterIdx[ofi] = fiberMeta.length;
                     break;
+                }
+            }
+        }
+
+        // Audit: RN renders a PressabilityDebugView inside every press target it owns
+        // (Pressable, every Touchable*, and gesture-handler's Pressable), whether or not
+        // "Show Touchables" is on — the component returns null when disabled but the
+        // fiber is still mounted. So the marker count is RN's own answer to "how many
+        // press targets exist", and anything this walk reports is a subset of it.
+        // Counting the drops, with the rule that caused each one, turns a silently short
+        // list into a statement about what was skipped and why.
+        if (name === 'PressabilityDebugView') {
+            markerTotal++;
+            var auditHost = fiber.return;
+            var auditWhy = null;
+            if (nextHidden) auditWhy = 'pruned as hidden by ' + nextHiddenBy;
+            else if (!auditHost) auditWhy = 'marker had no host view';
+            else if (!getMeasurable(auditHost)) auditWhy = 'host view is not measurable';
+            if (auditWhy) {
+                if (auditWhy.indexOf('pruned as hidden') === 0) markerHiddenCount++;
+                else markerUnmeasurableCount++;
+                if (markerSkipped.length < 12) {
+                    var ap = (auditHost && auditHost.memoizedProps) || {};
+                    markerSkipped.push({
+                        id: ap.testID || ap.nativeID || ap.accessibilityLabel || getComponentName(auditHost) || 'unnamed',
+                        why: auditWhy
+                    });
                 }
             }
         }
@@ -1447,11 +1561,11 @@ export async function getScreenState(
 
         var child = fiber.child;
         while (child) {
-            walkPressabilityDebugViews(child, depth + 1, nextHidden, ovIdx);
+            walkPressabilityDebugViews(child, depth + 1, nextHidden, ovIdx, nextHiddenBy);
             child = child.sibling;
         }
     }
-    walkPressabilityDebugViews(roots[0].current, 0, false, null);
+    walkPressabilityDebugViews(roots[0].current, 0, false, null, null);
 
     // ------------------------------------------------------------------
     // 3b. Standalone texts — proximity labels for icon-only pressables
@@ -1743,6 +1857,16 @@ export async function getScreenState(
         } catch(e) {}
     }
 
+    // Handed to the resolve pass the same way the measurements are: this script and the
+    // one that builds the response are separate evaluations with no shared scope.
+    globalThis.__screenStateAudit = {
+        markerTotal: markerTotal,
+        markerHiddenCount: markerHiddenCount,
+        markerUnmeasurableCount: markerUnmeasurableCount,
+        markerSkipped: markerSkipped,
+        collectedCount: hostFibers.length
+    };
+
     return { count: hostFibers.length + textFibers.length + imageFibers.length, overlayCount: overlayFiberMeta.length };
 })()
     `;
@@ -1959,6 +2083,8 @@ export async function getScreenState(
     }
 
     // Build pressable list
+    var droppedByGeometry = 0;
+    var droppedIds = [];
     var allPressables = [];
     for (var i = 0; i < meta.length; i++) {
         if (i === rootIdx) continue;
@@ -1966,7 +2092,26 @@ export async function getScreenState(
         if (!m0) { unmeasuredCount++; continue; }
         var tr = withTransform(shiftRect(m0, shiftFor(sheetIdx, i)), meta[i].transform);
         var m = tr.m;
-        if (!keepElement(m, tr.unreliable)) continue;
+        if (!keepElement(m, tr.unreliable)) {
+            // Dropped for geometry: zero-sized, or measured outside the viewport. Both are
+            // usually right, and both were silent — which is why a sheet whose content
+            // measures at zero size looked exactly like a sheet with no buttons in it.
+            droppedByGeometry++;
+            // Deduped by identity: a parked drawer contributes dozens of identical rows
+            // and would otherwise fill the sample, hiding the one element being hunted.
+            var dropId = meta[i].testID || meta[i].label || meta[i].component || 'unnamed';
+            var seenDrop = false;
+            for (var dq = 0; dq < droppedIds.length; dq++) if (droppedIds[dq].id === dropId) { seenDrop = true; break; }
+            if (!seenDrop && droppedIds.length < 12) {
+                droppedIds.push({
+                    id: dropId,
+                    why: (m.width <= 0 || m.height <= 0)
+                        ? 'measured ' + Math.round(m.width) + 'x' + Math.round(m.height)
+                        : 'measured off-viewport at ' + Math.round(m.x) + ',' + Math.round(m.y)
+                });
+            }
+            continue;
+        }
         allPressables.push({
             transformNote: tr.note,
             // Position in the DFS collection order == paint order. Kept so occlusion can
@@ -2164,6 +2309,23 @@ export async function getScreenState(
         overlays[so].images.sort(byPosition);
     }
 
+    var audit = globalThis.__screenStateAudit || {};
+    // A press target can survive the walk and still never reach the caller: overlay
+    // membership, coverage and measurement each drop elements in this pass. Counting
+    // what is actually emitted is the only way that loss is visible at all — the
+    // Gorhom sheet case (portaled outside the navigator, collected, then emitted
+    // nowhere) produced an empty sheet group and no other trace (2026-09-04).
+    var emittedPressables = rootPressables.length;
+    var emptyOverlayGroups = [];
+    for (var ec = 0; ec < overlays.length; ec++) {
+        var opl = (overlays[ec].pressables || []).length;
+        emittedPressables += opl;
+        // An overlay confident enough to be reported, holding nothing, is the shape of a
+        // real defect rather than of routine filtering: the sheet is on screen with a
+        // visible button and the caller is told it is empty.
+        if (opl === 0) emptyOverlayGroups.push(overlays[ec].type || 'overlay');
+    }
+
     // Strip bounds from overlay objects (not in public interface)
     var cleanOverlays = overlays.map(function(o) {
         return { type: o.type, title: o.title, pressables: o.pressables, texts: o.texts, images: o.images };
@@ -2186,6 +2348,11 @@ export async function getScreenState(
     return { route: route, overlays: cleanOverlays, pressables: rootPressables, texts: rootTexts, images: rootImages, nativeMarkers: nativeMarkers,
         logBoxSkipped: logBoxSkipped,
         unmeasuredCount: unmeasuredCount, transformedCount: transformedCount, sheetShift: Math.round(sheetShiftApplied),
+        markerTotal: audit.markerTotal, markerHiddenCount: audit.markerHiddenCount,
+        markerUnmeasurableCount: audit.markerUnmeasurableCount, markerSkipped: audit.markerSkipped,
+        collectedCount: audit.collectedCount, emittedCount: emittedPressables,
+        emptyOverlayGroups: emptyOverlayGroups,
+        droppedByGeometry: droppedByGeometry, droppedIds: droppedIds,
         dispatchedCount: meta.length + textContents.length + imageMeta.length };
 })()
     `;
@@ -2201,6 +2368,15 @@ export async function getScreenState(
         sheetShift?: number;
         dispatchedCount?: number;
         logBoxSkipped?: number;
+        markerTotal?: number;
+        markerHiddenCount?: number;
+        markerUnmeasurableCount?: number;
+        markerSkipped?: Array<{ id: string; why: string }>;
+        collectedCount?: number;
+        emittedCount?: number;
+        emptyOverlayGroups?: string[];
+        droppedByGeometry?: number;
+        droppedIds?: Array<{ id: string; why: string }>;
     } = {};
     try {
         const parsed = JSON.parse(resolveResult.result || "{}");
@@ -2222,6 +2398,8 @@ export async function getScreenState(
             `This is a timing miss, not an empty screen — call get_screen_state again, or take a screenshot, before concluding anything is absent.`
         );
     }
+    const markerNote = formatPressabilityAudit(counts);
+    if (markerNote) completenessNotes.push(markerNote);
     if ((counts.transformedCount ?? 0) > 0) {
         completenessNotes.push(
             `${counts.transformedCount} element(s) are marked ⚠transformed. Their frames come from the layout tree, which does not include ` +
