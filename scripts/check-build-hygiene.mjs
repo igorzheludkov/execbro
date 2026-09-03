@@ -14,12 +14,18 @@
  *
  * Lives in scripts/ deliberately — that directory is not published, so the
  * denylist itself never ships.
+ *
+ * The denylist terms live in scripts/build-hygiene-denylist.json, which is
+ * gitignored: naming a specific competitor in a public repo is itself a tell
+ * that their product was inspected closely enough to worry about. See
+ * scripts/build-hygiene-denylist.example.json for the shape.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const BUILD_DIR = new URL("../build", import.meta.url).pathname;
+const DENYLIST_FILE = new URL("./build-hygiene-denylist.json", import.meta.url).pathname;
 
 /**
  * Products that must not appear in published output.
@@ -31,9 +37,13 @@ const BUILD_DIR = new URL("../build", import.meta.url).pathname;
  * behaviour has been inspected closely enough that any mention is likely to be
  * an internal note rather than user-facing copy.
  */
-const DENYLIST = [
-    "buoy"
-];
+const DENYLIST = existsSync(DENYLIST_FILE) ? JSON.parse(readFileSync(DENYLIST_FILE, "utf8")) : [];
+
+if (DENYLIST.length === 0) {
+    console.warn(
+        `build hygiene: no local denylist at ${DENYLIST_FILE.replace(process.cwd() + "/", "")} — skipping (nothing to check).`
+    );
+}
 
 function* walk(dir) {
     let entries;
