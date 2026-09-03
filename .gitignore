@@ -40,3 +40,7 @@ Thumbs.db
 # old apex TXT record on execbro.com or verification fails.
 *.pem
 mcp-registry-key.hex
+
+# Build-hygiene denylist names a real competitor — kept local, never committed.
+# See scripts/build-hygiene-denylist.example.json for the shape.
+scripts/build-hygiene-denylist.json
