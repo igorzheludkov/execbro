@@ -3,6 +3,7 @@ import { executeInApp, delay } from "./jsExecute.js";
 import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
+import { OVERLAY_ADOPTION_JS } from "./injected/overlayAdoption.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 import type { KeyboardState } from "./keyboardMetrics.js";
 
@@ -1892,6 +1893,7 @@ export async function getScreenState(
     await delay(measureBudgetMs);
 
     const resolveExpression = `
+${OVERLAY_ADOPTION_JS}
 (function() {
     ${SHEET_HELPERS_JS}
     var hostFibers = globalThis.__screenStateFibers;
@@ -2221,8 +2223,15 @@ export async function getScreenState(
         var p = allPressables[pi];
         var assignedToOverlay = false;
         for (var ov = 0; ov < overlays.length; ov++) {
-            if (p.overlayIdx === overlays[ov].origIdx ||
-                (p.overlayIdx == null && overlays[ov].hasContent && inside(p.bounds, overlays[ov].contentBounds))) {
+            // Containment is a fallback for content the overlay portals out of its own
+            // subtree, so it must only ever adopt something painted ON TOP of the overlay.
+            // Without the paint-order test it also adopts the screen behind: an RN <Modal>
+            // measures a content rect large enough to contain the buttons underneath it,
+            // and those were reported as the modal's own contents — i.e. as reachable,
+            // when they are exactly what the modal blocks (verified on the test app,
+            // 2026-09-04). The occludes() helper already encodes the same ordering for the
+            // inverse question; this is that rule applied to adoption.
+            if (p.overlayIdx === overlays[ov].origIdx || adoptsByContainment(p, overlays[ov])) {
                 overlays[ov].pressables.push(p);
                 assignedToOverlay = true;
                 break;
