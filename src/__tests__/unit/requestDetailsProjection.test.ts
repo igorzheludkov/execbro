@@ -143,3 +143,49 @@ describe("credential headers", () => {
         expect(out).toContain("Bearer [secret:auth_api.example.com]");
     });
 });
+
+describe("redaction runs before structural bounding", () => {
+    beforeEach(resetVaultForTests);
+
+    // Measured live on 2026-09-05 against an MSAL flow: projection clips
+    // strings to 60 chars, so a ~2KB access_token reached the redactor already
+    // truncated. It no longer matched the JWT shape, fell through to the
+    // key-name rule, and rendered as `[redacted secret, 66 chars]` with no
+    // handle — so the most valuable link in the flow, "the token minted here is
+    // the token sent there", was the one the projection broke.
+    const BIG_JWT =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
+        "e" + "y".repeat(1200) +
+        ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+
+    function tokenResponse(): NetworkRequest {
+        return request({
+            url: "https://login.microsoftonline.com/tenant/oauth2/v2.0/token",
+            responseBody: JSON.stringify({ token_type: "Bearer", access_token: BIG_JWT, expires_in: 4887 })
+        });
+    }
+
+    it("gives a long token in a body a handle instead of a truncated shape description", () => {
+        const out = formatRequestDetails(tokenResponse(), { include: "response", maxBodyLength: 400 });
+        expect(out).not.toContain(BIG_JWT);
+        expect(out).toContain("[secret:jwt_login.microsoftonline.com]");
+        expect(out).not.toContain("[redacted secret,");
+    });
+
+    it("links a body token to the same token seen in a header, which is the whole point", () => {
+        formatRequestDetails(tokenResponse(), { include: "response", maxBodyLength: 400 });
+        const sent = formatRequestDetails(
+            request({ url: "https://api.example.com/graphql", headers: { authorization: `Bearer ${BIG_JWT}` } }),
+            { include: "request" }
+        );
+        // Same handle on both sides: minted there, sent here, nothing disclosed.
+        expect(sent).toContain("[secret:jwt_login.microsoftonline.com]");
+    });
+
+    it("keeps the body valid JSON after substitution", () => {
+        const out = formatRequestDetails(tokenResponse(), { include: "response", maxBodyLength: 0 });
+        const body = out.split("--- Response Body ---")[1].split("--- secrets")[0].trim();
+        expect(() => JSON.parse(body)).not.toThrow();
+        expect(JSON.parse(body).access_token).toBe("[secret:jwt_login.microsoftonline.com]");
+    });
+});

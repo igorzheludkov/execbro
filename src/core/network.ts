@@ -6,7 +6,7 @@ import {
     operationSearchText
 } from "./graphqlOperation.js";
 import { projectJsonText, formatProjectionNote } from "./jsonProjection.js";
-import { redactionEnabled } from "./redact.js";
+import { redactionEnabled, redactSecrets } from "./redact.js";
 import { vaultAdd, vaultHandleRef } from "./vault.js";
 
 // Circular buffer for storing network requests
@@ -251,15 +251,33 @@ export function redactHeaderValue(name: string, value: string, origin?: string):
  * and stops, which does not even reveal whether the field the caller came for
  * exists. Bounding structurally keeps every key path and states the sizes it
  * dropped. Non-JSON has no structure to exploit, so it keeps the plain clip.
+ *
+ * Redaction runs BEFORE the projection, and the order is load-bearing.
+ * Projection clips strings to 60 characters, so a ~2KB MSAL access_token used
+ * to reach the chokepoint already truncated: it no longer matched the JWT
+ * shape, fell through to the key-name rule, and rendered as `[redacted secret,
+ * 66 chars]` with no handle. The same token vaulted fine from the
+ * Authorization header of the calls that followed, but a clipped string is a
+ * different string, so exact matching never linked the two — breaking exactly
+ * the link worth having, "the token minted here is the token sent there".
+ *
+ * Redacting first also buys budget back: a 1.5KB token becomes a 30-character
+ * handle, leaving the projection that much more room for real content.
+ *
+ * `catalog: false` because the chokepoint appends one catalog for the whole
+ * result; a footer nested inside the body section would be noise. The
+ * chokepoint scans finished text for handles, so the ones minted here are
+ * still explained.
  */
 function renderBody(
     raw: string,
-    opts: { maxBodyLength: number; verbose: boolean; query?: string; hint: string }
+    opts: { maxBodyLength: number; verbose: boolean; query?: string; hint: string; origin?: string }
 ): string {
-    if (opts.verbose && !opts.query) return raw;
+    const text = redactionEnabled() ? redactSecrets(raw, { catalog: false, origin: opts.origin }) : raw;
+    if (opts.verbose && !opts.query) return text;
 
     const maxBytes = opts.maxBodyLength > 0 ? opts.maxBodyLength : Number.MAX_SAFE_INTEGER;
-    const projected = projectJsonText(raw, { query: opts.query, maxBytes: opts.verbose ? Number.MAX_SAFE_INTEGER : maxBytes });
+    const projected = projectJsonText(text, { query: opts.query, maxBytes: opts.verbose ? Number.MAX_SAFE_INTEGER : maxBytes });
     const note = formatProjectionNote(projected, opts.hint);
     return note ? `${projected.text}\n\n${note}` : projected.text;
 }
@@ -335,7 +353,8 @@ export function formatRequestDetails(
             maxBodyLength,
             verbose,
             query: queryTarget === "request" ? query : undefined,
-            hint: "Raise maxBodyLength, pass verbose:true, or query a narrower path."
+            hint: "Raise maxBodyLength, pass verbose:true, or query a narrower path.",
+            origin: request.url
         }));
     }
 
@@ -354,7 +373,8 @@ export function formatRequestDetails(
             maxBodyLength,
             verbose,
             query: queryTarget === "response" ? query : undefined,
-            hint: "Raise maxBodyLength, pass verbose:true, or query a narrower path."
+            hint: "Raise maxBodyLength, pass verbose:true, or query a narrower path.",
+            origin: request.url
         }));
     }
 
