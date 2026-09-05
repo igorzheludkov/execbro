@@ -80,7 +80,16 @@ function hostOf(origin: string): string {
  * shape or key rule would ever match, so the vault must not become the thing
  * that puts them in front of the agent.
  */
+const JWT_SHAPE = /^eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+$/;
+
 function jwtExpiry(value: string): number | undefined {
+    // Keyed on SHAPE, not on the caller's `kind`. redactHeaderValue vaults a
+    // bearer token as kind "auth" because that is what the header says, and
+    // gating on the label meant the single most common credential in the
+    // product — a JWT in an Authorization header — was the one entry that
+    // never got an expiry, which is precisely the staleness the catalog is
+    // supposed to surface before a 401 rather than after one.
+    if (!JWT_SHAPE.test(value)) return undefined;
     const payload = value.split(".")[1];
     if (!payload) return undefined;
     try {
@@ -133,7 +142,7 @@ export function vaultAdd(value: string, kind: string, origin?: string): string |
         value,
         firstSeen: now,
         lastSeen: now,
-        expiresAt: kind === "jwt" ? jwtExpiry(value) : undefined
+        expiresAt: jwtExpiry(value)
     });
 
     const handle = byHash.get(key)!.handle;
