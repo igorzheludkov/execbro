@@ -44,8 +44,16 @@ describe("vault", () => {
         expect(JSON.stringify(entry)).not.toContain("a@b.c");
     });
 
-    it("derives no expiry from a non-JWT kind", () => {
-        const handle = vaultAdd(JWT_EXP, "credential", "api.acme.io")!;
+    it("derives expiry from the value's shape, not the caller's kind label", () => {
+        // redactHeaderValue vaults a bearer JWT as kind "auth", which is what
+        // the header says. Gating exp on the label would leave the product's
+        // most common credential with no expiry at all.
+        const handle = vaultAdd(JWT_EXP, "auth", "api.acme.io")!;
+        expect(vaultByHandle(handle)!.expiresAt).toBe(2000000000 * 1000);
+    });
+
+    it("derives no expiry from something that is not JWT-shaped", () => {
+        const handle = vaultAdd("opaque-session-id-abcdefgh", "auth", "api.acme.io")!;
         expect(vaultByHandle(handle)!.expiresAt).toBeUndefined();
     });
 
