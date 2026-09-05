@@ -193,6 +193,12 @@ Use tap — it tries multiple strategies automatically and returns a post-tap sc
 tap returns a screenshot after every action (screenshot=true by default) — no need to call ios_screenshot/android_screenshot after tapping.
 For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visual change (verify=true by default). Set screenshot=false for fastest execution.
 
+When meaningful:true, verification.regions gives bounding boxes (screenshot pixels, same space as
+tap/inspect_at_point) of where the screen actually changed, and the explanation text names their
+centres. A pixel diff still cannot say WHAT changed, but the region tells you WHERE to look —
+inspect_at_point on a region's centre is the natural next call instead of eyeballing the whole
+screenshot.
+
 ### When verification says meaningful:false but you think the tap landed
 Retry with burst=true. It captures 4 rapid screenshots after the tap, catching press animations
 and highlights that settle before the ordinary after-screenshot. Then read
