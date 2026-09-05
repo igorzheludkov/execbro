@@ -160,3 +160,73 @@ export function resetVaultForTests(): void {
     byHash.clear();
     issued.clear();
 }
+
+/** The one place the on-the-wire rendering of a handle is defined. */
+export function vaultHandleRef(handle: string): string {
+    return `[secret:${handle}]`;
+}
+
+/**
+ * Replace every vaulted literal in `text`, recording the handles emitted.
+ *
+ * This is the strongest thing the vault buys and it has nothing to do with
+ * substitution: heuristic coverage becomes exact coverage for anything seen
+ * once. It matters most where per-frame heuristics are least reliable and most
+ * expensive, such as a WebSocket subscription re-sending its auth token in
+ * hundreds of frames.
+ *
+ * Longest first, so a token that contains a shorter vaulted value does not get
+ * half-masked into an unrecognisable fragment.
+ *
+ * ponytail: O(entries x text) with a plain indexOf guard. At a 200-entry cap
+ * that is a few hundred substring scans per tool result, far below the JSON
+ * projection already running on the same text. Build a trie or an Aho-Corasick
+ * automaton only if a profile ever says this shows up.
+ */
+export function vaultMaskExact(text: string, hits: Set<string>): string {
+    let out = text;
+    const entries = [...byHash.values()].sort((a, b) => b.value.length - a.value.length);
+    for (const entry of entries) {
+        if (!out.includes(entry.value)) continue;
+        out = out.split(entry.value).join(vaultHandleRef(entry.handle));
+        entry.lastSeen = Date.now();
+        hits.add(entry.handle);
+    }
+    return out;
+}
+
+function ageLabel(ms: number): string {
+    const minutes = Math.round(ms / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    return `${Math.round(minutes / 60)}h ago`;
+}
+
+/**
+ * Explain the handles that appeared, using derived facts only.
+ *
+ * Never the claims: a JWT payload carries `sub`, email, org ids and roles.
+ * Never a path either, because "first seen in a request to /v1/users/12345"
+ * puts a user id in the catalog just as surely as reading `sub` would.
+ *
+ * Staleness is meant to be visible here, before a call is made, rather than
+ * discovered through a 401.
+ */
+export function vaultCatalog(handles: Set<string>): string {
+    if (handles.size === 0) return "";
+    const now = Date.now();
+    const lines: string[] = ["--- secrets referenced above ---"];
+    for (const handle of handles) {
+        const entry = vaultByHandle(handle);
+        if (!entry) continue;
+        const where = entry.origin ? ` seen on ${entry.origin}` : " seen in the app";
+        const parts = [`${entry.kind}${where}`, `first seen ${ageLabel(now - entry.firstSeen)}`];
+        if (entry.expiresAt !== undefined) {
+            parts.push(entry.expiresAt <= now
+                ? "EXPIRED"
+                : `expires in ${ageLabel(entry.expiresAt - now).replace(" ago", "")}`);
+        }
+        lines.push(`${handle}: ${parts.join(", ")}`);
+    }
+    return lines.join("\n");
+}

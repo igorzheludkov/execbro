@@ -1,4 +1,4 @@
-import { vaultAdd, vaultEntries, vaultByHandle, resetVaultForTests } from "../../core/vault.js";
+import { vaultAdd, vaultEntries, vaultByHandle, resetVaultForTests, vaultMaskExact, vaultCatalog, vaultHandleRef } from "../../core/vault.js";
 
 // exp = 2000000000 (2033), no other claims read.
 const JWT_EXP =
@@ -54,5 +54,67 @@ describe("vault", () => {
         expect(vaultEntries().length).toBeLessThanOrEqual(200);
         const fresh = vaultAdd("value-padding-0000000000", "jwt");
         expect(fresh).toBe("jwt_app#206");
+    });
+});
+
+describe("vaultMaskExact", () => {
+    beforeEach(resetVaultForTests);
+
+    it("masks a vaulted value anywhere it later appears", () => {
+        vaultAdd("opaque-session-id-abcdefgh", "credential", "api.acme.io");
+        const hits = new Set<string>();
+        const out = vaultMaskExact("log line sid=opaque-session-id-abcdefgh done", hits);
+        expect(out).toBe("log line sid=[secret:credential_api.acme.io] done");
+        expect([...hits]).toEqual(["credential_api.acme.io"]);
+    });
+
+    it("masks every occurrence, not just the first", () => {
+        vaultAdd("opaque-session-id-abcdefgh", "credential");
+        const out = vaultMaskExact("a opaque-session-id-abcdefgh b opaque-session-id-abcdefgh", new Set());
+        expect(out).not.toContain("opaque-session-id-abcdefgh");
+        expect(out.match(/\[secret:credential_app\]/g)).toHaveLength(2);
+    });
+
+    it("prefers the longer value when one vaulted value contains another", () => {
+        vaultAdd("aaaaaaaaaaaaaaaaaaaaaaaa", "credential");
+        vaultAdd("aaaaaaaaaaaaaaaaaaaaaaaaEXTRAEXTRA", "credential");
+        const out = vaultMaskExact("v=aaaaaaaaaaaaaaaaaaaaaaaaEXTRAEXTRA", new Set());
+        expect(out).toBe("v=[secret:credential_app#2]");
+    });
+
+    it("leaves text with no vaulted value untouched and records no hits", () => {
+        vaultAdd("aaaaaaaaaaaaaaaaaaaaaaaa", "credential");
+        const hits = new Set<string>();
+        expect(vaultMaskExact("nothing to see", hits)).toBe("nothing to see");
+        expect(hits.size).toBe(0);
+    });
+});
+
+describe("vaultCatalog", () => {
+    beforeEach(resetVaultForTests);
+
+    it("is empty when nothing was referenced", () => {
+        expect(vaultCatalog(new Set())).toBe("");
+    });
+
+    it("lists origin and kind but never the value or a claim", () => {
+        const handle = vaultAdd(JWT_EXP, "jwt", "api.acme.io")!;
+        const out = vaultCatalog(new Set([handle]));
+        expect(out).toContain("--- secrets referenced above ---");
+        expect(out).toContain("jwt_api.acme.io: jwt seen on api.acme.io");
+        expect(out).not.toContain(JWT_EXP);
+        expect(out).not.toContain("12345");
+        expect(out).not.toContain("a@b.c");
+    });
+
+    it("marks an expired entry", () => {
+        // exp = 1000000000 (2001).
+        const expired = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjEwMDAwMDAwMDB9.Zm9vYmFyc2lnbmF0dXJlZm9vYmFy";
+        const handle = vaultAdd(expired, "jwt", "api.acme.io")!;
+        expect(vaultCatalog(new Set([handle]))).toContain("EXPIRED");
+    });
+
+    it("renders a handle reference in one place only", () => {
+        expect(vaultHandleRef("jwt_api.acme.io")).toBe("[secret:jwt_api.acme.io]");
     });
 });
