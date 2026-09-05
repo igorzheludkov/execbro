@@ -95,3 +95,36 @@ describe("catalog coverage for handles emitted elsewhere", () => {
         expect(out).toContain("auth_gifted.fyi: auth seen on gifted.fyi");
     });
 });
+
+describe("a value that already carries a handle", () => {
+    beforeEach(resetVaultForTests);
+
+    const TOKEN = "opaque-session-id-abcdefgh";
+
+    it("keeps the handle when a scheme prefix precedes it", () => {
+        vaultAdd(TOKEN, "auth", "https://api.acme.io/v1/me");
+        // An echoed Authorization header is the single most common shape in
+        // get_request_details output, and it used to lose its handle here.
+        const out = redactSecrets(JSON.stringify({ authorization: `Bearer ${TOKEN}` }), { catalog: false });
+        expect(out).toContain("Bearer [secret:auth_api.acme.io]");
+        expect(out).not.toContain("[redacted secret");
+    });
+
+    it("keeps the handle among cookie attributes", () => {
+        vaultAdd(TOKEN, "auth", "https://api.acme.io/v1/me");
+        const out = redactSecrets(JSON.stringify({ cookie: `sid=${TOKEN}; path=/` }), { catalog: false });
+        expect(out).toContain("sid=[secret:auth_api.acme.io]; path=/");
+    });
+
+    it("still redacts a second, unmatched secret sitting beside a handle", () => {
+        vaultAdd(TOKEN, "auth", "https://api.acme.io/v1/me");
+        // The marker must not become a shield: a credential-sized run next to
+        // it is exactly the case a blanket skip would leak.
+        const out = redactSecrets(
+            JSON.stringify({ authorization: `Bearer ${TOKEN} sig=OTHERSECRETVALUE1234567890` }),
+            { catalog: false }
+        );
+        expect(out).not.toContain("OTHERSECRETVALUE1234567890");
+        expect(out).toContain("[redacted secret");
+    });
+});
