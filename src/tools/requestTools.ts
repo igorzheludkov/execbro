@@ -8,6 +8,8 @@ import { buildReplayArgs } from "../core/replay.js";
 import { resolveNetworkBuffer } from "../core/toolHelpers.js";
 import { refreshMirror } from "../core/sdkMirrorPoller.js";
 import { activeMockBanner } from "../core/mockRules.js";
+import { issueHttpRequest } from "../core/httpRequest.js";
+import { captureToVault } from "../core/vaultCapture.js";
 
 /**
  * Runs an in-app request and renders the result. Shared by app_request and
@@ -71,11 +73,11 @@ export function registerRequestTools(server: McpServer): void {
             description:
                 "Issue an HTTP request from inside the running app, as the logged-in user.\n" +
                 "PURPOSE: Probe your backend through the app's real network stack, TLS trust and proxy config — without pasting credentials into the conversation.\n" +
-                "WHY THIS EXISTS: hand-written fetch calls either dig the token out of redux or embed a JWT literal in the expression, which puts the credential in the transcript. auth=\"auto\" resolves it in-app instead.\n" +
                 "WHEN TO USE: reproduce a 4xx, check what an endpoint returns for an edge case, clean up test records the UI can't reach.\n" +
                 "WORKFLOW: app_request({ method: \"GET\", url: \"https://api.example.com/me\" }) -> inspect status + body.\n" +
                 "AUTH RESOLUTION (auth=\"auto\", in order): explicit Authorization header -> redux (state.user.accessToken, state.auth.accessToken, state.auth.token) -> the Authorization header of the app's last captured request. That last step is source-agnostic, so it covers tokens kept outside redux — keychain, secure storage, an Apollo link — as long as the app has already made one authenticated call and the SDK captured it. Cookie auth needs none of this: the native cookie jar attaches cookies to any in-app request.\n" +
                 "LIMITATIONS: needs a connected app. Pass an explicit Authorization only when every step above misses — it puts the credential in the transcript.\n" +
+                "GOES THROUGH THE APP: same TLS trust, proxy, cookie jar and credentials, so an active network_mock rule intercepts it too. For a clean request from your own machine — to tell a server bug from a client one — use http_request.\n" +
                 "GOOD: app_request({ method: \"DELETE\", url: \"https://api.example.com/address/17\" })\n" +
                 "BAD: embedding a bearer token in an execute_in_app expression — it lands in the transcript.",
             inputSchema: {
@@ -185,6 +187,66 @@ export function registerRequestTools(server: McpServer): void {
             }
 
             return runAppRequest(expression, maxResultLength, device, "network_replay", notes);
+        }
+    );
+
+    registerToolWithTelemetry(
+        server,
+        "http_request",
+        {
+            description:
+                "Issue an HTTP request FROM THE HOST (Node), not through the app, carrying a credential you cannot read.\n" +
+                "PURPOSE: Isolate server behaviour from client behaviour. This is what curl was for, minus the part where the token and the whole response landed in the transcript.\n" +
+                "HOW IT DIFFERS FROM app_request: app_request runs inside the app, so it uses the app's TLS trust, proxy, cookie jar and credentials — and an active network_mock rule intercepts it. http_request does none of that: it is a clean request from your machine. Pick app_request when the app's real request conditions matter or the backend enforces attestation (Firebase App Check cannot be satisfied from Node, by design). Pick http_request to find out whether the server or the client is at fault.\n" +
+                "CREDENTIALS: pass auth:{secret:\"<origin or handle>\"} — names come from list_secrets. The value is substituted here and never rendered. A credential is bound to the origin it was observed on and will be refused for any other host.\n" +
+                "READING THE RESULT: a 401 here where app_request succeeds is itself an answer — the backend is enforcing attestation.\n" +
+                "GOOD: http_request({ method: \"GET\", url: \"https://api.acme.io/v1/me\", auth: { secret: \"api.acme.io\" } })\n" +
+                "BAD: pasting a token into headers.Authorization — that puts it in the transcript, which is what the vault exists to avoid.",
+            inputSchema: {
+                method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]).describe("HTTP method."),
+                url: z.string().describe("Absolute http or https URL."),
+                body: z
+                    .unknown()
+                    .optional()
+                    .describe("Request body. An object is JSON-serialised and sets Content-Type: application/json unless you override it; a string is sent verbatim."),
+                headers: z.record(z.string()).optional().describe("Extra request headers. An explicit Authorization wins over auth."),
+                auth: z
+                    .object({ secret: z.string().describe("Origin (\"api.acme.io\") or handle (\"auth_api.acme.io\") from list_secrets.") })
+                    .optional()
+                    .describe("Credential to attach as a bearer token. Typed on purpose: the credential position is structural, never string interpolation, so it cannot be smuggled into an arbitrary field."),
+                maxResultLength: z.number().optional().describe("Target size for the response body in characters (default 25000).")
+            }
+        },
+        async ({ method, url, body, headers, auth, maxResultLength }) => {
+            const text = await issueHttpRequest({ method, url, body, headers, auth, maxResultLength });
+            return { content: [{ type: "text" as const, text }] };
+        }
+    );
+
+    registerToolWithTelemetry(
+        server,
+        "vault_capture",
+        {
+            description:
+                "Read a credential out of the running app straight into the vault. The value is never returned to you.\n" +
+                "PURPOSE: Cover credentials no captured request revealed — a cold session before the app has made an authenticated call, a token the app refreshed in the background, or one held somewhere no heuristic finds (keychain, expo-secure-store, an Apollo link).\n" +
+                "WHEN TO USE: http_request says no credential is known for an origin, or list_secrets shows the entry as EXPIRED after a re-login.\n" +
+                "WORKFLOW: vault_capture({ expression: \"SecureStore.getItemAsync('access_token')\", origin: \"https://api.acme.io\" }) -> http_request({ ..., auth: { secret: \"api.acme.io\" } }).\n" +
+                "GOOD: vault_capture({ expression: \"store.getState().auth.token\", origin: \"https://api.acme.io\" })\n" +
+                "BAD: reading the same value with execute_in_app — that returns it into the transcript, permanently.",
+            inputSchema: {
+                expression: z
+                    .string()
+                    .describe("JS evaluated in the app; its result goes to the vault, not to you. An async expression is awaited."),
+                origin: z
+                    .string()
+                    .describe("Absolute URL of the API this credential authenticates, e.g. https://api.acme.io. Binds the credential: it can only be sent back to this host."),
+                device: z.string().optional().describe("Target device name (substring match). Omit for the default device.")
+            }
+        },
+        async ({ expression, origin, device }) => {
+            const text = await captureToVault(expression, origin, device);
+            return { content: [{ type: "text" as const, text }] };
         }
     );
 }
