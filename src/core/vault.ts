@@ -59,6 +59,19 @@ const byHash = new Map<string, VaultEntry>();
  * the same credential in a transcript that outlives the process.
  */
 const issued = new Set<string>();
+/**
+ * Origin host to the hash of the most recently observed value for it.
+ *
+ * Storage keys by content hash so every distinct token is its own entry, which
+ * is what makes cross-sink identity work. Substitution needs the opposite: the
+ * CURRENT credential for a position. A slot gives that, and it is why the vault
+ * needs no destructive operations at all — the next capture after a re-login
+ * supersedes the slot with no agent action, so "delete a stale entry" has
+ * nothing to do. Adding that operation would only invite the agent to reason
+ * about vault hygiene, which is not its job, and hand an injected instruction
+ * a target.
+ */
+const slots = new Map<string, string>();
 
 function hashOf(value: string): string {
     return createHash("sha256").update(value).digest("hex");
@@ -130,6 +143,7 @@ export function vaultAdd(value: string, kind: string, origin?: string): string |
     if (existing) {
         existing.lastSeen = Date.now();
         if (!existing.origin && origin) existing.origin = hostOf(origin);
+        if (existing.origin) slots.set(existing.origin, key);
         return existing.handle;
     }
 
@@ -144,6 +158,8 @@ export function vaultAdd(value: string, kind: string, origin?: string): string |
         lastSeen: now,
         expiresAt: jwtExpiry(value)
     });
+
+    if (host) slots.set(host, key);
 
     const handle = byHash.get(key)!.handle;
     if (byHash.size > MAX_ENTRIES) {
@@ -168,6 +184,56 @@ export function vaultByHandle(handle: string): VaultEntry | undefined {
 export function resetVaultForTests(): void {
     byHash.clear();
     issued.clear();
+    slots.clear();
+}
+
+/**
+ * Resolve a name the agent supplied to an entry.
+ *
+ * A handle names one specific value; a slot names whatever is current for an
+ * origin. Both are accepted because the spec's examples pass an origin while
+ * every rendered result the agent has actually seen names a handle, and an
+ * origin-only parameter would invite a wrong guess on the first call. This is
+ * safe to be generous about: origin binding is enforced against the resolved
+ * entry's own recorded origin, never against the name passed in, so a handle
+ * is not a way around the check.
+ */
+export function vaultResolve(nameOrHandle: string): VaultEntry | undefined {
+    const byName = vaultByHandle(nameOrHandle);
+    if (byName) return byName;
+    const hash = slots.get(hostOf(nameOrHandle));
+    return hash ? byHash.get(hash) : undefined;
+}
+
+/**
+ * Why an entry might not work, before it is used.
+ *
+ * Staleness should be visible in the catalog rather than discovered through a
+ * 401. Returns undefined when there is nothing to warn about, so callers can
+ * treat it as an optional line.
+ */
+export function vaultStaleness(entry: VaultEntry): string | undefined {
+    if (entry.expiresAt === undefined) return undefined;
+    const now = Date.now();
+    if (entry.expiresAt <= now) {
+        return `${entry.handle} expired ${ageLabel(now - entry.expiresAt)} (first seen ${ageLabel(now - entry.firstSeen)}). The vault cannot mint a token; only the app can. Drive a re-login, or capture the fresh token with vault_capture.`;
+    }
+    if (entry.expiresAt - now < 60_000) {
+        return `${entry.handle} expires in under a minute.`;
+    }
+    return undefined;
+}
+
+/** One catalog row. Shared by the redaction footer and list_secrets. */
+export function vaultCatalogLine(entry: VaultEntry, now: number): string {
+    const where = entry.origin ? ` seen on ${entry.origin}` : " seen in the app";
+    const parts = [`${entry.kind}${where}`, `first seen ${ageLabel(now - entry.firstSeen)}`];
+    if (entry.expiresAt !== undefined) {
+        parts.push(
+            entry.expiresAt <= now ? "EXPIRED" : `expires in ${ageLabel(entry.expiresAt - now).replace(" ago", "")}`,
+        );
+    }
+    return `${entry.handle}: ${parts.join(", ")}`;
 }
 
 /** The one place the on-the-wire rendering of a handle is defined. */
@@ -228,14 +294,7 @@ export function vaultCatalog(handles: Set<string>): string {
     for (const handle of handles) {
         const entry = vaultByHandle(handle);
         if (!entry) continue;
-        const where = entry.origin ? ` seen on ${entry.origin}` : " seen in the app";
-        const parts = [`${entry.kind}${where}`, `first seen ${ageLabel(now - entry.firstSeen)}`];
-        if (entry.expiresAt !== undefined) {
-            parts.push(entry.expiresAt <= now
-                ? "EXPIRED"
-                : `expires in ${ageLabel(entry.expiresAt - now).replace(" ago", "")}`);
-        }
-        lines.push(`${handle}: ${parts.join(", ")}`);
+        lines.push(vaultCatalogLine(entry, now));
     }
     return lines.join("\n");
 }
