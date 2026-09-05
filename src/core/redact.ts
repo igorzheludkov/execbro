@@ -98,8 +98,37 @@ const MARKER = /\[(?:secret:|redacted )[^\]]*\]/g;
 /** An emitted handle, capturing its name. */
 const HANDLE = /\[secret:([^\]]+)\]/g;
 
-/** A value that is nothing but markers already. */
-const ONLY_MARKERS = /^\s*(?:\[(?:secret:|redacted )[^\]]*\]\s*)+$/;
+/**
+ * A credential-sized run of characters, used to decide whether a value that
+ * already carries a marker still hides something unredacted. 20 matches the
+ * vault's floor: shorter than that and exact matching would be dangerous
+ * anyway, so it is the same line drawn in the same place.
+ */
+const CREDENTIAL_SIZED = /[^\s,;=&"']{20,}/;
+
+/**
+ * True when a value already carries a marker AND nothing credential-sized is
+ * left beside it, so the key-name rules must leave it alone.
+ *
+ * Re-redacting such a value destroys a handle that a higher-confidence rule
+ * just produced. Measured 2026-09-05 against the shipped redactor: an echoed
+ * `"authorization": "Bearer <token>"` came back as `[redacted secret, 32
+ * chars]` rather than `Bearer [secret:auth_api.acme.io]`, because the `Bearer `
+ * prefix means the value is not ONLY a marker and the match starts before the
+ * marker begins. `"cookie": "sid=<token>; path=/"` lost its handle the same
+ * way. Both are ordinary `get_request_details` output.
+ *
+ * The Phase 1 rule this replaces was right to refuse a blanket skip — a value
+ * holding both a marker and a real secret must still be redacted, or the
+ * second secret survives. It was wrong to treat every non-marker character as
+ * evidence of one. Scheme keywords, cookie attribute names and separators are
+ * not secrets; a 20-character opaque run beside a marker might be. So the test
+ * is what is LEFT once the markers are removed, not whether anything is left.
+ */
+function markerSafe(value: string): boolean {
+    if (!value.includes("[secret:") && !value.includes("[redacted ")) return false;
+    return !CREDENTIAL_SIZED.test(value.replace(MARKER, " "));
+}
 
 function markerSpans(text: string): Array<[number, number]> {
     const spans: Array<[number, number]> = [];
@@ -110,7 +139,7 @@ function markerSpans(text: string): Array<[number, number]> {
 }
 
 function alreadyMarked(spans: Array<[number, number]>, offset: number, value: string): boolean {
-    if (ONLY_MARKERS.test(value)) return true;
+    if (markerSafe(value)) return true;
     return spans.some(([start, end]) => offset >= start && offset < end);
 }
 
