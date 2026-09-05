@@ -11,7 +11,7 @@ import {
 import { getTargetPlatform } from "./state.js";
 import { resolveConnectedAppByDevice } from "./connection.js";
 import { recordToolCall } from "./screenStaleness.js";
-import { UserInputError } from "./errors.js";
+import { EnvironmentError, UserInputError, type FailureKind } from "./errors.js";
 import { estimateImageTokens } from "./toolHelpers.js";
 import { redactSecrets, redactionEnabled } from "./redact.js";
 import { connectedApps, shouldShowFeedbackHint, markFeedbackHintShown, pushLogBox } from "./index.js";
@@ -107,6 +107,7 @@ export function registerToolWithTelemetry(
         let success = true;
         let errorMessage: string | undefined;
         let errorContext: string | undefined;
+        let failureKind: FailureKind | undefined;
         // Which of the two failure paths ran. Both set success=false and share the
         // trackToolInvocation call below, so without this the dashboard cannot tell
         // a handled { isError: true } return from a real thrown exception — and only
@@ -169,6 +170,11 @@ export function registerToolWithTelemetry(
             // for unmeaningful outcomes where isError is false but we still want triage context).
             if (result?._errorContext) {
                 errorContext = result._errorContext;
+            }
+            // Structured cause, when the tool knows it. Independent of
+            // _errorContext because that field is not reliably a closed set.
+            if (result?._failureKind) {
+                failureKind = result._failureKind;
             }
             // Check for empty result (only on success). A tool that reports
             // `_emptyResult` wins over the detector: the detector can only see
@@ -246,6 +252,11 @@ export function registerToolWithTelemetry(
             if (error instanceof UserInputError && error.context) {
                 errorContext = error.context;
             }
+            if (error instanceof EnvironmentError) {
+                failureKind = error.kind;
+            } else if (error instanceof UserInputError && error.kind) {
+                failureKind = error.kind;
+            }
             // H2 (Step 9): UserInputError marks agent-input mistakes (unknown
             // device, missing predicate, ambiguous match). They flow through
             // telemetry's trackToolInvocation in the finally block; we just
@@ -282,7 +293,7 @@ export function registerToolWithTelemetry(
             // "the agent moved the screen" from "someone else did".
             recordToolCall(toolName);
             const targetPlatform = invocationPlatform(toolName, args);
-            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, targetPlatform, emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin);
+            trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, targetPlatform, emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin, failureKind);
             // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
             // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
             let platformKind: "rn" | "native" | null = null;
@@ -310,6 +321,7 @@ export function registerToolWithTelemetry(
                         package_name: getPackageName(),
                         ...(errorMessage && { error: errorMessage.substring(0, 200) }),
                         ...(errorMessage && { error_category: categorizeError(errorMessage, errorContext) }),
+                        ...(failureKind && { failure_kind: failureKind }),
                         ...(errorOrigin && { error_origin: errorOrigin }),
                         ...(targetPlatform && { platform: targetPlatform }),
                         ...(platformKind && { platform_kind: platformKind }),
