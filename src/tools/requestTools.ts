@@ -209,7 +209,7 @@ export function registerRequestTools(server: McpServer): void {
                     .unknown()
                     .optional()
                     .describe("Request body. An object is JSON-serialised and sets Content-Type: application/json unless you override it; a string is sent verbatim."),
-                headers: z.record(z.string()).optional().describe("Extra request headers. An explicit Authorization wins over auth."),
+                headers: z.record(z.string()).optional().describe("Extra request headers. One given here wins over auth when the names collide — but do not use that to pass a credential value, which is the transcript leak auth exists to prevent."),
                 auth: z
                     .object({
                         secret: z.string().describe("Origin (\"api.acme.io\") or handle (\"auth_api.acme.io\") from list_secrets."),

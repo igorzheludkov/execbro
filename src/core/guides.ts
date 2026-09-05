@@ -431,6 +431,20 @@ The value stays server-side, so it never lands in the transcript, and you send i
 3. vault_capture({ expression:"store.getState().auth.token", origin:"https://api.acme.io" })
    when nothing is captured yet, or list_secrets shows the entry EXPIRED after a re-login
 
+Placement defaults to Authorization: Bearer. For anything else, auth carries it:
+- auth:{ secret:"api.acme.io", header:"X-API-Key" } — key header, no scheme added
+- auth:{ secret:"api.acme.io", scheme:"Basic" } — another scheme on Authorization
+- auth:{ secret:"api.acme.io", scheme:"" } — a bare value with no prefix
+
+If a shape auth cannot express comes up, report the gap. Do NOT reach for
+headers:{...} with the credential in it — that is the transcript leak the vault
+exists to prevent, and it fails silently, with no error and nothing in telemetry.
+
+Cookie sessions need none of this and http_request cannot do them: React Native
+has no JS cookie API and the jar is native, so the value is not readable from JS
+in the first place. Use app_request or network_replay — both run inside the app,
+where the native jar attaches the session on its own.
+
 http_request runs FROM THE HOST, not through the app. That is the point: app_request uses the
 app's TLS trust, proxy, cookie jar and credentials, and an active network_mock rule intercepts
 it — http_request does none of that, so a difference between the two tells you whether the
@@ -451,7 +465,7 @@ resolves to nothing.
 - network_condition: offline / slow / normal
 - network_replay: re-issue a captured request, with optional overrides
 - app_request: issue a new request from inside the app, authenticated, without putting the token in the transcript
-- http_request: issue a request from the host instead, carrying a vaulted credential by handle — the clean-room comparison against app_request
+- http_request: issue a request from the host instead, carrying a vaulted credential by handle — the clean-room comparison against app_request. auth.header / auth.scheme place it outside the Authorization: Bearer default
 - list_secrets: the captured credentials by handle, with origin, age and expiry. Values are never shown
 - vault_capture: read a credential out of the app straight into the vault, when no captured request revealed one
 
