@@ -1,5 +1,5 @@
 import { redactSecrets } from "../../core/redact.js";
-import { resetVaultForTests } from "../../core/vault.js";
+import { resetVaultForTests, vaultAdd } from "../../core/vault.js";
 
 const JWT =
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
@@ -80,5 +80,18 @@ describe("redactSecrets", () => {
         const out = redactSecrets(`Bearer ${JWT}`, { catalog: false });
         expect(out).not.toContain("--- secrets referenced above ---");
         expect(out).toContain("[secret:jwt_app]");
+    });
+});
+
+describe("catalog coverage for handles emitted elsewhere", () => {
+    beforeEach(resetVaultForTests);
+
+    it("explains a handle that redactHeaderValue rendered, not this call", () => {
+        // network.ts renders its own handle, so the chokepoint sees the marker
+        // already in place with nothing left to match.
+        const handle = vaultAdd("opaque-session-id-abcdefgh", "auth", "https://gifted.fyi/app-api/me")!;
+        const out = redactSecrets(`Authorization: Bearer [secret:${handle}]`);
+        expect(out).toContain("--- secrets referenced above ---");
+        expect(out).toContain("auth_gifted.fyi: auth seen on gifted.fyi");
     });
 });

@@ -95,6 +95,9 @@ const PLACEHOLDER = /^(undefined|null|nil|none|true|false|empty|missing|redacted
  */
 const MARKER = /\[(?:secret:|redacted )[^\]]*\]/g;
 
+/** An emitted handle, capturing its name. */
+const HANDLE = /\[secret:([^\]]+)\]/g;
+
 /** A value that is nothing but markers already. */
 const ONLY_MARKERS = /^\s*(?:\[(?:secret:|redacted )[^\]]*\]\s*)+$/;
 
@@ -178,6 +181,16 @@ export function redactSecrets(text: string, opts: { catalog?: boolean; origin?: 
         PLACEHOLDER.test(value) || alreadyMarked(spans, offset, value) ? m : `${key}${mark("secret", value)}`);
 
     if (opts.catalog === false) return out;
+
+    // Pick up handles this call did not emit. redactHeaderValue renders its own
+    // handle in network.ts, so a get_request_details result arrives here with
+    // `[secret:auth_gifted.fyi]` already in it and no hit recorded — the reader
+    // would see a handle with nothing explaining its age or expiry, which is
+    // exactly the staleness the catalog exists to make visible before a 401
+    // rather than after one. Scanning the finished text catches every producer,
+    // present and future, instead of asking each one to remember to report.
+    for (const m of out.matchAll(HANDLE)) hits.add(m[1]);
+
     const catalog = vaultCatalog(hits);
     return catalog ? `${out}\n\n${catalog}` : out;
 }
