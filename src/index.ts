@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer as createHttpServer, type ServerResponse } from "node:http";
 
-import { DECISION_TREE } from "./core/guides.js";
+import { DECISION_TREE, UNTRUSTED_DATA_RULE } from "./core/guides.js";
 import { identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
 import { getInstallationId, isDevMode, initTelemetry } from "./core/telemetry.js";
 import {
@@ -47,21 +47,31 @@ export { toolRegistry };
 const httpRequested = process.argv.includes("--http");
 const httpAllowed = httpRequested && !isPublishedBuild();
 
+/**
+ * Sent to every agent when it connects. The untrusted-data rule leads, before
+ * the decision tree: an agent that reads only the opening lines should still
+ * have seen it.
+ */
+export const SERVER_INSTRUCTIONS: string = [
+    "React Native debugging MCP server.",
+    "",
+    UNTRUSTED_DATA_RULE,
+    "",
+    DECISION_TREE,
+    "",
+    "Call get_usage_guide with no arguments for the same decision tree plus a summary of every guide."
+].join("\n");
+
 const server = new McpServer(
     {
         name: "ExecBro (Mobile DevTools)",
         version: "1.0.0"
     },
     {
-        instructions: [
-            "React Native debugging MCP server.",
-            "",
-            DECISION_TREE,
-            "",
-            "Call get_usage_guide with no arguments for the same decision tree plus a summary of every guide."
-        ].join("\n")
+        instructions: SERVER_INSTRUCTIONS
     }
 );
+
 installToolRegistryInterceptor(server);
 
 registerAccountTools(server);
