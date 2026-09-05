@@ -105,3 +105,98 @@ describe("compareScreenshots", () => {
         expect(result.changeRate).toBe(1);
     });
 });
+
+// Paint opaque rectangles onto a black 200x200 base. Composite beats hand-
+// writing raw pixels here: it keeps each test's intent (a widget changed at
+// these coordinates) legible.
+async function withRects(rects: Array<{ x: number; y: number; w: number; h: number }>): Promise<Buffer> {
+    const base = sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 0, g: 0, b: 0 } } });
+    if (rects.length === 0) return base.png().toBuffer();
+    return base
+        .composite(
+            rects.map(({ x, y, w, h }) => ({
+                input: { create: { width: w, height: h, channels: 3, background: { r: 255, g: 255, b: 255 } } },
+                left: x,
+                top: y,
+            }))
+        )
+        .png()
+        .toBuffer();
+}
+
+describe("compareScreenshots regions", () => {
+    it("is absent unless asked for — the tap burst loop must not pay for it", async () => {
+        const before = await withRects([]);
+        const after = await withRects([{ x: 20, y: 30, w: 40, h: 20 }]);
+        expect((await compareScreenshots(before, after)).regions).toBeUndefined();
+        expect((await compareScreenshots(before, after, { regions: true })).regions).toBeDefined();
+    });
+
+    it("boxes a single changed widget", async () => {
+        const before = await withRects([]);
+        const after = await withRects([{ x: 32, y: 48, w: 32, h: 16 }]);
+        const { regions } = await compareScreenshots(before, after, { regions: true });
+
+        expect(regions).toHaveLength(1);
+        const [box] = regions!;
+        // The grid is 16px, so a box is the changed area snapped outward to
+        // cell edges — never smaller than the real change.
+        expect(box.x).toBeLessThanOrEqual(32);
+        expect(box.y).toBeLessThanOrEqual(48);
+        expect(box.x + box.width).toBeGreaterThanOrEqual(64);
+        expect(box.y + box.height).toBeGreaterThanOrEqual(64);
+        expect(box.changedPixels).toBe(32 * 16);
+    });
+
+    // The reason regions exist at all. One box spanning both changes would
+    // cover mostly unchanged screen and tell the agent nothing useful.
+    it("keeps two distant changes as two boxes", async () => {
+        const before = await withRects([]);
+        const after = await withRects([
+            { x: 0, y: 0, w: 32, h: 32 },
+            { x: 160, y: 160, w: 32, h: 32 },
+        ]);
+        const { regions } = await compareScreenshots(before, after, { regions: true });
+
+        expect(regions).toHaveLength(2);
+        for (const box of regions!) {
+            expect(box.width).toBeLessThanOrEqual(48);
+            expect(box.height).toBeLessThanOrEqual(48);
+        }
+    });
+
+    it("orders by size, so the first box is the main change", async () => {
+        const before = await withRects([]);
+        const after = await withRects([
+            { x: 0, y: 0, w: 16, h: 16 },
+            { x: 96, y: 96, w: 64, h: 64 },
+        ]);
+        const { regions } = await compareScreenshots(before, after, { regions: true });
+        expect(regions![0].changedPixels).toBe(64 * 64);
+        expect(regions![1].changedPixels).toBe(16 * 16);
+    });
+
+    it("reports boxes in full-screenshot coordinates, not cropped ones", async () => {
+        // A caller cropping the status bar still has to be able to hand the box
+        // back to tap, which works in full-screenshot pixels.
+        const before = await withRects([]);
+        const after = await withRects([{ x: 64, y: 96, w: 32, h: 32 }]);
+        const cropped = await compareScreenshots(before, after, { regions: true, statusBarHeight: 48 });
+        const uncropped = await compareScreenshots(before, after, { regions: true });
+        expect(cropped.regions![0].y).toBe(uncropped.regions![0].y);
+    });
+
+    it("treats a size change as one whole-frame box rather than inventing detail", async () => {
+        const small = await sharp({ create: { width: 100, height: 100, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer();
+        const big = await sharp({ create: { width: 200, height: 200, channels: 3, background: { r: 0, g: 0, b: 0 } } }).png().toBuffer();
+        const { regions } = await compareScreenshots(small, big, { regions: true });
+        expect(regions).toEqual([{ x: 0, y: 0, width: 200, height: 200, changedPixels: 200 * 200 }]);
+    });
+
+    it("returns no regions when nothing changed", async () => {
+        const img = await withRects([{ x: 10, y: 10, w: 20, h: 20 }]);
+        const result = await compareScreenshots(img, img, { regions: true });
+        expect(result.changed).toBe(false);
+        expect(result.regions).toBeUndefined();
+    });
+});

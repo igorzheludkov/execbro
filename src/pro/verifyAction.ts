@@ -1,7 +1,7 @@
 import { imageBuffer } from "../core/state.js";
 import { iosScreenshot } from "../core/ios.js";
 import { androidScreenshot } from "../core/android.js";
-import { compareScreenshots } from "./screenshot-diff.js";
+import { compareScreenshots, type ScreenshotDiffResult } from "./screenshot-diff.js";
 import {
     type TapScreenshot,
     type TapVerification,
@@ -48,12 +48,9 @@ export interface SettleFrame {
     scaleFactor: number;
 }
 
-interface SettleDiff {
-    changed: boolean;
-    changeRate: number;
-    changedPixels: number;
-    totalPixels: number;
-}
+// Structurally identical to what compareScreenshots returns, and was a
+// hand-maintained copy that silently went stale when the diff grew regions.
+type SettleDiff = ScreenshotDiffResult;
 
 export interface SettleResult {
     frame: SettleFrame;
@@ -268,21 +265,27 @@ export async function verifyAndCapture(args: {
             // The settle loop already diffed the frame it returned. Only recompute
             // when it didn't run (e.g. a caller that passed a before-buffer but got
             // no settle result), so the common path pays one diff, not two.
-            const diff = settle?.diff ?? await compareScreenshots(beforeBuffer, after.buffer, {
-                statusBarHeight: Math.round(
-                    (platform === "ios" ? 177 : 142) / (beforeScaleFactor || after.scaleFactor || 1)
-                )
-            });
+            const statusBarHeight = Math.round(
+                (platform === "ios" ? 177 : 142) / (beforeScaleFactor || after.scaleFactor || 1)
+            );
+            // This is the one diff whose result an agent reads, so it is the one
+            // worth localising. The settle loop's diffs stay region-free — it
+            // runs per frame and only needs "did anything move".
+            const diff = settle?.diff?.regions
+                ? settle.diff
+                : await compareScreenshots(beforeBuffer, after.buffer, { statusBarHeight, regions: true });
             verification = {
                 meaningful: diff.changed,
                 changeRate: diff.changeRate,
                 changedPixels: diff.changedPixels,
                 totalPixels: diff.totalPixels,
+                regions: diff.regions,
                 explanation: buildVerificationExplanation({
                     meaningful: diff.changed,
                     changeRate: diff.changeRate,
                     changedPixels: diff.changedPixels,
                     totalPixels: diff.totalPixels,
+                    regions: diff.regions,
                     action
                 })
             };
