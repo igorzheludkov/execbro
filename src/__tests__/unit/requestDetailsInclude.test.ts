@@ -1,6 +1,7 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "@jest/globals";
 import { formatRequestDetails, redactHeaderValue } from "../../core/network.js";
 import type { NetworkRequest } from "../../core/types.js";
+import { resetVaultForTests, vaultByHandle } from "../../core/vault.js";
 
 const JWT = "Bearer " + "e".repeat(1500);
 
@@ -22,10 +23,17 @@ function request(overrides: Partial<NetworkRequest> = {}): NetworkRequest {
 
 describe("get_request_details request/response split", () => {
     it("keeps a live token out of the transcript unless verbose asks for it", () => {
+        resetVaultForTests();
         const out = formatRequestDetails(request(), { include: "request" });
         expect(out).not.toContain(JWT);
-        expect(out).toContain("Bearer [redacted, 1507 chars");
-        expect(formatRequestDetails(request(), { include: "request", verbose: true })).toContain(JWT);
+        // A vaulted credential renders as its handle, named after the host it
+        // was seen on, rather than as a shape description.
+        expect(out).toContain("Bearer [secret:auth_api.example.com]");
+        // verbose:true no longer lifts header redaction. That hatch was in the
+        // hands of the model, which is the exact actor a mechanism must not
+        // depend on. EXECBRO_REDACT=off is the only way out, a human sets it,
+        // and it needs a restart.
+        expect(formatRequestDetails(request(), { include: "request", verbose: true })).not.toContain(JWT);
         expect(redactHeaderValue("accept", "application/json")).toBe("application/json");
     });
 
@@ -48,5 +56,34 @@ describe("get_request_details request/response split", () => {
         const out = formatRequestDetails(request(), { query: "data.things[0].id", include: "both" });
         expect(out).toContain("Request Headers");
         expect(out).toContain("t1");
+    });
+});
+
+describe("redactHeaderValue and the vault", () => {
+    beforeEach(resetVaultForTests);
+
+    it("names the handle after the request host", () => {
+        const out = redactHeaderValue(
+            "authorization",
+            "Bearer opaque-session-id-abcdefgh",
+            "https://api.acme.io/v1/me"
+        );
+        expect(out).toBe("Bearer [secret:auth_api.acme.io]");
+        expect(vaultByHandle("auth_api.acme.io")!.origin).toBe("api.acme.io");
+    });
+
+    it("vaults the token without its scheme, so the same value has one identity everywhere", () => {
+        redactHeaderValue("authorization", "Bearer opaque-session-id-abcdefgh", "https://api.acme.io/v1/me");
+        expect(vaultByHandle("auth_api.acme.io")!.value).toBe("opaque-session-id-abcdefgh");
+    });
+
+    it("falls back to a shape description for a short credential header", () => {
+        const out = redactHeaderValue("x-api-key", "abc123", "https://api.acme.io/v1/me");
+        expect(out).toContain("[redacted, 6 chars");
+        expect(out).not.toContain("abc123");
+    });
+
+    it("still leaves a non-credential header alone", () => {
+        expect(redactHeaderValue("accept", "application/json")).toBe("application/json");
     });
 });
