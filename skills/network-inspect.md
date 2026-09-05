@@ -52,8 +52,23 @@ For specific requests that need deeper investigation:
 - Use `mcp__execbro__get_request_details` with the `requestId` from the list
 - The first call returns the body's shape (key paths, array sizes) — then narrow with `query="data.orders[0].status"`, which returns that field in full
 - A `query` renders only the queried body; pass `include:"request"` / `"response"` / `"both"` when you need headers or the other side
-- Authorization and Cookie headers print as scheme + length. `verbose=true` unredacts them and drops all bounding — it writes a live token into the transcript, so use it only when the token itself is what you are checking
+- Credential headers, and tokens found in bodies or URLs, render as `[secret:<handle>]`. No argument lifts that — `verbose=true` drops the bounding but reveals nothing. Only `EXECBRO_REDACT=off` does, and that is a human's call and needs a restart
 - Increase `maxBodyLength` when you want a bigger shape rather than a single field
+
+### 4b. Use a credential without reading it
+
+- `list_secrets` — what has been captured, by handle, with origin, age and JWT expiry
+- `http_request({url, method, auth:{secret:"api.acme.io"}})` — issues the request **from the host**, substituting the value server-side
+- `vault_capture({expression, origin})` — reads a credential out of the app into the vault when nothing captured one yet, or after a re-login left the entry EXPIRED
+
+`http_request` is the clean-room counterpart to `app_request`: it does not use the
+app's TLS trust, proxy, cookie jar or credentials, and mock rules do not intercept
+it. Run both and the difference tells you whether the server or the client is at
+fault. A 401 from `http_request` where `app_request` succeeds means the backend is
+enforcing attestation, which Node cannot satisfy by design.
+
+The vault is memory-only and each credential is bound to the origin it was seen
+on, so it is refused for any other host.
 
 ### 5. Clear and Re-capture (if needed)
 

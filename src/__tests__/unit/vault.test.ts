@@ -126,3 +126,21 @@ describe("vaultCatalog", () => {
         expect(vaultHandleRef("jwt_api.acme.io")).toBe("[secret:jwt_api.acme.io]");
     });
 });
+
+describe("vaultCatalog with unresolvable handles", () => {
+    it("emits nothing when no handle resolves", () => {
+        // Prose quoting the [secret:...] form, or a handle from a transcript
+        // older than the last restart. The header alone reads as a suppressed
+        // secret rather than as plain text.
+        expect(vaultCatalog(new Set(["auth_api.acme.io", "auth_nope.example"]))).toBe("");
+    });
+
+    it("still explains the handles that do resolve", () => {
+        const handle = vaultAdd("resolvable-token-value-1234567890", "auth", "https://api.acme.io");
+        expect(handle).toBeTruthy();
+        const out = vaultCatalog(new Set([handle as string, "auth_gone.example"]));
+        expect(out).toContain("--- secrets referenced above ---");
+        expect(out).toContain(handle as string);
+        expect(out).not.toContain("auth_gone.example");
+    });
+});
