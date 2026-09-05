@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
-import { vaultAdd, vaultResolve, vaultStaleness, vaultCatalogLine, resetVaultForTests } from "../../core/vault.js";
+import { vaultAdd, vaultResolve, vaultStaleness, vaultCatalogLine, vaultSlotHandles, resetVaultForTests } from "../../core/vault.js";
 
 /** exp = 2000000000 (year 2033). */
 const LIVE_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSIsImV4cCI6MjAwMDAwMDAwMH0.Zm9vYmFyc2lnbmF0dXJl";
@@ -52,5 +52,28 @@ describe("vault slots", () => {
         expect(line).toContain("api.acme.io");
         expect(line).not.toContain(LIVE_JWT);
         expect(line).not.toContain("12345");
+    });
+});
+
+describe("vaultSlotHandles", () => {
+    beforeEach(resetVaultForTests);
+
+    it("names only the entry a bare origin resolves to", () => {
+        const older = vaultAdd("first-token-aaaaaaaaaaaa", "auth", "api.acme.io")!;
+        const newer = vaultAdd("second-token-bbbbbbbbbbb", "auth", "api.acme.io")!;
+        const current = vaultSlotHandles();
+        expect(current.has(newer)).toBe(true);
+        expect(current.has(older)).toBe(false);
+    });
+
+    it("tracks one slot per origin", () => {
+        const a = vaultAdd("first-token-aaaaaaaaaaaa", "auth", "api.acme.io")!;
+        const b = vaultAdd("second-token-bbbbbbbbbbb", "auth", "other.acme.io")!;
+        expect(vaultSlotHandles()).toEqual(new Set([a, b]));
+    });
+
+    it("names nothing for an origin-less entry", () => {
+        vaultAdd("first-token-aaaaaaaaaaaa", "jwt");
+        expect(vaultSlotHandles().size).toBe(0);
     });
 });

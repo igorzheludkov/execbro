@@ -9,7 +9,7 @@ import { getLicenseStatus, getUsageInfo, getDashboardUrl, requestLinkToken, refr
 import { refreezeSessionVerdict } from "../pro/usageGate.js";
 import { getServerVersion, TELEMETRY_JSONL_PATH } from "../core/telemetry.js";
 import { getTargetPlatform } from "../core/state.js";
-import { vaultEntries, vaultCatalogLine } from "../core/vault.js";
+import { vaultEntries, vaultCatalogLine, vaultSlotHandles } from "../core/vault.js";
 import { formatIssueBody, buildGitHubUrl } from "../core/feedback.js";
 
 export interface MetaToolOptions {
@@ -226,11 +226,24 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
                 };
             }
             const now = Date.now();
-            const lines = entries.map((entry) => vaultCatalogLine(entry, now));
+            const current = vaultSlotHandles();
+            // Mark which entry a bare origin resolves to. Two credentials for
+            // one host is ordinary (a bearer token and a cookie, say), and
+            // without this the agent cannot tell which one `secret: "host"`
+            // will actually send.
+            const lines = entries.map((entry) => {
+                const line = vaultCatalogLine(entry, now);
+                return current.has(entry.handle) ? `${line}  <- sent for secret:"${entry.origin}"` : line;
+            });
             return {
                 content: [{
                     type: "text" as const,
-                    text: [`${entries.length} credential(s) captured this session:`, ...lines].join("\n")
+                    text: [
+                        `${entries.length} credential(s) captured this session:`,
+                        ...lines,
+                        "",
+                        "Pass the origin to send whichever is newest for that host, or a handle to pin one exact value."
+                    ].join("\n")
                 }]
             };
         }
