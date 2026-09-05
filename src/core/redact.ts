@@ -142,13 +142,8 @@ export function redactionEnabled(): boolean {
     return process.env.EXECBRO_REDACT?.toLowerCase() !== "off";
 }
 
-/**
- * `origin` is the host the text came from, when the call site knows one (the
- * network renderer does; the generic chokepoint does not).
- */
-export function redactSecrets(text: string, opts: { catalog?: boolean; origin?: string } = {}): string {
+export function redactSecrets(text: string, opts: { catalog?: boolean } = {}): string {
     const hits = new Set<string>();
-    const origin = opts.origin;
 
     // Exact matching runs FIRST and the order is load-bearing: once a
     // heuristic has rewritten part of a value, the literal is gone and the
@@ -156,10 +151,10 @@ export function redactSecrets(text: string, opts: { catalog?: boolean; origin?: 
     let out = vaultMaskExact(text, hits);
 
     out = out
-        .replace(JWT, (m) => handleFor(m, "jwt", hits, origin))
-        .replace(PROVIDER_KEY, (m) => handleFor(m, providerOf(m), hits, origin))
+        .replace(JWT, (m) => handleFor(m, "jwt", hits))
+        .replace(PROVIDER_KEY, (m) => handleFor(m, providerOf(m), hits))
         .replace(AUTH_SCHEME, (_m, scheme: string, value: string) =>
-            `${scheme} ${handleFor(value, "auth", hits, origin)}`);
+            `${scheme} ${handleFor(value, "auth", hits)}`);
 
     // The three rules below match a key NAME, not a shape, so they stay out of
     // the vault. A wrongly-vaulted common substring would blank unrelated
