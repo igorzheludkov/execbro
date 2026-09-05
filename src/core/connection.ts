@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import type { FailureKind } from "./errors.js";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
 import { connectedApps, isSupersededSocket, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
@@ -1683,6 +1684,31 @@ function formatAgo(ms: number): string {
  * Human-facing explanation for a `kind: "none"` / `kind: "ambiguous"` resolution.
  * Kept next to the matcher so the message always reflects the matching rules.
  */
+/**
+ * Structured counterpart of `describeDeviceResolution`, keyed off the same
+ * `DeviceResolution` rather than the prose that function produces. Kept as a
+ * sibling instead of changing that function's `string` return, which every
+ * caller destructures.
+ *
+ * Ordering mirrors `describeDeviceResolution` branch for branch — if one grows
+ * a case, so must the other, and `failureKindForResolution.test.ts` pins that.
+ */
+export function failureKindForResolution(resolution: DeviceResolution): FailureKind | undefined {
+    if (resolution.kind === "ok") return undefined;
+    // Ambiguity is the agent under-specifying a name, not a setup state.
+    if (resolution.kind === "ambiguous") return undefined;
+
+    const { device, connected } = resolution;
+    if (!device) return "no_apps_connected";
+    // A device we drove earlier this session dropped off: environment, and
+    // distinct from a misspelling because the name was previously valid.
+    if (findDisconnectedDeviceName(device)) return "no_devices_attached";
+    if (connected.length === 0) return "no_devices_attached";
+    // Devices were attached, just not the requested one. Held out of
+    // ENVIRONMENT_KINDS deliberately — see the spec's §4.
+    return "platform_mismatch";
+}
+
 export function describeDeviceResolution(resolution: DeviceResolution): string {
     if (resolution.kind === "ok") return "";
 
@@ -1794,7 +1820,7 @@ export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
     const context = resolution.kind === "ambiguous"
         ? "ambiguous_device"
         : resolution.connected.length > 0 ? "device_mismatch" : "no_devices_connected";
-    throw new UserInputError(describeDeviceResolution(resolution), context);
+    throw new UserInputError(describeDeviceResolution(resolution), context, failureKindForResolution(resolution));
 }
 
 // Check if any app is connected with an OPEN WebSocket
@@ -2034,6 +2060,7 @@ export async function ensureConnection(options: {
                 healthCheckPassed: false,
                 connectionInfos: [],
                 error: "No Metro server found. Make sure Metro bundler is running.",
+                failureKind: "no_metro_server",
             };
         }
 
@@ -2046,6 +2073,7 @@ export async function ensureConnection(options: {
                 healthCheckPassed: false,
                 connectionInfos: [],
                 error: `No debuggable devices found on port ${targetPort}. Make sure the app is running.`,
+                failureKind: "no_debuggable_devices",
             };
         }
 

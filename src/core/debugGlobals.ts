@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import type { ExecutionResult } from "./types.js";
 import type { DeviceInfo } from "./types.js";
 import { connectedApps, getNextMessageId } from "./state.js";
-import { resolveConnectedAppByDevice, describeDeviceResolution, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
+import { resolveConnectedAppByDevice, describeDeviceResolution, failureKindForResolution, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
 import { fetchDevices, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
 import { cancelReconnectionTimer } from "./connectionState.js";
 import { executeInApp, delay } from "./jsExecute.js";
@@ -270,6 +270,7 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
             return {
                 success: false,
                 error: "No apps connected and no Metro server found. Make sure Metro bundler is running (npm start or expo start), then try again.",
+                failureKind: "no_metro_server",
                 errorContext: "no_metro"
             };
         }
@@ -307,6 +308,7 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
                 : "No apps connected. Found Metro server but could not connect to any device. Make sure the React Native app is running.";
             return {
                 success: false,
+                failureKind: device ? failureKindForResolution(resolution) : "no_apps_connected",
                 error: `${base}${detail}`,
                 errorContext: device
                     ? (resolution.connected.length > 0 ? "device_mismatch_after_rescan" : "connect_failed_with_device")

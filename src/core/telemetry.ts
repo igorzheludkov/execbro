@@ -98,6 +98,7 @@ interface TelemetryEvent {
     fiberPressableCount?: string; // tap: count of visible pressables fiber found
     accessibilityMatchCount?: string; // tap: count of accessibility elements found
     appRoute?: string; // tap: best-effort screen identifier (route name or bundle id)
+    failureKind?: string; // structured cause set at the throw site (FailureKind in errors.ts)
     properties?: Record<string, string | number | boolean>;
 }
 
@@ -477,7 +478,8 @@ export function trackToolInvocation(
     fiberPressableCount?: string,
     accessibilityMatchCount?: string,
     appRoute?: string,
-    errorOrigin?: ErrorOrigin
+    errorOrigin?: ErrorOrigin,
+    failureKind?: string
 ): void {
     // Append to local JSONL file for local dashboard (dev mode only)
     if (isDevMode()) try {
@@ -510,6 +512,7 @@ export function trackToolInvocation(
         if (fiberPressableCount) localEvent.fiberPressableCount = fiberPressableCount;
         if (accessibilityMatchCount) localEvent.accessibilityMatchCount = accessibilityMatchCount;
         if (appRoute) localEvent.appRoute = appRoute;
+        if (failureKind) localEvent.failureKind = failureKind;
         appendFileSync(TELEMETRY_JSONL_PATH, JSON.stringify(localEvent) + "\n");
     } catch {
         // Non-critical — local file sink failure should never affect tool execution
@@ -592,6 +595,7 @@ export function trackToolInvocation(
     if (fiberPressableCount) event.fiberPressableCount = fiberPressableCount;
     if (accessibilityMatchCount) event.accessibilityMatchCount = accessibilityMatchCount;
     if (appRoute) event.appRoute = appRoute;
+    if (failureKind) event.failureKind = failureKind;
 
     // Counted signal: this is the metering heartbeat the free-tier cap relies
     // on. Fires whenever meteringEnabled — including when the user opted out

@@ -267,7 +267,8 @@ export function registerConnectionTools(server: McpServer): void {
                             text: result.error || "Connection failed: No error details available. Try running scan_metro to check if Metro is running, then ensure_connection with forceRefresh=true."
                         }
                     ],
-                    isError: true
+                    isError: true,
+                    ...(result.failureKind && { _failureKind: result.failureKind })
                 };
             }
     

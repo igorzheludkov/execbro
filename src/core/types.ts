@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import type { FailureKind } from "./errors.js";
 
 // Log entry interface
 export interface LogEntry {
@@ -152,6 +153,10 @@ export interface ExecutionResult {
     // Tools forward it as `_errorContext` so telemetry can cluster failures
     // without regex-matching the human-facing message.
     errorContext?: string;
+    // Machine-readable cause (FailureKind in errors.ts). Unlike errorContext,
+    // which some callers fill with free-form prose, this is always one of a
+    // closed set, so telemetry can classify on it instead of regex-matching.
+    failureKind?: FailureKind;
     _meta?: {
         reconnected?: boolean;
         transportError?: string;
@@ -289,4 +294,5 @@ export interface EnsureConnectionResult {
     healthCheckPassed: boolean;
     connectionInfos: EnsureConnectionDeviceInfo[];
     error?: string;
+    failureKind?: FailureKind;
 }

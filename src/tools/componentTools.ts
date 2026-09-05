@@ -110,7 +110,8 @@ export function registerComponentTools(server: McpServer): void {
                 const hint = await metroMissingHintIfAbsent("get_screen_layout");
                 return {
                     content: [{ type: "text", text: `Screen Layout unavailable.${hint}` }],
-                    isError: true
+                    isError: true,
+                    _failureKind: "no_metro" as const
                 };
             }
 
@@ -285,7 +286,8 @@ export function registerComponentTools(server: McpServer): void {
                 const hint = await metroMissingHintIfAbsent("get_screen_state");
                 return {
                     content: [{ type: "text", text: `get_screen_state unavailable.${hint}` }],
-                    isError: true
+                    isError: true,
+                    _failureKind: "no_metro" as const
                 };
             }
 
@@ -698,7 +700,8 @@ export function registerComponentTools(server: McpServer): void {
                 const hint = await metroMissingHintIfAbsent("measure");
                 return {
                     content: [{ type: "text", text: `measure unavailable.${hint}` }],
-                    isError: true
+                    isError: true,
+                    _failureKind: "no_metro" as const
                 };
             }
 
