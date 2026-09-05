@@ -333,7 +333,7 @@ export function registerNetworkTools(server: McpServer): void {
                     .boolean()
                     .optional()
                     .default(false)
-                    .describe("Return bodies raw and unbounded, and print credential headers (Authorization, Cookie, …) in full instead of redacted. Prefer query — verbose on a large JSON body is the 40KB dump this tool exists to avoid."),
+                    .describe("Return bodies raw and unbounded. Does NOT reveal secrets \u2014 credential headers, tokens in bodies and tokens in URLs stay redacted regardless; that is deliberate and only EXECBRO_REDACT=off lifts it. Prefer query \u2014 verbose on a large JSON body is the 40KB dump this tool exists to avoid."),
                 device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },

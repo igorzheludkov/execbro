@@ -1,5 +1,6 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "@jest/globals";
 import { formatRequestDetails } from "../../core/network.js";
+import { resetVaultForTests } from "../../core/vault.js";
 import type { NetworkRequest } from "../../core/types.js";
 
 function request(overrides: Partial<NetworkRequest> = {}): NetworkRequest {
@@ -79,5 +80,66 @@ describe("get_request_details body rendering", () => {
     it("verbose still returns the body raw", () => {
         const text = formatRequestDetails(request({ responseBody: graphqlResponse }), { verbose: true });
         expect(text).toContain(graphqlResponse);
+    });
+});
+
+describe("credential headers", () => {
+    const JWT =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    const VALUE = "abc123def456ghi789jkl";
+
+    const render = (headers: Record<string, string>, verbose = false) =>
+        formatRequestDetails(request({ headers }), { verbose });
+
+    // Measured against the ecosystem on 2026-09-05: a fixed seven-name list let
+    // all of these through, because vendors namespace their own header names.
+    it.each([
+        "authorization",
+        "cookie",
+        "x-api-key",
+        "apikey",
+        "api-key",
+        "x-goog-api-key",
+        "x-algolia-api-key",
+        "x-shopify-access-token",
+        "x-amz-security-token",
+        "x-hasura-admin-secret",
+        "x-firebase-appcheck",
+        "x-access-token",
+        "x-refresh-token",
+        "x-session-token",
+        "x-client-token",
+        "x-csrf-token",
+        "x-xsrf-token",
+        "sec-websocket-protocol",
+        "token"
+    ])("redacts %s", (name) => {
+        expect(render({ [name]: VALUE })).not.toContain(VALUE);
+    });
+
+    // Redacting these would break the debugging and pagination workflows this
+    // tool exists to serve, so a bare `key` or `token` segment must not match.
+    it.each([
+        "x-request-id",
+        "x-correlation-id",
+        "x-amzn-trace-id",
+        "x-idempotency-key",
+        "x-continuation-token",
+        "content-type"
+    ])("leaves %s alone", (name) => {
+        expect(render({ [name]: VALUE })).toContain(VALUE);
+    });
+
+    // verbose used to print credentials in full. That put the escape hatch in
+    // the model's hands, and a transcript is append-only, so one revealing call
+    // is permanent. Only EXECBRO_REDACT=off lifts redaction now.
+    // Reset per case so the handle is deterministic: the suffix counts distinct
+    // values seen for a host, so it would otherwise depend on test order.
+    beforeEach(resetVaultForTests);
+
+    it.each([false, true])("stays redacted with verbose:%s", (verbose) => {
+        const out = render({ authorization: `Bearer ${JWT}` }, verbose);
+        expect(out).not.toContain(JWT);
+        expect(out).toContain("Bearer [secret:auth_api.example.com]");
     });
 });
