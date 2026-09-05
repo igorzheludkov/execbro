@@ -58,7 +58,7 @@ For specific requests that need deeper investigation:
 ### 4b. Use a credential without reading it
 
 - `list_secrets` — what has been captured, by handle, with origin, age and JWT expiry
-- `http_request({url, method, auth:{secret:"api.acme.io"}})` — issues the request **from the host**, substituting the value server-side
+- `http_request({url, method, auth:{secret:"api.acme.io"}})` — issues the request **from the host**, substituting the value server-side. Placement defaults to `Authorization: Bearer`; pass `auth.header` for a key header (`X-API-Key`) or `auth.scheme` for another scheme (`Basic`, `token`, or `""` for a bare value). If a shape `auth` cannot express comes up, say so rather than pasting the credential into `headers` — that puts it back in the transcript
 - `vault_capture({expression, origin})` — reads a credential out of the app into the vault when nothing captured one yet, or after a re-login left the entry EXPIRED
 
 `http_request` is the clean-room counterpart to `app_request`: it does not use the
@@ -69,6 +69,13 @@ enforcing attestation, which Node cannot satisfy by design.
 
 The vault is memory-only and each credential is bound to the origin it was seen
 on, so it is refused for any other host.
+
+For a cookie-authenticated session there is nothing to hand `http_request`: React
+Native has no JS cookie API, and the cookies live in the native jar (NSURLSession
+on iOS, the OkHttp/WebView `CookieManager` on Android) where the JS layer cannot
+read them. Use `app_request` or `network_replay` instead. Both run inside the app,
+so the native jar attaches the session automatically and the call goes out as the
+logged-in user with no credential handling at all.
 
 ### 5. Clear and Re-capture (if needed)
 

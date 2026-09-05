@@ -197,11 +197,11 @@ export function registerRequestTools(server: McpServer): void {
             description:
                 "Issue an HTTP request FROM THE HOST (Node), not through the app, carrying a credential you cannot read.\n" +
                 "PURPOSE: Isolate server behaviour from client behaviour. This is what curl was for, minus the part where the token and the whole response landed in the transcript.\n" +
-                "HOW IT DIFFERS FROM app_request: app_request runs inside the app, so it uses the app's TLS trust, proxy, cookie jar and credentials — and an active network_mock rule intercepts it. http_request does none of that: it is a clean request from your machine. Pick app_request when the app's real request conditions matter or the backend enforces attestation (Firebase App Check cannot be satisfied from Node, by design). Pick http_request to find out whether the server or the client is at fault.\n" +
-                "CREDENTIALS: pass auth:{secret:\"<origin or handle>\"} — names come from list_secrets. The value is substituted here and never rendered. A credential is bound to the origin it was observed on and will be refused for any other host.\n" +
+                "HOW IT DIFFERS FROM app_request: app_request runs inside the app, so it carries the app's TLS trust, proxy, native cookie jar and credentials, and an active network_mock intercepts it. http_request is a clean request from your machine. Pick app_request when the app's real conditions matter, when the session is cookie-authenticated, or when the backend enforces attestation (Firebase App Check cannot be satisfied from Node). Pick http_request to tell a server bug from a client one.\n" +
+                "CREDENTIALS: pass auth:{secret:\"<origin or handle>\"} — names come from list_secrets. The value is substituted here and never rendered, and is bound to the origin it was observed on: any other host is refused. Default placement is Authorization: Bearer; set header for a key header (X-API-Key) or scheme for another (Basic).\n" +
                 "READING THE RESULT: a 401 here where app_request succeeds is itself an answer — the backend is enforcing attestation.\n" +
                 "GOOD: http_request({ method: \"GET\", url: \"https://api.acme.io/v1/me\", auth: { secret: \"api.acme.io\" } })\n" +
-                "BAD: pasting a token into headers.Authorization — that puts it in the transcript, which is what the vault exists to avoid.",
+                "BAD: pasting a credential into headers to cover a shape auth does not — that is the transcript leak the vault exists to prevent. Report the gap instead.",
             inputSchema: {
                 method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]).describe("HTTP method."),
                 url: z.string().describe("Absolute http or https URL."),
@@ -211,9 +211,13 @@ export function registerRequestTools(server: McpServer): void {
                     .describe("Request body. An object is JSON-serialised and sets Content-Type: application/json unless you override it; a string is sent verbatim."),
                 headers: z.record(z.string()).optional().describe("Extra request headers. An explicit Authorization wins over auth."),
                 auth: z
-                    .object({ secret: z.string().describe("Origin (\"api.acme.io\") or handle (\"auth_api.acme.io\") from list_secrets.") })
+                    .object({
+                        secret: z.string().describe("Origin (\"api.acme.io\") or handle (\"auth_api.acme.io\") from list_secrets."),
+                        header: z.string().optional().describe("Header to carry it. Default \"Authorization\"; use \"X-API-Key\" or similar for key-header APIs."),
+                        scheme: z.string().optional().describe("Prefix before the value. Defaults to \"Bearer\" for Authorization and to nothing for any other header; pass \"Basic\", \"token\", or \"\" for a bare value.")
+                    })
                     .optional()
-                    .describe("Credential to attach as a bearer token. Typed on purpose: the credential position is structural, never string interpolation, so it cannot be smuggled into an arbitrary field."),
+                    .describe("Credential to attach. Typed on purpose: the credential position is structural, never string interpolation, so it cannot be smuggled into an arbitrary field."),
                 maxResultLength: z.number().optional().describe("Target size for the response body in characters (default 25000).")
             }
         },
