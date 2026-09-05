@@ -133,20 +133,22 @@ is why the over-general rule survived its own review.
 VERIFICATION
 ------------
 
-Run on BOTH the iOS simulator (iPhone Air, RN 0.83 / Fabric) and the Android emulator
-(Pixel_9_-_16kb, API 36, Fabric), execbro-test-app:
+Run on all three targets, execbro-test-app, simultaneously connected:
+
+  - iOS simulator, iPhone Air, RN 0.83 / Fabric
+  - Android emulator, Pixel_9_-_16kb, API 36, Fabric
+  - physical Android, Samsung SM-A346E (Galaxy A34), API 36, over USB
 
   1. Gorhom 50% sheet open -> get_screen_state lists the button under the BottomSheet
-     group, iOS (461, 1294) and Android (446, 1278), and tapping those coordinates closes
-     the sheet on both — so the reported frames are real, not merely present.
-  2. RN <Modal> control case unchanged on both: only rn-modal-close under the Modal group,
-     the six background buttons under Blocked.
-  3. The empty-overlay warning from formatPressabilityAudit no longer fires on either.
-  4. Scroll screen with the new sticky header, on both: kept in the listing, tagged
+     group — iOS (461, 1294), emulator (446, 1278), device (462, 1288) — and tapping those
+     coordinates closes the sheet on each, so the frames are real, not merely present.
+  2. RN <Modal> control case unchanged everywhere: only rn-modal-close under the Modal
+     group, the background buttons under Blocked.
+  3. The empty-overlay warning from formatPressabilityAudit no longer fires anywhere.
+  4. Scroll screen with the new sticky header, on all three: kept in the listing, tagged
      ⚠transformed(sticky header), pre-transform frame — identical before and after.
 
 Unit: src/__tests__/unit/transformCompose.test.ts, plus three cases in visibility.test.ts.
 Full suite 1982 passed / 170 suites.
 
-No physical device was attached, so that leg of the original definition of done is not
-covered.
+Every item of the original DEFINITION OF DONE is covered.
