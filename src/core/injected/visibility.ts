@@ -26,14 +26,40 @@ export function isHiddenNavigationScene(name: string | null, props: any): boolea
     if (props["aria-hidden"] === true) return true;
     if (props.accessibilityElementsHidden === true) return true;
     if (props.importantForAccessibility === "no-hide-descendants") return true;
-    var s = props.style;
-    if (s && !Array.isArray(s) && isHiddenStyle(s)) return true;
+    return isHiddenStyleProp(props.style);
+}
+
+/**
+ * Does this `style` prop — one object, or the array RN flattens last-wins — hide its subtree?
+ *
+ * Asking `isHiddenStyle` of each entry and OR-ing the answers is a different question, and
+ * the wrong one. A style array is how a component expresses state, so an entry that hides
+ * is routinely followed by one that un-hides it. Gorhom's bottom sheet container ships
+ *
+ *   [null, {position:'absolute', ...}, {opacity: 0, transform: [{translateY: 923}]},
+ *          {transform: [{translateY: 435}], opacity: 1}]
+ *
+ * — the closed state, then the open state overriding it. Measured on the Android emulator
+ * with the sheet fully open and on screen: the `opacity: 0` in the middle pruned the whole
+ * subtree, so the sheet's only button never reached the listing and the sheet reported
+ * itself as containing no pressables.
+ */
+export function isHiddenStyleProp(s: any): boolean {
+    var resolved: { display?: any; opacity?: any } = {};
+    flattenHiding(s, resolved, 0);
+    return isHiddenStyle(resolved);
+}
+
+/** Last-wins merge of just the two properties that hide a subtree. Arrays may nest. */
+function flattenHiding(s: any, out: { display?: any; opacity?: any }, depth: number): void {
+    if (!s || depth > 10) return;
     if (Array.isArray(s)) {
-        for (var i = 0; i < s.length; i++) {
-            if (s[i] && isHiddenStyle(s[i])) return true;
-        }
+        for (var i = 0; i < s.length; i++) flattenHiding(s[i], out, depth + 1);
+        return;
     }
-    return false;
+    if (typeof s !== "object") return;
+    if (s.display !== undefined) out.display = s.display;
+    if (s.opacity !== undefined) out.opacity = s.opacity;
 }
 
 /**
@@ -77,6 +103,8 @@ export function isHiddenStyle(s: any): boolean {
  */
 export const VISIBILITY_HELPERS_JS = [
     `var isHiddenStyle = ${isHiddenStyle.toString()};`,
+    `var flattenHiding = ${flattenHiding.toString()};`,
+    `var isHiddenStyleProp = ${isHiddenStyleProp.toString()};`,
     `var isHiddenNavigationScene = ${isHiddenNavigationScene.toString()};`,
     `var isLogBoxSubtree = ${isLogBoxSubtree.toString()};`
 ].join("\n");

@@ -4,6 +4,7 @@ import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 import { OVERLAY_ADOPTION_JS } from "./injected/overlayAdoption.js";
+import { TRANSFORM_COMPOSE_JS } from "./injected/transformCompose.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 import type { KeyboardState } from "./keyboardMetrics.js";
 
@@ -938,37 +939,14 @@ export async function getScreenState(
     // "is animated", which is true of half the tab bars in existence.
     var STICKY_OWNER = /^ScrollViewStickyHeader$/;
 
-    /** The current value of an Animated node, or null when it is not one / cannot be read. */
-    function animatedValueOf(v) {
-        if (!v || typeof v !== 'object') return null;
-        if (typeof v.__getValue !== 'function') return null;
-        try {
-            var got = v.__getValue();
-            return typeof got === 'number' && isFinite(got) ? got : null;
-        } catch (e) { return null; }
-    }
-
-    /** True for an Animated node handed to the native driver, whose JS value may be stale. */
-    function isNativeDriven(v) {
-        return !!(v && typeof v === 'object' && v.__isNative === true);
-    }
+    ${TRANSFORM_COMPOSE_JS}
 
     /**
-     * Resolve the transform chain above this fiber, up to the fiber root.
+     * The offset measureInWindow is missing for this fiber, or null when there is none.
      *
-     * Returns null when there is no transform at all, else { dx, dy, uncertain, label }:
-     * dx/dy are the best available composed translation, and the uncertain flag says
-     * whether that number can be trusted.
-     *
-     * The hard case is a native-driven transform. measureInWindow and getBoundingClientRect
-     * both read the shadow tree, so neither sees one — verified on RN 0.83/Fabric, where a
-     * pinned sticky header sat at y=132pt on screen while both APIs reported y=-1698pt. The
-     * JS-side style holds whatever was last committed, which for that header is translateY:0
-     * forever. So there is no way to be exactly right; the goal is to be exactly honest.
-     *
-     * Reading Animated nodes with __getValue() is what keeps this quiet enough to be worth
-     * reading: a resting tab bar composes to 0 and says nothing, instead of tagging every
-     * tab item on every screen and training the reader to ignore the tag.
+     * Walks the ancestors and folds every transform it finds. Only native-driven Animated
+     * values move the frame — see composeTransformOps in injected/transformCompose.ts for
+     * why, and for the sheet whose contents disappeared when everything else moved it too.
      */
     function transformStateOf(fiber) {
         var dx = 0, dy = 0;
@@ -986,40 +964,11 @@ export async function getScreenState(
             var t = st && st.transform;
             if (t) {
                 sawTransform = true;
-                if (Array.isArray(t)) {
-                    for (var i = 0; i < t.length; i++) {
-                        var op = t[i];
-                        if (!op || typeof op !== 'object') continue;
-                        for (var key in op) {
-                            var raw = op[key];
-                            var val = typeof raw === 'number' && isFinite(raw) ? raw : animatedValueOf(raw);
-                            if (val === null) {
-                                // An opaque value: not a number and not a readable node.
-                                uncertain = true;
-                                if (!label) label = key + ':<unreadable>';
-                                continue;
-                            }
-                            if (isNativeDriven(raw)) uncertain = true;
-                            if (key === 'translateX') {
-                                dx += val;
-                                if (!label && val !== 0) label = 'translateX:' + val;
-                            } else if (key === 'translateY') {
-                                dy += val;
-                                if (!label && val !== 0) label = 'translateY:' + val;
-                            } else if (val !== 0 && !(key === 'scale' && val === 1) &&
-                                       !(key === 'scaleX' && val === 1) && !(key === 'scaleY' && val === 1)) {
-                                // scale / rotate / skew / matrix at a non-identity value: a real
-                                // geometric effect this does not model. Say so rather than
-                                // presenting the untouched frame as exact.
-                                uncertain = true;
-                                if (!label) label = key + ':' + val;
-                            }
-                        }
-                    }
-                } else {
-                    uncertain = true;
-                    if (!label) label = 'transform:<opaque>';
-                }
+                var c = composeTransformOps(t);
+                dx += c.dx;
+                dy += c.dy;
+                if (c.uncertain) uncertain = true;
+                if (!label && c.label) label = c.label;
             }
             cur = cur.return;
             steps++;
