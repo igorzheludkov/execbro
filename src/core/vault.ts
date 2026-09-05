@@ -310,13 +310,19 @@ function ageLabel(ms: number): string {
  * discovered through a 401.
  */
 export function vaultCatalog(handles: Set<string>): string {
-    if (handles.size === 0) return "";
     const now = Date.now();
-    const lines: string[] = ["--- secrets referenced above ---"];
+    // Resolve first, and return nothing when nothing resolved. A handle can
+    // appear in text without being in the vault — prose that quotes the
+    // [secret:...] form, or a handle from a transcript older than the last
+    // restart. Emitting the header before the loop printed it bare in exactly
+    // those cases, which reads as "a secret was here and I cannot tell you
+    // about it" rather than "that was just text".
+    const lines: string[] = [];
     for (const handle of handles) {
         const entry = vaultByHandle(handle);
         if (!entry) continue;
         lines.push(vaultCatalogLine(entry, now));
     }
-    return lines.join("\n");
+    if (lines.length === 0) return "";
+    return ["--- secrets referenced above ---", ...lines].join("\n");
 }

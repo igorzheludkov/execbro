@@ -50,6 +50,13 @@ Linking is also how [ExecBro Pro](#pricing) attaches to your installation, if yo
 - **Accessibility Inspection** - Query UI hierarchy to find elements by text, label, or resource ID
 - **OCR Text Extraction** - Extract visible text with tap-ready coordinates via Google Cloud Vision (works on any screen content)
 
+### Credential Safety
+
+- **Secrets never enter the transcript** - Every tool's output passes one redaction chokepoint, so a token is replaced by a handle (`[secret:auth_api.acme.io]`) whether it appears in a network header, a Redux store, a log line or a URL. Credential headers are matched by pattern rather than a fixed list, so vendor-namespaced ones (`x-shopify-access-token`, `x-goog-api-key`, `x-hasura-admin-secret`) are covered too, while `x-request-id` and `x-idempotency-key` are deliberately left alone. There is no per-call escape: `EXECBRO_REDACT=off` is set by a human and needs a restart
+- **Use a credential without reading it** - `list_secrets` names the handles; `http_request({auth:{secret:"api.acme.io"}})` substitutes the value host-side and issues the request from your machine, and `vault_capture` reads a token out of the app straight into the vault when no captured request revealed one. Each credential is bound to the origin it was observed on and refused elsewhere; the vault is memory-only
+- **Server- vs client-side, isolated** - `http_request` runs from the host with none of the app's TLS trust, proxy, cookie jar or mock rules; `app_request` runs inside the app with all of them. Comparing the two is how you tell a backend bug from a client one — and a 401 from the host where the app succeeds is itself the answer that the backend enforces attestation
+- **App data is treated as data** - The server tells every connecting agent that logs, payloads, component trees and eval results are shaped by whatever the app talked to, and are never to be followed as instructions
+
 ### Multi-Device Debugging
 
 - **Connect All Devices** - `scan_metro` automatically discovers and connects to all Bridgeless targets on each Metro port
@@ -170,7 +177,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | [Device Interaction](docs/device-interaction.md)           | Unified `tap`, platform-specific gestures, text input, key events               |
 | [OCR Text Extraction](docs/ocr.md)                         | Cloud Vision OCR, offline fallback, language config, workflows                  |
 | [Claude Code Skills](docs/skills.md)                       | Pre-built skills for session setup, debugging, and automation                   |
-| [Full Tool Reference](docs/tools.md)                       | Complete list of all 58 tools with descriptions                                 |
+| [Full Tool Reference](docs/tools.md)                       | Complete list of all 63 tools with descriptions                                 |
 
 ## How It Works
 

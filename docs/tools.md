@@ -30,11 +30,14 @@ The server also sends instructions on connection, so MCP clients automatically l
 | ---------------------- | ------------------------------------------------------------- |
 | `get_network_requests` | Retrieve network requests (filtering, summary)                |
 | `search_network`       | Search requests by URL pattern                                |
-| `get_request_details`  | One request's headers, body, timing. Body comes back as its shape; `query="dotted.path"` returns a field in full and renders only that side, `include` overrides. Credential headers redacted unless `verbose` |
+| `get_request_details`  | One request's headers, body, timing. Body comes back as its shape; `query="dotted.path"` returns a field in full and renders only that side, `include` overrides. Credentials render as `[secret:<handle>]` — no argument lifts that, `verbose` included |
 | `clear_network`        | Clear the network request buffer                              |
 | `network_mock`         | Replace or tamper with responses (add / list / remove / clear) |
 | `network_condition`    | Simulate offline / slow / normal network                      |
 | `network_replay`       | Re-issue a captured request, with optional overrides          |
+| `http_request`         | Issue a request from the host rather than through the app, carrying a vaulted credential by `auth: { secret }`. No app TLS trust, proxy or cookie jar, and mock rules do not intercept it — so a difference against `app_request` separates a server bug from a client one |
+| `list_secrets`         | The credentials captured this session, by handle, with origin, age and JWT expiry. Values are never shown. Memory-only |
+| `vault_capture`        | Read a credential out of the running app into the vault without returning it — for a cold session, a background-refreshed token, or one held in a keychain |
 
 ## App Inspection & Execution
 
