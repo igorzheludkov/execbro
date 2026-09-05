@@ -1,0 +1,162 @@
+/**
+ * The credential vault: values the redactor recognises with high confidence,
+ * stored server-side and rendered as a stable handle rather than a shape
+ * description.
+ *
+ * Two capabilities, and the second is the stronger one:
+ *
+ *  - Identity. The same value always yields the same handle, so "the app is
+ *    sending a different token than the one in its store" is one glance across
+ *    a redux_get_state and a get_request_details, with nothing disclosed.
+ *  - Exact matching. Once a literal value is here, every later tool result is
+ *    filtered by exact string match rather than by shape or key name. A short
+ *    opaque session id no heuristic would catch, seen once in a response
+ *    header, is masked everywhere afterwards.
+ *
+ * Memory only. Never written to disk, never sent to telemetry. A restart
+ * invalidates every handle and a handle from an old transcript resolves to
+ * nothing, which is correct rather than a defect: it fails closed, and the
+ * vault never becomes something worth stealing from disk. This is a session
+ * cache, not a credential store.
+ *
+ * The vault is architecturally unreachable from execute_in_app: it lives in
+ * this process, and execute_in_app runs in the app's JS runtime. That
+ * isolation follows from where the vault lives rather than from a guard that
+ * could be forgotten. It is also narrow: it means the vault adds no new easy
+ * disclosure path, not that it withholds anything from an agent that would
+ * read the token straight off Metro's unauthenticated inspector socket.
+ */
+
+import { createHash } from "node:crypto";
+
+export interface VaultEntry {
+    /** The only part of a secret that permanently enters the transcript. */
+    handle: string;
+    /** Verified shape, never claimed identity: "jwt", "stripe", "credential". */
+    kind: string;
+    /** Host the value was observed on, when there was one. */
+    origin?: string;
+    value: string;
+    firstSeen: number;
+    lastSeen: number;
+    /** Derived from a JWT `exp` claim. No other claim is read or stored. */
+    expiresAt?: number;
+}
+
+/**
+ * Exact matching makes a false positive here far more damaging than one in the
+ * renderer: a wrongly-vaulted common substring blanks unrelated output with no
+ * visible cause. Hence the floor, and hence only high-confidence callers.
+ */
+const MIN_LENGTH = 20;
+const MAX_ENTRIES = 200;
+
+/** Insertion-ordered, so the first key is the oldest entry. */
+const byHash = new Map<string, VaultEntry>();
+/**
+ * Every handle ever issued, including evicted ones. Handles are permanent
+ * transcript content: reusing one would make two different credentials read as
+ * the same credential in a transcript that outlives the process.
+ */
+const issued = new Set<string>();
+
+function hashOf(value: string): string {
+    return createHash("sha256").update(value).digest("hex");
+}
+
+/** Accepts a bare host or a full URL; anything unparseable is used verbatim. */
+function hostOf(origin: string): string {
+    try {
+        return new URL(origin).host || origin;
+    } catch {
+        return origin;
+    }
+}
+
+/**
+ * Read `exp` and nothing else.
+ *
+ * JWT payloads carry `sub`, email, org ids and roles. Those are PII that no
+ * shape or key rule would ever match, so the vault must not become the thing
+ * that puts them in front of the agent.
+ */
+function jwtExpiry(value: string): number | undefined {
+    const payload = value.split(".")[1];
+    if (!payload) return undefined;
+    try {
+        const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: unknown };
+        return typeof claims.exp === "number" ? claims.exp * 1000 : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function assignHandle(kind: string, origin?: string): string {
+    const base = `${kind}_${origin ?? "app"}`;
+    if (!issued.has(base)) {
+        issued.add(base);
+        return base;
+    }
+    for (let n = 2; ; n++) {
+        const candidate = `${base}#${n}`;
+        if (!issued.has(candidate)) {
+            issued.add(candidate);
+            return candidate;
+        }
+    }
+}
+
+/**
+ * Record a value and return its handle, or undefined when it is too short to
+ * be matched exactly without risk.
+ *
+ * `kind` is the verified shape the caller matched. `origin` may be a host or a
+ * full URL; only its host is kept, because a path can carry a user id.
+ */
+export function vaultAdd(value: string, kind: string, origin?: string): string | undefined {
+    if (value.length < MIN_LENGTH) return undefined;
+
+    const key = hashOf(value);
+    const existing = byHash.get(key);
+    if (existing) {
+        existing.lastSeen = Date.now();
+        if (!existing.origin && origin) existing.origin = hostOf(origin);
+        return existing.handle;
+    }
+
+    const host = origin ? hostOf(origin) : undefined;
+    const now = Date.now();
+    byHash.set(key, {
+        handle: assignHandle(kind, host),
+        kind,
+        origin: host,
+        value,
+        firstSeen: now,
+        lastSeen: now,
+        expiresAt: kind === "jwt" ? jwtExpiry(value) : undefined
+    });
+
+    const handle = byHash.get(key)!.handle;
+    if (byHash.size > MAX_ENTRIES) {
+        const oldest = byHash.keys().next().value;
+        if (oldest !== undefined) byHash.delete(oldest);
+    }
+    return handle;
+}
+
+/** Newest first. */
+export function vaultEntries(): VaultEntry[] {
+    return [...byHash.values()].reverse();
+}
+
+export function vaultByHandle(handle: string): VaultEntry | undefined {
+    for (const entry of byHash.values()) {
+        if (entry.handle === handle) return entry;
+    }
+    return undefined;
+}
+
+export function resetVaultForTests(): void {
+    byHash.clear();
+    issued.clear();
+}
