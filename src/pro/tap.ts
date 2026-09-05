@@ -13,7 +13,7 @@ import {
     getIOSSafeAreaTop
 } from "../core/ios.js";
 import { androidTap, androidFindElement } from "../core/android.js";
-import { compareScreenshots } from "./screenshot-diff.js";
+import { compareScreenshots, type DiffRegion } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
 import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice } from "../core/connection.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
@@ -96,6 +96,8 @@ export interface TapVerification {
     changeRate?: number;
     changedPixels?: number;
     totalPixels?: number;
+    /** Where the screen changed, in screenshot pixels. See screenshot-diff.ts. */
+    regions?: DiffRegion[];
     transientChangeDetected?: boolean;
     peakChangeRate?: number;
     peakFrame?: number;
@@ -109,6 +111,20 @@ export interface TapVerification {
     explanation: string;
 }
 
+/**
+ * Renders changed areas as centre points plus size, in screenshot pixels — the
+ * space `inspect_at_point` and `tap` already take, so the numbers are directly
+ * reusable rather than something the agent has to convert.
+ */
+function describeRegions(regions?: DiffRegion[]): string {
+    if (!regions || regions.length === 0) return "";
+    const listed = regions
+        .map(r => `(${Math.round(r.x + r.width / 2)}, ${Math.round(r.y + r.height / 2)}) ${r.width}x${r.height}px`)
+        .join("; ");
+    const lead = regions.length === 1 ? "Changed area, centre" : `${regions.length} changed areas, centres`;
+    return ` ${lead}: ${listed}. Use inspect_at_point there to identify what moved.`;
+}
+
 export function buildVerificationExplanation(v: {
     meaningful: boolean;
     changeRate: number;
@@ -119,15 +135,20 @@ export function buildVerificationExplanation(v: {
     peakFrame?: number;
     action?: "tap" | "swipe";
     kind?: "settled_elsewhere" | "snap_back" | "missed";
+    regions?: DiffRegion[];
 }): string {
     const pct = (rate: number) => (rate * 100).toFixed(1) + "%";
     const action = v.action ?? "tap";
     const Action = action[0].toUpperCase() + action.slice(1);
     const target = action === "swipe" ? "scroll surface" : "element";
 
+    // A box is not an element, so the caveat stays. What changes is that the
+    // agent can now act on the location: crop it, OCR it, inspect_at_point it.
+    const where = describeRegions(v.regions);
+
     // Burst path with typed verdict
     if (v.kind === "settled_elsewhere") {
-        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.`;
+        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff).${where} Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.`;
     }
     if (v.kind === "snap_back") {
         if (action === "swipe") {
@@ -151,7 +172,7 @@ export function buildVerificationExplanation(v: {
 
     // Legacy non-burst path
     if (v.meaningful) {
-        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff). Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.`;
+        return `${Action} caused a visible UI change (${pct(v.changeRate)} pixel diff).${where} Something on screen responded; a pixel diff cannot identify which element, so this is not confirmation that the intended target handled it.`;
     }
     return (
         `No visual change detected between before and after screenshots. ` +
