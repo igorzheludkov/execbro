@@ -62,6 +62,31 @@ describe("isHiddenNavigationScene", () => {
         expect(isHiddenNavigationScene("View", { style: { opacity: "0" } })).toBe(false);
     });
 
+    // A style array is how a component expresses state, so an entry that hides is routinely
+    // followed by one that un-hides it. RN flattens last-wins; OR-ing across the entries
+    // asks a different question. Measured on the Android emulator, Gorhom's open bottom
+    // sheet ships exactly this array, and reading the middle entry pruned the whole sheet.
+    it("resolves a style array last-wins instead of OR-ing its entries", () => {
+        const gorhomOpenSheet = [
+            null,
+            { flexDirection: "column-reverse", position: "absolute", top: 0, left: 0, right: 0 },
+            { opacity: 0, transform: [{ translateY: 923.43 }] },
+            { transform: [{ translateY: 434.67 }], opacity: 1 }
+        ];
+        expect(isHiddenNavigationScene("View", { style: gorhomOpenSheet })).toBe(false);
+    });
+
+    it("still prunes when the last entry to set the property is the hiding one", () => {
+        expect(isHiddenNavigationScene("View", { style: [{ opacity: 1 }, { opacity: 0 }] })).toBe(true);
+        expect(isHiddenNavigationScene("View", { style: [{ display: "flex" }, { display: "none" }] })).toBe(true);
+        expect(isHiddenNavigationScene("View", { style: [{ display: "none" }, { display: "flex" }] })).toBe(false);
+    });
+
+    it("flattens nested style arrays", () => {
+        expect(isHiddenNavigationScene("View", { style: [[{ opacity: 0 }], [{ opacity: 1 }]] })).toBe(false);
+        expect(isHiddenNavigationScene("View", { style: [[{ opacity: 1 }], [{ opacity: 0 }]] })).toBe(true);
+    });
+
     it("prunes display:none (object and array style)", () => {
         expect(isHiddenNavigationScene("View", { style: { display: "none" } })).toBe(true);
         expect(isHiddenNavigationScene("View", { style: [{ flex: 1 }, { display: "none" }] })).toBe(true);
