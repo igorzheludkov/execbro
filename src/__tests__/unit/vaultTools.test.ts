@@ -43,3 +43,22 @@ describe("Phase 2 tool surface", () => {
         expect(out.content[0].text).toContain("No credentials captured");
     });
 });
+
+describe("list_secrets marks which credential an origin sends", () => {
+    beforeEach(resetVaultForTests);
+
+    it("flags the slot holder when one origin has two credentials", async () => {
+        // Verified live 2026-09-05: vault_capture for an origin already primed
+        // from an Authorization header repointed the slot to a different KIND
+        // of credential, and the next request by origin failed against a real
+        // backend. Newest-wins is correct; silent is not.
+        vaultAdd("bearer-token-aaaaaaaaaaaaa", "auth", "https://gifted.fyi/a");
+        vaultAdd("redux-secret-bbbbbbbbbbbbb", "auth", "https://gifted.fyi/b");
+        const out = await toolRegistry.get("list_secrets")!.handler({});
+        const text = out.content[0].text as string;
+        const marked = text.split("\n").filter((l) => l.includes("<- sent for"));
+        expect(marked).toHaveLength(1);
+        expect(marked[0]).toContain("auth_gifted.fyi#2");
+        expect(text).toContain("or a handle to pin one exact value");
+    });
+});

@@ -181,6 +181,28 @@ export function vaultByHandle(handle: string): VaultEntry | undefined {
     return undefined;
 }
 
+/**
+ * Handles that are currently the slot holder for their origin, i.e. the ones a
+ * bare origin name resolves to.
+ *
+ * Verified live on 2026-09-05: priming the vault from an Authorization header
+ * and then running vault_capture for the same origin repointed the slot to the
+ * captured value, which was a different KIND of credential (a redux `secret`
+ * field, not the bearer token). The next http_request by origin got "Error
+ * decode access token" from a real backend. Slots have no notion of kind and
+ * should not grow one — newest-wins is what makes a re-login need no agent
+ * action — but the displacement must not be invisible, which is what this is
+ * for. Addressing the older value by its handle still works.
+ */
+export function vaultSlotHandles(): Set<string> {
+    const current = new Set<string>();
+    for (const hash of slots.values()) {
+        const entry = byHash.get(hash);
+        if (entry) current.add(entry.handle);
+    }
+    return current;
+}
+
 export function resetVaultForTests(): void {
     byHash.clear();
     issued.clear();
