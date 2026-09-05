@@ -28,8 +28,9 @@ describe("resolveAuth origin binding", () => {
 
     it("attaches a credential to its own origin", () => {
         vaultAdd(TOKEN, "auth", "https://api.acme.io/v1/me");
-        const { header } = resolveAuth({ secret: "api.acme.io" }, "https://api.acme.io/v1/orders");
-        expect(header).toBe(`Bearer ${TOKEN}`);
+        const { name, value } = resolveAuth({ secret: "api.acme.io" }, "https://api.acme.io/v1/orders");
+        expect(name).toBe("Authorization");
+        expect(value).toBe(`Bearer ${TOKEN}`);
     });
 
     it("refuses to send a credential to a different origin, which is the exfiltration case", () => {
@@ -55,13 +56,54 @@ describe("resolveAuth origin binding", () => {
 
     it("returns a staleness note for an expired credential rather than failing silently", () => {
         vaultAdd(DEAD_JWT, "auth", "https://api.acme.io/v1/me");
-        const { header, note } = resolveAuth({ secret: "api.acme.io" }, "https://api.acme.io/v1/orders");
-        expect(header).toBe(`Bearer ${DEAD_JWT}`);
+        const { value, note } = resolveAuth({ secret: "api.acme.io" }, "https://api.acme.io/v1/orders");
+        expect(value).toBe(`Bearer ${DEAD_JWT}`);
         expect(note).toContain("expired");
     });
 
     it("attaches nothing when no auth was asked for", () => {
         expect(resolveAuth(undefined, "https://api.acme.io/x")).toEqual({});
+    });
+});
+
+describe("resolveAuth placement", () => {
+    beforeEach(resetVaultForTests);
+    beforeEach(() => {
+        vaultAdd(TOKEN, "auth", "https://api.acme.io/v1/me");
+    });
+
+    const at = (auth: Parameters<typeof resolveAuth>[0]) => resolveAuth(auth, "https://api.acme.io/v1/orders");
+
+    it("carries a custom header with no scheme, because X-API-Key: Bearer <k> authenticates nothing", () => {
+        expect(at({ secret: "api.acme.io", header: "X-API-Key" })).toMatchObject({
+            name: "X-API-Key",
+            value: TOKEN,
+        });
+    });
+
+    it("keeps Authorization but swaps the scheme", () => {
+        expect(at({ secret: "api.acme.io", scheme: "Basic" })).toMatchObject({
+            name: "Authorization",
+            value: `Basic ${TOKEN}`,
+        });
+    });
+
+    it("sends a bare Authorization value when the scheme is explicitly empty", () => {
+        expect(at({ secret: "api.acme.io", scheme: "" })).toMatchObject({ value: TOKEN });
+    });
+
+    it("rejects a header name that would inject a second header", () => {
+        expect(() => at({ secret: "api.acme.io", header: "X-Key\r\nX-Admin: 1" })).toThrow(UserInputError);
+    });
+
+    it("rejects a scheme carrying a newline", () => {
+        expect(() => at({ secret: "api.acme.io", scheme: "Bearer\r\nX-Admin: 1" })).toThrow(UserInputError);
+    });
+
+    it("checks origin binding before it ever looks at placement", () => {
+        expect(() =>
+            resolveAuth({ secret: "api.acme.io", header: "X-API-Key" }, "https://evil.com/collect"),
+        ).toThrow(/origin/i);
     });
 });
 
@@ -103,6 +145,33 @@ describe("issueHttpRequest", () => {
         });
         expect(out).not.toContain(TOKEN);
         expect(out).toContain("[secret:auth_api.acme.io]");
+    });
+
+    it("puts the credential in the custom header the caller named", async () => {
+        vaultAdd(TOKEN, "auth", "https://api.acme.io/v1/me");
+        const spy = mockFetch("{}");
+        await issueHttpRequest({
+            method: "GET",
+            url: "https://api.acme.io/v1/orders",
+            auth: { secret: "api.acme.io", header: "X-API-Key" },
+        });
+        const sent = spy.mock.calls[0][1]!.headers as Record<string, string>;
+        expect(sent["X-API-Key"]).toBe(TOKEN);
+        expect(sent.Authorization).toBeUndefined();
+    });
+
+    it("lets an explicit header of the same name win over auth", async () => {
+        vaultAdd(TOKEN, "auth", "https://api.acme.io/v1/me");
+        const spy = mockFetch("{}");
+        await issueHttpRequest({
+            method: "GET",
+            url: "https://api.acme.io/v1/orders",
+            headers: { "x-api-key": "explicit" },
+            auth: { secret: "api.acme.io", header: "X-API-Key" },
+        });
+        const sent = spy.mock.calls[0][1]!.headers as Record<string, string>;
+        expect(sent["x-api-key"]).toBe("explicit");
+        expect(sent["X-API-Key"]).toBeUndefined();
     });
 
     it("serialises an object body as JSON and sets the content type", async () => {

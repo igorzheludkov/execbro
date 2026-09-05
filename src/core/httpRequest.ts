@@ -25,16 +25,36 @@ import { redactSecrets } from "./redact.js";
 import { redactHeaderValue } from "./network.js";
 import { applyResultBudget, DEFAULT_MAX_BYTES } from "./truncate.js";
 
+/**
+ * Where a vaulted credential goes in the request.
+ *
+ * `header` and `scheme` exist because Bearer-only was not the neutral
+ * simplification it looked like. Outside Bearer the only way to authenticate
+ * was `headers: { "X-API-Key": "<pasted value>" }` — which puts the raw
+ * credential back in the transcript, silently, with no error. The fallback for
+ * the unsupported case WAS the insecure case, so covering the other shapes is
+ * what makes the vault's guarantee hold rather than merely usually hold.
+ */
+export interface AuthArg {
+    secret: string;
+    /** Header to carry it. Default `Authorization`. */
+    header?: string;
+    /** Prefix before the value. Defaults to `Bearer` for `Authorization`, none otherwise; `""` forces a bare value. */
+    scheme?: string;
+}
+
 export interface HttpRequestArgs {
     method: string;
     url: string;
     body?: unknown;
     headers?: Record<string, string>;
-    auth?: { secret: string };
+    auth?: AuthArg;
     maxResultLength?: number;
 }
 
 const TIMEOUT_MS = 30_000;
+/** RFC 7230 token: what a header name and an auth scheme are allowed to be. */
+const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 function hostOfUrl(url: string): string {
     try {
@@ -45,7 +65,7 @@ function hostOfUrl(url: string): string {
 }
 
 /**
- * Resolve `auth: { secret }` to an Authorization header.
+ * Resolve `auth: { secret, header?, scheme? }` to one request header.
  *
  * Origin binding lives here and it is the whole security story of this tool.
  * Without it, "send secret X to evil.com" is single-call exfiltration, and that
@@ -54,8 +74,24 @@ function hostOfUrl(url: string): string {
  * the RESOLVED ENTRY's recorded origin, never the name the caller passed, so
  * naming a handle instead of a slot is not a way around it.
  */
-export function resolveAuth(auth: { secret: string } | undefined, url: string): { header?: string; note?: string } {
+export function resolveAuth(
+    auth: AuthArg | undefined,
+    url: string,
+): { name?: string; value?: string; note?: string } {
     if (!auth) return {};
+
+    // The header name and scheme are agent-controlled and land in the request
+    // line, so they are a trust boundary: an unchecked newline here is header
+    // injection. fetch would reject most of it, but as an opaque transport
+    // error long after the useful message could be given.
+    const name = auth.header ?? "Authorization";
+    if (!HTTP_TOKEN.test(name)) {
+        throw new UserInputError(`"${name}" is not a valid HTTP header name.`, "bad_header_name");
+    }
+    const scheme = auth.scheme ?? (name.toLowerCase() === "authorization" ? "Bearer" : "");
+    if (scheme && !HTTP_TOKEN.test(scheme)) {
+        throw new UserInputError(`"${scheme}" is not a valid auth scheme.`, "bad_scheme_name");
+    }
 
     const entry = vaultResolve(auth.secret);
     if (!entry) {
@@ -73,7 +109,7 @@ export function resolveAuth(auth: { secret: string } | undefined, url: string): 
         );
     }
 
-    return { header: `Bearer ${entry.value}`, note: vaultStaleness(entry) };
+    return { name, value: scheme ? `${scheme} ${entry.value}` : entry.value, note: vaultStaleness(entry) };
 }
 
 /** Render response headers, reusing the credential-header rules. */
@@ -103,9 +139,9 @@ export async function issueHttpRequest(args: HttpRequestArgs): Promise<string> {
     }
 
     const headers: Record<string, string> = { ...(args.headers ?? {}) };
-    const { header, note } = resolveAuth(args.auth, args.url);
-    if (header && !Object.keys(headers).some((k) => k.toLowerCase() === "authorization")) {
-        headers.Authorization = header;
+    const { name, value, note } = resolveAuth(args.auth, args.url);
+    if (name && value && !Object.keys(headers).some((k) => k.toLowerCase() === name.toLowerCase())) {
+        headers[name] = value;
     }
 
     let body: string | undefined;
