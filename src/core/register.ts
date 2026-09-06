@@ -97,8 +97,11 @@ export function registerToolWithTelemetry(
         await ensureLicense();
         freezeSessionVerdict(getUsageInfo());
         const usageNow = getUsageInfo();
-        void maybeNotifyDeferral(usageNow);
-        void maybeNotifyUsage(usageNow);
+        // Pass the caller's device through: with a single app connected an
+        // undefined device already resolves to it, but with several connected
+        // it resolves to "ambiguous" and the banner is silently dropped.
+        void maybeNotifyDeferral(usageNow, args?.device);
+        void maybeNotifyUsage(usageNow, args?.device);
         const gate = isToolBlocked(toolName);
         if (gate.blocked) {
             return { content: [{ type: "text" as const, text: gate.message! }] };
