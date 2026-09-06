@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
-import { pushLogBox } from "../core/logbox.js";
+import { pushLogBox, getLastLogBoxError } from "../core/logbox.js";
+import { hasConnectedApp } from "../core/connection.js";
+import { trackCapNotification } from "../core/telemetry.js";
 import { CONFIG_DIR } from "../core/paths.js";
 import { getPricingInfo, formatPlanPrice, type UsageInfo } from "../core/license.js";
 import { API_BASE_URL } from "../core/config.js";
@@ -108,8 +110,19 @@ export async function maybeNotifyUsage(usage: UsageInfo | null, device?: string)
         // expanded=false is stored but never visually shown unless LogBox is already open —
         // this notification exists to be seen, so we force the full-screen view open instead
         // of reaching for level="error", which would look like the app itself broke.
-        await pushLogBox(msg, "warning", true, "logbox", "ExecBro", device);
+        // Delivery is instrumented, not just attempted. This banner is the only
+        // cap channel we can observe at all, so an undelivered one has to be
+        // distinguishable from an unsent one — otherwise a zero conversion rate
+        // cannot be told apart from a paywall nobody ever saw.
+        const connected = hasConnectedApp();
+        const delivered = await pushLogBox(msg, "warning", true, "logbox", "ExecBro", device);
+        trackCapNotification(
+            threshold === 100 ? "100" : "80",
+            delivered,
+            delivered ? "logbox" : connected ? (getLastLogBoxError() ?? "unknown") : "no_app_connected"
+        );
     } catch {
+        trackCapNotification(nextThreshold(usage) === 100 ? "100" : "80", false, "threw");
         /* best-effort — never throw into the caller */
     }
 }
@@ -134,8 +147,15 @@ export async function maybeNotifyDeferral(usage: UsageInfo | null, device?: stri
         state.deferralNotifiedFor = usage.enforcementStartsAt;
         write(state);
         // warning level (grey) + expanded=true → dismissible full-screen LogBox view.
-        await pushLogBox(msg, "warning", true, "logbox", "ExecBro", device);
+        const connected = hasConnectedApp();
+        const delivered = await pushLogBox(msg, "warning", true, "logbox", "ExecBro", device);
+        trackCapNotification(
+            "deferral",
+            delivered,
+            delivered ? "logbox" : connected ? (getLastLogBoxError() ?? "unknown") : "no_app_connected"
+        );
     } catch {
+        trackCapNotification("deferral", false, "threw");
         /* best-effort — never throw into the caller */
     }
 }
