@@ -40,8 +40,29 @@ and no agent reading it could discover the parameter.
   parameter usually demotes an older tool: `android_long_press` went from "long
   press" to "the no-RN coordinate escape hatch". Grep the tool name across the
   repo — it appears in more places than you expect.
-- Verify the shipped guide by calling `get_usage_guide` against the running dev
-  server, not by reading the source. That is the copy agents actually receive.
+- **Prove the dev server is serving this checkout before you trust anything it
+  says.** A server on 8600 that answers normally is not evidence it is running
+  current code:
+
+  ```bash
+  P=$(lsof -ti:8600); echo "ppid=$(ps -o ppid= -p $P | tr -d ' ')"
+  ```
+
+  A PPID of `1` is an orphan re-parented to launchd — nodemon's rebuilds have
+  been dying against it on `EADDRINUSE` while it keeps answering from whatever
+  code it started with. `kill` it, wait for the port to free, then `touch` a
+  source file: the surviving nodemon is parked "waiting for file changes" and
+  restarts on the save. Re-check that the new PID's PPID is *not* 1. The
+  SessionStart hook will not repair this — `already_running()` in
+  `scripts/dev-server.sh` checks existence, not health.
+
+  This is not hypothetical: the 2.11.0 release verified its sweep against a
+  15-hour-old server that still listed the tool the release had deleted.
+- Verify the shipped guide by calling `get_usage_guide` against that server, not
+  by reading the source. That is the copy agents actually receive. Cheapest
+  freshness check when the release adds or removes a tool: `dev(action="list",
+  filter="<tool>")` must already reflect the change — if it still shows the old
+  surface, you are reading a stale server, not a failed edit.
 - Commit the sweep, then continue to step 2.
 
 ### 2. Get Version Bump Type
