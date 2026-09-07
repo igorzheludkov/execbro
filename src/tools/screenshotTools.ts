@@ -8,8 +8,6 @@ import {
     androidScreenshot,
     detectLogBox,
     formatLogBoxWarning,
-    recognizeText,
-    inferIOSDevicePixelRatio,
     getScreenState,
     formatScreenStateSummary,
     imageBuffer,
@@ -594,7 +592,7 @@ export function registerScreenshotTools(server: McpServer): void {
         "get_images",
         {
             description:
-                "Access the shared image buffer containing screenshots from all tools (ios_screenshot, android_screenshot, ocr_screenshot, tap verification). Returns metadata only by default — use id or groupId+frameIndex to retrieve actual image data. Tap burst verification stores frame groups here when burst=true is used.\n" +
+                "Access the shared image buffer containing screenshots from all tools (ios_screenshot, android_screenshot, tap verification). Returns metadata only by default — use id or groupId+frameIndex to retrieve actual image data. Tap burst verification stores frame groups here when burst=true is used.\n" +
                 "PURPOSE: Retrieve prior screenshots — especially tap burst frames — without re-taking them, for visual diffing or reviewing transient UI states.\n" +
                 "WHEN TO USE: After tap(burst=true) reports transientChangeDetected, or to compare before/after frames without another screenshot round-trip.\n" +
                 "WORKFLOW: tap(burst=true) -> note verification.burstGroupId -> get_images(groupId, frameIndex=N) to inspect individual frames.\n" +
@@ -663,151 +661,6 @@ export function registerScreenshotTools(server: McpServer): void {
                     }
                 ]
             };
-        }
-    );
-    // Tool: OCR Screenshot - Extract text with coordinates from screenshot
-    registerToolWithTelemetry(
-        server,
-        "ocr_screenshot",
-        {
-            description:
-                "RECOMMENDED: Use this tool FIRST when you need to find and tap UI elements. Takes a screenshot and extracts all visible text with tap-ready coordinates using OCR. " +
-                "ADVANTAGES over accessibility trees: (1) Works on ANY visible text regardless of accessibility labels, (2) Returns ready-to-use tapX/tapY coordinates - no conversion needed, (3) Faster than parsing accessibility hierarchies, (4) Works consistently across iOS and Android. " +
-                "USE THIS FOR: Finding buttons, labels, menu items, tab bars, or any text you need to tap. Simply find the text in the results and use its tapX/tapY with the tap command.\n" +
-                "PURPOSE: Visually locate text on screen and return coordinates safe to pass straight into tap.\n" +
-                "WHEN TO USE: Non-RN surfaces, third-party WebViews, accessibility-poor screens, or when fiber/testID strategies have failed.\n" +
-                "WORKFLOW: ocr_screenshot(platform=\"ios\") -> scan results for the label -> tap(x=tapX, y=tapY) -> ios_screenshot to verify.\n" +
-                "LIMITATIONS: OCR accuracy degrades on very small or stylized text; icons with no label won't appear — use tap(component=...) instead.\n" +
-                "GOOD: ocr_screenshot({ platform: \"ios\" })\n" +
-                "BAD: ocr_screenshot used just to view the screen — plain ios_screenshot / android_screenshot is cheaper when you don't need OCR text.\n" +
-                "SOURCE: for RN screens, inspect_at_point(x, y) returns the file and line that render an element — no OCR needed.\n",
-            inputSchema: {
-                platform: z.enum(["ios", "android"]).describe("Platform to capture screenshot from"),
-                deviceId: z
-                    .string()
-                    .optional()
-                    .describe("Optional device ID (Android) or UDID (iOS). Uses first available device if not specified.")
-            }
-        },
-        async ({ platform, deviceId }) => {
-            try {
-                let screenshotResult;
-                if (platform === "android") {
-                    const r = await resolveAndroidDeviceId(deviceId);
-                    if (!r.ok) return r.response;
-                    screenshotResult = await androidScreenshot(undefined, r.serial);
-                } else {
-                    const r = await resolveIosUdid(deviceId);
-                    if (!r.ok) return r.response;
-                    screenshotResult = await iosScreenshot(undefined, r.udid);
-                }
-    
-                if (!screenshotResult.success || !screenshotResult.data) {
-                    return {
-                        content: [
-                            {
-                                type: "text" as const,
-                                text: `Screenshot failed: ${screenshotResult.error || "No image data"}`
-                            }
-                        ],
-                        isError: true
-                    };
-                }
-    
-                // Calculate device pixel ratio for iOS
-                const devicePixelRatio =
-                    platform === "ios" && screenshotResult.originalWidth && screenshotResult.originalHeight
-                        ? inferIOSDevicePixelRatio(screenshotResult.originalWidth, screenshotResult.originalHeight)
-                        : 1;
-    
-                // Run OCR on the screenshot
-                const scaleFactor = screenshotResult.scaleFactor || 1;
-                const ocrResult = await recognizeText(screenshotResult.data, {
-                    scaleFactor,
-                    platform,
-                    devicePixelRatio
-                });
-    
-                if (!ocrResult.success) {
-                    return {
-                        content: [
-                            {
-                                type: "text" as const,
-                                text: `OCR failed: no text recognized`
-                            }
-                        ],
-                        isError: true
-                    };
-                }
-    
-                // Format results for MCP tool output
-                const elements = ocrResult.words
-                    .filter((w: { confidence: number; text: string }) => w.confidence > 50 && w.text.trim().length > 0)
-                    .map((w: { text: string; confidence: number; tapCenter: { x: number; y: number } }) => ({
-                        text: w.text,
-                        confidence: Math.round(w.confidence),
-                        tapX: w.tapCenter.x,
-                        tapY: w.tapCenter.y
-                    }));
-    
-                const result: Record<string, unknown> = {
-                    platform,
-                    engine: ocrResult.engine || "unknown",
-                    processingTimeMs: ocrResult.processingTimeMs,
-                    fullText: ocrResult.fullText?.trim() || "",
-                    confidence: Math.round(ocrResult.confidence || 0),
-                    elementCount: elements.length,
-                    elements,
-                    note: "tapX/tapY are in device pixels — pass directly to tap(x, y) for automatic platform conversion"
-                };
-    
-                // Check for LogBox overlay (uses default CDP device — native deviceId cannot be mapped to CDP device name)
-                try {
-                    const logBoxState = await detectLogBox();
-                    if (logBoxState && logBoxState.total > 0) {
-                        result.logBoxWarning = formatLogBoxWarning(logBoxState).trim();
-                    }
-                } catch {
-                    // Non-fatal: LogBox detection failure should not break OCR
-                }
-    
-                // Store screenshot in image buffer
-                try {
-                    imageBuffer.add({
-                        id: `ocr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                        image: screenshotResult.data,
-                        timestamp: Date.now(),
-                        source: "ocr_screenshot",
-                        metadata: {
-                            width: screenshotResult.originalWidth || 0,
-                            height: screenshotResult.originalHeight || 0,
-                            scaleFactor,
-                            platform,
-                        },
-                    });
-                } catch {
-                    // Non-fatal: image buffer write failure should not break OCR response
-                }
-    
-                return {
-                    content: [
-                        {
-                            type: "text" as const,
-                            text: JSON.stringify(result, null, 2)
-                        }
-                    ]
-                };
-            } catch (error) {
-                return {
-                    content: [
-                        {
-                            type: "text" as const,
-                            text: `OCR failed: ${error instanceof Error ? error.message : String(error)}`
-                        }
-                    ],
-                    isError: true
-                };
-            }
         }
     );
 }

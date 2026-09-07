@@ -356,7 +356,7 @@ export function formatScreenStateSummary(
         const comp = ss.nativeOverlay.component ? ` (${ss.nativeOverlay.component})` : "";
         lines.push(
             `⚠️ Native sheet detected${comp} — its content is presented outside the RN coordinate ` +
-            `space, so tap targets below may be wrong. Verify with ios_screenshot / ocr_screenshot.`
+            `space, so tap targets below may be wrong. Verify with ios_screenshot / android_screenshot.`
         );
     }
     if (ss.notes && ss.notes.length > 0) {
@@ -2487,7 +2487,7 @@ ${OVERLAY_ADOPTION_JS}
             const note =
                 `Native ${sheet.kind} (${sheet.component}) is open — its content is presented outside ` +
                 `the RN coordinate space; reported coordinates for it (and the screen behind it) are ` +
-                `unreliable. Use ios_screenshot / ocr_screenshot to read and tap it.`;
+                `unreliable. Use ios_screenshot / android_screenshot to read it, then tap(x, y) or tap(text=...).`;
             screenState.nativeOverlay = { kind: sheet.kind, component: sheet.component, note };
             screenState.notes = [...(screenState.notes ?? []), note];
             // The native sheet dims/blocks the underlying screen — flag root pressables.

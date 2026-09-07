@@ -65,7 +65,7 @@ exactly like "my fix didn't work".
         content: `# Component Inspection
 
 ## Recommended Workflow: Identify a Component on Screen
-1. get_screen_state — screenshot-free, and every element comes back with a ready (x, y). Start here; only fall back to a screenshot (ios_screenshot / android_screenshot / ocr_screenshot) when you need to see the element to pick it out
+1. get_screen_state — screenshot-free, and every element comes back with a ready (x, y). Start here; only fall back to a screenshot (ios_screenshot / android_screenshot) when you need to see the element to pick it out
 2. Take the coordinate from that listing, or estimate it off the screenshot
 3. Pass it straight through — every layout tool, tap() and the screenshots share one screen-space coordinate system, so no conversion is needed
 4. Pick the right tool (see decision below) and call it with (x, y)
@@ -164,7 +164,6 @@ size in a note when it applies.
 - get_screen_state: route + overlays + every element, screenshot-free (start here)
 - ios_screenshot / android_screenshot: visual capture
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
-- ocr_screenshot: screenshot with text recognition and tap coordinates
 - inspect_at_point: frames per ancestor + props + source file:line (no overlay, fast)
 - measure: geometry for one named component
 - get_images: re-read any screenshot already captured (including tap burst frames) instead of taking another

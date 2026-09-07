@@ -1,6 +1,6 @@
 # OCR Text Extraction
 
-The `ocr_screenshot` tool extracts all visible text from a screenshot with tap-ready coordinates. This is useful when accessibility labels are missing or when you need to find text that isn't exposed in the accessibility tree.
+OCR is the last fallback in `tap`'s strategy chain. When the fiber tree and the accessibility tree both fail to find the element, `tap(text="...")` reads the screen with OCR and taps the matching text. There is no standalone OCR tool — OCR runs inside `tap`, not as a separate call.
 
 > **Note:** Many iOS interaction tools (swipe, text input, accessibility queries) require [IDB](https://github.com/facebook/idb). See the [Platform Setup](../README.md#platform-setup) section for installation instructions.
 
@@ -10,34 +10,17 @@ The `ocr_screenshot` tool extracts all visible text from a screenshot with tap-r
 |----------|------|------|
 | Fiber / accessibility tree (`tap`, `get_screen_layout`) | Fast, reliable, low token usage | Only finds elements the tree exposes (testID, text, labels) |
 | Screenshot + Vision | Visual layout understanding | High token usage, slow |
-| **OCR** | Works on ANY visible text, returns tap coordinates | Requires text to be visible, may miss small text |
+| **OCR** (inside `tap`) | Works on ANY visible text, no tree required | Requires text to be visible, may miss small or stylized text |
 
 ## Usage
 
-```
-ocr_screenshot with platform="ios"
-```
-
-Returns all visible text with tap-ready coordinates:
-
-```json
-{
-  "platform": "ios",
-  "engine": "cloud",
-  "processingTimeMs": 550,
-  "elementCount": 24,
-  "elements": [
-    { "text": "Settings", "confidence": 95, "tapX": 195, "tapY": 52 },
-    { "text": "Login", "confidence": 95, "tapX": 187, "tapY": 420 }
-  ]
-}
-```
-
-Then tap the element:
+Nothing to call directly — just target the element by its visible text:
 
 ```
-tap with x=187 y=420
+tap with text="Submit"
 ```
+
+`tap` tries accessibility, then fiber, then OCR, and reports which strategy won.
 
 ## OCR Engine
 
@@ -71,17 +54,15 @@ EASYOCR_LANGUAGES=es,fr
 
 ## Recommended Workflow
 
-1. **Use unified `tap`** - Handles fallback chain automatically
-2. **Fall back to OCR** - When `tap` suggests using coordinates
-3. **Use screenshot** - For visual debugging or layout verification
+1. **`tap(text=...)`** — runs the whole fallback chain, OCR included
+2. **`get_screen_state`** — when you need the element list rather than a single tap
+3. **`ios_screenshot` / `android_screenshot`** — for visual debugging or layout verification
 
 ```
-# Simplest approach — tap handles everything
+# Simplest approach — tap handles everything, OCR included
 tap with text="Submit"
 
-# If tap fails, use OCR to find coordinates
-ocr_screenshot with platform="android"
-
-# Then tap using coordinates from OCR result
+# If tap still can't find it, look at the screen and tap by coordinate
+android_screenshot
 tap with x=540 y=1200
 ```

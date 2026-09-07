@@ -115,7 +115,7 @@ Style is the node's own style object, not RN's merged cascade — when a value l
 
 ## get_images
 
-Access the shared image buffer containing screenshots from all tools (`ios_screenshot`, `android_screenshot`, `ocr_screenshot`, tap verification).
+Access the shared image buffer containing screenshots from all tools (`ios_screenshot`, `android_screenshot`, tap verification).
 
 ```
 get_images

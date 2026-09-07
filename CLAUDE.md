@@ -204,12 +204,11 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 
 **Screenshots & OCR:**
 - `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
-- `ocr_screenshot`: Screenshot with OCR text recognition and tap-ready coordinates
 - `get_images`: Access shared image buffer containing screenshots from all tools. Returns metadata by default; use `id` or `groupId`+`frameIndex` to retrieve specific images. Tap burst frames are stored here.
 
 **Component Inspection (recommended workflow: get_screen_state → find_components → inspect_component):**
 
-> **One coordinate space.** Every tool below, both screenshot tools, `ocr_screenshot`, `swipe` and `tap` speak
+> **One coordinate space.** Every tool below, both screenshot tools, `swipe` and `tap` speak
 > **delivered-screenshot pixels** — the pixels of the image a screenshot actually returns, after the downscale
 > applied to fit the API limit. The factor is a property of the device (`deviceScale / deliveredDownscale`), not
 > of a particular capture, so it is stable across calls. Pass coordinates between any of these tools unchanged;

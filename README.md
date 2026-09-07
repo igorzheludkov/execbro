@@ -175,9 +175,9 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | [App Inspection](docs/app-inspection.md)                   | Debug globals (Apollo, Redux, Expo Router), `execute_in_app`, limitations       |
 | [Layout & Component Inspection](docs/layout-inspection.md) | `get_screen_layout`, component tree, `inspect_at_point`, `find_components`      |
 | [Device Interaction](docs/device-interaction.md)           | Unified `tap`, platform-specific gestures, text input, key events               |
-| [OCR Text Extraction](docs/ocr.md)                         | Cloud Vision OCR, offline fallback, language config, workflows                  |
+| [OCR Text Extraction](docs/ocr.md)                         | Cloud Vision OCR inside `tap`, offline fallback, language config                |
 | [Claude Code Skills](docs/skills.md)                       | Pre-built skills for session setup, debugging, and automation                   |
-| [Full Tool Reference](docs/tools.md)                       | Complete list of all 63 tools with descriptions                                 |
+| [Full Tool Reference](docs/tools.md)                       | Complete list of all 62 tools with descriptions                                 |
 
 ## How It Works
 

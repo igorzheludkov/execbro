@@ -45,9 +45,9 @@ Based on what's running, capture screenshots:
 **For Android Devices:**
 - Use `mcp__execbro__android_screenshot` with the device serial
 
-**Screenshot with OCR (when you need tap coordinates):**
-- Use `mcp__execbro__ocr_screenshot` to capture a screenshot and extract all visible text with tap-ready coordinates
-- Recommended when you need to identify tappable elements — returns ready-to-use tapX/tapY coordinates
+**When you need tap coordinates:**
+- Use `mcp__execbro__get_screen_state` — every element comes back with a ready `(x, y)` in the same space as the screenshots, with no OCR round trip
+- To tap an element straight away, `mcp__execbro__tap` with `text=` runs the fiber, accessibility and OCR strategies itself
 
 ### 4. Present Results
 
@@ -90,7 +90,7 @@ If the user provides a Figma URL or design reference:
 - `mcp__execbro__ios_screenshot`
 - `mcp__execbro__android_screenshot`
 - `mcp__execbro__inspect_at_point` (optional: per-ancestor frames + props at coordinates)
-- `mcp__execbro__ocr_screenshot` (screenshot + OCR text with tap coordinates)
+- `mcp__execbro__tap` (resolves by text/testID/component, OCR fallback included)
 
 ## Notes
 

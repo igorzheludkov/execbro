@@ -11,7 +11,7 @@ ExecBro ("the Tool"), shipped as the npm package `execbro` (formerly `react-nati
 | **Telemetry** | Anonymous usage metrics (tool names, success/failure, duration) | Automatically on every session | `EXECBRO_TELEMETRY=false` |
 | **Auto-registration** | Installation ID, device fingerprint, platform, hostname, OS version, server version | Once on first tool use per session | `EXECBRO_TELEMETRY=false` |
 | **License validation** | Installation ID, device fingerprint | Once per session (cached 24 hours) | Cannot be disabled (required for license check) |
-| **OCR screenshots** | Screenshot image for text recognition | Only when `ocr_screenshot` tool is called | Don't use the tool, or use local fallback |
+| **OCR screenshots** | Screenshot image for text recognition | Only when `tap` falls through to its OCR strategy, or `get_bundle_errors` reads the screen | Target elements by `testID`/`component`, or use local fallback |
 | **Tap failure artifacts** | JSON bundle + up to 3 downscaled PNG screenshots | On `tap` failure or unmeaningful tap (`changeRate < 0.1%`) | `RN_AI_DEVTOOLS_DISABLE_FAILURE_ARTIFACTS=1` |
 | **Installation ID** | Random UUID (not linked to your identity) | With telemetry, registration, and OCR requests | Delete `~/.execbro/` |
 | **Network mock rules** | Nothing — never transmitted | n/a | n/a |
@@ -113,7 +113,7 @@ With telemetry disabled, registration does not occur. License validation will st
 
 ### What happens
 
-When you use the `ocr_screenshot` tool, the Tool takes a screenshot of your app and sends the image to our cloud OCR service for text recognition.
+There is no standalone OCR tool. OCR runs as the last fallback inside `tap` (when the fiber and accessibility trees cannot find the element) and inside `get_bundle_errors` (when CDP is unavailable and the error must be read off the screen). In those cases the Tool takes a screenshot of your app and sends the image to our cloud OCR service for text recognition.
 
 ### Data flow
 
@@ -138,7 +138,8 @@ If the cloud OCR service is unavailable (timeout, network error), the Tool autom
 
 ### How to avoid cloud OCR
 
-- Use `ios_screenshot` or `android_screenshot` instead of `ocr_screenshot`
+- Target elements by `testID` or `component` so `tap` resolves them through the fiber tree and never reaches the OCR strategy
+- Use `ios_screenshot` or `android_screenshot` when you only need to look at the screen
 - If cloud OCR fails, the local fallback processes everything on your machine
 
 ## 4. Tap Failure Diagnostic Artifacts
@@ -283,7 +284,7 @@ To run the Tool with zero external data transmission, add to your MCP server con
 }
 ```
 
-`ocr_screenshot` will automatically fall back to local OCR (EasyOCR) when cloud is unavailable.
+OCR automatically falls back to local OCR (EasyOCR) when cloud is unavailable.
 
 All debugging tools will continue to work normally — external calls are never required for core functionality. License validation falls back to local cache, then defaults to the free tier.
 
