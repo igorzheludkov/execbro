@@ -198,6 +198,26 @@ async function main() {
                         // process restarted.
                         const transport = new StreamableHTTPServerTransport({
                             sessionIdGenerator: undefined,
+                            // Loopback is not a boundary against DNS rebinding:
+                            // the victim's own browser is already on it. A page
+                            // that re-points its hostname at 127.0.0.1 becomes
+                            // same-origin with this port, so CORS never runs and
+                            // the page gets the full tool surface — REPL, tap,
+                            // screenshots — against the developer's app.
+                            //
+                            // The Host header is what survives that trick: a
+                            // rebound page still sends its own hostname. Both
+                            // lists are load-bearing — each branch of the SDK's
+                            // validateRequestHeaders() is guarded by a
+                            // `length > 0` test, so the flag alone passes
+                            // everything. Origin is absent on non-browser
+                            // clients and only checked when present.
+                            enableDnsRebindingProtection: true,
+                            allowedHosts: [`127.0.0.1:${httpPort}`, `localhost:${httpPort}`],
+                            allowedOrigins: [
+                                `http://127.0.0.1:${httpPort}`,
+                                `http://localhost:${httpPort}`,
+                            ],
                         });
                         // Registered before handleRequest so a client that
                         // disconnects mid-response cannot be missed.
