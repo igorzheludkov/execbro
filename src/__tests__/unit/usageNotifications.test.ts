@@ -50,7 +50,15 @@ describe("maybeNotifyUsage — 100% cap banner fires once per session", () => {
         pushLogBoxMock.mockClear();
         // Fresh module instance per test = fresh in-memory sessionCapNotified,
         // i.e. simulates a new process/session each time.
+        const actualConnection = await import("../../core/connection.js");
         jest.resetModules();
+        // maybeNotifyUsage bails before pushing when no app is connected, and the
+        // real connection registry is empty under test. These cases are about the
+        // dedup logic, so give them a connected app.
+        jest.unstable_mockModule("../../core/connection.js", () => ({
+            ...actualConnection,
+            hasConnectedApp: () => true
+        }));
         const actualFs = await import("fs");
         jest.unstable_mockModule("fs", () => ({
             ...actualFs,
@@ -141,14 +149,36 @@ describe("maybeNotifyUsage — reports notification delivery", () => {
         expect(trackCapNotificationMock).toHaveBeenCalledWith("100", false, "execute_failed");
     });
 
-    // The distinction that matters most: "nothing was connected to show it on"
-    // is not a delivery bug, it is a channel that never had a chance to fire.
-    test("failed push with no app connected is reported as no_app_connected", async () => {
-        pushLogBoxMock.mockResolvedValue(false);
+    // With no app connected there is no channel to render on, and a user whose
+    // app is not running cannot act on a cap warning anyway. Pushing anyway would
+    // spend the 80% warning's monthly allowance (and the grandfather notice's
+    // once-per-window allowance) on a moment nobody could see.
+    test("no app connected: nothing is pushed, and the deferral is reported", async () => {
         hasConnectedAppMock.mockReturnValue(false);
-        lastErrorMock.mockReturnValue("execute_failed");
         await maybeNotifyUsage(usage({ used: 600 }));
-        expect(trackCapNotificationMock).toHaveBeenCalledWith("100", false, "no_app_connected");
+        expect(pushLogBoxMock).not.toHaveBeenCalled();
+        expect(trackCapNotificationMock).toHaveBeenCalledWith("100", false, "deferred_no_app");
+    });
+
+    test("no app connected: the deferral is reported once per session, not per call", async () => {
+        hasConnectedAppMock.mockReturnValue(false);
+        await maybeNotifyUsage(usage({ used: 600 }));
+        await maybeNotifyUsage(usage({ used: 600 }));
+        await maybeNotifyUsage(usage({ used: 600 }));
+        expect(trackCapNotificationMock).toHaveBeenCalledTimes(1);
+    });
+
+    // The whole point of bailing early: the monthly dedup must not be spent.
+    test("no app connected: the 80% warning is still owed once an app appears", async () => {
+        hasConnectedAppMock.mockReturnValue(false);
+        await maybeNotifyUsage(usage({ used: 480 }));
+        expect(pushLogBoxMock).not.toHaveBeenCalled();
+
+        hasConnectedAppMock.mockReturnValue(true);
+        pushLogBoxMock.mockResolvedValue(true);
+        await maybeNotifyUsage(usage({ used: 480 }));
+        expect(pushLogBoxMock).toHaveBeenCalledTimes(1);
+        expect(trackCapNotificationMock).toHaveBeenCalledWith("80", true, "logbox");
     });
 
     test("a throwing push is reported rather than swallowed", async () => {
