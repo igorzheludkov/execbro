@@ -280,6 +280,7 @@ input_text reads the field back and compares. Several differences are the FIELD 
 - A masked field (secureTextEntry / android:password) exposes bullets, never its text. The write is reported as DELIVERED BUT NOT VERIFIED — that is the ceiling, not a bug, and no read-back can lift it. replace:true still clears first, since "it looked empty" is not evidence that it was.
 - A value that gained formatting ("5551234567" -> "(555) 123-4567") is either a display mask (the write landed) or a field reinterpreting the number ("3700" -> "37.00", a different value). The text alone cannot tell these apart, so read the app's own state to decide.
 - keyboardType: both write paths bypass the on-screen keyboard, so letters do reach a number-pad field. The write is allowed and noted — a test that passes only because the harness typed the untypeable is worth knowing about.
+- An append onto a field whose prior text could not be read is verified by the TAIL that landed, not against a predicted whole value, and is never retried. The prediction starts from an empty field, so a correct append looked like a mismatch — and the retry clears first (the native path appends at the caret), which destroyed exactly the text the call was appending to.
 - native:true types into whatever the OS reports as FOCUSED, which a fiber tap on a TextInput does not necessarily move. The verdict names the field it wrote, so a mis-target reads as one instead of as a wrong value.
 
 ## Icon-Only Buttons
@@ -307,6 +308,9 @@ unknown React Navigation names are rejected before dispatch with nearest-match s
 navigate({action:"back"}) and {action:"reset"} are available too. changed=false means it settled
 without moving; indeterminate=true means no settled reading. Prefer this over a hand-written
 router call through execute_in_app, which reports success whenever nothing throws.
+Do not know the route names? navigate({routeTable:true}) with NO destination just lists them —
+call that first rather than guessing. A rejected destination also carries the registered routes
+in its error, so a wrong guess still tells you the right answers.
 
 ## After Interactions
 - Take a screenshot to verify the result`

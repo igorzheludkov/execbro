@@ -62,7 +62,8 @@ globalThis.__dispatch__(globalThis.__REDUX_ACTIONS__.locale.setLocale('en'))
 **Navigate:** use `mcp__execbro__navigate({ to: 'PaywallScreen' })`, not a router call through
 `execute_in_app`. A hand-written call reports success whenever nothing throws, so a path sent to a
 React Navigation ref changes nothing and warns only in LogBox. `navigate` checks the route actually
-moved and reports which router resolved.
+moved and reports which router resolved. If you do not know the route names, `navigate({ routeTable: true })`
+with no destination lists them.
 ```javascript
 globalThis.__getCurrentRoute__()   // reading the current route this way is still fine
 ```
