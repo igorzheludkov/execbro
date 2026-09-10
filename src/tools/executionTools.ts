@@ -164,7 +164,15 @@ export function registerExecutionTools(server: McpServer): void {
                     ],
                     isError: true,
                     // Include expression as context for telemetry (helps debug syntax errors)
-                    _errorContext: expression
+                    _errorContext: expression,
+                    // The expression here is the CALLER's, so an exception from
+                    // it is not a defect in this tool. Forwarded only from this
+                    // handler for that reason: everywhere else the evaluated
+                    // source is ours. 73 of execute_in_app's 156 failures in
+                    // the 8 days after 2.9.6 were one install's own debug
+                    // helper throwing, which read as a 89.7% success rate for a
+                    // tool that was doing exactly what it was asked.
+                    ...(result.failureKind && { _failureKind: result.failureKind })
                 };
             }
 

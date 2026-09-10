@@ -728,7 +728,10 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
 
             if (result?.exceptionDetails) {
                 const errorMessage = extractExceptionMessage(result.exceptionDetails);
-                pending.resolve({ success: false, error: errorMessage });
+                // The evaluation itself worked; the code threw. Only
+                // execute_in_app forwards this to telemetry — see the
+                // app_exception note in errors.ts.
+                pending.resolve({ success: false, error: errorMessage, failureKind: "app_exception" });
                 return;
             }
 

@@ -63,7 +63,16 @@ export type FailureKind =
     | "no_ios_simulator"
     | "no_fiber_roots"
     | "platform_mismatch"
-    | "fiber_guard_unexpected";
+    | "fiber_guard_unexpected"
+    /**
+     * The JavaScript evaluated fine and THREW — the exception came from the
+     * code, not from the tool's ability to run it. Set at the one CDP choke
+     * point that sees `exceptionDetails`, but forwarded to telemetry only by
+     * `execute_in_app`, where the code is the caller's own. Everywhere else the
+     * evaluated source is OUR injected source, and an exception in that is a
+     * tool defect that must keep counting as one.
+     */
+    | "app_exception";
 
 /**
  * The kinds that mean "the tool could not have succeeded because the setup was
