@@ -126,14 +126,16 @@ export const readNativeFields: NativeFieldsReader = async (platform, deviceId) =
  * Pick the field a write landed in.
  *
  * By testID when there is one; else the focused field (Android only); else the
- * single field whose text changed. `null` means "could not determine", which
- * must surface as unverified rather than as a mismatch.
+ * only field that now ENDS WITH `written`; else the single field whose text
+ * changed. `null` means "could not determine", which must surface as unverified
+ * rather than as a mismatch.
  */
 export function resolveWrittenField(
     before: NativeField[],
     after: NativeField[],
-    testID: string | null
-): { text: string | null; via: "testID" | "focused" | "changed"; secure: boolean } | null {
+    testID: string | null,
+    written?: string
+): { text: string | null; via: "testID" | "focused" | "written" | "changed"; secure: boolean } | null {
     if (testID) {
         const hit = after.find((f) => f.id === testID);
         if (hit) return { text: hit.text, via: "testID", secure: hit.secure === true };
@@ -141,6 +143,27 @@ export function resolveWrittenField(
 
     const focused = after.filter((f) => f.focused);
     if (focused.length === 1) return { text: focused[0].text, via: "focused", secure: focused[0].secure === true };
+
+    // The diff below aligns the two snapshots BY INDEX, so any reshaping of the
+    // tree between them — a keyboard raising, an autocomplete list mounting, a
+    // bottom sheet resizing — makes every field read as changed and identifies
+    // nothing. Verified on an iPhone Air simulator: raising the keyboard drops
+    // the fields it covers out of the accessibility tree entirely. Content is
+    // order-independent, so it survives that: if exactly one field now ends
+    // with the text just typed, and none did before, that is the field.
+    //
+    // The tail rather than the whole value, because an append onto a field
+    // whose prior text could not be read has no predictable whole value — the
+    // same rule typedTextVerify applies. This is the arm that was missing when
+    // 33 of 37 iOS HID writes in the week after 2.9.6 reported "no single
+    // field's text changed".
+    if (written !== undefined && written.length > 0) {
+        const endsWithWritten = (f: NativeField): boolean => f.text !== null && f.text.endsWith(written);
+        const holding = after.filter(endsWithWritten);
+        if (holding.length === 1 && !before.some(endsWithWritten)) {
+            return { text: holding[0].text, via: "written", secure: holding[0].secure === true };
+        }
+    }
 
     // No identity available: exactly one field must have changed.
     const changed = after.filter((f, i) => {

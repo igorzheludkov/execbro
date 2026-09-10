@@ -256,6 +256,56 @@ describe("enterText", () => {
         expect(d.typeHid).toHaveBeenCalledWith("Alice");
     });
 
+    it("clears first on replace when the prior text could not be read", async () => {
+        // HID appends at the caret. An uncontrolled iOS field the accessibility
+        // tree cannot resolve leaves `previous` empty because nothing was read,
+        // not because the field was empty — skipping the clear on that turned
+        // every replace into an append and built up garbage across calls.
+        const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })], {
+            readNativeFields: jest.fn(async () => ({ fields: [{ id: null, text: "old", focused: false }, { id: null, text: "other", focused: false }] }))
+        });
+        const r = await enterText({ text: "Alice", replace: true }, d);
+        expect(r.path).toBe("hid");
+        expect(opsOf(d)).toContain("clear");
+        expect(d.typeHid).toHaveBeenCalledWith("Alice");
+    });
+
+    it("verifies an uncontrolled write by the text that landed when the tree reshaped", async () => {
+        // Two fields before, three after (the keyboard's own field mounted), so
+        // the index-aligned diff identifies nothing. Exactly one field holds
+        // what was written, and none did before: that is the field.
+        let call = 0;
+        const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })], {
+            readNativeFields: jest.fn(async () => {
+                call += 1;
+                return call === 1
+                    ? { fields: [{ id: null, text: "", focused: false }, { id: null, text: "x", focused: false }] }
+                    : { fields: [{ id: null, text: "x", focused: false }, { id: null, text: "Alice", focused: false }, { id: null, text: "", focused: false }] };
+            })
+        });
+        const r = await enterText({ text: "Alice", replace: true }, d);
+        expect(r).toMatchObject({ success: true, verified: true, value: "Alice" });
+    });
+
+    it("does not clear a field to retry an append whose prior text was unreadable", async () => {
+        // `desired` is predicted from an empty field, so a correct append reads
+        // as a mismatch. The retry clears first (HID appends at the caret), so
+        // it would destroy the text the caller asked to append to.
+        let call = 0;
+        const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })], {
+            readNativeFields: jest.fn(async () => {
+                call += 1;
+                return call === 1
+                    ? { fields: [{ id: null, text: "", focused: false }, { id: null, text: "", focused: false }] }
+                    : { fields: [{ id: null, text: "notesAlice", focused: false }, { id: null, text: "", focused: false }] };
+            })
+        });
+        const r = await enterText({ text: "Alice" }, d);
+        expect(r).toMatchObject({ success: true, verified: true, value: "notesAlice" });
+        expect(r.retried).toBeFalsy();
+        expect(opsOf(d)).not.toContain("clear");
+    });
+
     it("never reports an uncontrolled write as a mismatch", async () => {
         const d = deps([found({ controlled: false, hasOnChangeText: true, value: null })]);
         const r = await enterText({ text: "Alice" }, d);

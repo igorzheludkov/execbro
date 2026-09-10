@@ -99,4 +99,31 @@ describe("resolveWrittenField", () => {
         const after = [f("a", "one")];
         expect(resolveWrittenField(after, after, "missing")).toBeNull();
     });
+
+    it("identifies the written field by its text when the tree reshaped", () => {
+        // Raising the keyboard drops covered fields out of the tree, so the
+        // index-aligned diff below identifies nothing.
+        const before = [f(null, ""), f(null, "x")];
+        const after = [f(null, "x"), f(null, "Alice"), f(null, "")];
+        expect(resolveWrittenField(before, after, null, "Alice")).toEqual({ text: "Alice", via: "written", secure: false });
+    });
+
+    it("identifies an append by the tail of what was typed", () => {
+        // The prior text was unreadable, so the whole value is unpredictable.
+        const before = [f(null, "Carol"), f(null, "x")];
+        const after = [f(null, "CarolDave"), f(null, "x")];
+        expect(resolveWrittenField(before, after, null, "Dave")).toEqual({ text: "CarolDave", via: "written", secure: false });
+    });
+
+    it("does not claim a field that already ended with the text", () => {
+        const before = [f(null, "Alice"), f(null, "b")];
+        const after = [f(null, "Alice"), f(null, "c"), f(null, "d")];
+        expect(resolveWrittenField(before, after, null, "Alice")).toBeNull();
+    });
+
+    it("returns null when several fields end with the text", () => {
+        const before = [f(null, ""), f(null, "")];
+        const after = [f(null, "Alice"), f(null, "xAlice")];
+        expect(resolveWrittenField(before, after, null, "Alice")).toBeNull();
+    });
 });
