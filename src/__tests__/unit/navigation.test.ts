@@ -176,8 +176,19 @@ describe("buildNavigateSource", () => {
         const preamble =
             buildNavHandlesSource() + "\n" + buildRouteTableSource() + "\n" + buildNearestRoutesSource();
         const fn = new Function("globalThis", preamble + "\nreturn " + buildNavigateSource(action, to, params) + ";");
-        return fn(globalStub) as { ok: boolean; kind: string | null; error?: string; before?: string | null };
+        return fn(globalStub) as {
+            ok: boolean; kind: string | null; error?: string; before?: string | null; routes?: string[];
+        };
     }
+
+    it("hands back the registered routes when the destination is missing", () => {
+        // The agent has no other way to learn the route names, so a bare
+        // "destination is required" is a dead end.
+        const r = run(rnStub([]), "navigate", null);
+        expect(r.ok).toBe(false);
+        expect(r.error).toContain("destination is required");
+        expect(r.routes).toEqual(["Home", "TarotNav"]);
+    });
 
     function rnStub(calls: string[]) {
         return {

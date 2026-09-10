@@ -230,7 +230,11 @@ export function buildNavigateSource(
     var before = table.current;
 
     if (action !== 'back' && action !== 'reset' && !to) {
-        return { ok: false, kind: nav.kind, error: 'A destination is required for action "' + action + '".', before: before };
+        // The route table is already in hand here. Returning it turns a dead
+        // end into the answer the caller needed: 43 of these across 16 installs
+        // in 30 days, and the agent had no way to learn the route names except
+        // by asking this same tool.
+        return { ok: false, kind: nav.kind, error: 'A destination is required for action "' + action + '".', before: before, routes: table.all };
     }
 
     if (nav.kind === 'react-navigation' && to && table.all.length) {

@@ -93,6 +93,28 @@ function readStateExpression(): string {
 export async function performNavigation(opts: PerformNavigationOptions): Promise<NavigationResult> {
     const { action, to = null, params, device, includeRouteTable } = opts;
 
+    // Asking for the route table with nowhere to go is a LISTING, not a failed
+    // navigation. This is the tool's only route-discovery affordance, and
+    // requiring a destination to reach it made it unreachable until you already
+    // knew the answer.
+    if (action !== "back" && action !== "reset" && !to && includeRouteTable === true) {
+        const read = await executeInApp(readStateExpression(), false, { originatingToolName: "navigate" }, device);
+        if (read.success) {
+            try {
+                const parsed = JSON.parse(String(read.result)) as { current: string | null; stack: string[]; all: string[] };
+                return {
+                    success: true, kind: null, action, to,
+                    route: { before: parsed.current, after: parsed.current },
+                    changed: false, indeterminate: false,
+                    stack: parsed.stack,
+                    routeTable: parsed.all
+                };
+            } catch {
+                // Fall through to the normal path, which reports the real error.
+            }
+        }
+    }
+
     const perform = `(function(){ ${preamble()}
     return JSON.stringify(${buildNavigateSource(action, to, params ?? null)});
 })()`;
@@ -106,7 +128,7 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
         };
     }
 
-    let head: { ok: boolean; kind: string | null; error?: string; before?: string | null };
+    let head: { ok: boolean; kind: string | null; error?: string; before?: string | null; routes?: string[] };
     try {
         head = JSON.parse(String(performed.result));
     } catch {
@@ -119,10 +141,19 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
 
     const before = head.before ?? null;
     if (!head.ok) {
+        // Hand back the registered routes whenever the app knew them. Expo
+        // Router destinations are paths and never appear in routeNames, so the
+        // list is legitimately empty there and nothing is appended.
+        const routes = head.routes ?? [];
+        const shown = routes.slice(0, 12);
+        const hint = shown.length > 0
+            ? ` Registered routes: ${shown.join(", ")}${routes.length > shown.length ? ` (+${routes.length - shown.length} more)` : ""}.`
+            : "";
         return {
             success: false, kind: head.kind, action, to,
             route: { before, after: before }, changed: false, indeterminate: false,
-            error: head.error
+            ...(routes.length > 0 && { routeTable: routes }),
+            error: `${head.error ?? "Navigation failed"}${hint}`
         };
     }
 
