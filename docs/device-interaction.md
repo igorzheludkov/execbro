@@ -125,6 +125,8 @@ Take a screenshot:
 ios_screenshot
 ```
 
+A USB-attached physical iPhone/iPad works too — pass its UDID or name from `list_devices`. Capture only: none of the interaction tools on this page reach a physical device. See [setup.md](setup.md) for the one-time `pymobiledevice3` install.
+
 Launch an app:
 
 ```

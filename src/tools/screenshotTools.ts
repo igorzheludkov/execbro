@@ -22,6 +22,63 @@ import {
     androidGetDensity,
 } from "../core/index.js";
 import { screenStateToScreenSpace } from "../core/screenSpace.js";
+import { resolvePhysicalIosDevice, physicalIosScreenshot } from "../core/iosPhysical.js";
+import type { PhysicalIosDevice } from "../core/iosPhysical.js";
+
+/**
+ * Screenshot a USB-attached iPhone/iPad.
+ *
+ * Deliberately thinner than the simulator path: none of the enrichment there
+ * (accessibility probe, screen state, LogBox, system-overlay detection) can
+ * reach a physical device today — describeAll and the RN registry are both
+ * keyed to simulator UDIDs. Returning the image with an honest note about
+ * what is missing beats returning simulator-shaped guesses about a phone.
+ */
+async function capturePhysicalDevice(
+    phys: PhysicalIosDevice,
+    outputPath?: string
+) {
+    const result = await physicalIosScreenshot(phys.udid, outputPath);
+    if (!result.success || !result.data) {
+        return {
+            content: [{ type: "text" as const, text: `Error: ${result.error}` }],
+            isError: true as const
+        };
+    }
+
+    const pixelWidth = result.originalWidth || 0;
+    const pixelHeight = result.originalHeight || 0;
+    const downscaled = (result.scaleFactor ?? 1) > 1;
+    const deliveredWidth = downscaled ? Math.round(pixelWidth / result.scaleFactor!) : pixelWidth;
+    const deliveredHeight = downscaled ? Math.round(pixelHeight / result.scaleFactor!) : pixelHeight;
+
+    let infoText = downscaled
+        ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${deliveredWidth}x${deliveredHeight} px (downscaled ${(1 / result.scaleFactor!).toFixed(3)}× to fit API limits).`
+        : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+    infoText += `\n📸 Captured from: ${phys.name} — physical device, iOS ${phys.version} (${phys.udid})`;
+    infoText += `\n⚠️ Physical device: capture only. tap/swipe/input_text drive simulators via simctl and cannot reach this device — there is no OS-level touch injection here (see docs/devtools-core/specs/2026-09-09-ios-physical-device-interaction.md).`;
+    infoText += `\nℹ️ No pressable enrichment: the accessibility probe and screen-state lookup are simulator-only.`;
+
+    imageBuffer.add({
+        id: `ios-device-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        image: result.data,
+        timestamp: Date.now(),
+        source: "ios_screenshot",
+        metadata: {
+            width: pixelWidth,
+            height: pixelHeight,
+            scaleFactor: result.scaleFactor || 1,
+            platform: "ios",
+        },
+    });
+
+    return {
+        content: [
+            { type: "text" as const, text: infoText },
+            { type: "image" as const, data: result.data.toString("base64"), mimeType: "image/jpeg" }
+        ]
+    };
+}
 
 export function registerScreenshotTools(server: McpServer): void {
     // Tool: iOS screenshot
@@ -33,7 +90,8 @@ export function registerScreenshotTools(server: McpServer): void {
                 "PURPOSE: Snapshot what the user sees on iOS AND get tap-ready pressables + a structured component map in one call.\n" +
                 "WHEN TO USE: Any visual verification, before/after comparison, or as the starting point for tapping UI by coordinates.\n" +
                 "WORKFLOW: ios_screenshot -> pick element from pressables -> tap(x, y) or tap(testID=...) -> ios_screenshot to verify.\n" +
-                "LIMITATIONS: Requires a booted iOS simulator (simctl). For physical devices or system dialogs without RN, combine with tap(..., native=true).\n" +
+                "PHYSICAL DEVICES: a USB-attached iPhone/iPad works too (pass its UDID or name from list_devices) — capture only, via pymobiledevice3. No pressables, no tap/swipe/input_text: iOS has no touch injection below 17.\n" +
+                "LIMITATIONS: Otherwise requires a booted iOS simulator (simctl). For system dialogs without RN, combine with tap(..., native=true).\n" +
                 "GOOD: ios_screenshot()\n" +
                 "BAD: ios_screenshot({ udid: \"guess\" }) with a made-up UDID — run list_devices first.\n" +
                 "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y) — it returns the absolute file and line.\n",
@@ -54,7 +112,16 @@ export function registerScreenshotTools(server: McpServer): void {
         },
         async ({ outputPath, udid, device }) => {
             const resolved = await resolveIosUdid(udid ?? device);
-            if (!resolved.ok) return resolved.response;
+            if (!resolved.ok) {
+                // Only reached when the hint matched no simulator, so the physical
+                // lookup costs nothing on the normal path. A physical device is not
+                // in simctl's world at all — its UDID makes simctl answer
+                // "Invalid device" — so this is a fallback, not a second resolver.
+                const hint = udid ?? device;
+                const phys = hint ? await resolvePhysicalIosDevice(hint) : null;
+                if (phys) return await capturePhysicalDevice(phys, outputPath);
+                return resolved.response;
+            }
             // Resolve ONCE to a single canonical UDID and use it for BOTH the
             // framebuffer capture and the pressable/screen-state enrichment, so
             // the pixels and the element list always describe the same simulator.

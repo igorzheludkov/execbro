@@ -114,9 +114,15 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 
 | Tool                   | Description                                               |
 | ---------------------- | --------------------------------------------------------- |
-| `ios_screenshot`       | Take a screenshot from an iOS simulator                   |
+| `ios_screenshot`       | Take a screenshot from an iOS simulator, or from a USB-attached physical iPhone/iPad (capture only — see below) |
 | `ios_launch_app`       | Launch an app by bundle ID                                |
 | `ios_open_url`         | Open a URL (deep links or web URLs)                       |
 | `ios_terminate_app`    | Terminate a running app                                   |
 | `ios_boot_simulator`   | Boot a simulator by UDID                                  |
 | `ios_button`           | Press hardware button: HOME, LOCK, SIRI (requires IDB)    |
+
+### Physical iOS devices
+
+`ios_screenshot` is the only iOS tool that reaches a USB-attached iPhone or iPad. Pass the device's UDID or name from `list_devices`; the physical lookup runs only after the simulator lookup fails, so nothing changes for simulator use.
+
+It is capture only — no pressable list, no `tap` / `swipe` / `input_text`. iOS exposes no touch injection to a host below iOS 17, and the iOS 17+ path is not implemented. Requires `pipx install pymobiledevice3` and a mounted DeveloperDiskImage; see [setup.md](setup.md).

@@ -216,3 +216,38 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
 \* `pinch` is **Android emulator only** — iOS support is in progress. Neither AXe nor IDB exposes multi-touch: both drivers are strictly single-pointer, so installing one does not enable pinch on the simulator.
 
 > **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"AXe is not installed"` in tap results, install the appropriate driver with the commands above and retry.
+
+## Physical iOS device — screenshots
+
+`ios_screenshot` can capture a USB-attached iPhone or iPad. This is **capture only**: no tapping, swiping or text input, because iOS exposes no touch injection to a host below iOS 17 and ExecBro does not implement the iOS 17+ path yet.
+
+Install the transport. There is no Homebrew formula for it, and plain `pip install` is refused on
+current macOS (`externally-managed-environment`), so install it as an isolated CLI tool:
+
+```bash
+brew install pipx
+pipx install pymobiledevice3
+```
+
+If you already use [uv](https://docs.astral.sh/uv/), `uv tool install pymobiledevice3` does the same
+thing. Both land the binary in `~/.local/bin`, which ExecBro checks directly — so it works even when
+your MCP client is launched from the GUI and does not inherit your shell `PATH`.
+
+Then mount the DeveloperDiskImage once per device. `pymobiledevice3 mounter auto-mount` is the documented route but fails on a stock machine — it tries to write into a root-owned Xcode directory — so mount Xcode's existing image instead:
+
+```bash
+X=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/DeviceSupport/15.5
+pymobiledevice3 mounter mount-developer \
+  "$X/DeveloperDiskImage.dmg" "$X/DeveloperDiskImage.dmg.signature"
+```
+
+Pick the directory closest to your device's iOS version; a 15.5 image mounts fine on a 15.8 device. Verify with `pymobiledevice3 mounter list`.
+
+The device then appears in `list_devices` under "iOS physical", and `ios_screenshot` accepts its UDID or name:
+
+```
+ios_screenshot with udid="fdc2d1b5937ce66..."
+ios_screenshot with udid="Ihor"
+```
+
+Without `pymobiledevice3` installed, `list_devices` simply shows no physical devices and a direct capture attempt tells you what to install.

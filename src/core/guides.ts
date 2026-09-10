@@ -30,7 +30,9 @@ const guides: Guide[] = [
 3. get_connection_status — check connection health
 
 ## If No App Running
-- list_devices — iOS simulators, Android emulators, and physical devices in one call
+- list_devices — iOS simulators, Android emulators, and physical devices in one call. A USB-attached
+  iPhone/iPad appears under "iOS physical" and is screenshot-only: ios_screenshot reaches it, every
+  interaction tool does not
 - ios_boot_simulator — boot an iOS simulator if needed
 - ios_launch_app / android_launch_app — launch the app
 - ios_terminate_app — kill an app that is in a bad state before relaunching
@@ -162,7 +164,7 @@ size in a note when it applies.
 
 ## Key Tools
 - get_screen_state: route + overlays + every element, screenshot-free (start here)
-- ios_screenshot / android_screenshot: visual capture
+- ios_screenshot / android_screenshot: visual capture (ios_screenshot also captures a USB-attached physical iPhone/iPad — capture only, no pressable list)
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - inspect_at_point: frames per ancestor + props + source file:line (no overlay, fast)
 - measure: geometry for one named component
@@ -180,6 +182,11 @@ iOS interaction tools (tap, ios_button) require a UI driver:
 - Default: AXe — brew install cameroncooke/axe/axe
 - Alternative: IDB — brew install idb-companion (set IOS_DRIVER=idb in MCP server env to use it)
 Without a UI driver installed, these tools will fail.
+
+Physical iOS devices: nothing on this page reaches one. Both drivers target the Simulator, and iOS
+exposes no touch injection to a host below iOS 17. ios_screenshot is the only tool that reaches a
+USB-attached iPhone/iPad — do not retry a failed tap against one, and do not report a physical
+device as unresponsive when the gesture was never delivered.
 
 ## Tapping Elements
 Use tap — it tries multiple strategies automatically and returns a post-tap screenshot:

@@ -203,7 +203,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `navigate`: Drive the app's router directly and verify the route actually moved. Expo Router takes paths (`/event-details?id=1`), React Navigation takes route names (`TarotNav`) — the response says which resolved, and unknown React Navigation names are rejected before dispatch with nearest-match suggestions. It exists because a hand-written router call reports success whenever nothing throws: a path sent to a React Navigation ref changes nothing and warns only in LogBox, so a no-op reads as a success
 
 **Screenshots & OCR:**
-- `ios_screenshot` / `android_screenshot`: Capture simulator/device screen
+- `ios_screenshot` / `android_screenshot`: Capture simulator/device screen. `ios_screenshot` also captures a **USB-attached physical iPhone/iPad** — pass its UDID or name from `list_devices`. That path goes through `pymobiledevice3` over usbmux (`src/core/iosPhysical.ts`), needs a mounted DeveloperDiskImage, and is **capture only**: no pressable enrichment (describeAll and the RN registry are keyed to simulator UDIDs) and no tap/swipe/input_text, because iOS exposes no touch injection below 17. It runs only after the simctl lookup fails, so the simulator path pays nothing for it. Design: `~/rn-devtools/docs/devtools-core/specs/2026-09-09-ios-physical-device-interaction.md`
 - `get_images`: Access shared image buffer containing screenshots from all tools. Returns metadata by default; use `id` or `groupId`+`frameIndex` to retrieve specific images. Tap burst frames are stored here.
 
 **Component Inspection (recommended workflow: get_screen_state → find_components → inspect_component):**
@@ -239,7 +239,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in the shared screen space) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
 
 **Device Management:**
-- `list_devices`: Find available simulators, emulators, and physical devices in one call
+- `list_devices`: Find available simulators, emulators, and physical devices in one call. Physical iPhones/iPads are listed in their own section, labelled screenshot-only — simctl cannot see them at all, so they need a separate usbmux probe
 - `ios_boot_simulator`: Boot an iOS simulator by UDID
 - `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name
 - `ios_terminate_app`: Terminate app on iOS simulator
