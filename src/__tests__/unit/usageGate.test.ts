@@ -46,6 +46,20 @@ describe("session verdict freeze", () => {
         expect(isToolBlocked("activate_license").blocked).toBe(false);
     });
 
+    it("connect path stays open over cap so the banner has a channel", () => {
+        freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        for (const tool of ["ensure_connection", "connect_metro", "scan_metro", "get_connection_status", "list_devices"]) {
+            expect(isToolBlocked(tool).blocked).toBe(false);
+        }
+    });
+
+    it("connecting buys nothing: tools that read or drive the app stay blocked", () => {
+        freezeSessionVerdict(usage({ used: 600, canUse: false }));
+        for (const tool of ["tap", "get_logs", "execute_in_app", "get_screen_state", "ios_screenshot"]) {
+            expect(isToolBlocked(tool).blocked).toBe(true);
+        }
+    });
+
     it("deferred user (capActive:false) never blocked", () => {
         freezeSessionVerdict(usage({ used: 900, capActive: false, canUse: true }));
         expect(isToolBlocked("tap").blocked).toBe(false);

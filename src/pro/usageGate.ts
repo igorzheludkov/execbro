@@ -8,6 +8,16 @@ const BLOCKED_UPGRADE_URL = `${UPGRADE_URL}?from=cap`;
 
 // Tools that must never be gated so the stop can always explain itself, and
 // account/feedback tools the user needs even while capped.
+//
+// Connection tools are exempt for the same reason, not as a courtesy. The cap
+// banner renders through LogBox inside the running app, so with no app attached
+// there is no channel and maybeNotifyUsage defers. Gating the connect path made
+// that permanent: the agent could not attach, so the channel could never open,
+// so the one message explaining the block could never be delivered. Telemetry
+// for September shows 7 of 11 blocked installs stuck in exactly that loop (one
+// booted 62 times, deferred 17 times, delivered nothing). Connecting on its own
+// does no billable work — every tool that reads or drives the app stays blocked
+// — so this opens the notification channel without weakening the cap.
 const EXEMPT = new Set<string>([
     "get_license_status",
     "activate_license",
@@ -16,6 +26,11 @@ const EXEMPT = new Set<string>([
     "dev",
     "reset_telemetry",
     "delete_account",
+    "ensure_connection",
+    "connect_metro",
+    "scan_metro",
+    "get_connection_status",
+    "list_devices",
 ]);
 
 let frozen = false;
