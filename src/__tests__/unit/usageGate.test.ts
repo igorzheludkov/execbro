@@ -60,6 +60,16 @@ describe("session verdict freeze", () => {
         }
     });
 
+    // The verdict shape the server has returned to every install since the cap
+    // was retired on 2026-09-15: limit null, capActive true (NOT the deferral
+    // shape, which the client reads as "a cap is coming").
+    it("uncapped verdict (limit:null) blocks nothing, however high the count", () => {
+        freezeSessionVerdict(usage({ used: 10_000, limit: null, canUse: true, capActive: true }));
+        expect(isToolBlocked("tap").blocked).toBe(false);
+        expect(isToolBlocked("execute_in_app").blocked).toBe(false);
+        expect(usageWarningLine(usage({ used: 10_000, limit: null }))).toBeNull();
+    });
+
     it("deferred user (capActive:false) never blocked", () => {
         freezeSessionVerdict(usage({ used: 900, capActive: false, canUse: true }));
         expect(isToolBlocked("tap").blocked).toBe(false);

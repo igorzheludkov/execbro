@@ -25,7 +25,7 @@ ExecBro is the runtime bridge between your AI coding assistant and your running 
 
 Log in at **[execbro.com](https://execbro.com)** to see your ExecBro activity rendered back to you: which tools you use most, tool **error rates**, and your **session history** — so you can spot flaky tools, track usage over time, and understand how your agent drives the app across sessions. It's built from the same anonymous telemetry described in [Telemetry & Privacy](#telemetry--privacy), tied to your installation ID.
 
-Linking is also how [ExecBro Pro](#pricing) attaches to your installation, if you ever subscribe.
+Linking is only for the dashboard: it attaches your installs to your account so the stats are yours. Nothing in the tooling is gated behind it.
 
 ## Features
 
@@ -218,7 +218,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 ExecBro sends two small signals:
 
 - **Product analytics** (optional) — tool names, success/failure, and durations. This is what powers your [usage dashboard](#see-your-usage--execbrocom) and tells me which tools are flaky and worth fixing. Turn it off any time with `EXECBRO_TELEMETRY=false` in your MCP server config.
-- **Usage count** — a running tally of how many tool calls you've made, so the free tier knows where you stand against its monthly allowance. It's a number, not content, and it's the one signal that keeps running when analytics is off.
+- **Usage count** — a running tally of how many tool calls you've made. It's a number, not content, and it's the one signal that keeps running when analytics is off.
 
 See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full field-by-field breakdown, and [PRIVACY.md](./PRIVACY.md) for the complete privacy policy.
 
@@ -234,10 +234,7 @@ See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full fiel
 
 ## Pricing
 
-ExecBro is **free** — every tool, full power, no feature gates, no account needed to start. The free tier covers **600 tool calls a month**, which is evaluation plus everyday debugging; most people never reach it. If you drive your agent hard all day, **ExecBro Pro** ($8.99/mo) lifts the cap and includes every hosted feature as it ships. See [execbro.com/pricing](https://execbro.com/pricing).
-
-> [!NOTE]
-> **Grandfather notice:** the 600-call monthly cap starts applying **2026-08-01** for new installs. If you already had ExecBro installed before then, you get a free month on top — your cap doesn't start until **2026-08-31**. You'll also see this as an in-app notice. No action needed unless you want to [link your account and upgrade to Pro](#see-your-usage--execbrocom) ahead of time. Questions? [zigor535@gmail.com](mailto:zigor535@gmail.com).
+ExecBro is **free**. Every tool, no cap, no account required. [Linking an account](#see-your-usage--execbrocom) is optional and only gets you the usage dashboard.
 
 ## Feedback & Feature Requests
 
