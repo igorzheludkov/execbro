@@ -206,7 +206,8 @@ export function diagnoseMismatch(sent: string, landed: string | null): string {
     if (remapped !== null && !/[^\u0000-\u007F]/u.test(sent)) {
         return ` — the keystrokes were re-mapped into ${remapped}, which is the simulator's active keyboard` +
             ` layout interpreting US keycodes. Nothing is wrong with the field. Switch the simulator to a` +
-            ` Latin keyboard layout, or pass write:"native" to set the value without going through a keyboard`;
+            ` Latin keyboard layout — the keystrokes only go through one when the React write path is` +
+            ` unavailable (native:true, or no fiber tree reachable)`;
     }
     if (landed !== sent && landed.toLowerCase() === sent.toLowerCase()) {
         return " — only the capitalisation differs, which is the field's keyboard transforming input" +

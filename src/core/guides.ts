@@ -267,7 +267,7 @@ tap detects TextInput elements (onChangeText/onFocus) in the fiber tree and fall
 Inputs that already contain text are the most common verification-blocker. The typing tools APPEND by default — typing "https://app.example.com" into a field that already holds "https://demo.example.com" produces "https://demo.example.comhttps://app.example.com", not the intended replacement. Two tools handle this on Bridgeless/Fabric apps:
 
 - **input_text with replace:true** — clear the focused field, then type, in a single call. This is the way to set a pre-filled field to an exact value. Works both by target (testID/component/textMatch) and, with native:true, on whatever already has focus.
-- **dismiss_keyboard** — blur the currently focused TextInput, closing the on-screen keyboard. Useful before tapping buttons hidden behind the keyboard, or to verify "tap outside dismisses" behavior.
+- **dismiss_keyboard** — blur the currently focused TextInput, closing the on-screen keyboard. Useful before tapping buttons hidden behind the keyboard, or to verify "tap outside dismisses" behavior. Nothing focused with the keyboard already down is reported as success, not an error — the caller asked for the keyboard down and it is down. Nothing focused with the keyboard UP is a real failure and says so: a native field owns it (system dialog, WebView, non-RN screen), so blurring React cannot close it — use android_key_event({key:"BACK"}) or tap outside the field on iOS.
 
 dismiss_keyboard acts on whatever has focus; input_text focuses its own target unless native:true is passed. replace:true updates React state via onChangeText("") — controlled components (Formik, react-hook-form, useState) stay consistent. Calling publicInstance.clear() directly does NOT do this; it only updates the native side and leaves form state stale.
 
@@ -281,6 +281,8 @@ input_text reads the field back and compares. Several differences are the FIELD 
 - A value that gained formatting ("5551234567" -> "(555) 123-4567") is either a display mask (the write landed) or a field reinterpreting the number ("3700" -> "37.00", a different value). The text alone cannot tell these apart, so read the app's own state to decide.
 - keyboardType: both write paths bypass the on-screen keyboard, so letters do reach a number-pad field. The write is allowed and noted — a test that passes only because the harness typed the untypeable is worth knowing about.
 - An append onto a field whose prior text could not be read is verified by the TAIL that landed, not against a predicted whole value, and is never retried. The prediction starts from an empty field, so a correct append looked like a mismatch — and the retry clears first (the native path appends at the caret), which destroyed exactly the text the call was appending to.
+- testID on a WRAPPER, not on the input itself, resolves — the custom <Input testID="x"> that keeps the id on its container and passes only value/onChangeText down is the ordinary RN shape. Accepted only when exactly one mounted input sits under it; a wrapper around several is refused rather than guessed between, and says which. When no input on the screen carries a testID of any kind, the error says that instead of echoing the id back — stop guessing ids and target by placeholder or label (textMatch=) or by index.
+- Pure ASCII sent and another script back ("testing" -> "Еуіештп") is the simulator's ACTIVE keyboard layout reinterpreting US keycodes, and is named as such. Nothing is wrong with the field; switch the simulator to a Latin layout. Keystrokes only go through a layout when the React write path is unavailable (native:true, or no fiber tree reachable).
 - native:true types into whatever the OS reports as FOCUSED, which a fiber tap on a TextInput does not necessarily move. The verdict names the field it wrote, so a mis-target reads as one instead of as a wrong value.
 
 ## Icon-Only Buttons
@@ -294,7 +296,7 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 ## Other Interactions
 - swipe: cross-platform swipe/scroll. Easiest form: swipe({ direction: "up" }) scrolls to reveal more content (content-scroll semantics; "down"/"left"/"right" supported, bare swipe() defaults to "up"). Optional distance is in screenshot pixels (default 33% of the axis). For pixel-precise gestures pass all four startX/startY/endX/endY coordinates — they take precedence over direction. Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false, warning names which no-op it was, by probing the scroll surface under the start point: already at top, already at end, content not scrollable, wrong axis, or no scroll view there at all. On a screen with no React Native connection it says it could not inspect the screen, rather than claiming the gesture missed — the gesture itself still went through, and swipe needs no RN connection to drive the device. Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path. Pass delta on iOS to control touch step size.
 - input_text: type text — target with testID/component/textMatch (focuses itself), or pass native:true to type into whatever already has focus (system dialogs, non-RN screens). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
-- dismiss_keyboard: blur the focused input, closing the keyboard.
+- dismiss_keyboard: blur the focused input, closing the keyboard. Already-down with nothing focused is a success; up with nothing focused means a native field owns it and only a platform dismiss will close it.
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)
 - ios_open_url: deep links and universal links
 - get_images: retrieve screenshots already captured by any tool, including tap burst frames
@@ -311,6 +313,10 @@ router call through execute_in_app, which reports success whenever nothing throw
 Do not know the route names? navigate({routeTable:true}) with NO destination just lists them —
 call that first rather than guessing. A rejected destination also carries the registered routes
 in its error, so a wrong guess still tells you the right answers.
+An app written as a plain <NavigationContainer> with no ref prop is still reachable: the router is
+resolved from a mounted screen's own navigation object, climbed to the root navigator. That route
+has no getRootState, so the route table comes back empty and destination validation is skipped
+rather than run against nothing — the note says when this happened.
 
 ## After Interactions
 - Take a screenshot to verify the result`
