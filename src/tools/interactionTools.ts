@@ -40,6 +40,7 @@ import { clearFocusedInput, dismissKeyboard } from "../core/focusedInputTools.js
 import { enterText, textEntryAxes, type TextEntryResult } from "../core/textEntry.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
+import { readKeyboardState } from "../core/keyboardMetrics.js";
 import { readNativeFields } from "../core/nativeInputValue.js";
 import { typeAndVerify } from "../core/hidTypeVerify.js";
 import { nonLatinKeyboardsFor } from "../core/iosKeyboardLayout.js";
@@ -984,7 +985,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "\nPURPOSE: Close the keyboard when it's blocking content beneath the input, or move focus off an input before a tap that would otherwise be intercepted." +
                 "\nWHEN TO USE: After typing into a field and before tapping a button that is hidden by the keyboard. Or to verify a 'tap outside dismisses' UX is wired up." +
                 "\nPREREQUISITE: A TextInput must already have React focus. Tap the field first (e.g. tap({ testID: 'search' }))." +
-                "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). Returns 'no focused TextInput' if nothing is focused.",
+                "\nLIMITATIONS: Requires Bridgeless/Fabric (RN new architecture). With nothing focused it reports the keyboard already down; if the keyboard is up anyway, a native field owns it and only a platform dismiss will close it.",
             inputSchema: {
                 device: z
                     .string()
@@ -994,6 +995,33 @@ export function registerInteractionTools(server: McpServer): void {
         },
         async ({ device }) => {
             const result = await dismissKeyboard(device);
+            if (!result.success && (result.error ?? "").includes("no focused TextInput")) {
+                // Nothing has React focus. Whether that is a failure depends
+                // entirely on the keyboard, which this never looked at: the
+                // caller asked for the keyboard to be down, and with no focused
+                // field it already is. Reporting that as an error sent agents
+                // hunting for a field to blur that does not exist — 4 of the 6
+                // dismiss_keyboard failures in the week to 2026-09-19.
+                //
+                // A keyboard that IS up with no RN focus is the other case, and
+                // a real one: a native field owns it, so blurring React cannot
+                // close it. That stays a failure, and now says which it is.
+                const keyboard = await readKeyboardState(device);
+                if (!keyboard.visible) {
+                    return {
+                        content: [{ type: "text", text: "Keyboard is already down — no TextInput had focus, so there was nothing to blur." }]
+                    };
+                }
+                return {
+                    content: [{
+                        type: "text",
+                        text: "Error: the keyboard is up but no React TextInput has focus, so blurring React cannot close it." +
+                            " A native field owns it (a system dialog, a WebView, or a non-RN screen)." +
+                            " Dismiss it from the platform instead: android_key_event({ key: \"BACK\" }), or tap outside the field on iOS."
+                    }],
+                    isError: true
+                };
+            }
             return {
                 content: [
                     {
