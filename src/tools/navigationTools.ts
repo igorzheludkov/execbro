@@ -53,7 +53,8 @@ export function registerNavigationTools(server: McpServer): void {
             if (!result.success) {
                 return {
                     content: [{ type: "text", text: `Error: ${result.error ?? "Navigation failed"}` }],
-                    isError: true
+                    isError: true,
+                    ...(result.failureKind && { _failureKind: result.failureKind })
                 };
             }
 

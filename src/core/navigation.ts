@@ -69,6 +69,61 @@ var __eb_nav = (function () {
         return null;
     }
 
+    // Last resort: a SCREEN's navigation object, climbed to its root.
+    //
+    // isRnRoot above wants resetRoot, which only the NavigationContainer ref
+    // has. An app that never creates that ref — plain <NavigationContainer>
+    // with no ref prop, which is the default every React Navigation tutorial
+    // shows — puts nothing matching it in the tree, and navigate answered "No
+    // router resolved" on a perfectly ordinary router: 20 failures across 6
+    // installations, both platforms, in the week to 2026-09-19.
+    //
+    // Every mounted screen is handed a navigation object through
+    // NavigationContext, and getParent() walks it up to the root navigator,
+    // whose navigate is the same dispatch the container ref would have used.
+    // It has no getRootState, so it serves as navigator only and the route
+    // table stays empty — destination validation is skipped rather than wrong.
+    function findFiberScreenNav() {
+        function isScreenNav(v) {
+            return !!v && typeof v.navigate === 'function' && typeof v.dispatch === 'function' &&
+                typeof v.getParent === 'function';
+        }
+        function toRoot(v) {
+            var cur = v;
+            for (var i = 0; i < 20; i++) {
+                var up = null;
+                try { up = cur.getParent(); } catch (e) { up = null; }
+                if (!up || up === cur) break;
+                cur = up;
+            }
+            return cur;
+        }
+        if (globalThis.__EB_TEST_SCREEN_NAV__) return toRoot(globalThis.__EB_TEST_SCREEN_NAV__);
+        try {
+            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+            if (!hook || typeof hook.getFiberRoots !== 'function' || !hook.renderers) return null;
+            var found = null;
+            var ids = [];
+            hook.renderers.forEach(function (_, k) { ids.push(k); });
+            var walk = function (f, d) {
+                if (!f || found || d > 1600) return;
+                var p = f.memoizedProps;
+                if (p) {
+                    var c = isScreenNav(p.value) ? p.value : (isScreenNav(p.navigation) ? p.navigation : null);
+                    if (c) { found = c; return; }
+                }
+                if (f.child) walk(f.child, d + 1);
+                if (f.sibling) walk(f.sibling, d);
+            };
+            for (var j = 0; j < ids.length && !found; j++) {
+                var rs = hook.getFiberRoots(ids[j]);
+                if (!rs) continue;
+                rs.forEach(function (r) { walk(r.current, 0); });
+            }
+            return found ? toRoot(found) : null;
+        } catch (e) { return null; }
+    }
+
     var moduleRouter = findModuleRouter();
     var fiberNav = findFiberNav();
 
@@ -83,11 +138,20 @@ var __eb_nav = (function () {
     if (fiberNav) {
         return { navigator: fiberNav, stateReader: fiberNav, kind: 'react-navigation', note: null };
     }
+    var screenNav = findFiberScreenNav();
+    if (screenNav) {
+        return {
+            navigator: screenNav,
+            stateReader: null,
+            kind: 'react-navigation',
+            note: 'Resolved through the navigation object of a mounted screen, not a NavigationContainer ref, so route state and destination validation are unavailable. Pass a ref to <NavigationContainer> to get them.'
+        };
+    }
     return {
         navigator: null,
         stateReader: null,
         kind: null,
-        note: 'No router resolved. Tried the Metro module registry (expo-router) and a fiber walk for a React Navigation root ref.'
+        note: 'No router resolved. Tried the Metro module registry (expo-router), a fiber walk for a React Navigation root ref, and the navigation object of a mounted screen.'
     };
 })();
 `.trim();
@@ -234,7 +298,7 @@ export function buildNavigateSource(
         // end into the answer the caller needed: 43 of these across 16 installs
         // in 30 days, and the agent had no way to learn the route names except
         // by asking this same tool.
-        return { ok: false, kind: nav.kind, error: 'A destination is required for action "' + action + '".', before: before, routes: table.all };
+        return { ok: false, badArgs: true, kind: nav.kind, error: 'A destination is required for action "' + action + '".', before: before, routes: table.all };
     }
 
     if (nav.kind === 'react-navigation' && to && table.all.length) {

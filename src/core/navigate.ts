@@ -1,3 +1,4 @@
+import type { FailureKind } from "./errors.js";
 import { executeInApp } from "./jsExecute.js";
 import {
     buildNavHandlesSource,
@@ -56,6 +57,8 @@ export interface NavigationResult {
     indeterminate: boolean;
     stack?: string[];
     routeTable?: string[];
+    /** Structured cause, forwarded to telemetry by the tool layer. */
+    failureKind?: FailureKind;
     error?: string;
 }
 
@@ -128,7 +131,7 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
         };
     }
 
-    let head: { ok: boolean; kind: string | null; error?: string; before?: string | null; routes?: string[] };
+    let head: { ok: boolean; badArgs?: boolean; kind: string | null; error?: string; before?: string | null; routes?: string[] };
     try {
         head = JSON.parse(String(performed.result));
     } catch {
@@ -153,6 +156,11 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
             success: false, kind: head.kind, action, to,
             route: { before, after: before }, changed: false, indeterminate: false,
             ...(routes.length > 0 && { routeTable: routes }),
+            // Flagged at the refusal site rather than matched on the message
+            // here, for the same reason `failureKind` exists at all: the text
+            // is free to be reworded and the classification must not move
+            // with it.
+            ...(head.badArgs === true && { failureKind: "bad_arguments" as const }),
             error: `${head.error ?? "Navigation failed"}${hint}`
         };
     }

@@ -76,6 +76,29 @@ describe("buildNavHandlesSource", () => {
         expect(String(out.note)).toContain("route state");
     });
 
+    it("falls back to a mounted screen's navigation object when no container ref exists", () => {
+        // <NavigationContainer> with no ref prop puts nothing carrying
+        // resetRoot in the tree, which is the default shape and which used to
+        // answer "No router resolved" on a perfectly ordinary router.
+        const root = { which: "root", navigate: () => undefined, dispatch: () => undefined, getParent: () => null };
+        const screen = { which: "screen", navigate: () => undefined, dispatch: () => undefined, getParent: () => root };
+        const out = resolveWith({ __EB_TEST_SCREEN_NAV__: screen });
+        expect(out.kind).toBe("react-navigation");
+        // The ROOT navigator, not the screen's own: navigate on a nested
+        // navigator only reaches that navigator's own routes.
+        expect((out.navigator as { which: string }).which).toBe("root");
+        // No getRootState anywhere on it, so destination validation is skipped
+        // rather than run against an empty table.
+        expect(out.stateReader).toBeNull();
+        expect(String(out.note)).toContain("NavigationContainer");
+    });
+
+    it("prefers a real container ref over a screen's navigation object", () => {
+        const screen = { navigate: () => undefined, dispatch: () => undefined, getParent: () => null };
+        const out = resolveWith({ __EB_TEST_FIBER_NAV__: rnRootRef, __EB_TEST_SCREEN_NAV__: screen });
+        expect(out.navigator).toBe(rnRootRef);
+    });
+
     it("prefers the library module over an app-exposed global wrapper", () => {
         // AppB's __EXPO_ROUTER__ is a hand-built wrapper carrying its own
         // {router, currentPath, segments, ...}, not the library's router.
@@ -177,7 +200,7 @@ describe("buildNavigateSource", () => {
             buildNavHandlesSource() + "\n" + buildRouteTableSource() + "\n" + buildNearestRoutesSource();
         const fn = new Function("globalThis", preamble + "\nreturn " + buildNavigateSource(action, to, params) + ";");
         return fn(globalStub) as {
-            ok: boolean; kind: string | null; error?: string; before?: string | null; routes?: string[];
+            ok: boolean; badArgs?: boolean; kind: string | null; error?: string; before?: string | null; routes?: string[];
         };
     }
 
@@ -188,6 +211,16 @@ describe("buildNavigateSource", () => {
         expect(r.ok).toBe(false);
         expect(r.error).toContain("destination is required");
         expect(r.routes).toEqual(["Home", "TarotNav"]);
+        // Flagged at the refusal site so telemetry can list it as a bad
+        // argument rather than as a navigate defect. Set here, not matched on
+        // the message later: the wording is free to change, the class is not.
+        expect((r as { badArgs?: boolean }).badArgs).toBe(true);
+    });
+
+    it("does not flag a real navigation failure as a bad argument", () => {
+        const r = run(rnStub([]), "navigate", "NoSuchRoute");
+        expect(r.ok).toBe(false);
+        expect((r as { badArgs?: boolean }).badArgs).toBeUndefined();
     });
 
     function rnStub(calls: string[]) {
