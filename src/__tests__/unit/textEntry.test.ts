@@ -503,6 +503,20 @@ describe("field transforms vs. real corruption", () => {
         expect(diagnoseMismatch("abc", "")).not.toContain("display mask");
     });
 
+    it("names the keyboard layout when ASCII came back as another script", () => {
+        // A Cyrillic simulator layout turns "testing" into "Еуіештп" with no
+        // error anywhere, and a bare "landed differently" sends the reader
+        // looking for a bug in the app's validation.
+        const d = diagnoseMismatch("testing", "Еуіештп");
+        expect(d).toContain("Cyrillic");
+        expect(d).toContain("active keyboard");
+        expect(d).toContain("Nothing is wrong with the field");
+    });
+
+    it("does not blame the layout when the text sent was not ASCII to begin with", () => {
+        expect(diagnoseMismatch("привет", "привет!")).not.toContain("active keyboard");
+    });
+
     it("names a truncation instead of calling it a corruption", () => {
         expect(diagnoseMismatch("512210", "5")).toContain("maxLength");
     });

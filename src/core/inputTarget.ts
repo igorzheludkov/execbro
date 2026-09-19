@@ -368,6 +368,8 @@ function prelude(query: InputQuery | undefined): string {
   // right text written into the wrong field and still verifies clean — the
   // exact class of confident-but-wrong result this tool exists to remove.
   var __eb_matches = [];
+  // Inputs whose ancestor chain carries the wanted testID — a wrapper match.
+  var __eb_wrapHits = [];
   var i;
 
   // The pin, tried FIRST: the native tag of a field already resolved by an earlier op in the same call.
@@ -387,6 +389,29 @@ function prelude(query: InputQuery | undefined): string {
     if (wantTestID !== null) {
       for (i = 0; i < __eb_inputs.length; i++) {
         if (__eb_testIDOf(__eb_inputs[i]) === wantTestID) __eb_matches.push(__eb_inputs[i]);
+      }
+      // The testID is on a WRAPPER, not on the TextInput itself. A custom
+      // <Input testID="login-password"> that puts its testID on the container
+      // View is the ordinary RN shape, and the deliberately narrow scope of
+      // __eb_testIDOf (host + controlling owner) cannot see it. Telemetry for
+      // the week to 2026-09-19: 10 of the 17 bad_target misses named a testID
+      // that plainly belonged to the screen in view (login-password,
+      // salary-input, local-payee-information-view-iban-input) while NOT ONE
+      // mounted input carried any testID at all.
+      //
+      // Accepted ONLY when exactly one input answers. That is what keeps the
+      // collision this scope was narrowed for: a ScrollView's shared ancestor
+      // id answers for every field beneath it, and an ambiguous match is no
+      // match. testID only, never nativeID, and never when the strict pass
+      // already found something.
+      if (__eb_matches.length === 0) {
+        for (i = 0; i < __eb_inputs.length; i++) {
+          for (var wa = __eb_inputs[i].return, wd = 0; wa && wd < 12; wa = wa.return, wd++) {
+            var wp = wa.memoizedProps;
+            if (wp && wp.testID === wantTestID) { __eb_wrapHits.push(__eb_inputs[i]); break; }
+          }
+        }
+        if (__eb_wrapHits.length === 1) __eb_matches.push(__eb_wrapHits[0]);
       }
     } else if (wantComponent !== null) {
       var wc = String(wantComponent).toLowerCase();
@@ -444,14 +469,33 @@ function prelude(query: InputQuery | undefined): string {
     // C3, and error-message quality ONLY: no matcher is loosened, nothing is guessed, the miss is still a miss. Verified live 2026-08-22 — testID "name-inpu" against a mounted "name-input" returned the bare "no TextInput matched that target" plus the candidate list, and the list pushes everything useful past the 200-char truncation telemetry applies to the message, so the closest match goes at the FRONT of the string.
     //
     // Telemetry 2026-08-22: 26 of the 145 bad_target failures in 7 days are strict-equality testID misses (login.username.input, search-input, church-search-list-search-input) — names that plainly belong to the screen the caller was looking at, off by a prefix. Containment either way catches those for one lowercase compare per mounted input, which is what this can afford: it runs inside the user's app on every failed call.
-    if (wantTestID !== null) {
+    if (__eb_wrapHits.length > 1) {
+      // A wrapper DID carry the id, but it wraps more than one field, so
+      // resolving it would be a guess between them.
+      reason = 'testID "' + wantTestID + '" is on a wrapper around ' + __eb_wrapHits.length +
+        ' of the ' + __eb_inputs.length + ' mounted input(s), not on any one of them — target the field itself by placeholder or label (textMatch=), or pass index';
+    } else if (wantTestID !== null) {
       var wid = String(wantTestID).toLowerCase();
+      var anyTestID = false;
       for (var h = 0; h < candidates.length; h++) {
         var cid = candidates[h].testID ? String(candidates[h].testID).toLowerCase() : "";
         if (cid && (cid.indexOf(wid) !== -1 || wid.indexOf(cid) !== -1)) {
           reason = 'did you mean testID "' + candidates[h].testID + '" (index ' + candidates[h].index + ')? no mounted input has testID "' + wantTestID + '" (' + __eb_inputs.length + " input(s) mounted)";
+          anyTestID = true;
           break;
         }
+        if (cid) anyTestID = true;
+      }
+      // Not one mounted input carries a testID of any kind, and no wrapper
+      // above them does either. Repeating the target back is then the least
+      // useful thing to say: the caller is guessing at ids this screen simply
+      // does not have, and the answer is to stop guessing and describe the
+      // field. Six of the eight installs that hit this cluster retried the
+      // same invented id at least once.
+      if (!anyTestID) {
+        reason = 'no input on this screen has a testID (' + __eb_inputs.length +
+          ' mounted, none with one, and no wrapper carries "' + wantTestID +
+          '" either) — target by placeholder or label instead (textMatch=), or by index, using the list below';
       }
     }
     return {

@@ -7,6 +7,7 @@ import {
     recordScreen,
     type StalenessVerdict
 } from "./screenStaleness.js";
+import { scriptOf } from "./typedTextVerify.js";
 
 export type EnterTextArgs = {
     /** The text to write. */
@@ -193,6 +194,20 @@ export function keyboardTypeNote(keyboardType: string | null, text: string): str
  */
 export function diagnoseMismatch(sent: string, landed: string | null): string {
     if (landed === null) return "";
+    // Plain ASCII went out and another script came back: the keystrokes were
+    // re-mapped by the simulator's ACTIVE keyboard layout, which is the one
+    // cause that looks nothing like a field bug and reads exactly like one.
+    // The HID path types US keycodes; a Cyrillic layout turns "testing" into
+    // "Еуіештп" with no error anywhere. Telemetry for the week to 2026-09-19:
+    // 6 of the 71 input_text failures, every one of them a bare "landed
+    // differently" that named no cause. typedTextVerify already says this on
+    // the type-and-verify path — the same evidence was simply unreachable here.
+    const remapped = scriptOf(landed);
+    if (remapped !== null && !/[^\u0000-\u007F]/u.test(sent)) {
+        return ` — the keystrokes were re-mapped into ${remapped}, which is the simulator's active keyboard` +
+            ` layout interpreting US keycodes. Nothing is wrong with the field. Switch the simulator to a` +
+            ` Latin keyboard layout, or pass write:"native" to set the value without going through a keyboard`;
+    }
     if (landed !== sent && landed.toLowerCase() === sent.toLowerCase()) {
         return " — only the capitalisation differs, which is the field's keyboard transforming input" +
             " (RN TextInput defaults autoCapitalize to 'sentences'); set autoCapitalize=\"none\" to type verbatim";
