@@ -817,9 +817,25 @@ export async function iosTerminateApp(
       result: `Terminated ${bundleId}`,
     };
   } catch (error) {
+    // simctl exits 3 with "found nothing to terminate" when the app is not
+    // running. The caller asked for the app to be stopped and it is stopped,
+    // so this is the outcome they wanted, not a failure: 13 of the 13
+    // ios_terminate_app failures in the week to 2026-09-19 were this, and
+    // every one of them was an app that had already exited. simctl gives the
+    // same error for a bundle id that is not installed at all, which is why
+    // the result says plainly that nothing was running rather than claiming a
+    // termination happened.
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("found nothing to terminate")) {
+      return {
+        success: true,
+        result: `${bundleId} was not running (nothing to terminate). If you expected it to be running, check the bundle id.`,
+      };
+    }
+
     return {
       success: false,
-      error: `Failed to terminate app: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Failed to terminate app: ${message}`,
     };
   }
 }
