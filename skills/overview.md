@@ -15,6 +15,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 | `/device-interact` | Tap, swipe, pinch, type on device | Automating UI interactions, reproducing bugs |
 | `/bundle-check` | Check Metro bundler health | Red screens, compilation errors, reload issues |
 | `/native-rebuild` | Rebuild after native installs | After adding native Expo packages that need dev client |
+| `/verify-change` | Check finished work on the device | A feature or refactor is done and about to be handed on; reports findings, fixes nothing |
 
 ## Decision Guide
 
@@ -32,6 +33,10 @@ Quick reference for all available React Native debugging skills. Use this to pic
 - Bundle won't load / red screen → `/bundle-check`
 - Added a native package → `/native-rebuild`
 
+**"I'm finished and about to hand this on"** → `/verify-change`
+
+The whole change, exercised end to end on the device, plus the screens next to it, plus the error paths. Reports what it finds and fixes nothing, so a bug cannot disappear into a silent patch. This is the pass before a PR or a handover to QA, not the quick look after a single edit (that is `/layout-check`).
+
 **"I need to interact with the app"** → `/device-interact`
 
 
@@ -44,6 +49,7 @@ Quick reference for all available React Native debugging skills. Use this to pic
 3. Make code changes
 4. `/layout-check` — verify visually
 5. `/bundle-check` — only if changes aren't reflected or errors appear
+6. `/verify-change`: once the whole change is done, before handing it on
 
 ## Notes
 

@@ -15,6 +15,7 @@ This repository includes pre-built [Claude Code skills](https://docs.anthropic.c
 | `device-interact` | Automate device interaction: tap, swipe, pinch (Android emulator only), text input, and element finding |
 | `bundle-check` | Detect and diagnose Metro bundler errors and compilation failures |
 | `native-rebuild` | Rebuild and verify the app after installing native Expo packages |
+| `verify-change` | Check a finished feature or refactor on the device before handing it on: walks the flow, checks the neighbouring screens and the error paths, reports findings and changes nothing |
 
 See [`skills/overview.md`](../skills/overview.md) for a decision guide on which skill to use and a recommended workflow.
 
