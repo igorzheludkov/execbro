@@ -127,10 +127,12 @@
         ],
         "execute_in_app": [
             "awaitPromise",
+            "code",
             "collect",
             "device",
             "expression",
             "maxResultLength",
+            "script",
             "timeoutMs",
             "verbose",
             "waitMs"

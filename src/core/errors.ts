@@ -72,7 +72,22 @@ export type FailureKind =
      * evaluated source is OUR injected source, and an exception in that is a
      * tool defect that must keep counting as one.
      */
-    | "app_exception";
+    | "app_exception"
+    /**
+     * A required argument was missing or unusable, so the tool refused before
+     * it did anything. The caller's mistake, not a defect and not a setup
+     * state — but it stays in the denominator on purpose, because a tool whose
+     * arguments are routinely got wrong usually has a schema problem rather
+     * than a careless caller. `execute_in_app`'s missing `expression` was
+     * exactly that: 29 refusals across 15 installations in the week to
+     * 2026-09-19, every one arriving with NO arguments at all, which is the
+     * shape a call takes when the JavaScript was sent under a key the schema
+     * does not declare. Excluding these from the rate would have hidden it.
+     *
+     * So this exists to make them countable and separable, never to remove
+     * them: see `badArgumentsBreakdown` in the infra worker.
+     */
+    | "bad_arguments";
 
 /**
  * The kinds that mean "the tool could not have succeeded because the setup was
