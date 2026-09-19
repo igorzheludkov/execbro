@@ -48,9 +48,16 @@ export function getInterceptorScript(): string {
 
     function _report(evt) {
       // Suppressed when the in-app SDK is the source of truth — the MCP
-      // flips this flag via Runtime.evaluate once it detects __RN_AI_DEVTOOLS__,
+      // flips this flag via Runtime.evaluate once it detects the SDK global,
       // so the wrapper stops emitting debug lines and CDP traffic.
       if (globalThis.__RN_NET_DISABLED__) return;
+      // The flag arrives asynchronously (probe edge / context event), so it is
+      // absent for the window between injection and the first probe answer —
+      // and is written *false* if that probe lands before the SDK's init().
+      // Re-check the SDK's own marker here, using the same predicate the
+      // server probes with, so suppression establishes itself with no window.
+      var _sdk = globalThis.__EXECBRO__ || globalThis.__RN_AI_DEVTOOLS__;
+      if (_sdk && typeof _sdk.getNetworkEntries === 'function') return;
       _reportAlways(evt);
     }
 

@@ -383,6 +383,25 @@ describe("injected interceptor — XHR capture", () => {
         expect(events()).toHaveLength(0);
     });
 
+    it("emits nothing when the SDK global is present but the flag has not arrived", () => {
+        // The flag is pushed asynchronously (probe edge / context event), so it
+        // is absent for the window right after injection — and written *false*
+        // if that probe lands before the SDK's init(). The in-app re-check is
+        // what closes that window.
+        const { sandbox, events } = runInterceptor();
+        (sandbox as Record<string, unknown>).__RN_NET_DISABLED__ = false;
+        (sandbox as Record<string, unknown>).__EXECBRO__ = {
+            getNetworkEntries: () => [],
+        };
+
+        const xhr = newXhr(sandbox);
+        xhr.open("GET", "https://api.example.com/early");
+        xhr.send();
+        xhr.emit("load");
+
+        expect(events()).toHaveLength(0);
+    });
+
     it("is idempotent — a second injection does not double-wrap", () => {
         const { sandbox, events } = runInterceptor();
         vm.runInContext(getInterceptorScript(), sandbox as unknown as vm.Context);
