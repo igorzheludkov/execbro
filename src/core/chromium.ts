@@ -610,3 +610,19 @@ export async function chromiumKey(app: ConnectedApp, combo: { mods: number; key:
         await send({ type: "keyUp", modifiers: mods, ...fields(MOD_KEYS[m]) });
     }
 }
+
+/** Focus a collected target for press_key: the element itself if focusable, else the nearest focusable inside or around it. */
+export function buildDomKeyFocusJs(i: number): string {
+    return `(function () {
+    var el = (globalThis.__eb_domTargets || [])[${i}];
+    if (!el || !el.isConnected) return JSON.stringify({ error: "The element left the page between lookup and focus. Retry." });
+    var F = "input, textarea, select, button, a[href], [tabindex], [contenteditable]";
+    var f = el.matches(F) ? el : (el.querySelector(F) || el.closest(F));
+    if (!f) return JSON.stringify({ error: "The target is not focusable and has no focusable element inside or around it, so keys cannot be sent to it." });
+    f.scrollIntoView({ block: "nearest", behavior: "instant" });
+    f.focus();
+    // Caret at the end, so Backspace deletes what was typed last.
+    if (typeof f.value === "string" && f.setSelectionRange) { try { f.setSelectionRange(f.value.length, f.value.length); } catch (e) {} }
+    return JSON.stringify({ focused: document.activeElement === f });
+})()`;
+}

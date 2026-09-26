@@ -1163,6 +1163,51 @@ export async function iosKeyEvent(
   }
 }
 
+/** press_key names (DOM KeyboardEvent.key) to HID usage codes. Letters and digits are added below. */
+const KEY_TO_HID: Record<string, number> = {
+  Enter: 40, Escape: 41, Backspace: 42, Tab: 43, " ": 44,
+  ArrowRight: 79, ArrowLeft: 80, ArrowDown: 81, ArrowUp: 82,
+  Home: 74, PageUp: 75, Delete: 76, End: 77, PageDown: 78,
+  ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`F${i + 1}`, 58 + i])),
+  ...Object.fromEntries(Array.from({ length: 26 }, (_, i) => [String.fromCharCode(97 + i), 4 + i])),
+  ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [String(i + 1), 30 + i])),
+  "0": 39,
+};
+
+/** CDP modifier bits (chromium.ts MOD) to left-hand HID modifier codes: Control, Shift, Alt, Command. */
+const MOD_BIT_TO_HID: Array<[number, number]> = [[2, 224], [8, 225], [1, 226], [4, 227]];
+
+/**
+ * A parsed press_key combo as HID codes. Character keys are key positions, so a
+ * non-US active keyboard layout turns them into that layout's letters; named keys
+ * are layout-independent.
+ */
+export function hidKeyFor(combo: { mods: number; key: { key: string } }): { keycode: number; modifiers: number[] } | { error: string } {
+  const keycode = KEY_TO_HID[combo.key.key];
+  if (keycode === undefined) {
+    return { error: `"${combo.key.key}" has no HID keycode here. Named keys, a-z and 0-9 are supported; use input_text for other characters.` };
+  }
+  return { keycode, modifiers: MOD_BIT_TO_HID.filter(([bit]) => combo.mods & bit).map(([, hid]) => hid) };
+}
+
+/**
+ * Hold modifiers and press one key (AXe key-combo). IDB has no combo command,
+ * so under IDB this is refused rather than sent as separate presses.
+ */
+export async function iosKeyCombo(modifiers: number[], keycode: number, udid?: string): Promise<iOSResult> {
+  if (getIosDriver() !== "axe") {
+    return { success: false, error: "Modifier combos need the AXe driver (brew install cameroncooke/axe/axe, then unset IOS_DRIVER): IDB has no key-combo command." };
+  }
+  try {
+    const preflight = await ensureUiDriverReady(udid);
+    if (!preflight.ready) return preflight.error;
+    await runAxe("key-combo", "--modifiers", modifiers.join(","), "--key", String(keycode), "--udid", preflight.targetUdid);
+    return { success: true, result: `Sent key combo: ${modifiers.join("+")}+${keycode}` };
+  } catch (error) {
+    return { success: false, error: `Failed to send key combo: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 /**
  * Send a sequence of key events to an iOS simulator
  */

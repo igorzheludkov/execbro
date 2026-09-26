@@ -31,9 +31,9 @@ describe("chromiumGate", () => {
     });
 
     it("rejects a non-allowlisted tool on chromium, naming the tool", () => {
-        const r = chromiumGate("swipe", "chromium");
+        const r = chromiumGate("pinch", "chromium");
         expect(r?.isError).toBe(true);
-        expect(r?.content[0].text).toContain("swipe");
+        expect(r?.content[0].text).toContain("pinch");
         expect(r?._failureKind).toBe("platform_mismatch");
     });
 
@@ -148,6 +148,8 @@ describe("tap on chromium", () => {
 describe("input_text on chromium", () => {
     it("is allowlisted, and the default refusal lists the interaction tools", () => {
         expect(chromiumGate("input_text", "chromium")).toBeNull();
-        expect(chromiumGate("swipe", "chromium")?.content[0].text).toContain("screenshot, tap, input_text");
+        expect(chromiumGate("swipe", "chromium")).toBeNull();
+        expect(chromiumGate("press_key", "chromium")).toBeNull();
+        expect(chromiumGate("pinch", "chromium")?.content[0].text).toContain("screenshot, tap, input_text, swipe (wheel scroll and drag), press_key");
     });
 });
