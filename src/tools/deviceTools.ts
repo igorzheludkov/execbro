@@ -38,7 +38,7 @@ export function registerDeviceTools(server: McpServer): void {
             inputSchema: {
                 projectPath: z.string().describe("The Electron project's source folder (the one with package.json). A leading ~ is expanded."),
                 port: z.coerce.number().int().min(1024).max(65535).optional().default(9222).describe("CDP port to open (default 9222). Must be free."),
-                timeoutMs: z.coerce.number().optional().default(60000).describe("How long to wait for the first window (default 60000; electron-vite compiles first)."),
+                timeoutMs: z.coerce.number().int().min(1000).max(600000).optional().default(60000).describe("How long to wait for the first window (default 60000; electron-vite compiles first)."),
             },
         },
         async ({ projectPath, port, timeoutMs }) => {

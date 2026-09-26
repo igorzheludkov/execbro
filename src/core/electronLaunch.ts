@@ -9,6 +9,7 @@
  * Chromium binds the port to 127.0.0.1.
  */
 import { spawn } from "child_process";
+import { createHash } from "crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import type { DeviceInfo } from "./types.js";
@@ -82,6 +83,11 @@ function tail(path: string, lines = 20): string {
     }
 }
 
+/** Keyed on the full path, so two monorepos' apps/desktop do not share desktop.log. */
+export function launchLogPath(logDir: string, cwd: string): string {
+    return join(logDir, `${basename(cwd)}-${createHash("sha1").update(cwd).digest("hex").slice(0, 8)}.log`);
+}
+
 export async function launchElectron(
     plan: LaunchPlan,
     port: number,
@@ -89,7 +95,7 @@ export async function launchElectron(
     logDir: string = join(CONFIG_DIR, "electron")
 ): Promise<{ ok: true; pid: number; port: number; logPath: string; devices: DeviceInfo[] } | { ok: false; error: string; logPath: string }> {
     mkdirSync(logDir, { recursive: true });
-    const logPath = join(logDir, `${basename(plan.cwd)}.log`);
+    const logPath = launchLogPath(logDir, plan.cwd);
     const fd = openSync(logPath, "w");
     const env = { ...process.env };
     // Exported in Claude Code's shell. With it, Electron boots as plain Node and
@@ -105,14 +111,16 @@ export async function launchElectron(
 
     const deadline = Date.now() + timeoutMs;
     let firstSeen: number | null = null;
+    let actual = port;
+    let devices: DeviceInfo[] = [];
     while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, POLL_MS));
         if (spawnError) return { ok: false, error: `Could not start ${plan.cmd}: ${(spawnError as Error).message}`, logPath };
         if (exited !== null) {
             return { ok: false, error: `The app exited (${exited}) before its CDP port answered. Last log lines:\n${tail(logPath)}`, logPath };
         }
-        const actual = devToolsPortFromLog(readLog(logPath)) ?? port;
-        const devices = (await fetchDevices(actual)).filter(isChromiumTarget);
+        actual = devToolsPortFromLog(readLog(logPath)) ?? port;
+        devices = (await fetchDevices(actual)).filter(isChromiumTarget);
         if (devices.length === 0) continue;
         // Windows are named after their title and the name is how `device` finds
         // them, so connecting before the page sets its title would name the window
@@ -121,9 +129,11 @@ export async function launchElectron(
         if (devices.some(isUntitledPage) && Date.now() - firstSeen < TITLE_GRACE_MS) continue;
         return { ok: true, pid: child.pid!, port: actual, logPath, devices };
     }
+    // The title grace is a courtesy: a window that is up but untitled still connects.
+    if (devices.length > 0) return { ok: true, pid: child.pid!, port: actual, logPath, devices };
     return {
         ok: false,
-        error: `Port ${port} listed no window within ${Math.round(timeoutMs / 1000)}s. The app is still running (pid ${child.pid}). ` +
+        error: `Port ${actual} listed no window within ${Math.round(timeoutMs / 1000)}s. The app is still running (pid ${child.pid}). ` +
             `If its main process calls app.commandLine.appendSwitch('remote-debugging-port', ...), that port wins over this flag: ` +
             `connect_metro({ port: <that port> }), or relaunch with that port. Last log lines:\n${tail(logPath)}`,
         logPath,
