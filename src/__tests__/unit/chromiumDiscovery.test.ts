@@ -303,6 +303,11 @@ describe("selectConnectTargets (connect_metro)", () => {
         expect("targets" in r && r.targets.map((d) => d.id)).toEqual(["t2"]);
     });
 
+    it("connects a tab named by a substring of its page url, as every other tool resolves it", () => {
+        const r = selectConnectTargets(tabs, "http://b");
+        expect("targets" in r && r.targets.map((d) => d.id)).toEqual(["t2"]);
+    });
+
     it("connects a lone Chromium target without a device name", () => {
         const r = selectConnectTargets([tabs[0]], undefined);
         expect("targets" in r && r.targets).toHaveLength(1);
