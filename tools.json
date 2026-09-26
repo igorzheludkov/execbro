@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 64,
+    "count": 65,
     "tools": [
         "activate_license",
         "android_key_event",
@@ -55,6 +55,7 @@
         "network_mock",
         "network_replay",
         "pinch",
+        "press_key",
         "redux_dispatch",
         "redux_get_state",
         "reload_app",
@@ -388,6 +389,13 @@
             "verify",
             "x",
             "y"
+        ],
+        "press_key": [
+            "device",
+            "key",
+            "repeat",
+            "testID",
+            "text"
         ],
         "redux_dispatch": [
             "action",
