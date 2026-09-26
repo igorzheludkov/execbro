@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { DOM_HELPERS_JS, buildScrollProbeJs, SCROLL_READ_JS, ACTIVE_ELEMENT_JS, buildScreenCollectJs, rawToScreenState, buildLayoutCollectJs, formatChromiumLayout, buildInspectJs, formatChromiumInspect, formatChromiumMeasure, type RawScreen, type RawLayout, type RawInspect } from "../../core/chromiumScreen.js";
+import { DOM_HELPERS_JS, buildScrollProbeJs, SCROLL_READ_JS, ACTIVE_ELEMENT_JS, buildScreenCollectJs, rawToScreenState, buildLayoutCollectJs, formatChromiumLayout, buildInspectJs, formatChromiumInspect, formatChromiumMeasure, measureRangeError, type RawScreen, type RawLayout, type RawInspect } from "../../core/chromiumScreen.js";
 import { formatScreenStateSummary } from "../../core/screenState.js";
 
 // Pull one injected helper out as a callable, with the browser globals it reads.
@@ -300,14 +300,39 @@ describe("formatChromiumInspect without React", () => {
 });
 
 describe("formatChromiumMeasure", () => {
+    const vp1 = { w: 380, h: 600, dpr: 1 };
     it("reports frame and centre in delivered px, and flags an element scrolled out of view", () => {
-        const out = formatChromiumMeasure("Row", { x: 0, y: 700, w: 380, h: 40 }, { w: 380, h: 600, dpr: 2 }, true);
+        const out = formatChromiumMeasure("Row", { x: 0, y: 700, w: 380, h: 40 }, { w: 380, h: 600, dpr: 2 }, "off");
         expect(out).toContain("Frame: (0.0, 1400.0) 760.0x80.0");
         expect(out).toContain("Center: (380.0, 1440.0)");
         expect(out).toContain("scrolled or clipped out of view");
     });
-    it("stays quiet about an element on screen, even one inside the viewport box of a scroll container", () => {
-        expect(formatChromiumMeasure("Row", { x: 0, y: 10, w: 10, h: 10 }, { w: 380, h: 600, dpr: 1 }, false)).not.toContain("out of view");
+    it("stays quiet about an element fully on screen", () => {
+        const r = { x: 0, y: 10, w: 10, h: 10 };
+        const out = formatChromiumMeasure("Row", r, vp1, r);
+        expect(out).not.toContain("out of view");
+        expect(out).not.toContain("Visible part");
+    });
+    it("gives a partly scrolled element's visible part and a tap-safe centre inside it", () => {
+        const out = formatChromiumMeasure("Row", { x: 0, y: 560, w: 100, h: 100 }, vp1, { x: 0, y: 560, w: 100, h: 40 });
+        expect(out).toContain("Frame: (0.0, 560.0) 100.0x100.0");
+        expect(out).toContain("Visible part: (0.0, 560.0) 100.0x40.0");
+        expect(out).toContain("Visible centre: (50.0, 580.0)");
+    });
+});
+
+describe("measureRangeError", () => {
+    it("reports the real count, never a count larger than the index", () => {
+        expect(measureRangeError("Row", 60, 55)).toBe('index 60 is out of range: 55 visible instance(s) of "Row".');
+        expect(measureRangeError("Row", 0, 0)).toContain('No visible element renders component "Row"');
+    });
+});
+
+describe("maskProps", () => {
+    const maskProps = helper<(p: Record<string, unknown>, pw: boolean) => Record<string, unknown>>("maskProps");
+    it("hides a password field's value and defaultValue", () => {
+        expect(maskProps({ value: "hunter2", defaultValue: "x", type: "password" }, true)).toEqual({ value: "[password]", defaultValue: "[password]", type: "password" });
+        expect(maskProps({ value: "vote" }, false)).toEqual({ value: "vote" });
     });
 });
 
