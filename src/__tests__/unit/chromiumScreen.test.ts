@@ -72,6 +72,20 @@ describe("visibleRect", () => {
     });
 });
 
+describe("leafPresses", () => {
+    const leafPresses = helper<(els: unknown[]) => unknown[]>("leafPresses");
+    const node = (kids: unknown[] = []) => {
+        const n = { kids, contains: (o: unknown): boolean => n === o || kids.some((k) => k === o || (k as { contains(o: unknown): boolean }).contains(o)) };
+        return n;
+    };
+    it("keeps only pressables with no pressable inside, so a click-wrapper does not own the text under it", () => {
+        const button = node();
+        const backdrop = node([node([button])]);
+        const card = node();
+        expect(leafPresses([backdrop, button, card])).toEqual([button, card]);
+    });
+});
+
 describe("nameOf", () => {
     const nameOf = helper<(t: unknown) => string | null>("nameOf");
     it("names functions, memo and forwardRef wrappers, and skips host strings", () => {
