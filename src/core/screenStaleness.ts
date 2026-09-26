@@ -62,6 +62,7 @@ const MUTATING_TOOLS = new Set([
     "swipe",
     "pinch",
     "input_text",
+    "press_key",
     "navigate",
     "reload_app",
     "logbox",

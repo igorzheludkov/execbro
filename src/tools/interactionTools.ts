@@ -39,7 +39,12 @@ import {
 import { clearFocusedInput, dismissKeyboard } from "../core/focusedInputTools.js";
 import { enterText, textEntryAxes, type TextEntryResult } from "../core/textEntry.js";
 import { chromiumAppFor } from "../core/connection.js";
-import { chromiumInputText } from "../core/chromium.js";
+import { chromiumInputText, parseKeyCombo } from "../core/chromium.js";
+import { chromiumSwipe } from "../pro/chromiumSwipe.js";
+import { chromiumPressKey } from "../pro/chromiumKeys.js";
+import { androidKeyFor } from "../core/android.js";
+import { hidKeyFor, iosKeyCombo, iosKeyEvent, iosKeySequence } from "../core/ios.js";
+import { resolvePhysicalIosDevice } from "../core/iosPhysical.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
@@ -317,7 +322,8 @@ export function registerInteractionTools(server: McpServer): void {
                 "VERIFICATION: verify=true (default) returns `verification.meaningful`. When false, `warning` names the cause — already at top/end, not scrollable, wrong axis, no scroll view there, or (no RN connection) that it could not inspect the screen. burst=true catches transient feedback like overscroll bounce.\n" +
                 "SAFETY: Android direction swipes stay clear of the system bars; `foregroundLost` appears if the app left the foreground anyway.\n" +
                 "WORKFLOW: swipe({ direction: \"up\" }) -> read response.verification.meaningful.\n" +
-                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to target a specific device — call list_devices for the inventory.\n",
+                "CHROMIUM: a direction is a mouse wheel (reports `scrolled`), four coordinates a drag.\n" +
+                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB. Pass `device` to pick one (list_devices).\n",
             inputSchema: {
                 direction: z
                     .enum(["up", "down", "left", "right"])
@@ -326,7 +332,9 @@ export function registerInteractionTools(server: McpServer): void {
                         "Shorthand for a centered scroll gesture (content-scroll semantics): " +
                         "\"up\" reveals content below (finger moves bottom→top), \"down\" reveals content above, " +
                         "\"left\"/\"right\" page horizontally. A bare swipe() with no params defaults to \"up\". " +
-                        "Ignored when all four explicit coordinates are provided."
+                        "Ignored when all four explicit coordinates are provided. " +
+                        "On chromium it is one mouse-wheel event (up = deltaY positive) at the viewport centre, or at startX/startY when given, since the browser scrolls whatever is under the pointer; " +
+                        "the response's `scrolled` and `container` come from the scroll container's own offsets, and a no-op names why (already at top/end, wrong axis, nothing scrollable there)."
                     ),
                 distance: z.coerce
                     .number()
@@ -336,11 +344,11 @@ export function registerInteractionTools(server: McpServer): void {
                 startX: z.coerce.number().optional().describe("Starting X coordinate in screenshot pixels (explicit-coordinate mode)"),
                 startY: z.coerce.number().optional().describe("Starting Y coordinate in screenshot pixels (explicit-coordinate mode)"),
                 endX: z.coerce.number().optional().describe("Ending X coordinate in screenshot pixels (explicit-coordinate mode)"),
-                endY: z.coerce.number().optional().describe("Ending Y coordinate in screenshot pixels (explicit-coordinate mode)"),
+                endY: z.coerce.number().optional().describe("Ending Y coordinate in screenshot pixels (explicit-coordinate mode). On chromium the four coordinates are a real left-button drag (sliders, resizable panes, pointer-event drag libraries); native HTML5 drag and drop (draggable=true) is not started by synthesized mouse events."),
                 durationMs: z.coerce
                     .number()
                     .optional()
-                    .describe("Swipe duration in milliseconds (default: 300 on Android; iOS uses driver default if omitted)"),
+                    .describe("Swipe duration in milliseconds (default: 300 on Android; iOS uses driver default if omitted). On chromium: the drag duration, default 300; unused by the wheel."),
                 delta: z.coerce
                     .number()
                     .optional()
@@ -384,6 +392,11 @@ export function registerInteractionTools(server: McpServer): void {
             }
         },
         async ({ direction, distance, startX, startY, endX, endY, durationMs, delta, device, verify, screenshot, burst }) => {
+            // Chromium: a direction is a mouse wheel, four coordinates a left-button drag.
+            const chromeApp = chromiumAppFor("swipe", device);
+            if (chromeApp) {
+                return chromiumSwipe(chromeApp, { direction, distance, startX, startY, endX, endY, durationMs, delta, burst, verify, screenshot });
+            }
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
                 return {
@@ -1039,6 +1052,91 @@ export function registerInteractionTools(server: McpServer): void {
         }
     );
     
+    // Tool: press_key — one key tool across chromium, Android and the iOS simulator
+    registerToolWithTelemetry(
+        server,
+        "press_key",
+        {
+            description:
+                "Press a keyboard key or shortcut in the focused element: Enter, Escape, Tab, arrows, Backspace, or a combo like Shift+Tab / Meta+K.\n" +
+                "PURPOSE: Keys that are not text: submit with Enter, close a dialog with Escape, move focus with Tab, walk a list with arrows, delete with Backspace.\n" +
+                "WHEN TO USE: After input_text, or on any focused element. Pass testID or text to focus a target first; otherwise the key goes to whatever has focus. For typing text use input_text.\n" +
+                "PLATFORMS: chromium (Electron / Chrome) sends real key events through CDP and reports the focused element before and after. Android sends adb keyevents (no modifier combos). iOS simulator sends HID keys through AXe or IDB (combos need AXe); a physical iPhone is not supported.\n" +
+                "WORKFLOW: input_text({ testID, text }) -> press_key({ key: \"Enter\" }).\n" +
+                "GOOD: press_key({ key: \"Backspace\", repeat: 3 })\n" +
+                "GOOD: press_key({ key: \"Meta+K\", device: \"FluentTalk\" })\n" +
+                "BAD: press_key({ key: \"hello\" }) - text is input_text's job.\n",
+            inputSchema: {
+                key: z
+                    .string()
+                    .describe(
+                        "A named key (Enter, Escape, Tab, Backspace, Delete, Space, ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown, F1-F12) or one character, " +
+                        "optionally after modifiers joined by + (Shift, Control, Alt, Meta): \"Shift+Tab\", \"Meta+K\". Case-insensitive. " +
+                        "On chromium, Meta+A/C/V reach the page's own handlers but Chromium does not run the editing command for synthesized keys. " +
+                        "On iOS, character keys are key positions, so a non-US active keyboard layout types that layout's letter."
+                    ),
+                repeat: z.number().int().min(1).max(50).optional().describe("Press it this many times. Default 1."),
+                testID: z.string().optional().describe("Focus this element first (on chromium: data-testid / data-test-id / id)."),
+                text: z.string().optional().describe("Focus the element with this visible text first."),
+                device: z.string().optional().describe("Target device or chromium window name (substring match). Omit when one is connected; see get_apps."),
+            },
+        },
+        async ({ key, repeat, testID, text, device }) => {
+            const combo = parseKeyCombo(key);
+            if ("error" in combo) {
+                return { content: [{ type: "text" as const, text: `Error: ${combo.error}` }], isError: true };
+            }
+            const times = repeat ?? 1;
+            const chromeApp = chromiumAppFor("press_key", device);
+            if (chromeApp) return chromiumPressKey(chromeApp, { input: key, combo, repeat: times, testID, text });
+
+            const fail = (msg: string) => ({ content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true });
+            const resolved = await resolveDeviceTarget(device);
+            if (!resolved.ok) {
+                if (device && (await resolvePhysicalIosDevice(device).catch(() => null))) {
+                    return fail("press_key cannot drive a physical iPhone: iOS exposes no key injection below iOS 17, the same reason tap does not work there. Use a simulator.");
+                }
+                return fail(formatResolverError(resolved.error));
+            }
+            const { platform, iosUdid, androidSerial, deviceName } = resolved.target;
+            // Map before focusing, so a refused key does not tap anything first.
+            const android = platform === "android" ? androidKeyFor(combo) : null;
+            const hid = platform === "ios" ? hidKeyFor(combo) : null;
+            const mapped = android ?? hid;
+            if (mapped && "error" in mapped) return fail(mapped.error);
+
+            if (testID !== undefined || text !== undefined) {
+                const focused = await tap({ testID, text, device, screenshot: false, verify: false });
+                if (!focused.success) return fail(`could not focus the target before pressing the key: ${focused.error ?? "tap failed"}`);
+            }
+
+            let result: { success: boolean; error?: string };
+            let note: string | undefined;
+            if (android && "keycode" in android) {
+                result = { success: true };
+                for (let n = 0; n < times && result.success; n++) result = await androidKeyEvent(android.keycode, androidSerial);
+            } else if (hid && "keycode" in hid) {
+                if (hid.modifiers.length > 0) {
+                    result = { success: true };
+                    for (let n = 0; n < times && result.success; n++) result = await iosKeyCombo(hid.modifiers, hid.keycode, iosUdid);
+                } else {
+                    result = times === 1
+                        ? await iosKeyEvent(hid.keycode, { udid: iosUdid })
+                        : await iosKeySequence(Array(times).fill(hid.keycode), iosUdid);
+                }
+                if (/^[a-z0-9]$/.test(combo.key.key)) {
+                    const layouts = await nonLatinKeyboardsFor(iosUdid);
+                    if (layouts.length) note = `Character keys are key positions; this simulator has non-Latin keyboards (${layouts.join(", ")}), and if one is active it types that layout's letter instead.`;
+                }
+            } else {
+                return fail(`press_key does not support platform ${platform}.`);
+            }
+            if (!result.success) return fail(result.error ?? "the key could not be sent");
+            const body = { success: true, platform, device: deviceName, key, repeat: times, ...(note && { note }), deviceNote: resolved.note };
+            return { content: [{ type: "text" as const, text: JSON.stringify(body, null, 2) }], isError: false };
+        }
+    );
+
     // Tool: cross-platform text entry
     registerToolWithTelemetry(
         server,

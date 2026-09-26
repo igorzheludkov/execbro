@@ -16,6 +16,7 @@ import {
     pickDomTarget,
     prepareDomTarget,
     pxPerCss,
+    type ChromiumShot,
 } from "../core/chromium.js";
 
 /** Long enough for a click's re-render and a CSS transition's first frames. */
@@ -91,50 +92,7 @@ export async function chromiumTap(
         const before = shouldVerify ? await chromiumCapture(app) : null;
         await chromiumClick(app, css.x, css.y, options.duration ?? 0);
 
-        let screenshot: TapScreenshot | undefined;
-        let verification: TapVerification = {
-            skipped: true,
-            skippedReason: "verify=false",
-            explanation: "Verification skipped (verify=false).",
-        };
-        let after: Awaited<ReturnType<typeof chromiumCapture>> | undefined;
-        if (before || shouldScreenshot) {
-            await new Promise((r) => setTimeout(r, SETTLE_MS));
-            // The click is already delivered. A popover that hides itself on the
-            // click ("Save & close") leaves nothing to capture, and reporting that
-            // as a failed tap invites a retry that acts twice.
-            try {
-                after = await chromiumCapture(app);
-            } catch (err) {
-                const why = err instanceof Error ? err.message : String(err);
-                verification = {
-                    ...(before ? { meaningful: true } : { skipped: true, skippedReason: "no after-frame" }),
-                    explanation: `The click was delivered, then the window could not be captured: ${why} It most likely hid itself in response to the click.`,
-                };
-            }
-        }
-        if (after) {
-            if (shouldScreenshot) {
-                screenshot = { image: after.buffer.toString("base64"), width: after.width, height: after.height, scaleFactor: after.scaleFactor };
-            }
-            if (before) {
-                const d = await compareScreenshots(before.buffer, after.buffer, { regions: true });
-                verification = {
-                    meaningful: d.changed,
-                    changeRate: d.changeRate,
-                    changedPixels: d.changedPixels,
-                    totalPixels: d.totalPixels,
-                    regions: d.regions,
-                    explanation: buildVerificationExplanation({
-                        meaningful: d.changed,
-                        changeRate: d.changeRate,
-                        changedPixels: d.changedPixels,
-                        totalPixels: d.totalPixels,
-                        regions: d.regions,
-                    }),
-                };
-            }
-        }
+        const { screenshot, verification } = await verifyChromiumAction(app, before, shouldScreenshot, "click");
 
         return {
             ...base,
@@ -149,4 +107,62 @@ export async function chromiumTap(
     } catch (err) {
         return { ...base, success: false, error: err instanceof Error ? err.message : String(err) };
     }
+}
+
+/**
+ * After an input action: settle, capture, and diff against the before-frame.
+ * Shared by tap and swipe so both report verification the same way.
+ */
+export async function verifyChromiumAction(
+    app: ConnectedApp,
+    before: ChromiumShot | null,
+    shouldScreenshot: boolean,
+    action: string,
+    settleMs = SETTLE_MS
+): Promise<{ screenshot?: TapScreenshot; verification: TapVerification }> {
+    let screenshot: TapScreenshot | undefined;
+    let verification: TapVerification = {
+        skipped: true,
+        skippedReason: "verify=false",
+        explanation: "Verification skipped (verify=false).",
+    };
+    let after: ChromiumShot | undefined;
+    if (before || shouldScreenshot) {
+        if (settleMs > 0) await new Promise((r) => setTimeout(r, settleMs));
+        // The action is already delivered. A popover that hides itself on the
+        // click ("Save & close") leaves nothing to capture, and reporting that
+        // as a failure invites a retry that acts twice.
+        try {
+            after = await chromiumCapture(app);
+        } catch (err) {
+            const why = err instanceof Error ? err.message : String(err);
+            verification = {
+                ...(before ? { meaningful: true } : { skipped: true, skippedReason: "no after-frame" }),
+                explanation: `The ${action} was delivered, then the window could not be captured: ${why} It most likely hid itself in response to the ${action}.`,
+            };
+        }
+    }
+    if (after) {
+        if (shouldScreenshot) {
+            screenshot = { image: after.buffer.toString("base64"), width: after.width, height: after.height, scaleFactor: after.scaleFactor };
+        }
+        if (before) {
+            const d = await compareScreenshots(before.buffer, after.buffer, { regions: true });
+            verification = {
+                meaningful: d.changed,
+                changeRate: d.changeRate,
+                changedPixels: d.changedPixels,
+                totalPixels: d.totalPixels,
+                regions: d.regions,
+                explanation: buildVerificationExplanation({
+                    meaningful: d.changed,
+                    changeRate: d.changeRate,
+                    changedPixels: d.changedPixels,
+                    totalPixels: d.totalPixels,
+                    regions: d.regions,
+                }),
+            };
+        }
+    }
+    return { screenshot, verification };
 }

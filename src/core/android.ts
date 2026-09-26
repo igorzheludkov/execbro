@@ -617,6 +617,27 @@ export const ANDROID_KEY_EVENTS = {
     ESCAPE: 111
 } as const;
 
+/** press_key names (DOM KeyboardEvent.key) to Android keycodes. Letters and digits are added below. */
+const KEY_TO_ANDROID: Record<string, number> = {
+    Enter: 66, Tab: 61, Backspace: 67, Delete: 112, Escape: 111, " ": 62,
+    ArrowUp: 19, ArrowDown: 20, ArrowLeft: 21, ArrowRight: 22,
+    Home: 122, End: 123, PageUp: 92, PageDown: 93,
+    ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`F${i + 1}`, 131 + i])),
+    ...Object.fromEntries(Array.from({ length: 26 }, (_, i) => [String.fromCharCode(97 + i), 29 + i])),
+    ...Object.fromEntries(Array.from({ length: 10 }, (_, i) => [String(i), 7 + i])),
+};
+
+/** A parsed press_key combo as an Android keycode. `adb shell input keyevent` sends no modifiers, so a combo is refused. */
+export function androidKeyFor(combo: { mods: number; key: { key: string } }): { keycode: number } | { error: string } {
+    if (combo.mods !== 0) {
+        return { error: "Modifier combos (Shift, Control, Alt, Meta) are not supported on Android: adb input keyevent sends no modifiers. Press the key alone, or use input_text for text." };
+    }
+    const keycode = KEY_TO_ANDROID[combo.key.key];
+    return keycode === undefined
+        ? { error: `"${combo.key.key}" has no Android keycode here. Named keys, a-z and 0-9 are supported; use input_text for other characters.` }
+        : { keycode };
+}
+
 /**
  * Tap at coordinates on an Android device
  */
