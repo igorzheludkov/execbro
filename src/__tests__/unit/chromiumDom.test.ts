@@ -90,6 +90,15 @@ describe("DOM collector, input mode on a wrapper", () => {
         expect(collect({ mode: "input", testID: "login-form" }).candidates).toHaveLength(2);
     });
 
+    it("never lists a password field's value", () => {
+        const form = el("FORM", { attrs: { "data-testid": "login-form" } }, [
+            el("INPUT", { type: "email", value: "a@b.co" }),
+            el("INPUT", { type: "password", value: "hunter2" }),
+        ]);
+        mount(el("BODY", {}, [form]));
+        expect(collect({ mode: "input", testID: "login-form" }).candidates.map((c) => c.value)).toEqual(["a@b.co", "[password]"]);
+    });
+
     it("resolves a wrapper around exactly one field", () => {
         const wrap = el("DIV", { attrs: { "data-testid": "email" } }, [el("INPUT", { type: "email", value: "" }), el("BUTTON", { type: "submit" })]);
         mount(el("BODY", {}, [wrap]));
