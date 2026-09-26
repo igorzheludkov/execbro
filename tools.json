@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 63,
+    "count": 64,
     "tools": [
         "activate_license",
         "android_key_event",
@@ -15,6 +15,7 @@
         "delete_account",
         "disconnect_metro",
         "dismiss_keyboard",
+        "electron_launch_app",
         "ensure_connection",
         "execute_in_app",
         "find_components",
@@ -121,6 +122,11 @@
         ],
         "dismiss_keyboard": [
             "device"
+        ],
+        "electron_launch_app": [
+            "port",
+            "projectPath",
+            "timeoutMs"
         ],
         "ensure_connection": [
             "forceRefresh",
