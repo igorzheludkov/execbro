@@ -68,11 +68,16 @@ export function isUntitledPage(d: DeviceInfo): boolean {
 // session ever opens thousands of tabs.
 const byId = new Map<string, string>();
 const reserved = new Map<string, { url: string; base: string }>();
+// Windows that already used up fetchDevices' title grace once. A page that never
+// gets a title (about:blank, a page with no <title>) would otherwise make every
+// fetch on its port wait the full grace.
+const graceSpent = new Set<string>();
 
 /** Test seam. */
 export function __resetChromiumNames(): void {
     byId.clear();
     reserved.clear();
+    graceSpent.clear();
 }
 
 function baseName(d: DeviceInfo): string {
@@ -85,10 +90,15 @@ function baseName(d: DeviceInfo): string {
  * connected before its title loaded keeps its url name rather than being
  * renamed under the agent on the next scan.
  */
-export function pinChromiumName(d: DeviceInfo): void {
-    if (!isChromiumTarget(d) || !d.deviceName || byId.has(d.id)) return;
+export function pinChromiumName(d: DeviceInfo): string {
+    if (!isChromiumTarget(d) || !d.deviceName) return d.deviceName;
+    // Pinned already, possibly by a fetch that ran while this object was in
+    // flight: that name wins, or the registry and every later scan would disagree.
+    const pinned = byId.get(d.id);
+    if (pinned) return pinned;
     byId.set(d.id, d.deviceName);
     if (!reserved.has(d.deviceName)) reserved.set(d.deviceName, { url: d.url || "", base: baseName(d) });
+    return d.deviceName;
 }
 
 /**
@@ -211,8 +221,12 @@ export async function fetchDevices(port: number, titleGraceMs = 1500): Promise<D
         }
         // A window listed before its document.title loaded would be named after its
         // url, and connecting it would pin that name. The title follows within ~300 ms.
-        const waiting = devices.some((d) => isChromiumTarget(d) && !d.deviceName && !byId.has(d.id) && isUntitledPage(d));
-        if (!waiting || Date.now() >= deadline) return nameChromiumTargets(devices);
+        const waiting = devices.filter((d) => isChromiumTarget(d) && !d.deviceName && !byId.has(d.id) && !graceSpent.has(d.id) && isUntitledPage(d));
+        if (waiting.length === 0) return nameChromiumTargets(devices);
+        if (Date.now() >= deadline) {
+            for (const d of waiting) graceSpent.add(d.id);
+            return nameChromiumTargets(devices);
+        }
         await new Promise((r) => setTimeout(r, 100));
     }
 }
