@@ -40,6 +40,7 @@ import {
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
+import { chromiumScanPorts, isChromiumTarget, isPortOpen } from "../core/metro.js";
 
 export function registerConnectionTools(server: McpServer): void {
     // Tool: Scan for Metro servers
@@ -48,8 +49,8 @@ export function registerConnectionTools(server: McpServer): void {
         "scan_metro",
         {
             description:
-                "Scan for running Metro bundler servers and automatically connect to any found React Native apps. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.\n" +
-                "PURPOSE: Discover Metro on ports 8081-8090 and auto-connect all React Native debugger targets it advertises.\n" +
+                "Discover and connect to debuggable JS runtimes: React Native via Metro and Chromium/Electron via CDP. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.\n" +
+                "PURPOSE: Discover Metro on ports 8081-8090 and auto-connect every React Native debugger target it advertises. Also probes Chromium debug ports: 9222 is listed but not auto-connected (attach with connect_metro), ports in EXECBRO_CHROMIUM_PORTS auto-connect.\n" +
                 "WHEN TO USE: At the start of any session, or after the user restarts Metro / boots a new simulator.\n" +
                 "WORKFLOW: scan_metro -> get_apps -> get_logs / ios_screenshot / tap.\n" +
                 "GOOD: scan_metro()\n" +
@@ -63,13 +64,24 @@ export function registerConnectionTools(server: McpServer): void {
             // Clear reconnection suppression (in case user previously called disconnect_metro)
             clearReconnectionSuppression();
             const openPorts = await scanMetroPorts(startPort, endPort);
-    
-            if (openPorts.length === 0) {
+
+            // Chromium ports: configured ones join the normal connect flow, while
+            // 9222 (unless configured) is listed only. See chromiumScanPorts.
+            const chromiumPortSet = new Set<number>();
+            const listOnlyPorts: number[] = [];
+            for (const { port, autoConnect } of chromiumScanPorts()) {
+                if (openPorts.includes(port) || !(await isPortOpen(port))) continue;
+                chromiumPortSet.add(port);
+                if (autoConnect) openPorts.push(port);
+                else listOnlyPorts.push(port);
+            }
+
+            if (openPorts.length === 0 && listOnlyPorts.length === 0) {
                 return {
                     content: [
                         {
                             type: "text",
-                            text: "No Metro servers found. Make sure Metro bundler is running (npm start or expo start)."
+                            text: "No Metro servers or Chromium debug ports found. For React Native, make sure Metro is running (npm start or expo start). For Electron/Chrome, start it with --remote-debugging-port=9222."
                         }
                     ]
                 };
@@ -135,7 +147,7 @@ export function registerConnectionTools(server: McpServer): void {
             // devices about to attach can be flagged.
             const restartedPorts = new Set<number>();
             for (const port of openPorts) {
-                if (await metroProcessChanged(port)) restartedPorts.add(port);
+                if (!chromiumPortSet.has(port) && await metroProcessChanged(port)) restartedPorts.add(port);
             }
 
             // Phase 3: Connect devices to their assigned ports
@@ -171,13 +183,26 @@ export function registerConnectionTools(server: McpServer): void {
                         results.push(`  - ${name}: Failed - ${error}`);
                     }
                 }
-    
-                // Connect to Metro build events for this port
-                try {
-                    await connectMetroBuildEvents(port);
-                    results.push(`  - Connected to Metro build events`);
-                } catch {
-                    // Build events connection is optional
+
+                // Connect to Metro build events for this port (Metro only)
+                if (!chromiumPortSet.has(port)) {
+                    try {
+                        await connectMetroBuildEvents(port);
+                        results.push(`  - Connected to Metro build events`);
+                    } catch {
+                        // Build events connection is optional
+                    }
+                }
+            }
+
+            // Discover-only chromium ports: list targets, connect nothing. Connecting
+            // injects a network interceptor into the page, which must never be a
+            // side effect of a scan on a port shared with unrelated tools.
+            for (const port of listOnlyPorts) {
+                const targets = (await fetchDevices(port)).filter(isChromiumTarget);
+                results.push(`Port ${port}: ${targets.length} Chromium target(s), not auto-connected (shared debug port; set EXECBRO_CHROMIUM_PORTS=${port} to auto-connect)`);
+                for (const t of targets) {
+                    results.push(`  - ${t.deviceName} ${t.url ?? ""}: connect_metro({ port: ${port}, device: "${t.deviceName}" })`);
                 }
             }
     
@@ -577,17 +602,31 @@ export function registerConnectionTools(server: McpServer): void {
         "connect_metro",
         {
             description:
-                "Connect to a Metro server on a specific port — the only way to reach a port scan_metro does not probe.\n" +
-                "PURPOSE: Establish a CDP WebSocket connection to a Metro server on a known port.\n" +
-                "WHEN TO USE: Metro is on a port outside 8081-8090. For any port in that range, scan_metro is strictly better — it probes them all and attaches every Bridgeless target in one call, where this connects to one port only.\n" +
+                "Connect to a debug port directly: a Metro server outside 8081-8090, or a Chromium/Electron target (e.g. port 9222, which scan_metro lists but does not auto-connect).\n" +
+                "PURPOSE: Establish a CDP WebSocket connection to the targets on one known port.\n" +
+                "WHEN TO USE: Metro is on a port outside 8081-8090, or you want to attach a Chromium target scan_metro listed. For Metro in that range, scan_metro is strictly better.\n" +
+                "GOOD: connect_metro({ port: 9222, device: \"FluentTalk\" })\n" +
                 "SEE ALSO: scan_metro for auto-discovery; get_apps afterwards to confirm the device attached.",
             inputSchema: {
-                port: z.coerce.number().default(8081).describe("Metro server port (default: 8081)")
+                port: z.coerce.number().default(8081).describe("Debug port (default: 8081)"),
+                device: z.string().optional().describe("Connect only targets whose name contains this (case-insensitive). Omit to connect every target on the port.")
             }
         },
-        async ({ port }) => {
+        async ({ port, device }) => {
             try {
                 const devices = await fetchDevices(port);
+                const wanted = device?.toLowerCase();
+                const targets = wanted
+                    ? devices.filter((d) => (d.deviceName || d.title || "").toLowerCase().includes(wanted))
+                    : devices;
+                if (wanted && targets.length === 0 && devices.length > 0) {
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `No target on port ${port} matches "${device}". Available: ${devices.map((d) => d.deviceName || d.title).join(", ")}`
+                        }]
+                    };
+                }
                 if (devices.length === 0) {
                     return {
                         content: [
@@ -599,23 +638,25 @@ export function registerConnectionTools(server: McpServer): void {
                     };
                 }
     
-                const results: string[] = [`Found ${devices.length} device(s) on port ${port}:`];
-    
-                for (const device of devices) {
+                const results: string[] = [`Found ${targets.length} device(s) on port ${port}:`];
+
+                for (const target of targets) {
                     try {
-                        const result = await connectToDevice(device, port);
+                        const result = await connectToDevice(target, port);
                         results.push(`  - ${result}`);
                     } catch (error) {
-                        results.push(`  - ${device.title}: Failed - ${error}`);
+                        results.push(`  - ${target.title}: Failed - ${error}`);
                     }
                 }
-    
-                // Also connect to Metro build events
-                try {
-                    await connectMetroBuildEvents(port);
-                    results.push(`  - Connected to Metro build events`);
-                } catch {
-                    // Build events connection is optional
+
+                // Also connect to Metro build events (not on a pure Chromium port)
+                if (!targets.every(isChromiumTarget)) {
+                    try {
+                        await connectMetroBuildEvents(port);
+                        results.push(`  - Connected to Metro build events`);
+                    } catch {
+                        // Build events connection is optional
+                    }
                 }
     
                 return {
