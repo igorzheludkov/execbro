@@ -91,7 +91,7 @@ export async function chromiumTap(
         const shouldVerify = options.verify !== false;
         const shouldScreenshot = options.screenshot !== false;
         const before = shouldVerify ? await chromiumCapture(app) : null;
-        const click = await raceDialog(app.ws, chromiumClick(app, css.x, css.y, options.duration ?? 0));
+        const click = await raceDialog(app.ws, () => chromiumClick(app, css.x, css.y, options.duration ?? 0));
         const { screenshot, verification, dialog } = click.kind === "dialog"
             ? { screenshot: undefined, verification: dialogVerification(click.dialog), dialog: click.dialog }
             : await verifyChromiumAction(app, before, shouldScreenshot, "click");
@@ -136,7 +136,7 @@ export async function verifyChromiumAction(
         // click ("Save & close") leaves nothing to capture, and reporting that
         // as a failure invites a retry that acts twice.
         try {
-            const shot = await raceDialog(app.ws, chromiumCapture(app));
+            const shot = await raceDialog(app.ws, () => chromiumCapture(app));
             if (shot.kind === "dialog") return { verification: dialogVerification(shot.dialog), dialog: shot.dialog };
             after = shot.value;
         } catch (err) {

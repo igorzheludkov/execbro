@@ -97,7 +97,7 @@ export async function chromiumSwipe(app: ConnectedApp, a: ChromiumSwipeArgs) {
         }
 
         const before = shouldVerify ? await chromiumCapture(app) : null;
-        const act = await raceDialog(app.ws, drag
+        const act = await raceDialog(app.ws, () => drag
             ? chromiumDrag(app, dragPath(at, { x: a.endX! / k, y: a.endY! / k }, a.durationMs ?? DRAG_DEFAULT_MS))
             : chromiumWheel(app, at.x, at.y, wheel!.dx, wheel!.dy));
         if (act.kind === "dialog") {

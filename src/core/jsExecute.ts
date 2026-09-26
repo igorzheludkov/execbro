@@ -762,7 +762,7 @@ function executeCDP(
                 pendingExecutions.delete(currentMessageId);
                 resolve({
                     success: false,
-                    error: `The expression opened ${formatDialog(d)}. The page is paused until it is answered: call handle_dialog({ action: "accept" }) or ({ action: "dismiss" }). The expression finishes once the dialog closes; its result is not returned.`,
+                    error: `A dialog opened while the expression ran: ${formatDialog(d)}. The page is paused until it is answered: call handle_dialog({ action: "accept" }) or ({ action: "dismiss" }). The expression finishes once the dialog closes; its result is not returned.`,
                     errorContext: "js_dialog_open",
                     failureKind: "js_dialog_open",
                 });

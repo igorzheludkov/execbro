@@ -32,6 +32,15 @@ describe("tracker", () => {
         noteDialogOpened(a, opening("two"));
         expect(seen).toEqual(["one"]);
     });
+    it("keeps an empty prompt answer, and reports none for a dialog that takes no input", () => {
+        const a = {}, b = {};
+        noteDialogOpened(a, opening("Name?", "prompt"));
+        noteDialogClosed(a, { result: true, userInput: "" });
+        expect(lastClosedDialog(a)).toMatchObject({ userInput: "" });
+        noteDialogOpened(b, opening("Hi", "alert"));
+        noteDialogClosed(b, { result: true, userInput: "" });
+        expect(lastClosedDialog(b)).not.toHaveProperty("userInput");
+    });
     it("waitForDialogClosed resolves true on close, false on timeout", async () => {
         const a = {};
         noteDialogOpened(a, opening());
@@ -45,13 +54,13 @@ describe("tracker", () => {
 
 describe("raceDialog", () => {
     it("returns the value when no dialog opens", async () => {
-        expect(await raceDialog({}, Promise.resolve(7))).toEqual({ kind: "done", value: 7 });
+        expect(await raceDialog({}, () => Promise.resolve(7))).toEqual({ kind: "done", value: 7 });
     });
     it("returns the dialog when one opens first, and swallows the late rejection of the loser", async () => {
         const a = {};
         let reject!: (e: Error) => void;
         const hung = new Promise<void>((_, r) => { reject = r; });
-        const race = raceDialog(a, hung);
+        const race = raceDialog(a, () => hung);
         noteDialogOpened(a, opening("Sure?"));
         expect(await race).toMatchObject({ kind: "dialog", dialog: { message: "Sure?" } });
         const unhandled: unknown[] = [];
@@ -65,10 +74,13 @@ describe("raceDialog", () => {
     it("returns a dialog that is already open, since the page is paused either way", async () => {
         const a = {};
         noteDialogOpened(a, opening("Open already"));
-        expect(await raceDialog(a, new Promise(() => {}))).toMatchObject({ kind: "dialog", dialog: { message: "Open already" } });
+        let started = 0;
+        expect(await raceDialog(a, () => { started++; return new Promise(() => {}); })).toMatchObject({ kind: "dialog", dialog: { message: "Open already" } });
+        // The input must not go into the paused page, where it would land after the dialog closes.
+        expect(started).toBe(0);
     });
     it("passes a rejection through when no dialog opened", async () => {
-        await expect(raceDialog({}, Promise.reject(new Error("boom")))).rejects.toThrow("boom");
+        await expect(raceDialog({}, () => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
     });
 });
 
@@ -84,6 +96,11 @@ describe("formatDialog and dialogGate", () => {
         const a = {};
         noteDialogOpened(a, opening("y".repeat(50000)));
         expect(openDialog(a)!.message).toBe("y".repeat(200) + "…");
+    });
+    it("escapes quotes inside the message, so the quoted text cannot be read as ending early", () => {
+        const a = {};
+        noteDialogOpened(a, opening('say "hi"', "alert"));
+        expect(formatDialog(openDialog(a)!)).toBe('an alert dialog: "say \\"hi\\""');
     });
     it("uses the right article for an alert", () => {
         const a = {};
