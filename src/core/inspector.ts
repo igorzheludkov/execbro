@@ -87,9 +87,7 @@ export async function inspectAtPoint(
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             ${FIBER_ROOTS_JS}
             var roots = __eb_fiberRoots(false);
-            if (roots.length === 0) return resolve(hook
-                ? { error: 'No fiber roots found. The app may not have rendered yet.' }
-                : { error: 'React DevTools hook not available. Make sure you are running a development build.' });
+            if (roots.length === 0) return resolve({ error: __eb_noRootsReason() });
 
             // Paper: measureInWindow is on stateNode directly.
             // Fabric: measureInWindow is on stateNode.canonical.publicInstance.

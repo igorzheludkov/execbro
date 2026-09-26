@@ -37,23 +37,43 @@ function __eb_fiberRoots(all) {
         }
     }
     if (roots.length === 0 && typeof document !== 'undefined' && document) {
+        var containerRoot = function (el) {
+            if (!el) return null;
+            var keys = Object.keys(el);
+            for (var k = 0; k < keys.length; k++) {
+                if (keys[k].indexOf('__reactContainer$') !== 0) continue;
+                var f = el[keys[k]];
+                return f ? (f.stateNode && f.stateNode.current ? f.stateNode : { current: f }) : null;
+            }
+            return null;
+        };
+        var seen = [];
+        var scan = function (list) {
+            for (var c = 0; c < list.length; c++) {
+                if (!all && roots.length > 0) return;
+                // #root is usually also one of body's children: read each element once.
+                if (!list[c] || seen.indexOf(list[c]) >= 0) continue;
+                seen.push(list[c]);
+                var r = containerRoot(list[c]);
+                if (r && roots.indexOf(r) < 0) roots.push(r);
+            }
+        };
         var candidates = [document.getElementById ? document.getElementById('root') : null];
         if (document.body) {
             candidates = candidates.concat(Array.from(document.body.children || []));
             candidates.push(document.body);
         }
-        for (var c = 0; c < candidates.length && roots.length === 0; c++) {
-            var el = candidates[c];
-            if (!el) continue;
-            var keys = Object.keys(el);
-            for (var k = 0; k < keys.length; k++) {
-                if (keys[k].indexOf('__reactContainer$') !== 0) continue;
-                var f = el[keys[k]];
-                if (f) roots.push(f.stateNode && f.stateNode.current ? f.stateNode : { current: f });
-                break;
-            }
-        }
+        scan(candidates);
+        // The usual spots missed: a container nested deeper (<div class="wrapper"><div id="app">).
+        // ponytail: one Object.keys per element, only on a page where the fast path found nothing.
+        if (roots.length === 0 && document.body && document.body.querySelectorAll) scan(Array.from(document.body.querySelectorAll('*')));
     }
     return roots;
+}
+function __eb_noRootsReason() {
+    if (typeof document !== 'undefined' && document) return 'No fiber roots found on this page: it is not a React app, or React has not rendered yet.';
+    return globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__
+        ? 'No fiber roots found. The app may not have rendered yet.'
+        : 'React DevTools hook not found. Make sure you are running a development build.';
 }
 `;

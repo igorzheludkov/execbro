@@ -69,3 +69,40 @@ describe("__eb_fiberRoots — DOM fallback", () => {
         expect(run(false)).toEqual([]);
     });
 });
+
+describe("__eb_fiberRoots — DOM fallback beyond the usual spots", () => {
+    it("finds a container nested below body's children", () => {
+        const hostFiber = { tag: 3 };
+        const app = { "__reactContainer$k": hostFiber };
+        g.document = { getElementById: () => null, body: { children: [{}], querySelectorAll: () => [{}, app] } };
+        expect(run(false)).toEqual([{ current: hostFiber }]);
+    });
+    it("returns every root with all=true, the first without", () => {
+        const a = { tag: 3 }, b = { tag: 3 };
+        fakeDocument({ "__reactContainer$k": a }, [{ "__reactContainer$k": b }]);
+        expect(run(true)).toEqual([{ current: a }, { current: b }]);
+        expect(run(false)).toEqual([{ current: a }]);
+    });
+    it("reads #root once when it is also one of body's children", () => {
+        const a = { tag: 3 };
+        const root = { "__reactContainer$k": a };
+        fakeDocument(root, [root]);
+        expect(run(true)).toEqual([{ current: a }]);
+    });
+});
+
+describe("__eb_noRootsReason", () => {
+    const reason = (): string => new Function(`${FIBER_ROOTS_JS}; return __eb_noRootsReason();`)() as string;
+    it("on a web page, does not blame the build", () => {
+        fakeDocument(null);
+        expect(reason()).toMatch(/not a React app, or React has not rendered yet/);
+        expect(reason()).not.toMatch(/development build/);
+    });
+    it("with a hook and no roots, says the app has not rendered", () => {
+        g.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { renderers: new Map() };
+        expect(reason()).toMatch(/may not have rendered yet/);
+    });
+    it("with neither, points at a development build", () => {
+        expect(reason()).toMatch(/development build/);
+    });
+});
