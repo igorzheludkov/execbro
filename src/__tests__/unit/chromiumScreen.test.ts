@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { DOM_HELPERS_JS, buildScreenCollectJs, rawToScreenState, buildLayoutCollectJs, formatChromiumLayout, buildInspectJs, formatChromiumInspect, formatChromiumMeasure, type RawScreen, type RawLayout, type RawInspect } from "../../core/chromiumScreen.js";
+import { DOM_HELPERS_JS, buildScrollProbeJs, SCROLL_READ_JS, ACTIVE_ELEMENT_JS, buildScreenCollectJs, rawToScreenState, buildLayoutCollectJs, formatChromiumLayout, buildInspectJs, formatChromiumInspect, formatChromiumMeasure, type RawScreen, type RawLayout, type RawInspect } from "../../core/chromiumScreen.js";
 import { formatScreenStateSummary } from "../../core/screenState.js";
 
 // Pull one injected helper out as a callable, with the browser globals it reads.
@@ -279,5 +279,48 @@ describe("formatChromiumMeasure", () => {
 describe("buildInspectJs", () => {
     it("parses", () => {
         expect(() => new Function(`return ${buildInspectJs(10, 20, true)};`)).not.toThrow();
+    });
+});
+
+describe("scrollerAt / readScroller", () => {
+    const styles = new Map<unknown, { overflowX: string; overflowY: string }>();
+    const root = { scrollHeight: 600, clientHeight: 600, scrollWidth: 800, clientWidth: 800, scrollTop: 0, scrollLeft: 0, tagName: "HTML", className: "" };
+    const body = { parentElement: root, tagName: "BODY", className: "" };
+    const list = { parentElement: body, tagName: "DIV", id: "", className: "list", scrollHeight: 2000, clientHeight: 400, scrollWidth: 300, clientWidth: 300, scrollTop: 120, scrollLeft: 0, isConnected: true };
+    const row = { parentElement: list, tagName: "DIV", className: "" };
+    const plain = { parentElement: body, tagName: "P", className: "" };
+    styles.set(list, { overflowX: "hidden", overflowY: "auto" });
+    const hitAt: Record<string, unknown> = { "10,10": row, "10,500": plain };
+    const globals = {
+        document: { scrollingElement: root, documentElement: root, body, elementFromPoint: (x: number, y: number) => hitAt[`${x},${y}`] ?? null },
+        getComputedStyle: (el: unknown) => styles.get(el) ?? { overflowX: "visible", overflowY: "visible" },
+    };
+    const scrollerAt = helper<(x: number, y: number, h: boolean) => unknown>("scrollerAt", globals);
+    const readScroller = helper<(el: unknown) => unknown>("readScroller", globals);
+
+    it("finds the nearest ancestor scrollable on the axis and reads its offsets", () => {
+        expect(scrollerAt(10, 10, false)).toBe(list);
+        expect(readScroller(list)).toEqual({ container: "<div.list>", top: 120, left: 0, maxTop: 1600, maxLeft: 0 });
+    });
+    it("falls back to a scroller on the other axis, reported with max 0 on this one", () => {
+        expect(scrollerAt(10, 10, true)).toBe(list);
+    });
+    it("is null when nothing under the point scrolls and the page fits", () => {
+        expect(scrollerAt(10, 500, false)).toBeNull();
+        expect(readScroller(null)).toEqual({ container: null });
+    });
+    it("uses the page when it scrolls", () => {
+        root.scrollHeight = 3000;
+        expect(scrollerAt(10, 500, false)).toBe(root);
+        expect(readScroller(root)).toMatchObject({ container: "the page", maxTop: 2400 });
+        root.scrollHeight = 600;
+    });
+});
+
+describe("scroll probe and active element scripts", () => {
+    it("parse", () => {
+        for (const js of [buildScrollProbeJs(10, 20.5, true), SCROLL_READ_JS, ACTIVE_ELEMENT_JS]) {
+            expect(() => new Function(`return ${js};`)).not.toThrow();
+        }
     });
 });
