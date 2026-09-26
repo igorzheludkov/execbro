@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
-import { planElectronLaunch, launchElectron, findBin } from "../../core/electronLaunch.js";
+import { planElectronLaunch, launchElectron, findBin, launchLogPath } from "../../core/electronLaunch.js";
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "eb-launch-")); });
@@ -112,5 +112,54 @@ describe("launchElectron, app pins its own port", () => {
         } finally {
             if (r.ok) process.kill(-r.pid);
         }
+    });
+});
+
+describe("launchLogPath", () => {
+    it("gives two projects with the same folder name their own log", () => {
+        const a = launchLogPath("/logs", "/a/apps/desktop");
+        const b = launchLogPath("/logs", "/b/apps/desktop");
+        expect(a).not.toBe(b);
+        expect(a).toMatch(/^\/logs\/desktop-[0-9a-f]{8}\.log$/);
+        expect(launchLogPath("/logs", "/a/apps/desktop")).toBe(a);
+    });
+});
+
+describe("launchElectron deadline", () => {
+    let server: Server;
+    afterEach(() => new Promise<void>((r) => server.close(() => r())));
+
+    async function run(listing: () => unknown[], timeoutMs: number) {
+        server = createServer((_req, res) => {
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify(listing()));
+        });
+        await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+        const real = (server.address() as AddressInfo).port;
+        const dir = project(join(root, "app"), { electron: "33" }, {
+            electron: `#!/bin/sh\necho "DevTools listening on ws://127.0.0.1:${real}/devtools/browser/x"\nexec sleep 30\n`,
+        });
+        const plan = planElectronLaunch(dir, 1);
+        if ("error" in plan) throw new Error(plan.error);
+        return { real, r: await launchElectron(plan, 1, timeoutMs, join(root, "logs")) };
+    }
+
+    it("connects a window that is still untitled when the deadline lands in the title grace", async () => {
+        const { r } = await run(() => [{ id: "A1", type: "page", title: "localhost:5173/", description: "", url: "http://localhost:5173/", webSocketDebuggerUrl: "ws://127.0.0.1/devtools/page/A1" }], 1500);
+        try {
+            expect(r.ok).toBe(true);
+            if (r.ok) expect(r.devices).toHaveLength(1);
+        } finally {
+            if (r.ok) process.kill(-r.pid);
+        }
+    });
+
+    it("names the port it followed, not the requested one, when no window appears", async () => {
+        const { real, r } = await run(() => [], 1200);
+        expect(r.ok).toBe(false);
+        if (r.ok) return;
+        expect(r.error).toContain(`Port ${real} listed no window`);
+        const pid = /pid (\d+)/.exec(r.error)?.[1];
+        if (pid) process.kill(-Number(pid));
     });
 });
