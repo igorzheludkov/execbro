@@ -125,7 +125,10 @@ export function nameChromiumTargets(devices: DeviceInfo[]): DeviceInfo[] {
     for (const d of fresh) {
         const base = baseName(d);
         const url = d.url || "";
-        let name = [...reserved].find(([n, r]) => r.url === url && (r.base === base || r.untitled) && !live.has(n))?.[0];
+        const mine = (match: (r: { base: string; untitled: boolean }) => boolean) =>
+            [...reserved].find(([n, r]) => r.url === url && match(r) && !live.has(n))?.[0];
+        // Its own titled name first: an untitled one may belong to another window on the same url.
+        let name = mine((r) => r.base === base) ?? mine((r) => r.untitled);
         if (!name) {
             const free = (n: string) => !live.has(n) && (reserved.get(n)?.url ?? url) === url;
             name = base;
