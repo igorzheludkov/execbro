@@ -93,9 +93,7 @@ export async function getComponentTree(
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             ${FIBER_ROOTS_JS}
             const roots = __eb_fiberRoots(false);
-            if (roots.length === 0) return hook
-                ? { error: 'No fiber roots found. The app may not have rendered yet.' }
-                : { error: 'React DevTools hook not found. Make sure you are running a development build.' };
+            if (roots.length === 0) return { error: __eb_noRootsReason() };
 
             const maxDepth = ${maxDepth};
             const includeProps = ${includeProps};

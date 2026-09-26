@@ -83,7 +83,7 @@ export async function inspectComponent(
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             ${FIBER_ROOTS_JS}
             const roots = __eb_fiberRoots(false);
-            if (roots.length === 0) return hook ? { error: 'No fiber roots found.' } : { error: 'React DevTools hook not found.' };
+            if (roots.length === 0) return { error: __eb_noRootsReason() };
 
             const targetName = '${escapedName}';
             const targetIndex = ${index};
@@ -491,7 +491,7 @@ export async function findComponents(
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             ${FIBER_ROOTS_JS}
             const roots = __eb_fiberRoots(false);
-            if (roots.length === 0) return hook ? { error: 'No fiber roots found.' } : { error: 'React DevTools hook not found.' };
+            if (roots.length === 0) return { error: __eb_noRootsReason() };
 
             const pattern = '${escapedPattern}';
             const regex = new RegExp(pattern, 'i');

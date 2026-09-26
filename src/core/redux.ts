@@ -5,7 +5,7 @@ const FIBER_WALK = `
 ${FIBER_ROOTS_JS}
 var roots = __eb_fiberRoots(true);
 if (roots.length === 0) {
-    return JSON.stringify({ ok: false, error: 'React DevTools hook not available — app must be run in dev mode with React Native renderer registered.' });
+    return JSON.stringify({ ok: false, error: __eb_noRootsReason() });
 }
 function isStore(v) {
     return !!v && typeof v === 'object' && typeof v.dispatch === 'function' && typeof v.getState === 'function' && typeof v.subscribe === 'function';
