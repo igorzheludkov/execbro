@@ -6,7 +6,7 @@ import WebSocket from "ws";
 import type { ConnectedApp } from "../../core/types.js";
 
 const { connectedApps } = await import("../../core/state.js");
-const { peekTargetPlatform } = await import("../../core/connection.js");
+const { peekTargetPlatform, getFirstConnectedApp } = await import("../../core/connection.js");
 const { CHROMIUM_TOOLS, chromiumGate } = await import("../../core/chromiumCapabilities.js");
 const { toolRegistry } = await import("../../index.js");
 
@@ -68,11 +68,14 @@ describe("peekTargetPlatform", () => {
         expect(peekTargetPlatform("tap", "nothing-like-this")).toBeUndefined();
     });
 
-    it("with no device argument, answers only when every open app is the same platform", () => {
+    it("with no device argument, answers for the app the handler will default to", () => {
         connectedApps.set("a", makeApp("a", "FluentTalk", "chromium"));
         expect(peekTargetPlatform("get_screen_state", undefined)).toBe("chromium");
+        // Mixed session, chromium inserted FIRST: the bare call defaults to the RN app,
+        // so the gate lets it through, and the handler must act on that same app.
         connectedApps.set("b", makeApp("b", "iPhone 17 Pro", "ios"));
-        expect(peekTargetPlatform("get_screen_state", undefined)).toBeUndefined();
+        expect(peekTargetPlatform("get_screen_state", undefined)).toBe("ios");
+        expect(getFirstConnectedApp()?.deviceInfo.deviceName).toBe("iPhone 17 Pro");
     });
 
     it("never infers a platform for a bare ios_/android_ tool call", () => {

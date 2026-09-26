@@ -67,10 +67,14 @@ export const CONTEXT_BINDINGS = [
 export function buildContextPreamble(): string {
     return `
 ${buildRequireSource()}
-// Expose under the natural name too. Hermes has no require in the evaluate
-// scope, so this shadows nothing, and var keeps it local to the evaluated
-// program rather than mutating globalThis.
-var require = __eb_require;
+// Expose under the natural name too, only where the runtime has none. Hermes
+// has no require in the evaluate scope. A browser page may (Electron with
+// nodeIntegration, AMD loaders), and a top-level var there IS a property of
+// window, so an unguarded assignment replaced the app's own require.
+// The __eb tag keeps our own from a previous call replaceable: each call's
+// __eb_require re-indexes Metro modules, so a pinned one would go stale.
+__eb_require.__eb = true;
+var require = typeof require !== 'undefined' && !require.__eb ? require : __eb_require;
 ${FIBER_ROOTS_JS}
 var __eb_fiberFind = function (predicate) {
     try {
