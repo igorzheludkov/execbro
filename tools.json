@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 65,
+    "count": 66,
     "tools": [
         "activate_license",
         "android_key_event",
@@ -34,6 +34,7 @@
         "get_screen_layout",
         "get_screen_state",
         "get_usage_guide",
+        "handle_dialog",
         "http_request",
         "input_text",
         "inspect_at_point",
@@ -246,6 +247,11 @@
         ],
         "get_usage_guide": [
             "topic"
+        ],
+        "handle_dialog": [
+            "action",
+            "device",
+            "promptText"
         ],
         "http_request": [
             "auth",

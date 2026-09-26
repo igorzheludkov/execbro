@@ -174,7 +174,7 @@ size in a note when it applies.
     {
         id: "interact",
         title: "Device Interaction",
-        summary: "Tap buttons, swipe, pinch to zoom, type text, and navigate the app UI",
+        summary: "Tap buttons, swipe, pinch to zoom, type text, answer browser dialogs, and navigate the app UI",
         content: `# Device Interaction
 
 ## Prerequisites
@@ -297,6 +297,7 @@ tap(text=...) skips fiber for non-ASCII (Hermes limitation) and uses accessibili
 - swipe: cross-platform swipe/scroll. Easiest form: swipe({ direction: "up" }) scrolls to reveal more content (content-scroll semantics; "down"/"left"/"right" supported, bare swipe() defaults to "up"). Optional distance is in screenshot pixels (default 33% of the axis). For pixel-precise gestures pass all four startX/startY/endX/endY coordinates — they take precedence over direction. Use for FlatList/SectionList scrolling where off-screen items aren't mounted. Returns verification.meaningful — if false, warning names which no-op it was, by probing the scroll surface under the start point: already at top, already at end, content not scrollable, wrong axis, or no scroll view there at all. On a screen with no React Native connection it says it could not inspect the screen, rather than claiming the gesture missed — the gesture itself still went through, and swipe needs no RN connection to drive the device. Set burst:true to surface overscroll/bounce feedback even when the final state is unchanged. Set verify:false, screenshot:false for the fastest path. Pass delta on iOS to control touch step size. On chromium a direction is one mouse-wheel event at the viewport centre (or startX/startY), verified by reading the scroll container's offsets (scrolled, container), and four coordinates are a left-button drag (sliders, resizable panes, pointer-event drag libraries; not native HTML5 draggable).
 - input_text: type text — target with testID/component/textMatch (focuses itself), or pass native:true to type into whatever already has focus (system dialogs, non-RN screens). Pass replace:true to clear pre-filled values before typing (Bridgeless/Fabric only).
 - press_key: keys that are not text: Enter to submit, Escape to close, Tab to move focus, arrows, Backspace, or a combo like Shift+Tab / Meta+K. Goes to the focused element, or pass testID/text to focus one first; repeat:N presses it N times. Works on chromium (CDP key events; the response names the focused element before and after), Android (adb keyevent, no modifier combos) and the iOS simulator (HID keys; combos need AXe).
+- handle_dialog: accept or dismiss a JavaScript alert / confirm / prompt / beforeunload on a chromium page. A dialog pauses the page: tap, press_key, swipe and execute_in_app return it as dialog when they open one, and other page tools refuse until it is answered. Pass promptText for a prompt. Chromium only: an RN Alert is native UI, tap its button instead.
 - dismiss_keyboard: blur the focused input, closing the keyboard. Already-down with nothing focused is a success; up with nothing focused means a native field owns it and only a platform dismiss will close it.
 - ios_button / android_key_event: hardware buttons (HOME, BACK, etc.)
 - ios_open_url: deep links and universal links
@@ -674,12 +675,12 @@ export const UNTRUSTED_DATA_RULE: string = [
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_screen_state, get_screen_layout.",
     "Platform-specific ios_* / android_* tools (ios_button, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible. input_text covers native-only text entry too, via native:true.",
-    "Chromium/Electron targets (platform chromium) support logs, network capture and mocking, execute_in_app, globals, redux, component inspection, screen reading (get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap, input_text, swipe (wheel scroll, four-coordinate drag) and press_key; other tools refuse them with a message saying so. electron_launch_app starts an Electron project with the CDP port open.",
+    "Chromium/Electron targets (platform chromium) support logs, network capture and mocking, execute_in_app, globals, redux, component inspection, screen reading (get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap, input_text, swipe (wheel scroll, four-coordinate drag), press_key and handle_dialog (JavaScript alert / confirm / prompt); other tools refuse them with a message saying so. electron_launch_app starts an Electron project with the CDP port open.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
     "  logs        — console debugging (get_logs, search_logs)",
-    "  interact    — device interaction (tap, swipe, pinch, screenshots, input_text, press_key, dismiss_keyboard)",
+    "  interact    — device interaction (tap, swipe, pinch, screenshots, input_text, press_key, handle_dialog, dismiss_keyboard)",
     "  layout      — on-screen layout check (get_screen_state, get_screen_layout)",
     "  inspect     — component inspection (find_components, inspect_component, inspect_at_point)",
     "  network     — network request inspection (get_network_requests, search_network)",
