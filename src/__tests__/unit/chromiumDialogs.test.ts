@@ -1,8 +1,10 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, beforeAll, afterAll } from "@jest/globals";
 import {
     noteDialogOpened, noteDialogClosed, openDialog, lastClosedDialog, onDialogOpened,
     waitForDialogClosed, raceDialog, formatDialog, dialogGate, DIALOG_BLOCKED_TOOLS,
 } from "../../core/chromiumDialogs.js";
+import { handleCDPMessage, dialogGateFor } from "../../core/connection.js";
+import { connectedApps } from "../../core/state.js";
 
 const opening = (message = "Delete it?", type = "confirm") => ({ type, message, url: "http://x/", defaultPrompt: "" });
 
@@ -95,5 +97,28 @@ describe("formatDialog and dialogGate", () => {
         const a = {};
         noteDialogOpened(a, opening("Name?", "prompt"));
         expect(dialogGate("screenshot", openDialog(a))?.content[0].text).toMatch(/promptText/);
+    });
+});
+
+describe("CDP events and the gate", () => {
+    const wsA = { readyState: 1, send: () => {}, on: () => {}, removeListener: () => {} };
+    const wsB = { readyState: 1, send: () => {}, on: () => {}, removeListener: () => {} };
+    const dev = (n: string) => ({ id: n, title: n, deviceName: n, webSocketDebuggerUrl: "ws://x/" + n, type: "page", url: "http://x/" + n });
+    beforeAll(() => {
+        connectedApps.set("9999-A", { ws: wsA, deviceInfo: dev("PageA"), port: 9999, platform: "chromium" } as never);
+        connectedApps.set("9999-B", { ws: wsB, deviceInfo: dev("PageB"), port: 9999, platform: "chromium" } as never);
+    });
+    afterAll(() => { connectedApps.delete("9999-A"); connectedApps.delete("9999-B"); });
+
+    it("an opening event on one window refuses page tools aimed at that window only", () => {
+        handleCDPMessage({ method: "Page.javascriptDialogOpening", params: { type: "alert", message: "Saved", url: "http://x/PageA" } }, dev("PageA") as never, wsA as never);
+        expect(dialogGateFor("tap", "PageA")?.content[0].text).toMatch(/alert dialog: "Saved"/);
+        expect(dialogGateFor("tap", "PageB")).toBeNull();
+        expect(dialogGateFor("get_logs", "PageA")).toBeNull();
+        handleCDPMessage({ method: "Page.javascriptDialogClosed", params: { result: true } }, dev("PageA") as never, wsA as never);
+        expect(dialogGateFor("tap", "PageA")).toBeNull();
+    });
+    it("an unknown device never throws out of the gate", () => {
+        expect(dialogGateFor("tap", "NoSuchDevice")).toBeNull();
     });
 });

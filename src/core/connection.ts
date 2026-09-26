@@ -14,6 +14,7 @@ import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
 import { startSdkMirrorPoller, stopSdkMirrorPoller } from "./sdkMirrorPoller.js";
+import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate } from "./chromiumDialogs.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -801,6 +802,18 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
 
     const method = message.method as string;
 
+    // JavaScript dialogs on chromium. The page is paused while one is open; the
+    // tracker lets the gate and the input races report it instead of timing out.
+    if (method === "Page.javascriptDialogOpening" || method === "Page.javascriptDialogClosed") {
+        const dws = ws ?? connectedApps.get(findAppKeyForDevice(device) ?? "")?.ws;
+        if (dws) {
+            const p = message.params as { type: string; message: string; defaultPrompt?: string; url: string; result: boolean; userInput?: string };
+            if (method === "Page.javascriptDialogOpening") noteDialogOpened(dws, p);
+            else noteDialogClosed(dws, p);
+        }
+        return;
+    }
+
     // Handle Runtime.consoleAPICalled
     if (method === "Runtime.consoleAPICalled") {
         const params = message.params as {
@@ -1345,6 +1358,12 @@ export async function connectToDevice(
                 })
             );
 
+            // Page domain events report JavaScript dialogs (alert / confirm / prompt).
+            // Chromium only: Metro's inspector proxy has no use for it.
+            if (isChromiumTarget(device)) {
+                ws.send(JSON.stringify({ id: getNextMessageId(), method: "Page.enable" }));
+            }
+
             // Inject JS network interceptor (immediate capture, may fail if context not ready)
             injectNetworkInterceptor(ws, isChromiumTarget(device));
             // Rules for this device may already exist — from a previous session
@@ -1850,6 +1869,16 @@ export function chromiumAppFor(toolName: string, device?: string): ConnectedApp 
     return device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
 }
 
+/** The dialog refusal for a call aimed at a chromium page with a dialog open, else null. Never throws. */
+export function dialogGateFor(toolName: string, device: unknown) {
+    try {
+        const app = chromiumAppFor(toolName, typeof device === "string" ? device : undefined);
+        return app ? dialogGate(toolName, openDialog(app.ws)) : null;
+    } catch {
+        return null; // a bad device argument is the handler's to report
+    }
+}
+
 export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
     const resolution = resolveConnectedAppByDevice(device);
     if (resolution.kind === "ok") return resolution.app;
@@ -1987,6 +2016,7 @@ export async function verifyLogPipeline(app: ConnectedApp): Promise<LogPipelineR
     try {
         app.ws.send(JSON.stringify({ id: getNextMessageId(), method: "Runtime.enable" }));
         app.ws.send(JSON.stringify({ id: getNextMessageId(), method: "Log.enable" }));
+        if (app.platform === "chromium") app.ws.send(JSON.stringify({ id: getNextMessageId(), method: "Page.enable" }));
     } catch {
         // WS send failed — fall through to reconnect
     }

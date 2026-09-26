@@ -9,7 +9,7 @@ import {
     isTelemetryEnabled,
 } from "./telemetry.js";
 import { getTargetPlatform } from "./state.js";
-import { resolveConnectedAppByDevice, peekTargetPlatform } from "./connection.js";
+import { resolveConnectedAppByDevice, peekTargetPlatform, dialogGateFor } from "./connection.js";
 import { chromiumGate } from "./chromiumCapabilities.js";
 import { recordToolCall } from "./screenStaleness.js";
 import { EnvironmentError, UserInputError, type FailureKind } from "./errors.js";
@@ -142,7 +142,9 @@ export function registerToolWithTelemetry(
             // Chromium capability gate. Inside the try so a refusal is recorded
             // in telemetry as a returned failure: that count is how we learn
             // which unsupported tool agents reach for first on desktop.
-            const result = chromiumGate(toolName, peekTargetPlatform(toolName, args?.device)) ?? await handler(args);
+            const result = chromiumGate(toolName, peekTargetPlatform(toolName, args?.device))
+                ?? dialogGateFor(toolName, args?.device)
+                ?? await handler(args);
             // Secret redaction, applied once for every tool rather than at each
             // render site. Runs before anything else reads the text, so the
             // token accounting and the dev-mode JSONL on disk both see the
