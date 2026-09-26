@@ -609,7 +609,15 @@ async function chromiumScreenshotResponse(app: ConnectedApp, outputPath?: string
             isError: true as const,
         };
     }
-    if (outputPath) writeFileSync(outputPath, shot.buffer);
+    // The capture worked; a bad path must not throw it away.
+    let saveNote = "";
+    if (outputPath) {
+        try {
+            writeFileSync(outputPath, shot.buffer);
+        } catch (err) {
+            saveNote = `\nCould not save to ${outputPath}: ${err instanceof Error ? err.message : String(err)}`;
+        }
+    }
     imageBuffer.add({
         id: `chromium-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         image: shot.buffer,
@@ -627,7 +635,7 @@ async function chromiumScreenshotResponse(app: ConnectedApp, outputPath?: string
     const text =
         `Screenshot ${shot.width}x${shot.height} px of ${app.deviceInfo.deviceName} ` +
         `(chromium viewport ${w}x${h} CSS px at devicePixelRatio ${dpr}${downscaled}).\n` +
-        `Pass pixel coordinates from this image straight to tap(x, y, device).` +
+        `Pass pixel coordinates from this image straight to tap(x, y, device).` + saveNote +
         (summary ? `\n\n${summary}` : "");
     return {
         content: [
