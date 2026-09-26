@@ -75,10 +75,15 @@ export async function chromiumTap(
             const prep = await prepareDomTarget(app, pick.cand.i);
             css = { x: prep.x, y: prep.y };
             pressed = `<${pick.cand.tag}>${pick.cand.text ? ` "${pick.cand.text.slice(0, 60)}"` : ""}`;
+            const notes: string[] = [];
+            // The before-frame is taken after the scroll, so without this a click
+            // with no visible effect reads as a miss while the page visibly moved.
+            if (prep.scrolled) notes.push("The element was off-screen, so it was scrolled into view first; the verification diff covers the click only.");
             if (prep.covered) {
-                warning = `The element's centre is covered by ${prep.covered}, so the click landed on that instead. ` +
-                    "Close the overlay first, or tap the covering element deliberately.";
+                notes.push(`The element's centre is covered by ${prep.covered}, so the click landed on that instead. ` +
+                    "Close the overlay first, or tap the covering element deliberately.");
             }
+            if (notes.length) warning = notes.join(" ");
         }
 
         const shouldVerify = options.verify !== false;
