@@ -138,3 +138,10 @@ describe("tap on chromium", () => {
         expect(chromiumGate("tap", "chromium")).toBeNull();
     });
 });
+
+describe("input_text on chromium", () => {
+    it("is allowlisted, and the default refusal lists the interaction tools", () => {
+        expect(chromiumGate("input_text", "chromium")).toBeNull();
+        expect(chromiumGate("swipe", "chromium")?.content[0].text).toContain("screenshot, tap, input_text");
+    });
+});

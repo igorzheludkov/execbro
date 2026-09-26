@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { pxPerCss, CHROMIUM_MAX_DIMENSION, pickDomTarget, normText, buildDomCollectJs, buildDomPrepareJs, type DomCandidate } from "../../core/chromium.js";
+import { pxPerCss, CHROMIUM_MAX_DIMENSION, pickDomTarget, normText, buildDomCollectJs, buildDomPrepareJs, judgeTextEntry, buildDomFocusJs, buildDomReadJs, type DomCandidate } from "../../core/chromium.js";
 
 describe("pxPerCss", () => {
     it("is devicePixelRatio when the raw capture fits the cap (FluentTalk popover, 380x600 @2)", () => {
@@ -86,4 +86,43 @@ describe("injected DOM scripts are valid JavaScript", () => {
         expect(parses(buildDomCollectJs(q))).not.toThrow();
     });
     it("prepare", () => expect(parses(buildDomPrepareJs(3))).not.toThrow());
+});
+
+describe("judgeTextEntry", () => {
+    it("verifies an append against the prior value", () => {
+        expect(judgeTextEntry({ before: "Hello", sent: " world", replace: false, landed: "Hello world", maxLength: null }))
+            .toEqual({ success: true, verified: true, value: "Hello world", path: "cdp" });
+    });
+
+    it("verifies a replace against the sent text alone", () => {
+        expect(judgeTextEntry({ before: "old", sent: "new", replace: true, landed: "new", maxLength: null }).verified).toBe(true);
+    });
+
+    it("reports a controlled input that reverted the write, with sent and landed", () => {
+        const r = judgeTextEntry({ before: "", sent: "abc1", replace: true, landed: "abc", maxLength: null });
+        expect(r.success).toBe(false);
+        expect(r.sent).toBe("abc1");
+        expect(r.landed).toBe("abc");
+        expect(r.error).toContain("does not hold");
+    });
+
+    it("names a maxLength truncation instead of a generic mismatch", () => {
+        const r = judgeTextEntry({ before: "", sent: "123456", replace: true, landed: "1234", maxLength: 4 });
+        expect(r.success).toBe(false);
+        expect(r.error).toContain("maxLength (4)");
+    });
+
+    it("treats a field that vanished as a failure", () => {
+        expect(judgeTextEntry({ before: "", sent: "x", replace: true, landed: null, maxLength: null }).success).toBe(false);
+    });
+});
+
+describe("input scripts are valid JavaScript", () => {
+    const parses = (js: string) => () => new Function(`return ${js};`);
+    it("focus (append, replace, clear) and read", () => {
+        expect(parses(buildDomFocusJs(0, false, false))).not.toThrow();
+        expect(parses(buildDomFocusJs(1, true, false))).not.toThrow();
+        expect(parses(buildDomFocusJs(2, true, true))).not.toThrow();
+        expect(parses(buildDomReadJs(0))).not.toThrow();
+    });
 });
