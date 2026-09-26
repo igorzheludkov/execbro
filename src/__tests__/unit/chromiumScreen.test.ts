@@ -125,6 +125,11 @@ describe("rawToScreenState", () => {
         expect(ss.notes?.join("\n")).toContain('"FluentTalk"');
     });
 
+    it("does not print a data: URL's whole document as the route", () => {
+        const ss = rawToScreenState(raw({ url: "data:text/html," + "%3Ch1%3EHello%3C%2Fh1%3E".repeat(20) }));
+        expect(ss.route?.name).toBe("(data: URL)");
+    });
+
     it("puts overlay content in its overlay and covered elements under Blocked", () => {
         const ss = rawToScreenState(raw({
             overlays: [{ type: "Unknown", title: "<div#eb-cover>" }],
@@ -234,6 +239,14 @@ describe("formatChromiumInspect", () => {
     it("prints source when React provides it, and says why when it does not", () => {
         expect(formatChromiumInspect(inspectRaw({ source: { file: "/src/Speak.tsx", line: 12, column: 3 } }), true)).toContain("Source: /src/Speak.tsx:12:3");
         expect(formatChromiumInspect(inspectRaw(), true)).toContain("Source: unavailable");
+    });
+});
+
+describe("formatChromiumInspect without React", () => {
+    it("does not blame React for a missing source on a page with no component", () => {
+        const out = formatChromiumInspect(inspectRaw({ component: undefined, props: undefined }), true);
+        expect(out).toContain("Source: no React component at this point");
+        expect(out).not.toContain("React 19");
     });
 });
 

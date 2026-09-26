@@ -242,7 +242,8 @@ export function buildScreenCollectJs(): string {
 function routeOf(url: string): ScreenState["route"] {
     try {
         const u = new URL(url);
-        const name = u.pathname + u.hash;
+        // A data: URL's "path" is the whole document.
+        const name = u.protocol === "data:" ? "(data: URL)" : u.pathname + u.hash;
         const params = [...u.searchParams.keys()].length > 0 ? Object.fromEntries(u.searchParams) : null;
         return { name, params, stack: [name] };
     } catch {
@@ -431,7 +432,9 @@ export function formatChromiumInspect(raw: RawInspect, includeFrame: boolean): s
     };
     const source = raw.source
         ? `Source: ${raw.source.file}:${raw.source.line}:${raw.source.column}`
-        : "Source: unavailable on chromium (React 19 records no _debugSource). Grep the component name to find its file.";
+        : raw.component
+            ? "Source: unavailable on chromium (React 19 records no _debugSource). Grep the component name to find its file."
+            : "Source: no React component at this point; the hierarchy lists DOM ancestors.";
     return `${JSON.stringify(out, null, 2)}\n\n${source}`;
 }
 
