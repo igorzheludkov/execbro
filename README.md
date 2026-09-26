@@ -67,8 +67,8 @@ Linking is only for the dashboard: it attaches your installs to your account so 
 ### Electron & Chromium (experimental)
 
 - **Desktop React apps over CDP** - An Electron window or a Chrome tab connects as a `chromium` target alongside your simulators, and every tool takes the same `device` argument
-- **What works today** - Console logs, network capture and replay, `execute_in_app`, debug globals, Redux, `http_request` / `app_request`, and React component inspection (`get_component_tree`, `find_components`, `inspect_component`), including on Vite apps whose DevTools hook has no renderers
-- **Not yet** - Screenshots, `tap`, text input, screen layout, and network mocking. These tools refuse a chromium target with a message saying so, rather than acting on the wrong device
+- **What works today** - Console logs, network capture and replay, `execute_in_app`, debug globals, Redux, `http_request` / `app_request`, React component inspection (`get_component_tree`, `find_components`, `inspect_component`), including on Vite apps whose DevTools hook has no renderers, plus `screenshot`, `tap` and `input_text`. Taps find elements by `data-testid` / `id`, visible text or React component name and click with real CDP mouse events
+- **Not yet** - Screen layout (`get_screen_state`), swipe and scroll, and network mocking. These tools refuse a chromium target with a message saying so, rather than acting on the wrong device
 - **Opt in** - Add one dev-only line to the Electron main process, then run `scan_metro`. Port 9222 is listed but not auto-connected, because connecting injects a network interceptor into the page. Attach with `connect_metro({ port: 9222, device: "<window title>" })`, or set `EXECBRO_CHROMIUM_PORTS=9222` to auto-connect
 
   ```ts
