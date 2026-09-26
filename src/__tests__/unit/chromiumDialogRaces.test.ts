@@ -88,7 +88,7 @@ describe("dialog races", () => {
         connectedApps.set("9998-Dlg2", { ws: pws, deviceInfo: { id: "Dlg2", title: "DlgPage2", deviceName: "DlgPage2", webSocketDebuggerUrl: "ws://x/Dlg2" }, port: 9998, platform: "chromium" } as never);
         try {
             const r = await executeInApp("alert(1)", false, { timeoutMs: 3000, skipBootstrap: true }, "DlgPage2");
-            expect(r.error).toMatch(/^The expression opened an? alert dialog/);
+            expect(r.error).toMatch(/^A dialog opened while the expression ran: an? alert dialog/);
             expect(pws.close).not.toHaveBeenCalled();
             expect(connectedApps.has("9998-Dlg2")).toBe(true);
         } finally {

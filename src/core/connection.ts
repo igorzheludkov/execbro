@@ -14,7 +14,7 @@ import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
 import { startSdkMirrorPoller, stopSdkMirrorPoller } from "./sdkMirrorPoller.js";
-import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate, formatDialog } from "./chromiumDialogs.js";
+import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate, formatDialog, DIALOG_BLOCKED_TOOLS } from "./chromiumDialogs.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -1883,6 +1883,8 @@ export function chromiumAppFor(toolName: string, device?: string): ConnectedApp 
 
 /** The dialog refusal for a call aimed at a chromium page with a dialog open, else null. Never throws. */
 export function dialogGateFor(toolName: string, device: unknown) {
+    // Checked first: resolving the device costs a registry walk on every tool call.
+    if (!DIALOG_BLOCKED_TOOLS.has(toolName)) return null;
     try {
         const app = chromiumAppFor(toolName, typeof device === "string" ? device : undefined);
         return app ? dialogGate(toolName, openDialog(app.ws)) : null;

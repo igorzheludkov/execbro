@@ -40,14 +40,14 @@ export async function chromiumPressKey(
         let dialog: DialogInfo | undefined;
         let sent = 0;
         for (; sent < a.repeat && !dialog; sent++) {
-            const r = await raceDialog(app.ws, chromiumKey(app, a.combo));
+            const r = await raceDialog(app.ws, () => chromiumKey(app, a.combo));
             if (r.kind === "dialog") dialog = r.dialog;
         }
         let focusedAfter: Active | undefined;
         if (!dialog) {
             await new Promise((r) => setTimeout(r, KEY_SETTLE_MS));
             // A handler can open the dialog from a timer after the last keyUp.
-            const r = await raceDialog(app.ws, evaluateJson<Active>(app.ws, ACTIVE_ELEMENT_JS));
+            const r = await raceDialog(app.ws, () => evaluateJson<Active>(app.ws, ACTIVE_ELEMENT_JS));
             if (r.kind === "dialog") dialog = r.dialog;
             else focusedAfter = r.value;
         }
