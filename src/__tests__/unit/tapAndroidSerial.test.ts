@@ -132,6 +132,22 @@ describe("tap threads the Android serial to the device", () => {
         connectedApps.clear();
     });
 
+    it("native:true reaches the device even when the only connected app is a chromium window", async () => {
+        connectedApps.set("chromium-1", {
+            ws: { readyState: WebSocket.OPEN } as unknown as WebSocket,
+            deviceInfo: { id: "chromium-1", title: "FluentTalk", description: "", appId: "http://localhost:5173/", type: "page", webSocketDebuggerUrl: "ws://localhost:9222/chromium-1", deviceName: "FluentTalk" },
+            port: 9222,
+            platform: "chromium",
+        } as ConnectedApp);
+        try {
+            const r = await tap({ x: 300, y: 600, native: true, screenshot: false, verify: false });
+            expect(r.platform).not.toBe("chromium");
+            expect(adbCallsMatching("input tap")).toHaveLength(1);
+        } finally {
+            connectedApps.delete("chromium-1");
+        }
+    });
+
     it("sends a native coordinate tap to the resolved emulator, not the default one", async () => {
         await tap({ x: 300, y: 600, native: true, device: TARGET, screenshot: false });
 

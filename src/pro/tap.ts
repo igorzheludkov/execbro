@@ -2032,7 +2032,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
     // Chromium targets take a separate path: DOM lookup plus CDP mouse events.
     // Asked the way the capability gate asks, so the two cannot disagree.
-    const chromiumApp = chromiumAppFor("tap", options.device);
+    // native:true means the OS layer (a system dialog), which a chromium window does not have.
+    const chromiumApp = options.native ? null : chromiumAppFor("tap", options.device);
     if (chromiumApp) return chromiumTap(chromiumApp, query, options);
 
     // Native mode: bypass React Native connection, tap directly via ADB/simctl

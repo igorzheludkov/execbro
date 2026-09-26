@@ -1092,8 +1092,8 @@ export function registerInteractionTools(server: McpServer): void {
             }
         },
         async ({ text, testID, component, textMatch, index, replace, device, native }) => {
-            // Chromium: DOM targeting plus Input.insertText. `native` has no layer below it here.
-            const chromeApp = chromiumAppFor("input_text", device);
+            // Chromium: DOM targeting plus Input.insertText. native:true skips it, since that asks for the OS layer (a system dialog).
+            const chromeApp = native === true ? null : chromiumAppFor("input_text", device);
             if (chromeApp) {
                 return formatTextEntryResponse(
                     await chromiumInputText(chromeApp, { text, testID, component, textMatch, index, replace })
