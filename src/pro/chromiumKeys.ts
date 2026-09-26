@@ -30,8 +30,10 @@ export async function chromiumPressKey(
                 const list = pick.matches.slice(0, 10).map((c) => `<${c.tag}>${c.testID ? ` testID=${c.testID}` : ""} "${c.text.slice(0, 40)}"`);
                 return fail(`${pick.matches.length} elements match this target, so the key would go to a guess. Use a testID. Matches: ${list.join("; ")}`);
             }
-            const r = await evaluateJson<{ error?: string }>(app.ws, buildDomKeyFocusJs(pick.cand.i));
+            const r = await evaluateJson<{ error?: string; focused?: boolean }>(app.ws, buildDomKeyFocusJs(pick.cand.i));
             if (r.error) return fail(r.error);
+            // A disabled or inert target keeps focus where it was, and the keys would land there instead.
+            if (!r.focused) return fail(`<${pick.cand.tag}> matched but did not take focus (disabled, inert or hidden?), so no key was sent.`);
         }
         const focusedBefore = await evaluateJson<Active>(app.ws, ACTIVE_ELEMENT_JS);
         for (let n = 0; n < a.repeat; n++) await chromiumKey(app, a.combo);

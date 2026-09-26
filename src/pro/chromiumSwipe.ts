@@ -108,7 +108,9 @@ export async function chromiumSwipe(app: ConnectedApp, a: ChromiumSwipeArgs) {
             const v = scrollVerdict(beforeProbe, afterProbe, wheel);
             const moved = Math.round(v.moved * k);
             body.scrolled = { dx: wheel.dx !== 0 ? moved : 0, dy: wheel.dy !== 0 ? moved : 0, unit: "screenshot px" };
-            if (beforeProbe.container !== null) body.container = beforeProbe.container;
+            if (beforeProbe.container !== null) {
+                body.container = v.chainedTo ? `${v.chainedTo} (${beforeProbe.container} was at its limit, so the wheel passed on)` : beforeProbe.container;
+            }
             if (v.warning) warning = `Wheel delivered but nothing scrolled: ${v.warning}`;
         }
         const { screenshot, verification } = await verifyChromiumAction(app, before, shouldScreenshot, drag ? "drag" : "wheel", drag ? undefined : 0);

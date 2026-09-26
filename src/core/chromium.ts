@@ -543,11 +543,15 @@ export function dragPath(
 
 /** What SCROLL_PROBE_JS reads: the scroll container under a point and its offsets, CSS px. */
 export type ScrollProbe =
-    | { container: string; top: number; left: number; maxTop: number; maxLeft: number }
+    | { container: string; top: number; left: number; maxTop: number; maxLeft: number; page?: { top: number; left: number } }
     | { container: null };
 
 /** How far the wheel moved the container on its axis (CSS px), and why not when it did not. */
-export function scrollVerdict(before: ScrollProbe, after: ScrollProbe, delta: { dx: number; dy: number }): { moved: number; warning?: string } {
+export function scrollVerdict(
+    before: ScrollProbe,
+    after: ScrollProbe,
+    delta: { dx: number; dy: number }
+): { moved: number; chainedTo?: string; warning?: string } {
     if (before.container === null || after.container === null) {
         return { moved: 0, warning: "no scroll container under the point: nothing there scrolls. Aim startX/startY at the list itself (get_screen_state shows where it is)." };
     }
@@ -556,6 +560,11 @@ export function scrollVerdict(before: ScrollProbe, after: ScrollProbe, delta: { 
     const max = horizontal ? before.maxLeft : before.maxTop;
     const moved = pos(after) - pos(before);
     if (Math.abs(moved) >= 1) return { moved };
+    // The container was at its limit and the browser chained the wheel to the page.
+    if (before.page && after.page) {
+        const pageMoved = horizontal ? after.page.left - before.page.left : after.page.top - before.page.top;
+        if (Math.abs(pageMoved) >= 1) return { moved: pageMoved, chainedTo: "the page" };
+    }
     const where = before.container;
     if (max <= 0) {
         return { moved: 0, warning: `${where} is not scrollable ${horizontal ? "horizontally" : "vertically"}: its content fits, or it scrolls on the other axis. Swipe ${horizontal ? "up/down" : "left/right"} instead.` };

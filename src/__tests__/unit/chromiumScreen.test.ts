@@ -300,7 +300,7 @@ describe("scrollerAt / readScroller", () => {
 
     it("finds the nearest ancestor scrollable on the axis and reads its offsets", () => {
         expect(scrollerAt(10, 10, false)).toBe(list);
-        expect(readScroller(list)).toEqual({ container: "<div.list>", top: 120, left: 0, maxTop: 1600, maxLeft: 0 });
+        expect(readScroller(list)).toEqual({ container: "<div.list>", top: 120, left: 0, maxTop: 1600, maxLeft: 0, page: { top: 0, left: 0 } });
     });
     it("falls back to a scroller on the other axis, reported with max 0 on this one", () => {
         expect(scrollerAt(10, 10, true)).toBe(list);
@@ -320,6 +320,29 @@ describe("scrollerAt / readScroller", () => {
         expect(scrollerAt(10, 500, true)).toBe(root);
         expect(readScroller(root)).toMatchObject({ container: "the page", maxLeft: 0 });
         root.scrollHeight = 600;
+    });
+});
+
+describe("scrollerAt with a body scroller", () => {
+    // html { overflow: hidden } + body { overflow: auto; height: 100vh }: body is the real scroller.
+    const root = { scrollHeight: 600, clientHeight: 600, scrollWidth: 800, clientWidth: 800, scrollTop: 0, scrollLeft: 0, tagName: "HTML", className: "" };
+    const body = { parentElement: root, tagName: "BODY", className: "", id: "", scrollHeight: 4000, clientHeight: 600, scrollWidth: 800, clientWidth: 800, scrollTop: 50, scrollLeft: 0 };
+    const p = { parentElement: body, tagName: "P", className: "" };
+    const styles = new Map<unknown, { overflowX: string; overflowY: string }>([
+        [root, { overflowX: "hidden", overflowY: "hidden" }],
+        [body, { overflowX: "auto", overflowY: "auto" }],
+    ]);
+    const globals = {
+        document: { scrollingElement: root, documentElement: root, body, elementFromPoint: () => p },
+        getComputedStyle: (el: unknown) => styles.get(el) ?? { overflowX: "visible", overflowY: "visible" },
+    };
+    it("finds body, so the probe does not report nothing scrollable while the page visibly scrolls", () => {
+        expect(helper<(x: number, y: number, h: boolean) => unknown>("scrollerAt", globals)(10, 10, false)).toBe(body);
+    });
+    it("carries the page offsets for a non-page scroller, so a chained scroll can be seen", () => {
+        const list = { parentElement: body, tagName: "DIV", className: "", id: "", scrollHeight: 900, clientHeight: 300, scrollWidth: 10, clientWidth: 10, scrollTop: 0, scrollLeft: 0 };
+        styles.set(list, { overflowX: "hidden", overflowY: "auto" });
+        expect(helper<(el: unknown) => unknown>("readScroller", globals)(list)).toMatchObject({ page: { top: 0, left: 0 } });
     });
 });
 
