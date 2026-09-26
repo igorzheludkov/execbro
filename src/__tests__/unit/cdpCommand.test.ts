@@ -88,5 +88,6 @@ describe("evaluateJson and a dialog", () => {
         const p = evaluateJson(asWs(ws), "1", 60_000);
         noteDialogOpened(ws, { type: "alert", message: "Saved", url: "http://x/" });
         await expect(p).rejects.toThrow(/alert dialog: "Saved".*handle_dialog/s);
+        ws.emit("close"); // settle the losing evaluate so no timer outlives the test
     });
 });
