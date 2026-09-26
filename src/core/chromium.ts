@@ -416,3 +416,197 @@ export async function chromiumInputText(
         return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
 }
+
+// ── Keys, wheel and drag ────────────────────────────────────────────────────
+
+/** CDP Input modifiers bitmask. */
+export const MOD = { Alt: 1, Control: 2, Meta: 4, Shift: 8 } as const;
+type ModName = keyof typeof MOD;
+
+export interface KeyDef {
+    /** DOM KeyboardEvent.key: "Enter", "ArrowUp", " ", "k". */
+    key: string;
+    code: string;
+    /** Required: without it Enter does not submit a form. */
+    windowsVirtualKeyCode: number;
+    /** Sent on keyDown so the key fires keypress / input. */
+    text?: string;
+}
+
+const MOD_KEYS: Record<ModName, KeyDef> = {
+    Alt: { key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18 },
+    Control: { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+    Meta: { key: "Meta", code: "MetaLeft", windowsVirtualKeyCode: 91 },
+    Shift: { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 },
+};
+
+const MOD_ALIASES: Record<string, ModName> = {
+    alt: "Alt", option: "Alt", opt: "Alt",
+    control: "Control", ctrl: "Control",
+    meta: "Meta", cmd: "Meta", command: "Meta",
+    shift: "Shift",
+};
+
+const NAMED_KEYS: KeyDef[] = [
+    { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+    { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    { key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 },
+    { key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 },
+    { key: "Delete", code: "Delete", windowsVirtualKeyCode: 46 },
+    { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " },
+    { key: "ArrowUp", code: "ArrowUp", windowsVirtualKeyCode: 38 },
+    { key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 },
+    { key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 },
+    { key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 },
+    { key: "Home", code: "Home", windowsVirtualKeyCode: 36 },
+    { key: "End", code: "End", windowsVirtualKeyCode: 35 },
+    { key: "PageUp", code: "PageUp", windowsVirtualKeyCode: 33 },
+    { key: "PageDown", code: "PageDown", windowsVirtualKeyCode: 34 },
+    ...Array.from({ length: 12 }, (_, i) => ({ key: `F${i + 1}`, code: `F${i + 1}`, windowsVirtualKeyCode: 112 + i })),
+];
+
+const KEY_ALIASES: Record<string, string> = {
+    esc: "Escape", return: "Enter", space: " ", del: "Delete",
+    up: "ArrowUp", down: "ArrowDown", left: "ArrowLeft", right: "ArrowRight",
+};
+
+export const VALID_KEY_NAMES =
+    "Enter, Escape, Tab, Backspace, Delete, Space, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, F1-F12, " +
+    "or a single character, optionally after modifiers joined by + (Shift, Control, Alt, Meta): e.g. Shift+Tab, Meta+K";
+
+function charKey(ch: string): KeyDef {
+    const lower = ch.toLowerCase();
+    if (/^[a-z]$/.test(lower)) return { key: lower, code: `Key${lower.toUpperCase()}`, windowsVirtualKeyCode: lower.toUpperCase().charCodeAt(0), text: lower };
+    if (/^[0-9]$/.test(ch)) return { key: ch, code: `Digit${ch}`, windowsVirtualKeyCode: ch.charCodeAt(0), text: ch };
+    // ponytail: punctuation gets no code / virtual key; text alone types it. Add a table if a page keys on e.code.
+    return { key: ch, code: "", windowsVirtualKeyCode: 0, text: ch };
+}
+
+/** "Shift+Tab", "meta+k", "Enter", "a" -> modifiers bitmask and one key. Case-insensitive. */
+export function parseKeyCombo(input: string): { mods: number; key: KeyDef } | { error: string } {
+    const s = input.trim();
+    let keyPart: string;
+    let modParts: string[];
+    if (s === "+" || s.endsWith("++")) {
+        keyPart = "+";
+        modParts = s.length > 1 ? s.slice(0, -2).split("+") : [];
+    } else {
+        const parts = s.split("+");
+        keyPart = parts.pop() ?? "";
+        modParts = parts;
+    }
+    let mods = 0;
+    for (const m of modParts) {
+        const name = MOD_ALIASES[m.trim().toLowerCase()];
+        if (!name) return { error: `Unknown modifier "${m}" in "${input}". Valid: ${VALID_KEY_NAMES}.` };
+        mods |= MOD[name];
+    }
+    const k = keyPart.trim();
+    const lower = k.toLowerCase();
+    let key: KeyDef | undefined;
+    if ([...k].length === 1) key = charKey(k);
+    else {
+        const want = (KEY_ALIASES[lower] ?? k).toLowerCase();
+        key = NAMED_KEYS.find((d) => d.key.toLowerCase() === want || d.code.toLowerCase() === want);
+    }
+    if (!key) return { error: `Unknown key "${k || input}". Valid: ${VALID_KEY_NAMES}.` };
+    // With Control, Alt or Meta held a key is a shortcut: text would type the letter into the field.
+    if (mods & (MOD.Control | MOD.Alt | MOD.Meta)) key = { ...key, text: undefined };
+    else if (mods & MOD.Shift && key.text && /^[a-z]$/.test(key.text)) key = { ...key, text: key.text.toUpperCase() };
+    return { mods, key };
+}
+
+export type ScrollDirection = "up" | "down" | "left" | "right";
+
+/** Wheel delta in CSS px. up reveals content below (+dy), left reveals content to the right (+dx), as a finger swipe does on mobile. */
+export function wheelDelta(direction: ScrollDirection, distancePx: number | undefined, vp: ChromiumViewport): { dx: number; dy: number } {
+    const vertical = direction === "up" || direction === "down";
+    const css = distancePx && distancePx > 0 ? distancePx / pxPerCss(vp) : Math.round(0.33 * (vertical ? vp.h : vp.w));
+    const sign = direction === "up" || direction === "left" ? 1 : -1;
+    return vertical ? { dx: 0, dy: sign * css } : { dx: sign * css, dy: 0 };
+}
+
+/** Points from start to end at about 60 Hz, at least 5 steps, ending exactly on end. */
+export function dragPath(
+    start: { x: number; y: number },
+    end: { x: number; y: number },
+    durationMs: number
+): Array<{ x: number; y: number; at: number }> {
+    const steps = Math.max(5, Math.round(durationMs / 16));
+    return Array.from({ length: steps + 1 }, (_, i) => {
+        const t = i / steps;
+        return i === steps
+            ? { ...end, at: durationMs }
+            : { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t, at: durationMs * t };
+    });
+}
+
+/** What SCROLL_PROBE_JS reads: the scroll container under a point and its offsets, CSS px. */
+export type ScrollProbe =
+    | { container: string; top: number; left: number; maxTop: number; maxLeft: number }
+    | { container: null };
+
+/** How far the wheel moved the container on its axis (CSS px), and why not when it did not. */
+export function scrollVerdict(before: ScrollProbe, after: ScrollProbe, delta: { dx: number; dy: number }): { moved: number; warning?: string } {
+    if (before.container === null || after.container === null) {
+        return { moved: 0, warning: "no scroll container under the point: nothing there scrolls. Aim startX/startY at the list itself (get_screen_state shows where it is)." };
+    }
+    const horizontal = Math.abs(delta.dx) > Math.abs(delta.dy);
+    const pos = (p: typeof before) => (horizontal ? p.left : p.top);
+    const max = horizontal ? before.maxLeft : before.maxTop;
+    const moved = pos(after) - pos(before);
+    if (Math.abs(moved) >= 1) return { moved };
+    const where = before.container;
+    if (max <= 0) {
+        return { moved: 0, warning: `${where} is not scrollable ${horizontal ? "horizontally" : "vertically"}: its content fits, or it scrolls on the other axis. Swipe ${horizontal ? "up/down" : "left/right"} instead.` };
+    }
+    const towardEnd = (horizontal ? delta.dx : delta.dy) > 0;
+    if (!towardEnd && pos(before) <= 1) return { moved: 0, warning: `${where} is already at the ${horizontal ? "start" : "top"}. Swipe the other direction to move.` };
+    if (towardEnd && pos(before) >= max - 1) return { moved: 0, warning: `${where} is already at the end (offset ${Math.round(max)}). There is no more content this way.` };
+    return { moved: 0, warning: `${where} is at ${Math.round(pos(before))} of ${Math.round(max)} and did not move: something under the pointer took the wheel (a map, a canvas), or scrolling is disabled.` };
+}
+
+type InputSend = (params: Record<string, unknown>) => Promise<unknown>;
+
+/** One mouseWheel event at CSS (x, y): the browser scrolls whatever is under the pointer. */
+export async function chromiumWheel(app: ConnectedApp, x: number, y: number, dx: number, dy: number): Promise<void> {
+    await sendCdpCommand(app.ws, "Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: dx, deltaY: dy });
+}
+
+/** A left-button drag along path (CSS px), paced by each point's `at`. */
+export async function chromiumDrag(app: ConnectedApp, path: Array<{ x: number; y: number; at: number }>): Promise<void> {
+    const send: InputSend = (params) => sendCdpCommand(app.ws, "Input.dispatchMouseEvent", params);
+    const [first, ...rest] = path;
+    const last = path[path.length - 1];
+    const t0 = Date.now();
+    await send({ type: "mouseMoved", x: first.x, y: first.y });
+    await send({ type: "mousePressed", x: first.x, y: first.y, button: "left", buttons: 1, clickCount: 1 });
+    for (const p of rest) {
+        const wait = t0 + p.at - Date.now();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        await send({ type: "mouseMoved", x: p.x, y: p.y, button: "left", buttons: 1 });
+    }
+    await send({ type: "mouseReleased", x: last.x, y: last.y, button: "left", buttons: 0, clickCount: 1 });
+}
+
+/**
+ * Press one combo: each modifier goes down as its own key (so a keydown listener
+ * sees Meta), then the key down and up, then the modifiers up in reverse.
+ */
+export async function chromiumKey(app: ConnectedApp, combo: { mods: number; key: KeyDef }): Promise<void> {
+    const send: InputSend = (params) => sendCdpCommand(app.ws, "Input.dispatchKeyEvent", params);
+    const held = (Object.keys(MOD) as ModName[]).filter((m) => combo.mods & MOD[m]);
+    const fields = (d: KeyDef) => ({ key: d.key, code: d.code, windowsVirtualKeyCode: d.windowsVirtualKeyCode, nativeVirtualKeyCode: d.windowsVirtualKeyCode });
+    let mods = 0;
+    for (const m of held) {
+        mods |= MOD[m];
+        await send({ type: "rawKeyDown", modifiers: mods, ...fields(MOD_KEYS[m]) });
+    }
+    const k = combo.key;
+    await send({ type: k.text ? "keyDown" : "rawKeyDown", modifiers: mods, ...fields(k), ...(k.text && { text: k.text, unmodifiedText: k.text }) });
+    await send({ type: "keyUp", modifiers: mods, ...fields(k) });
+    for (const m of held.reverse()) {
+        mods &= ~MOD[m];
+        await send({ type: "keyUp", modifiers: mods, ...fields(MOD_KEYS[m]) });
+    }
+}
