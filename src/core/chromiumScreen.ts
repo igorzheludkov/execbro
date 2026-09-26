@@ -57,9 +57,10 @@ function safeValue(el) {
     return String(el.type).toLowerCase() === "password" ? (el.value ? "[password]" : "") : String(el.value);
 }
 function labelOf(el) {
+    // A select's own <label> usually wraps it, so the label's innerText lists every option.
     var s = el.getAttribute("aria-label") ||
-        (el.labels && el.labels[0] ? el.labels[0].innerText : "") ||
         (el.tagName === "SELECT" && el.selectedIndex >= 0 ? el.options[el.selectedIndex].text : "") ||
+        (el.labels && el.labels[0] ? el.labels[0].innerText : "") ||
         (isEditable(el) || el.tagName === "SELECT" ? "" : el.innerText) ||
         el.getAttribute("title") || el.getAttribute("alt");
     if (!s && el.querySelector) { var img = el.querySelector("img[alt]"); s = img ? img.getAttribute("alt") : ""; }
