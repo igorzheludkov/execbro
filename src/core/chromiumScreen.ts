@@ -158,7 +158,9 @@ export function buildScreenCollectJs(): string {
     var vp = ${VIEWPORT_FIELDS_JS};
     var all = document.body ? Array.prototype.slice.call(document.body.querySelectorAll("*")) : [];
     function isPress(el) {
-        if (el.matches(PRESS_SEL) || typeof el.onclick === "function") return true;
+        // Not el.onclick: a handler assigned as a property is usually delegation
+        // on a container (FluentTalk's #root has one), not a target.
+        if (el.matches(PRESS_SEL)) return true;
         var p = reactProp(el, "__reactProps$");
         return !!(p && (p.onClick || p.onMouseDown || p.onMouseUp || p.onPointerDown || p.onPointerUp));
     }
@@ -444,7 +446,7 @@ export async function chromiumInspectAtPoint(
     return formatChromiumInspect(raw, opts.includeFrame);
 }
 
-export function formatChromiumMeasure(name: string, rect: CssRect, vp: ChromiumViewport): string {
+export function formatChromiumMeasure(name: string, rect: CssRect, vp: ChromiumViewport, outOfView: boolean): string {
     const k = pxPerCss(vp);
     const [x, y, w, h] = [rect.x, rect.y, rect.w, rect.h].map((v) => v * k);
     const lines = [
@@ -452,11 +454,19 @@ export function formatChromiumMeasure(name: string, rect: CssRect, vp: ChromiumV
         `Frame: (${x.toFixed(1)}, ${y.toFixed(1)}) ${w.toFixed(1)}x${h.toFixed(1)}`,
         `Center: (${(x + w / 2).toFixed(1)}, ${(y + h / 2).toFixed(1)})`,
     ];
-    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
-    if (cx < 0 || cy < 0 || cx >= vp.w || cy >= vp.h) {
-        lines.push("Its centre is outside the viewport (scrolled away). tap({ component }) scrolls it into view first; tap(x, y) here would miss.");
+    if (outOfView) {
+        lines.push("It is scrolled or clipped out of view (outside the viewport or its scroll container), so a tap at this centre lands on whatever is shown there. tap({ component }) scrolls it into view first.");
     }
     return lines.join("\n");
+}
+
+/** visibleRect of a collected target: "off" when scrolled or clipped away, as get_screen_state counts it. */
+function buildOutOfViewJs(i: number): string {
+    return `(function () {
+    ${DOM_HELPERS_JS}
+    var el = (globalThis.__eb_domTargets || [])[${i}];
+    return JSON.stringify(!!el && visibleRect(el) === "off");
+})()`;
 }
 
 export async function chromiumMeasure(app: ConnectedApp, componentName: string, index: number): Promise<string> {
@@ -467,5 +477,6 @@ export async function chromiumMeasure(app: ConnectedApp, componentName: string, 
             ? `No visible element renders component "${componentName}". find_components lists component names.`
             : `index ${index} is out of range: ${found.total} visible instance(s) of "${componentName}".`);
     }
-    return formatChromiumMeasure(componentName, c.rect, found.viewport);
+    const outOfView = await evaluateJson<boolean>(app.ws, buildOutOfViewJs(c.i));
+    return formatChromiumMeasure(componentName, c.rect, found.viewport, outOfView);
 }

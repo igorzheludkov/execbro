@@ -221,11 +221,14 @@ describe("formatChromiumInspect", () => {
 });
 
 describe("formatChromiumMeasure", () => {
-    it("reports frame and centre in delivered px, and flags an off-viewport element", () => {
-        const out = formatChromiumMeasure("Row", { x: 0, y: 700, w: 380, h: 40 }, { w: 380, h: 600, dpr: 2 });
+    it("reports frame and centre in delivered px, and flags an element scrolled out of view", () => {
+        const out = formatChromiumMeasure("Row", { x: 0, y: 700, w: 380, h: 40 }, { w: 380, h: 600, dpr: 2 }, true);
         expect(out).toContain("Frame: (0.0, 1400.0) 760.0x80.0");
         expect(out).toContain("Center: (380.0, 1440.0)");
-        expect(out).toContain("outside the viewport");
+        expect(out).toContain("scrolled or clipped out of view");
+    });
+    it("stays quiet about an element on screen, even one inside the viewport box of a scroll container", () => {
+        expect(formatChromiumMeasure("Row", { x: 0, y: 10, w: 10, h: 10 }, { w: 380, h: 600, dpr: 1 }, false)).not.toContain("out of view");
     });
 });
 
