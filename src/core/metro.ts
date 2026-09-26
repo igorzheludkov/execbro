@@ -15,6 +15,82 @@ export const COMMON_PORTS = Array.from(
     (_, i) => DEFAULT_START_PORT + i
 );
 
+// Chromium (Electron / Chrome) remote-debugging port. Same default as argent's
+// ARGENT_CHROMIUM_PORTS so knowledge transfers between the two tools.
+export const CHROMIUM_DEFAULT_PORT = 9222;
+
+const EXCLUDED_PAGE_SCHEMES = ["chrome://", "chrome-extension://", "devtools://"];
+
+// Chromium target types that are never an app page. Unknown types are NOT in
+// here on purpose: an unrecognised type falls through to today's behaviour
+// rather than hiding a Metro target we have not seen before.
+const BROWSER_INTERNAL_TYPES = new Set([
+    "background_page", "service_worker", "shared_worker", "worker",
+    "browser_ui", "iframe", "webview", "auction_worklet", "shared_storage_worklet", "tab",
+]);
+
+function hasReactNativeMarker(d: DeviceInfo): boolean {
+    const title = d.title || "";
+    return (d.description || "").includes("React Native") || title.includes("React Native") || title.includes("Hermes");
+}
+
+function hasExcludedScheme(d: DeviceInfo): boolean {
+    const url = d.url || "";
+    return EXCLUDED_PAGE_SCHEMES.some((s) => url.startsWith(s));
+}
+
+/**
+ * An Electron BrowserWindow or a Chrome tab. A DevTools window is itself a
+ * `page`, so the scheme check is what keeps execbro off the user's own DevTools.
+ */
+export function isChromiumTarget(d: DeviceInfo): boolean {
+    return d.type === "page" && !hasReactNativeMarker(d) && !hasExcludedScheme(d);
+}
+
+/** Extension pages, service workers, omnibox popups, DevTools windows. */
+export function isBrowserInternalTarget(d: DeviceInfo): boolean {
+    if (hasReactNativeMarker(d)) return false;
+    if (BROWSER_INTERNAL_TYPES.has(d.type)) return true;
+    return d.type === "page" && hasExcludedScheme(d);
+}
+
+/**
+ * Chromium /json carries no deviceName, which is why the spike printed
+ * "Connected to FluentTalk (undefined)". Name each window after its title,
+ * suffixing collisions (`FluentTalk`, `FluentTalk#2`). Ordered by target id so
+ * a window keeps its name across fetches; Chrome lists most-recent first.
+ */
+export function nameChromiumTargets(devices: DeviceInfo[]): DeviceInfo[] {
+    const chromium = devices.filter((d) => isChromiumTarget(d) && !d.deviceName)
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const seen = new Map<string, number>();
+    for (const d of chromium) {
+        const base = d.title || d.url || "Chromium";
+        const n = (seen.get(base) ?? 0) + 1;
+        seen.set(base, n);
+        d.deviceName = n === 1 ? base : `${base}#${n}`;
+        if (!d.appId) d.appId = d.url || "";
+    }
+    return devices;
+}
+
+/**
+ * Chromium ports to probe in addition to the Metro range. Ports named in
+ * EXECBRO_CHROMIUM_PORTS were chosen by the user and auto-connect. 9222 is the
+ * shared convention where anyone's ad-hoc Chrome lives, and connecting injects
+ * a network interceptor into the page, so there it is discover-only unless named.
+ */
+export function chromiumScanPorts(env: NodeJS.ProcessEnv = process.env): Array<{ port: number; autoConnect: boolean }> {
+    const configured: number[] = [];
+    for (const raw of (env.EXECBRO_CHROMIUM_PORTS || "").split(",")) {
+        const port = Number(raw.trim());
+        if (Number.isInteger(port) && port > 0 && port <= 65535 && !configured.includes(port)) configured.push(port);
+    }
+    const result = configured.map((port) => ({ port, autoConnect: true }));
+    if (!configured.includes(CHROMIUM_DEFAULT_PORT)) result.push({ port: CHROMIUM_DEFAULT_PORT, autoConnect: false });
+    return result;
+}
+
 // Check if a port is open
 export async function isPortOpen(port: number, host: string = "localhost"): Promise<boolean> {
     return new Promise((resolve) => {
@@ -68,7 +144,9 @@ export async function fetchDevices(port: number): Promise<DeviceInfo[]> {
             return [];
         }
         const devices = (await response.json()) as DeviceInfo[];
-        return devices.filter((d) => d.webSocketDebuggerUrl);
+        // The one reader of /json: filtering here keeps browser internals out of
+        // scan, connect_metro, ensure_connection and the reconnect fallback alike.
+        return nameChromiumTargets(devices.filter((d) => d.webSocketDebuggerUrl && !isBrowserInternalTarget(d)));
     } catch {
         return [];
     }
