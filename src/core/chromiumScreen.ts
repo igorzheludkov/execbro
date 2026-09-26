@@ -547,5 +547,5 @@ export const ACTIVE_ELEMENT_JS = `(function () {
     ${DOM_HELPERS_JS}
     var el = document.activeElement;
     if (!el || el === document.body || el === document.documentElement) return JSON.stringify(null);
-    return JSON.stringify({ element: describe(el), testID: testIdOf(el), label: labelOf(el), value: isEditable(el) ? safeValue(el) : null });
+    return JSON.stringify({ element: describe(el), testID: testIdOf(el), label: labelOf(el), placeholder: el.getAttribute("placeholder"), value: isEditable(el) ? safeValue(el) : null });
 })()`;

@@ -12,7 +12,7 @@ import { ACTIVE_ELEMENT_JS } from "../core/chromiumScreen.js";
 /** Lets a keydown handler re-render before the focused element is read back. */
 const KEY_SETTLE_MS = 80;
 
-type Active = { element: string; testID: string | null; label: string | null; value: string | null } | null;
+type Active = { element: string; testID: string | null; label: string | null; placeholder: string | null; value: string | null } | null;
 
 export async function chromiumPressKey(
     app: ConnectedApp,
