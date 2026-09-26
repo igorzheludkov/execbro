@@ -87,7 +87,12 @@ export type FailureKind =
      * So this exists to make them countable and separable, never to remove
      * them: see `badArgumentsBreakdown` in the infra worker.
      */
-    | "bad_arguments";
+    | "bad_arguments"
+    /**
+     * A chromium page is paused by an open alert / confirm / prompt, so the tool
+     * refused instead of waiting out a timeout. App state, not a tool defect.
+     */
+    | "js_dialog_open";
 
 /**
  * The kinds that mean "the tool could not have succeeded because the setup was
