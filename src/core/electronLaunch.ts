@@ -18,6 +18,13 @@ import { CONFIG_DIR } from "./paths.js";
 export interface LaunchPlan { cmd: string; args: string[]; cwd: string; runner: "electron-vite" | "electron" }
 
 const POLL_MS = 500;
+/** How long a window may keep its URL as its title before it is connected anyway. */
+const TITLE_GRACE_MS = 5000;
+
+/** Before document.title is set, Chromium lists a page's URL (scheme dropped) as its title. */
+function untitled(d: DeviceInfo): boolean {
+    return !d.title || (d.url ?? "").endsWith(d.title);
+}
 
 /** node_modules/.bin/<name>, walking up from start, so a hoisted monorepo install is found. */
 export function findBin(start: string, name: string): string | null {
@@ -102,6 +109,7 @@ export async function launchElectron(
     child.unref();
 
     const deadline = Date.now() + timeoutMs;
+    let firstSeen: number | null = null;
     while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, POLL_MS));
         if (spawnError) return { ok: false, error: `Could not start ${plan.cmd}: ${(spawnError as Error).message}`, logPath };
@@ -110,7 +118,13 @@ export async function launchElectron(
         }
         const actual = devToolsPortFromLog(readLog(logPath)) ?? port;
         const devices = (await fetchDevices(actual)).filter(isChromiumTarget);
-        if (devices.length > 0) return { ok: true, pid: child.pid!, port: actual, logPath, devices };
+        if (devices.length === 0) continue;
+        // Windows are named after their title and the name is how `device` finds
+        // them, so connecting before the page sets its title would name the window
+        // after its URL.
+        firstSeen ??= Date.now();
+        if (devices.some(untitled) && Date.now() - firstSeen < TITLE_GRACE_MS) continue;
+        return { ok: true, pid: child.pid!, port: actual, logPath, devices };
     }
     return {
         ok: false,

@@ -87,9 +87,14 @@ describe("launchElectron, app pins its own port", () => {
 
     it("follows the port Chromium reports in the log when the app overrides the flag", async () => {
         // A stand-in /json listing: one Electron window, as Chromium serves it.
+        // The first listing is taken before the page has set document.title, so
+        // Chromium reports the URL as the title; a window named after it would not
+        // match device: "Pinned".
+        let hits = 0;
         server = createServer((_req, res) => {
+            const title = hits++ === 0 ? "localhost:5173/" : "Pinned";
             res.setHeader("content-type", "application/json");
-            res.end(JSON.stringify([{ id: "A1", type: "page", title: "Pinned", description: "", url: "http://localhost:5173/", webSocketDebuggerUrl: "ws://127.0.0.1/devtools/page/A1" }]));
+            res.end(JSON.stringify([{ id: "A1", type: "page", title, description: "", url: "http://localhost:5173/", webSocketDebuggerUrl: "ws://127.0.0.1/devtools/page/A1" }]));
         });
         await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
         const real = (server.address() as AddressInfo).port;
