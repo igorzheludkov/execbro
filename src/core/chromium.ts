@@ -13,6 +13,7 @@ import sharp from "sharp";
 import type { ConnectedApp } from "./types.js";
 import { sendCdpCommand, evaluateJson } from "./cdpCommand.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
+import type { TextEntryResult } from "./textEntry.js";
 
 /** Same API image cap ios.ts and android.ts apply. */
 export const CHROMIUM_MAX_DIMENSION = 2000;
@@ -270,4 +271,113 @@ export async function prepareDomTarget(
     );
     if (r.error) throw new Error(r.error);
     return r;
+}
+
+/** Lets a controlled input re-render, so a value React rejected has already reverted when it is read back. */
+const READBACK_SETTLE_MS = 80;
+
+export function buildDomFocusJs(i: number, replace: boolean, clearOnly: boolean): string {
+    return `(function () {
+    var el = (globalThis.__eb_domTargets || [])[${i}];
+    if (!el || !el.isConnected) return JSON.stringify({ error: "The field left the page between lookup and write. Retry." });
+    el.scrollIntoView({ block: "nearest" });
+    el.focus();
+    var field = !el.isContentEditable;
+    var before = field ? String(el.value) : el.innerText;
+    if (field) {
+        try {
+            if (${replace}) el.select();
+            else el.setSelectionRange(el.value.length, el.value.length);
+        } catch (e) {}
+    } else {
+        var range = document.createRange();
+        range.selectNodeContents(el);
+        if (!${replace}) range.collapse(false);
+        var sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+    if (${clearOnly}) document.execCommand("delete");
+    return JSON.stringify({
+        before: before,
+        field: field,
+        focused: document.activeElement === el,
+        maxLength: field && el.maxLength > 0 ? el.maxLength : null
+    });
+})()`;
+}
+
+export function buildDomReadJs(i: number): string {
+    return `(function () {
+    var el = (globalThis.__eb_domTargets || [])[${i}];
+    if (!el || !el.isConnected) return JSON.stringify({ value: null });
+    return JSON.stringify({ value: el.isContentEditable ? el.innerText : String(el.value) });
+})()`;
+}
+
+export function judgeTextEntry(a: {
+    before: string;
+    sent: string;
+    replace: boolean;
+    landed: string | null;
+    maxLength: number | null;
+}): TextEntryResult {
+    const expected = a.replace ? a.sent : a.before + a.sent;
+    if (a.landed === expected) return { success: true, verified: true, value: a.landed, path: "cdp" };
+    if (a.landed === null) return { success: false, error: "the field left the page before it could be read back", sent: expected, landed: null };
+    const truncated = a.maxLength !== null && a.landed.length === a.maxLength && expected.startsWith(a.landed);
+    return {
+        success: false,
+        error: truncated
+            ? `the field's maxLength (${a.maxLength}) cut the text; retrying cannot fit it`
+            : "the field does not hold what was sent (a controlled input may have rejected or reformatted it)",
+        sent: expected,
+        landed: a.landed,
+    };
+}
+
+export async function chromiumInputText(
+    app: ConnectedApp,
+    a: { text: string; testID?: string; component?: string; textMatch?: string; index?: number; replace?: boolean }
+): Promise<TextEntryResult> {
+    const replace = a.replace === true;
+    const targeted = a.testID !== undefined || a.component !== undefined || a.textMatch !== undefined;
+    try {
+        const found = await collectDomTargets(app, { mode: "input", testID: a.testID, component: a.component, textMatch: a.textMatch });
+        const candidates = found.candidates.map((c, n) => ({
+            index: n, component: c.tag, label: c.label, placeholder: c.placeholder, value: c.value, testID: c.testID,
+        }));
+        if (!targeted && !found.focused) {
+            return {
+                success: false,
+                error: "no field is focused. Pass testID, component or textMatch so this tool can focus one itself.",
+                candidates,
+                totalInputs: found.total,
+            };
+        }
+        const pick = pickDomTarget(found.candidates, undefined, a.index);
+        if (pick.kind === "ambiguous") {
+            return { success: false, ambiguous: true, error: `${pick.matches.length} fields match this target`, candidates, totalInputs: found.total };
+        }
+        if (pick.kind === "none") {
+            return {
+                success: false,
+                error: "no visible editable field matches that target. On chromium, inputs, textareas and contenteditable elements are searched; " +
+                    "testID matches data-testid / data-test-id / id.",
+            };
+        }
+        const prep = await evaluateJson<{ error?: string; before: string; field: boolean; focused: boolean; maxLength: number | null }>(
+            app.ws,
+            buildDomFocusJs(pick.cand.i, replace, replace && a.text === "")
+        );
+        if (prep.error) return { success: false, error: prep.error };
+        if (a.text !== "") await chromiumInsertText(app, a.text);
+        await new Promise((r) => setTimeout(r, READBACK_SETTLE_MS));
+        const { value } = await evaluateJson<{ value: string | null }>(app.ws, buildDomReadJs(pick.cand.i));
+        // contenteditable innerText carries a trailing newline the caller never typed.
+        const landed = value !== null && !prep.field ? value.replace(/\n$/, "") : value;
+        return judgeTextEntry({ before: prep.before, sent: a.text, replace, landed, maxLength: prep.maxLength });
+    } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
 }

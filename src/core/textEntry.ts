@@ -24,7 +24,7 @@ export type EnterTextArgs = {
 };
 
 /** How the text was written. See the branch in `write` for why each exists. */
-export type WritePath = "react" | "hid" | "native";
+export type WritePath = "react" | "hid" | "native" | "cdp";
 
 export type TextEntryResult = {
     success: boolean;

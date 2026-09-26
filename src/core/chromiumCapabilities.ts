@@ -27,7 +27,7 @@ export const CHROMIUM_TOOLS: Set<string> = new Set([
     // Component inspection via the fiber tree (DOM fallback). The surface argent rejects.
     "get_component_tree", "find_components", "inspect_component",
     // Screen and input via CDP (Page / Input domains)
-    "screenshot", "tap",
+    "screenshot", "tap", "input_text",
 ]);
 
 const OVERRIDES: Record<string, string> = {
@@ -44,7 +44,7 @@ export function chromiumGate(toolName: string, platform: string | undefined) {
     if (platform !== "chromium" || CHROMIUM_TOOLS.has(toolName)) return null;
     const text = OVERRIDES[toolName] ??
         `${toolName} is not supported on chromium targets (Electron / Chrome) yet. ` +
-        "Supported there: logs, network capture and replay, execute_in_app, debug globals, redux, http_request/app_request, component inspection (get_component_tree, find_components, inspect_component). " +
+        "Supported there: logs, network capture and replay, execute_in_app, debug globals, redux, http_request/app_request, component inspection (get_component_tree, find_components, inspect_component), screenshot, tap, input_text. " +
         "To run it against a React Native app instead, pass device=<name> (get_apps lists connected targets).";
     return {
         content: [{ type: "text" as const, text }] as [{ type: "text"; text: string }],

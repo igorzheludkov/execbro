@@ -38,6 +38,8 @@ import {
 } from "../pro/verifyAction.js";
 import { clearFocusedInput, dismissKeyboard } from "../core/focusedInputTools.js";
 import { enterText, textEntryAxes, type TextEntryResult } from "../core/textEntry.js";
+import { chromiumAppFor } from "../core/connection.js";
+import { chromiumInputText } from "../core/chromium.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
@@ -1060,7 +1062,7 @@ export function registerInteractionTools(server: McpServer): void {
                 testID: z
                     .string()
                     .optional()
-                    .describe("Target the input with this testID. Most reliable — the tool focuses it itself, no prior tap needed."),
+                    .describe("Target the input with this testID. Most reliable — the tool focuses it itself, no prior tap needed. On a chromium (Electron / Chrome) target it matches data-testid, data-test-id or id, and inputs, textareas and contenteditable elements are searched; the text is written with CDP Input.insertText and read back."),
                 component: z
                     .string()
                     .optional()
@@ -1090,6 +1092,13 @@ export function registerInteractionTools(server: McpServer): void {
             }
         },
         async ({ text, testID, component, textMatch, index, replace, device, native }) => {
+            // Chromium: DOM targeting plus Input.insertText. `native` has no layer below it here.
+            const chromeApp = chromiumAppFor("input_text", device);
+            if (chromeApp) {
+                return formatTextEntryResponse(
+                    await chromiumInputText(chromeApp, { text, testID, component, textMatch, index, replace })
+                );
+            }
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
                 return {
