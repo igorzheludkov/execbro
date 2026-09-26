@@ -18,6 +18,7 @@ import {
     pxPerCss,
     type ChromiumShot,
 } from "../core/chromium.js";
+import { raceDialog, formatDialog, type DialogInfo } from "../core/chromiumDialogs.js";
 
 /** Long enough for a click's re-render and a CSS transition's first frames. */
 const SETTLE_MS = 350;
@@ -90,9 +91,10 @@ export async function chromiumTap(
         const shouldVerify = options.verify !== false;
         const shouldScreenshot = options.screenshot !== false;
         const before = shouldVerify ? await chromiumCapture(app) : null;
-        await chromiumClick(app, css.x, css.y, options.duration ?? 0);
-
-        const { screenshot, verification } = await verifyChromiumAction(app, before, shouldScreenshot, "click");
+        const click = await raceDialog(app.ws, chromiumClick(app, css.x, css.y, options.duration ?? 0));
+        const { screenshot, verification, dialog } = click.kind === "dialog"
+            ? { screenshot: undefined, verification: dialogVerification(click.dialog), dialog: click.dialog }
+            : await verifyChromiumAction(app, before, shouldScreenshot, "click");
 
         return {
             ...base,
@@ -102,6 +104,7 @@ export async function chromiumTap(
             convertedTo: { x: Math.round(css.x), y: Math.round(css.y), unit: "css" },
             screenshot,
             verification,
+            dialog,
             warning,
         };
     } catch (err) {
@@ -119,7 +122,7 @@ export async function verifyChromiumAction(
     shouldScreenshot: boolean,
     action: string,
     settleMs = SETTLE_MS
-): Promise<{ screenshot?: TapScreenshot; verification: TapVerification }> {
+): Promise<{ screenshot?: TapScreenshot; verification: TapVerification; dialog?: DialogInfo }> {
     let screenshot: TapScreenshot | undefined;
     let verification: TapVerification = {
         skipped: true,
@@ -133,7 +136,9 @@ export async function verifyChromiumAction(
         // click ("Save & close") leaves nothing to capture, and reporting that
         // as a failure invites a retry that acts twice.
         try {
-            after = await chromiumCapture(app);
+            const shot = await raceDialog(app.ws, chromiumCapture(app));
+            if (shot.kind === "dialog") return { verification: dialogVerification(shot.dialog), dialog: shot.dialog };
+            after = shot.value;
         } catch (err) {
             const why = err instanceof Error ? err.message : String(err);
             verification = {
@@ -166,4 +171,13 @@ export async function verifyChromiumAction(
         }
     }
     return { screenshot, verification };
+}
+
+/** Verification when a JavaScript dialog paused the page: nothing can be captured until it is answered. */
+export function dialogVerification(d: DialogInfo): TapVerification {
+    return {
+        skipped: true,
+        skippedReason: "dialog open",
+        explanation: `The input was delivered and opened ${formatDialog(d)}. The page is paused until it is answered: call handle_dialog({ action: "accept" }) or ({ action: "dismiss" }), then take a screenshot.`,
+    };
 }

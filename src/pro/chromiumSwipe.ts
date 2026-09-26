@@ -20,7 +20,8 @@ import {
     type ScrollProbe,
 } from "../core/chromium.js";
 import { buildScrollProbeJs, SCROLL_READ_JS } from "../core/chromiumScreen.js";
-import { verifyChromiumAction } from "./chromiumTap.js";
+import { verifyChromiumAction, dialogVerification } from "./chromiumTap.js";
+import { raceDialog } from "../core/chromiumDialogs.js";
 
 /** Smooth scrolling animates: wait this long, then read until two reads agree. */
 const SCROLL_SETTLE_MS = 350;
@@ -96,10 +97,13 @@ export async function chromiumSwipe(app: ConnectedApp, a: ChromiumSwipeArgs) {
         }
 
         const before = shouldVerify ? await chromiumCapture(app) : null;
-        if (drag) {
-            await chromiumDrag(app, dragPath(at, { x: a.endX! / k, y: a.endY! / k }, a.durationMs ?? DRAG_DEFAULT_MS));
-        } else {
-            await chromiumWheel(app, at.x, at.y, wheel!.dx, wheel!.dy);
+        const act = await raceDialog(app.ws, drag
+            ? chromiumDrag(app, dragPath(at, { x: a.endX! / k, y: a.endY! / k }, a.durationMs ?? DRAG_DEFAULT_MS))
+            : chromiumWheel(app, at.x, at.y, wheel!.dx, wheel!.dy));
+        if (act.kind === "dialog") {
+            body.dialog = act.dialog;
+            body.verification = dialogVerification(act.dialog);
+            return { content: [{ type: "text" as const, text: JSON.stringify(body, null, 2) }], isError: false };
         }
 
         let warning: string | undefined;
@@ -113,7 +117,8 @@ export async function chromiumSwipe(app: ConnectedApp, a: ChromiumSwipeArgs) {
             }
             if (v.warning) warning = `Wheel delivered but nothing scrolled: ${v.warning}`;
         }
-        const { screenshot, verification } = await verifyChromiumAction(app, before, shouldScreenshot, drag ? "drag" : "wheel", drag ? undefined : 0);
+        const { screenshot, verification, dialog } = await verifyChromiumAction(app, before, shouldScreenshot, drag ? "drag" : "wheel", drag ? undefined : 0);
+        if (dialog) body.dialog = dialog;
 
         body.verification = verification;
         if (warning) body.warning = warning;

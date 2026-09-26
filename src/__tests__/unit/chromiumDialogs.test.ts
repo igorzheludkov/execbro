@@ -62,6 +62,11 @@ describe("raceDialog", () => {
         process.off("unhandledRejection", onUnhandled);
         expect(unhandled).toEqual([]);
     });
+    it("returns a dialog that is already open, since the page is paused either way", async () => {
+        const a = {};
+        noteDialogOpened(a, opening("Open already"));
+        expect(await raceDialog(a, new Promise(() => {}))).toMatchObject({ kind: "dialog", dialog: { message: "Open already" } });
+    });
     it("passes a rejection through when no dialog opened", async () => {
         await expect(raceDialog({}, Promise.reject(new Error("boom")))).rejects.toThrow("boom");
     });
