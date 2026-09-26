@@ -97,9 +97,23 @@ export async function chromiumTap(
             skippedReason: "verify=false",
             explanation: "Verification skipped (verify=false).",
         };
+        let after: Awaited<ReturnType<typeof chromiumCapture>> | undefined;
         if (before || shouldScreenshot) {
             await new Promise((r) => setTimeout(r, SETTLE_MS));
-            const after = await chromiumCapture(app);
+            // The click is already delivered. A popover that hides itself on the
+            // click ("Save & close") leaves nothing to capture, and reporting that
+            // as a failed tap invites a retry that acts twice.
+            try {
+                after = await chromiumCapture(app);
+            } catch (err) {
+                const why = err instanceof Error ? err.message : String(err);
+                verification = {
+                    ...(before ? { meaningful: true } : { skipped: true, skippedReason: "no after-frame" }),
+                    explanation: `The click was delivered, then the window could not be captured: ${why} It most likely hid itself in response to the click.`,
+                };
+            }
+        }
+        if (after) {
             if (shouldScreenshot) {
                 screenshot = { image: after.buffer.toString("base64"), width: after.width, height: after.height, scaleFactor: after.scaleFactor };
             }

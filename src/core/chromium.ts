@@ -167,11 +167,12 @@ export function buildDomCollectJs(q: DomQuery): string {
         if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
         return el.tagName === "INPUT" && NOT_TEXT.indexOf(String(el.type).toLowerCase()) < 0;
     }
-    function editableIn(el) {
-        if (isEditable(el)) return el;
-        var inner = el.querySelectorAll ? el.querySelectorAll("input, textarea, [contenteditable]") : [];
-        for (var n = 0; n < inner.length; n++) if (isEditable(inner[n])) return inner[n];
-        return null;
+    // Every field under a match, so a wrapper around several is reported as
+    // ambiguous rather than resolved to whichever field comes first.
+    function editablesIn(el) {
+        if (isEditable(el)) return [el];
+        var inner = el.querySelectorAll ? Array.prototype.slice.call(el.querySelectorAll("input, textarea, [contenteditable]")) : [];
+        return inner.filter(isEditable);
     }
     function testIdOf(el) { return el.getAttribute("data-testid") || el.getAttribute("data-test-id") || el.id || null; }
     function labelOf(el) { return norm(el.getAttribute("aria-label") || (el.labels && el.labels[0] ? el.labels[0].innerText : "")) || null; }
@@ -203,7 +204,10 @@ export function buildDomCollectJs(q: DomQuery): string {
         els = all.filter(function (el) {
             return norm(el.tagName === "INPUT" ? el.value : el.textContent).toLowerCase().indexOf(wantT) >= 0 ||
                 norm(el.getAttribute("aria-label")).toLowerCase().indexOf(wantT) >= 0;
-        }).filter(visible);
+        });
+        // Innermost first, visibility second: textContent includes hidden
+        // descendants, so filtering visibility first let a visible container
+        // stand in for a hidden match inside it.
         // ponytail: O(k^2) innermost filter over matches; k is small (matches plus their ancestors).
         els = els.filter(function (el) { return !els.some(function (o) { return o !== el && el.contains(o); }); });
     }
@@ -216,7 +220,8 @@ export function buildDomCollectJs(q: DomQuery): string {
                 });
             });
         } else if (q.testID || q.component) {
-            els = els.map(editableIn).filter(function (el, n, a) { return el && a.indexOf(el) === n; });
+            els = els.reduce(function (acc, el) { return acc.concat(editablesIn(el)); }, [])
+                .filter(function (el, n, a) { return a.indexOf(el) === n; });
         } else {
             var active = document.activeElement;
             focused = isEditable(active);
@@ -250,7 +255,7 @@ export function buildDomPrepareJs(i: number): string {
     var cx = r.x + r.width / 2, cy = r.y + r.height / 2;
     var scrolled = false;
     if (cx < 0 || cy < 0 || cx >= innerWidth || cy >= innerHeight) {
-        el.scrollIntoView({ block: "center", inline: "center" });
+        el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
         r = el.getBoundingClientRect();
         cx = r.x + r.width / 2;
         cy = r.y + r.height / 2;
@@ -288,7 +293,7 @@ export function buildDomFocusJs(i: number, replace: boolean, clearOnly: boolean)
     return `(function () {
     var el = (globalThis.__eb_domTargets || [])[${i}];
     if (!el || !el.isConnected) return JSON.stringify({ error: "The field left the page between lookup and write. Retry." });
-    el.scrollIntoView({ block: "nearest" });
+    el.scrollIntoView({ block: "nearest", behavior: "instant" });
     el.focus();
     var field = !el.isContentEditable;
     var before = field ? String(el.value) : el.innerText;
@@ -382,9 +387,11 @@ export async function chromiumInputText(
         if (a.text !== "") await chromiumInsertText(app, a.text);
         await new Promise((r) => setTimeout(r, READBACK_SETTLE_MS));
         const { value } = await evaluateJson<{ value: string | null }>(app.ws, buildDomReadJs(pick.cand.i));
-        // contenteditable innerText carries a trailing newline the caller never typed.
-        const landed = value !== null && !prep.field ? value.replace(/\n$/, "") : value;
-        return judgeTextEntry({ before: prep.before, sent: a.text, replace, landed, maxLength: prep.maxLength });
+        // contenteditable innerText carries a trailing newline the caller never
+        // typed, before the write (an empty editor reads "\n") as well as after.
+        const trim = (v: string) => (prep.field ? v : v.replace(/\n$/, ""));
+        const landed = value === null ? null : trim(value);
+        return judgeTextEntry({ before: trim(prep.before), sent: a.text, replace, landed, maxLength: prep.maxLength });
     } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
