@@ -164,7 +164,7 @@ export async function fetchDevices(port: number): Promise<DeviceInfo[]> {
         const devices = (await response.json()) as DeviceInfo[];
         // The one reader of /json: filtering here keeps browser internals out of
         // scan, connect_metro, ensure_connection and the reconnect fallback alike.
-        return nameChromiumTargets(devices.filter((d) => d.webSocketDebuggerUrl && !isBrowserInternalTarget(d)));
+        return nameChromiumTargets(keepChromiumPages(devices.filter((d) => d.webSocketDebuggerUrl && !isBrowserInternalTarget(d))));
     } catch {
         return [];
     }
@@ -190,6 +190,51 @@ export function selectMainDevice(devices: DeviceInfo[]): DeviceInfo | null {
         ) ||
         devices[0]
     );
+}
+
+/**
+ * A port is a Chromium endpoint by what it lists, not by its number: an
+ * Electron app can sit inside the Metro range (the spike used 8085). Metro's
+ * inspector proxy lists `node` targets only, so one real page settles it.
+ */
+export function isChromiumListing(devices: DeviceInfo[]): boolean {
+    return devices.some(isChromiumTarget);
+}
+
+/**
+ * On a Chromium endpoint keep only real pages. A target type we do not know
+ * (`other`, `assistive_technology`, whatever Chrome adds next) would otherwise
+ * connect with the default `android` platform and slip past the gate. A Metro
+ * listing is returned untouched.
+ */
+export function keepChromiumPages(devices: DeviceInfo[]): DeviceInfo[] {
+    return isChromiumListing(devices) ? devices.filter(isChromiumTarget) : devices;
+}
+
+/**
+ * What connect_metro attaches. Metro keeps connect-everything. On a port with
+ * several Chromium targets a name is required: connecting injects a network
+ * interceptor into the page, so a bare call must not do that to every tab of
+ * someone's browser.
+ */
+export function selectConnectTargets(
+    devices: DeviceInfo[],
+    device?: string
+): { targets: DeviceInfo[] } | { error: string } {
+    const available = devices.map((d) => d.deviceName || d.title).join(", ");
+    if (device) {
+        const wanted = device.toLowerCase();
+        const targets = devices.filter((d) => (d.deviceName || d.title || "").toLowerCase().includes(wanted));
+        return targets.length > 0 ? { targets } : { error: `No target matches "${device}". Available: ${available}` };
+    }
+    const chromium = devices.filter(isChromiumTarget);
+    if (chromium.length > 1) {
+        return {
+            error: `${chromium.length} Chromium targets here. Connecting injects a network interceptor into each page, ` +
+                `so name the one you want with device="<name>". Available: ${available}`
+        };
+    }
+    return { targets: devices };
 }
 
 /**

@@ -6,6 +6,9 @@ import {
     chromiumScanPorts,
     filterDebuggableDevices,
     pickReconnectTarget,
+    isChromiumListing,
+    keepChromiumPages,
+    selectConnectTargets,
 } from "../../core/metro.js";
 import type { DeviceInfo } from "../../core/types.js";
 
@@ -156,5 +159,64 @@ describe("pickReconnectTarget", () => {
     it("keeps the RN fallback to the main device when the id changed", () => {
         const oldRn = target({ id: "old", type: "node", title: "Hermes React Native", deviceName: "Pixel" });
         expect(pickReconnectTarget([RN_TARGETS[1]], oldRn)?.id).toBe("he");
+    });
+});
+
+describe("isChromiumListing / keepChromiumPages (a port is Chromium by what it lists)", () => {
+    it("recognises a Chromium endpoint on any port number, including the RN range", () => {
+        expect(isChromiumListing([target({ id: "p", title: "FluentTalk", url: "http://localhost:5173/" })])).toBe(true);
+        expect(isChromiumListing(RN_TARGETS)).toBe(false);
+        expect(isChromiumListing([])).toBe(false);
+    });
+
+    it("keeps only real pages on a Chromium endpoint, so an unknown type never connects as android", () => {
+        const listing = [
+            target({ id: "p", title: "App", url: "http://localhost:5173/" }),
+            target({ id: "o", type: "other", title: "Something", url: "" }),
+            target({ id: "x", type: "assistive_technology", title: "AT", url: "" }),
+        ];
+        expect(keepChromiumPages(listing).map((d) => d.id)).toEqual(["p"]);
+    });
+
+    it("leaves a Metro listing untouched, whatever its target types", () => {
+        const odd = target({ id: "n", type: "something-new", title: "Hermes React Native", deviceName: "Pixel" });
+        expect(keepChromiumPages([...RN_TARGETS, odd])).toHaveLength(4);
+    });
+});
+
+describe("selectConnectTargets (connect_metro)", () => {
+    const tabs = nameChromiumTargets([
+        target({ id: "t1", title: "Docs", url: "http://a" }),
+        target({ id: "t2", title: "Mail", url: "http://b" }),
+    ]);
+
+    it("refuses to connect every tab of a browser when no device is named", () => {
+        const r = selectConnectTargets(tabs, undefined);
+        expect("error" in r).toBe(true);
+        if ("error" in r) {
+            expect(r.error).toContain("Docs");
+            expect(r.error).toContain("Mail");
+            expect(r.error).toContain("device");
+        }
+    });
+
+    it("connects the one named tab", () => {
+        const r = selectConnectTargets(tabs, "mail");
+        expect("targets" in r && r.targets.map((d) => d.id)).toEqual(["t2"]);
+    });
+
+    it("connects a lone Chromium target without a device name", () => {
+        const r = selectConnectTargets([tabs[0]], undefined);
+        expect("targets" in r && r.targets).toHaveLength(1);
+    });
+
+    it("keeps Metro's connect-everything behaviour", () => {
+        const r = selectConnectTargets(RN_TARGETS, undefined);
+        expect("targets" in r && r.targets).toHaveLength(3);
+    });
+
+    it("names what is available when the filter matches nothing", () => {
+        const r = selectConnectTargets(tabs, "nomatch");
+        expect("error" in r && r.error).toContain("Available: Docs, Mail");
     });
 });

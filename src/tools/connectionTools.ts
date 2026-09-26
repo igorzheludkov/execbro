@@ -40,7 +40,7 @@ import {
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
-import { chromiumScanPorts, isChromiumTarget, isPortOpen } from "../core/metro.js";
+import { chromiumScanPorts, isChromiumListing, isChromiumTarget, isPortOpen, selectConnectTargets } from "../core/metro.js";
 
 export function registerConnectionTools(server: McpServer): void {
     // Tool: Scan for Metro servers
@@ -91,6 +91,9 @@ export function registerConnectionTools(server: McpServer): void {
             const portDevices = new Map<number, DeviceInfo[]>();
             for (const port of openPorts) {
                 const devices = await fetchDevices(port);
+                // A Chromium app inside the Metro range (the spike used 8085) is a
+                // Chromium port too: no Metro restart check, no build events.
+                if (isChromiumListing(devices)) chromiumPortSet.add(port);
                 const debuggable = filterDebuggableDevices(devices);
                 if (debuggable.length > 0) {
                     portDevices.set(port, debuggable);
@@ -609,24 +612,17 @@ export function registerConnectionTools(server: McpServer): void {
                 "SEE ALSO: scan_metro for auto-discovery; get_apps afterwards to confirm the device attached.",
             inputSchema: {
                 port: z.coerce.number().default(8081).describe("Debug port (default: 8081)"),
-                device: z.string().optional().describe("Connect only targets whose name contains this (case-insensitive). Omit to connect every target on the port.")
+                device: z.string().optional().describe("Connect only targets whose name contains this (case-insensitive). Omit on a Metro port to connect every target; required on a port with several Chromium targets (each connect injects a network interceptor into the page).")
             }
         },
         async ({ port, device }) => {
             try {
                 const devices = await fetchDevices(port);
-                const wanted = device?.toLowerCase();
-                const targets = wanted
-                    ? devices.filter((d) => (d.deviceName || d.title || "").toLowerCase().includes(wanted))
-                    : devices;
-                if (wanted && targets.length === 0 && devices.length > 0) {
-                    return {
-                        content: [{
-                            type: "text",
-                            text: `No target on port ${port} matches "${device}". Available: ${devices.map((d) => d.deviceName || d.title).join(", ")}`
-                        }]
-                    };
+                const selection = devices.length > 0 ? selectConnectTargets(devices, device) : { targets: devices };
+                if ("error" in selection) {
+                    return { content: [{ type: "text", text: `Port ${port}: ${selection.error}` }] };
                 }
+                const { targets } = selection;
                 if (devices.length === 0) {
                     return {
                         content: [
