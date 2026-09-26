@@ -214,8 +214,9 @@ export function buildDomCollectJs(q: DomQuery): string {
         // Innermost first, visibility second: textContent includes hidden
         // descendants, so filtering visibility first let a visible container
         // stand in for a hidden match inside it.
-        // ponytail: O(k^2) innermost filter over matches; k is small (matches plus their ancestors).
-        els = els.filter(function (el) { return !els.some(function (o) { return o !== el && el.contains(o); }); });
+        // els is in document order, where an element's descendants directly follow
+        // it: if any descendant matched, the next match is one. O(k), not O(k^2).
+        els = els.filter(function (el, n) { var next = els[n + 1]; return !(next && el.contains(next)); });
     }
     if (q.mode === "input") {
         if (q.textMatch) {
@@ -237,7 +238,7 @@ export function buildDomCollectJs(q: DomQuery): string {
     els = els.filter(visible);
     globalThis.__eb_domTargets = els;
     return JSON.stringify({
-        viewport: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio },
+        viewport: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, hidden: document.visibilityState === "hidden" },
         focused: focused,
         total: els.length,
         candidates: els.slice(0, 50).map(function (el, n) {

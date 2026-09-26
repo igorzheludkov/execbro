@@ -46,6 +46,28 @@ describe("chromiumTap scroll note", () => {
     });
 });
 
+describe("chromiumTap on a hidden window", () => {
+    it("refuses before clicking, with verify:false too", async () => {
+        const ws = new ScriptedWs((m) => {
+            if (m.method !== "Runtime.evaluate") return {};
+            if (m.params.expression!.includes("__eb_domTargets = els")) {
+                return value({
+                    viewport: { w: 380, h: 600, dpr: 1, hidden: true }, focused: false, total: 1,
+                    candidates: [{ i: 0, tag: "button", text: "Save", testID: null, label: null, placeholder: null, value: null, rect: { x: 10, y: 10, w: 100, h: 20 } }],
+                });
+            }
+            return value({ w: 380, h: 600, dpr: 1, hidden: true, x: 60, y: 20, scrolled: false, covered: null });
+        });
+        const r = await chromiumTap(appOn(ws), { text: "Save" }, { verify: false, screenshot: false });
+        expect(r.success).toBe(false);
+        expect(r.error).toMatch(/hidden/);
+        expect(ws.sent.some((m) => m.method === "Input.dispatchMouseEvent")).toBe(false);
+        const c = await chromiumTap(appOn(ws), { x: 10, y: 10 }, { verify: false, screenshot: false });
+        expect(c.success).toBe(false);
+        expect(ws.sent.some((m) => m.method === "Input.dispatchMouseEvent")).toBe(false);
+    });
+});
+
 describe("chromiumInputText into an empty rich-text editor", () => {
     it("verifies an append when the editor's empty paragraph reads as a lone newline", async () => {
         const ws = new ScriptedWs((m) => {
