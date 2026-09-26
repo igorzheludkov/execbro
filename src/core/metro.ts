@@ -271,7 +271,8 @@ export function selectConnectTargets(
     const available = devices.map((d) => d.deviceName || d.title).join(", ");
     if (device) {
         const wanted = device.toLowerCase();
-        const targets = devices.filter((d) => (d.deviceName || d.title || "").toLowerCase().includes(wanted));
+        // The page url too, the same as resolveConnectedAppByDevice, so `device: "window=main"` works here as well.
+        const targets = devices.filter((d) => [d.deviceName || d.title, d.url].some((h) => (h || "").toLowerCase().includes(wanted)));
         return targets.length > 0 ? { targets } : { error: `No target matches "${device}". Available: ${available}` };
     }
     const chromium = devices.filter(isChromiumTarget);
