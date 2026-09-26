@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { pxPerCss, CHROMIUM_MAX_DIMENSION, pickDomTarget, normText, buildDomCollectJs, buildDomPrepareJs, judgeTextEntry, buildDomFocusJs, buildDomReadJs, type DomCandidate } from "../../core/chromium.js";
+import { pxPerCss, CHROMIUM_MAX_DIMENSION, pickDomTarget, normText, buildDomCollectJs, buildDomPrepareJs, judgeTextEntry, maskPasswordEntry, buildDomFocusJs, buildDomReadJs, type DomCandidate } from "../../core/chromium.js";
 
 describe("pxPerCss", () => {
     it("is devicePixelRatio when the raw capture fits the cap (FluentTalk popover, 380x600 @2)", () => {
@@ -86,6 +86,16 @@ describe("injected DOM scripts are valid JavaScript", () => {
         expect(parses(buildDomCollectJs(q))).not.toThrow();
     });
     it("prepare", () => expect(parses(buildDomPrepareJs(3))).not.toThrow());
+});
+
+describe("maskPasswordEntry", () => {
+    it("keeps the verdict of a password write but none of its text", () => {
+        const ok = maskPasswordEntry({ success: true, verified: true, value: "hunter2x", path: "cdp" });
+        expect(ok).toEqual({ success: true, verified: true, value: "[password, 8 chars]", path: "cdp" });
+        const bad = maskPasswordEntry({ success: false, error: "e", sent: "hunter2x", landed: "hunter2" });
+        expect(JSON.stringify(bad)).not.toContain("hunter");
+        expect(bad).toMatchObject({ sent: "[password, 8 chars]", landed: "[password, 7 chars]" });
+    });
 });
 
 describe("judgeTextEntry", () => {
