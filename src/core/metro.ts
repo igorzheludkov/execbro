@@ -54,21 +54,39 @@ export function isBrowserInternalTarget(d: DeviceInfo): boolean {
     return d.type === "page" && hasExcludedScheme(d);
 }
 
+// Names already handed out, by target id + title. A window keeps its name for
+// as long as it lives, so opening a same-titled window never renames one that
+// is connected (buffers and `device` matching are keyed by name).
+// ponytail: grows by one small entry per window ever seen; bound it if a
+// session ever opens thousands of tabs.
+const chromiumNames = new Map<string, string>();
+
 /**
  * Chromium /json carries no deviceName, which is why the spike printed
  * "Connected to FluentTalk (undefined)". Name each window after its title,
- * suffixing collisions (`FluentTalk`, `FluentTalk#2`). Ordered by target id so
- * a window keeps its name across fetches; Chrome lists most-recent first.
+ * suffixing collisions (`FluentTalk`, `FluentTalk#2`). Known windows keep their
+ * name; new ones are named in target-id order so a fetch's listing order (Chrome
+ * lists most-recent first) never decides who gets the plain name.
  */
 export function nameChromiumTargets(devices: DeviceInfo[]): DeviceInfo[] {
     const chromium = devices.filter((d) => isChromiumTarget(d) && !d.deviceName)
         .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    const seen = new Map<string, number>();
+    const key = (d: DeviceInfo) => `${d.id}\u0000${d.title || d.url || "Chromium"}`;
+    const taken = new Set<string>();
     for (const d of chromium) {
-        const base = d.title || d.url || "Chromium";
-        const n = (seen.get(base) ?? 0) + 1;
-        seen.set(base, n);
-        d.deviceName = n === 1 ? base : `${base}#${n}`;
+        const known = chromiumNames.get(key(d));
+        if (known) taken.add(known);
+    }
+    for (const d of chromium) {
+        let name = chromiumNames.get(key(d));
+        if (!name) {
+            const base = d.title || d.url || "Chromium";
+            name = base;
+            for (let n = 2; taken.has(name); n++) name = `${base}#${n}`;
+            chromiumNames.set(key(d), name);
+        }
+        taken.add(name);
+        d.deviceName = name;
         if (!d.appId) d.appId = d.url || "";
     }
     return devices;
@@ -172,6 +190,19 @@ export function selectMainDevice(devices: DeviceInfo[]): DeviceInfo | null {
         ) ||
         devices[0]
     );
+}
+
+/**
+ * The target to reattach to after a drop. RN keeps its old fallback to the main
+ * device, since a reloaded runtime gets a new id. A Chromium target that has gone
+ * (tab or window closed) is gone: falling back would attach to, and inject the
+ * network interceptor into, some other page nobody chose.
+ */
+export function pickReconnectTarget(devices: DeviceInfo[], previous: DeviceInfo): DeviceInfo | null {
+    const same = devices.find((d) => d.id === previous.id);
+    if (same) return same;
+    if (isChromiumTarget(previous)) return null;
+    return selectMainDevice(devices);
 }
 
 export function filterBridgelessDevices(devices: DeviceInfo[]): DeviceInfo[] {

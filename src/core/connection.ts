@@ -8,7 +8,7 @@ import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
 import { resolveAdbSerialForDeviceName } from "./android.js";
-import { fetchDevices, selectMainDevice, scanMetroPorts, isChromiumTarget } from "./metro.js";
+import { fetchDevices, selectMainDevice, scanMetroPorts, isChromiumTarget, pickReconnectTarget } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
@@ -1533,8 +1533,7 @@ async function attemptReconnection(
         const devices = await fetchDevices(metadata.port);
 
         // Try to find the same device first, otherwise select main device
-        const device = devices.find(d => d.id === metadata.deviceInfo.id)
-            || selectMainDevice(devices);
+        const device = pickReconnectTarget(devices, metadata.deviceInfo);
 
         if (!device) {
             console.error(`[execbro] Device no longer available for ${appKey}`);
@@ -1571,16 +1570,21 @@ export function getConnectedApps(): Array<{
 
 // Get first connected app with an OPEN WebSocket (or null if none)
 export function getFirstConnectedApp(): ConnectedApp | null {
-    // Find first app with OPEN WebSocket, cleaning up stale entries
+    // Find first app with OPEN WebSocket, cleaning up stale entries. A React
+    // Native app wins over a chromium one: map order shifts on every reconnect,
+    // and a bare call in a simulator + Electron session means the RN app.
+    let chromium: ConnectedApp | null = null;
     for (const [key, app] of connectedApps.entries()) {
         if (app.ws.readyState === WebSocket.OPEN) {
-            return app;
+            if (app.platform !== "chromium") return app;
+            chromium ??= app;
+            continue;
         }
         // Clean up stale entry
         console.error(`[execbro] Cleaning up stale connection in getFirstConnectedApp: ${key} (state: ${getWebSocketStateName(app.ws.readyState)})`);
         connectedApps.delete(key);
     }
-    return null;
+    return chromium;
 }
 
 /**
@@ -1832,8 +1836,8 @@ export function peekTargetPlatform(toolName: string, device: unknown): Connected
     }
     // A bare ios_/android_ call targets the OS device, not a connected app.
     if (toolName.startsWith("ios_") || toolName.startsWith("android_")) return undefined;
-    const platforms = new Set(getConnectedApps().filter((e) => e.isConnected).map((e) => e.app.platform));
-    return platforms.size === 1 ? [...platforms][0] : undefined;
+    // The same app the handler's own default resolves to, so the two cannot disagree.
+    return getFirstConnectedApp()?.platform;
 }
 
 export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
@@ -2178,7 +2182,7 @@ export async function ensureConnection(options: {
                 connectedApps.delete(appKey);
 
                 const devices = await fetchDevices(appPort);
-                const mainDevice = selectMainDevice(devices);
+                const mainDevice = pickReconnectTarget(devices, app.deviceInfo);
                 if (mainDevice) {
                     try {
                         await connectToDevice(mainDevice, appPort);

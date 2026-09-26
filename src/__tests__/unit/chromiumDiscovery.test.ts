@@ -5,6 +5,7 @@ import {
     nameChromiumTargets,
     chromiumScanPorts,
     filterDebuggableDevices,
+    pickReconnectTarget,
 } from "../../core/metro.js";
 import type { DeviceInfo } from "../../core/types.js";
 
@@ -95,6 +96,20 @@ describe("nameChromiumTargets", () => {
     });
 });
 
+describe("nameChromiumTargets across fetches", () => {
+    it("keeps a named window's name when a same-titled window with a lower id appears", () => {
+        const first = nameChromiumTargets([target({ id: "m-connected", title: "Stable", url: "http://a" })]);
+        expect(first[0].deviceName).toBe("Stable");
+        // Next fetch: a new window whose id sorts BEFORE the connected one.
+        const second = nameChromiumTargets([
+            target({ id: "m-connected", title: "Stable", url: "http://a" }),
+            target({ id: "a-newcomer", title: "Stable", url: "http://b" }),
+        ]);
+        expect(second.find((d) => d.id === "m-connected")?.deviceName).toBe("Stable");
+        expect(second.find((d) => d.id === "a-newcomer")?.deviceName).toBe("Stable#2");
+    });
+});
+
 describe("filterDebuggableDevices with chromium targets", () => {
     it("keeps two same-titled windows apart once named", () => {
         const devices = nameChromiumTargets([
@@ -122,5 +137,24 @@ describe("chromiumScanPorts", () => {
             { port: 9223, autoConnect: true },
             { port: 9222, autoConnect: false },
         ]);
+    });
+});
+
+describe("pickReconnectTarget", () => {
+    const tabA = target({ id: "a", title: "App", url: "http://localhost:5173/" });
+    const tabB = target({ id: "b", title: "Other", url: "http://example.test/" });
+
+    it("reattaches to the same target id when it is still there", () => {
+        expect(pickReconnectTarget([tabB, tabA], tabA)?.id).toBe("a");
+    });
+
+    it("never falls back to another tab when the chromium target it had is gone", () => {
+        // Falling back would attach to, and inject the interceptor into, a page nobody chose.
+        expect(pickReconnectTarget([tabB], tabA)).toBeNull();
+    });
+
+    it("keeps the RN fallback to the main device when the id changed", () => {
+        const oldRn = target({ id: "old", type: "node", title: "Hermes React Native", deviceName: "Pixel" });
+        expect(pickReconnectTarget([RN_TARGETS[1]], oldRn)?.id).toBe("he");
     });
 });
