@@ -41,6 +41,8 @@ export interface DeviceInfo {
     type: string;
     webSocketDebuggerUrl: string;
     deviceName: string;
+    // Chromium /json only: the page URL. Metro targets do not carry it.
+    url?: string;
 }
 
 // Connected app info
