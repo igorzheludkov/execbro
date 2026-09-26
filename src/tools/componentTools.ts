@@ -26,7 +26,7 @@ import {
     getFirstConnectedApp,
 } from "../core/index.js";
 import { chromiumAppFor } from "../core/connection.js";
-import { chromiumScreenState, chromiumScreenLayout } from "../core/chromiumScreen.js";
+import { chromiumScreenState, chromiumScreenLayout, chromiumInspectAtPoint, chromiumMeasure } from "../core/chromiumScreen.js";
 import {
     screenStateToScreenSpace,
     toDeliveredPxY,
@@ -599,6 +599,11 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ x, y, includeProps, includeFrame, device, source = true }) => {
+            const chromeApp = chromiumAppFor("inspect_at_point", device);
+            if (chromeApp) {
+                return await chromiumText(async () =>
+                    `Element at (${x}, ${y}):\n\n${await chromiumInspectAtPoint(chromeApp, x, y, { includeProps, includeFrame })}`);
+            }
             const pointMetrics = await resolveScreenSpaceMetricsFor(device);
             const [result, keyboard] = await Promise.all([
                 inspectAtPoint(x, y, {
@@ -720,6 +725,8 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ componentName, index, device }) => {
+            const chromeApp = chromiumAppFor("measure", device);
+            if (chromeApp) return await chromiumText(() => chromiumMeasure(chromeApp, componentName, index ?? 0));
             if (!await awaitMetro()) {
                 const hint = await metroMissingHintIfAbsent("measure");
                 return {
