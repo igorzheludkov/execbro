@@ -72,6 +72,41 @@ describe("visibleRect", () => {
     });
 });
 
+describe("visibleRect and containing blocks", () => {
+    const doc = { body: {}, documentElement: {} };
+    type St = { overflowX: string; overflowY: string; position: string };
+    const styles = new Map<unknown, St>();
+    const visibleRect = helper<(el: unknown, b?: Box) => unknown>("visibleRect", {
+        document: doc,
+        innerWidth: 400,
+        innerHeight: 600,
+        getComputedStyle: (el: unknown) => styles.get(el) ?? { overflowX: "visible", overflowY: "visible", position: "static" },
+    });
+    const clip = { overflowX: "hidden", overflowY: "auto" };
+    const el = (y: number, parent: unknown, position = "static") => {
+        const e = { getBoundingClientRect: () => box(0, y, 400, 40), parentElement: parent };
+        styles.set(e, { overflowX: "visible", overflowY: "visible", position });
+        return e;
+    };
+    const container = (position: string, parent: unknown = doc.body) => {
+        const c = { getBoundingClientRect: () => box(0, 100, 400, 300), parentElement: parent };
+        styles.set(c, { ...clip, position });
+        return c;
+    };
+
+    it("does not clip a position:fixed element to an overflow ancestor", () => {
+        expect(visibleRect(el(500, container("static"), "fixed"))).toEqual({ x: 0, y: 500, w: 400, h: 40 });
+    });
+    it("does not clip an absolute element to a static overflow ancestor it escapes", () => {
+        const positioned = { getBoundingClientRect: () => box(0, 0, 400, 600), parentElement: doc.body };
+        styles.set(positioned, { overflowX: "visible", overflowY: "visible", position: "relative" });
+        expect(visibleRect(el(500, container("static", positioned), "absolute"))).toEqual({ x: 0, y: 500, w: 400, h: 40 });
+    });
+    it("still clips an absolute element to a positioned scroller, its containing block", () => {
+        expect(visibleRect(el(500, container("relative"), "absolute"))).toBe("off");
+    });
+});
+
 describe("leafPresses", () => {
     const leafPresses = helper<(els: unknown[]) => unknown[]>("leafPresses");
     const node = (kids: unknown[] = []) => {

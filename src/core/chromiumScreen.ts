@@ -79,12 +79,19 @@ function visibleRect(el, box) {
     if (b.width <= 0 || b.height <= 0) return null;
     if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return null;
     var x1 = Math.max(b.left, 0), y1 = Math.max(b.top, 0), x2 = Math.min(b.right, innerWidth), y2 = Math.min(b.bottom, innerHeight);
+    // Only ancestors on the containing-block chain clip: a fixed element escapes
+    // every one, an absolute one skips static ancestors up to its positioned one.
+    // ponytail: transform / contain ancestors also make containing blocks; ignored.
+    var pos = getComputedStyle(el).position;
     for (var p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+        if (pos === "fixed") break;
         var s = getComputedStyle(p);
+        if (pos === "absolute" && s.position === "static") continue;
         if (s.overflowX !== "visible" || s.overflowY !== "visible") {
             var c = p.getBoundingClientRect();
             x1 = Math.max(x1, c.left); y1 = Math.max(y1, c.top); x2 = Math.min(x2, c.right); y2 = Math.min(y2, c.bottom);
         }
+        pos = s.position;
     }
     return x2 - x1 >= 1 && y2 - y1 >= 1 ? { x: x1, y: y1, w: x2 - x1, h: y2 - y1 } : "off";
 }
@@ -246,7 +253,10 @@ export function buildScreenCollectJs(): string {
             if (!s || !pe || SKIP_TEXT.indexOf(pe.tagName) >= 0 || insidePress(pe)) continue;
             var range = document.createRange();
             range.selectNodeContents(t);
-            consider("text", pe, range.getBoundingClientRect(), { text: s });
+            // A wrapped text node's union box spans lines, and its centre can sit on
+            // an inline sibling; the first line box is what a tap should aim at.
+            var lines = range.getClientRects();
+            consider("text", pe, lines.length > 1 ? lines[0] : range.getBoundingClientRect(), { text: s });
         }
     }
     // Pass 1: what a tap at each visible centre would actually hit. The hit is
