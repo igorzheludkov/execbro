@@ -109,6 +109,20 @@ describe("chromiumAppFor", () => {
         expect(chromiumAppFor("tap", "FluentTalk")?.deviceInfo.id).toBe("a");
     });
 
+    it("resolves a chromium window by a substring of its page url", () => {
+        const pop = makeApp("a", "FluentTalk", "chromium");
+        pop.deviceInfo.url = "http://localhost:5173/index.html?window=popover";
+        const main = makeApp("b", "FluentTalk#2", "chromium");
+        main.deviceInfo.url = "http://localhost:5173/index.html?window=main";
+        connectedApps.set("a", pop);
+        connectedApps.set("b", main);
+        connectedApps.set("i", makeApp("i", "iPhone Air", "ios"));
+        expect(chromiumAppFor("tap", "window=main")?.deviceInfo.id).toBe("b");
+        expect(chromiumAppFor("tap", "FluentTalk")?.deviceInfo.id).toBe("a");
+        expect(peekTargetPlatform("tap", "iPhone")).toBe("ios");
+        expect(peekTargetPlatform("tap", "localhost")).toBeUndefined(); // ambiguous: fails open
+    });
+
     it("returns null for a mobile target", () => {
         connectedApps.set("a", makeApp("a", "iPhone 17 Pro", "ios"));
         connectedApps.set("b", makeApp("b", "FluentTalk", "chromium"));

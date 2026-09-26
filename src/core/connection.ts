@@ -8,7 +8,7 @@ import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
 import { resolveAdbSerialForDeviceName } from "./android.js";
-import { fetchDevices, selectMainDevice, scanMetroPorts, isChromiumTarget, pickReconnectTarget } from "./metro.js";
+import { fetchDevices, selectMainDevice, scanMetroPorts, isChromiumTarget, pickReconnectTarget, pinChromiumName } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
@@ -1303,6 +1303,7 @@ export async function connectToDevice(
             // Connection established — run setup
             connectionLocks.delete(appKey);
             connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: isChromiumTarget(device) ? "chromium" : "android" });
+            pinChromiumName(device); // the name buffers and the registry now use; no-op for RN
             recordDeviceSeen(device.deviceName || device.title);
             markConnectionEstablished();
 
@@ -1824,7 +1825,10 @@ export function resolveConnectedAppByDevice(device?: string): DeviceResolution {
         const haystacks = [
             normalizeDeviceId(deviceLabel(app)),
             normalizeDeviceId(app.simulatorUdid),
-            normalizeDeviceId(app.adbSerial)
+            normalizeDeviceId(app.adbSerial),
+            // A chromium window's page url: `device: "window=main"` addresses it
+            // whatever it is named, including after a server restart renames it.
+            normalizeDeviceId(app.deviceInfo.url)
         ].filter((s) => s.length > 0);
         if (haystacks.some((h) => h.includes(normDevice))) {
             matches.push(app);
