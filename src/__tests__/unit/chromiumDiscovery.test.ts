@@ -179,6 +179,16 @@ describe("nameChromiumTargets, closed and reopened windows", () => {
         const [reopened] = nameChromiumTargets([target({ id: "m2", title: "FluentTalk", url })]);
         expect(reopened.deviceName).toBe(early.deviceName);
     });
+    it("a titled window never takes a same-url window's untitled name while its own is free", () => {
+        const url = "http://localhost:5173/index.html";
+        const [w1] = nameChromiumTargets([target({ id: "w1", title: "localhost:5173/index.html", url })]);
+        pinChromiumName(w1);
+        const [, w2] = nameChromiumTargets([target({ id: "w1", title: "localhost:5173/index.html", url }), target({ id: "w2", title: "FluentTalk", url })]);
+        expect(w2.deviceName).toBe("FluentTalk");
+        // Both close; W2 reopens alone.
+        const [again] = nameChromiumTargets([target({ id: "w2b", title: "FluentTalk", url })]);
+        expect(again.deviceName).toBe("FluentTalk");
+    });
     it("the same title on two ports gets two names", () => {
         const [a] = nameChromiumTargets([target({ id: "a", title: "FluentTalk", url: "http://localhost:5173/" })]);
         const [b] = nameChromiumTargets([target({ id: "b", title: "FluentTalk", url: "http://localhost:5174/" })]);

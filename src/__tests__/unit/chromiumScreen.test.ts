@@ -107,6 +107,20 @@ describe("visibleRect and containing blocks", () => {
     });
 });
 
+describe("textBox", () => {
+    const textBox = helper<(range: unknown) => Box>("textBox");
+    const range = (rects: Box[], union: Box) => ({ getClientRects: () => rects, getBoundingClientRect: () => union });
+    it("aims a wrapped text at its first line, skipping an empty fragment at a line boundary", () => {
+        const union = box(0, 0, 300, 40);
+        expect(textBox(range([box(290, 0, 0, 20), box(10, 0, 200, 20), box(0, 20, 100, 20)], union))).toEqual(box(10, 0, 200, 20));
+    });
+    it("uses the union box for one line, or when every fragment is empty", () => {
+        const union = box(0, 0, 50, 20);
+        expect(textBox(range([box(0, 0, 50, 20)], union))).toBe(union);
+        expect(textBox(range([box(0, 0, 0, 20), box(0, 20, 0, 20)], union))).toBe(union);
+    });
+});
+
 describe("leafPresses", () => {
     const leafPresses = helper<(els: unknown[]) => unknown[]>("leafPresses");
     const node = (kids: unknown[] = []) => {

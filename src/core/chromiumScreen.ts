@@ -154,6 +154,14 @@ function hostsOf(f, acc) {
     }
     return acc;
 }
+// A wrapped text node's union box spans lines, and its centre can sit on an inline
+// sibling: aim at the first line box with an area (a line boundary can leave an
+// empty fragment first). One line, or no usable fragment: the union box.
+function textBox(range) {
+    var rs = range.getClientRects();
+    if (rs.length > 1) for (var i = 0; i < rs.length; i++) if (rs[i].width > 0 && rs[i].height > 0) return rs[i];
+    return range.getBoundingClientRect();
+}
 // A password field's value stays in the page, in props as everywhere else.
 function maskProps(props, isPassword) {
     if (!isPassword) return props;
@@ -259,10 +267,7 @@ export function buildScreenCollectJs(): string {
             if (!s || !pe || SKIP_TEXT.indexOf(pe.tagName) >= 0 || insidePress(pe)) continue;
             var range = document.createRange();
             range.selectNodeContents(t);
-            // A wrapped text node's union box spans lines, and its centre can sit on
-            // an inline sibling; the first line box is what a tap should aim at.
-            var lines = range.getClientRects();
-            consider("text", pe, lines.length > 1 ? lines[0] : range.getBoundingClientRect(), { text: s });
+            consider("text", pe, textBox(range), { text: s });
         }
     }
     // Pass 1: what a tap at each visible centre would actually hit. The hit is

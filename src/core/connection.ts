@@ -1557,7 +1557,7 @@ async function attemptReconnection(
         // Try to find the same device first, otherwise select main device
         const device = pickReconnectTarget(devices, metadata.deviceInfo);
 
-        if (!device && isChromiumTarget(metadata.deviceInfo)) {
+        if (!device && isChromiumTarget(metadata.deviceInfo) && chromiumWindowGone(devices.length, getConnectionState(appKey)?.reconnectionAttempts ?? 0)) {
             // A chromium target id never comes back once its window closes (a reopen
             // gets a new id, and scan_metro connects it). Retrying only kept an open
             // gap that made every device's log and network reads warn "disconnected".
@@ -1890,6 +1890,15 @@ export function peekTargetPlatform(toolName: string, device: unknown): Connected
 export function chromiumAppFor(toolName: string, device?: string): ConnectedApp | null {
     if (peekTargetPlatform(toolName, device) !== "chromium") return null;
     return device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
+}
+
+/**
+ * Whether a chromium target missing from its port's listing is a closed window.
+ * fetchDevices returns [] on any fetch error, so an empty listing alone could be
+ * a /json hiccup on a window that is still there: that needs a second miss.
+ */
+export function chromiumWindowGone(listed: number, attempts: number): boolean {
+    return listed > 0 || attempts >= 2;
 }
 
 /**
