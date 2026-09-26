@@ -2,6 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { EventEmitter } from "node:events";
 import type WebSocket from "ws";
 import { sendCdpCommand, evaluateJson } from "../../core/cdpCommand.js";
+import { noteDialogOpened } from "../../core/chromiumDialogs.js";
 
 class FakeWs extends EventEmitter {
     sent: Array<{ id: number; method: string; params: unknown }> = [];
@@ -62,5 +63,30 @@ describe("evaluateJson", () => {
         const p = evaluateJson(asWs(ws), "boom()");
         ws.reply({ id: ws.sent[0].id, result: { result: { type: "object" }, exceptionDetails: { text: "Uncaught", exception: { description: "ReferenceError: boom is not defined" } } } });
         await expect(p).rejects.toThrow("ReferenceError: boom is not defined");
+    });
+});
+
+describe("sendCdpCommand on a closing socket", () => {
+    it("rejects at once on a closed socket instead of waiting out its timeout", async () => {
+        const ws = Object.assign(new FakeWs(), { readyState: 3 });
+        await expect(sendCdpCommand(asWs(ws), "Page.captureScreenshot", {}, 60_000)).rejects.toThrow("socket is closed");
+        expect(ws.sent).toEqual([]);
+    });
+    it("rejects at once when the socket closes mid-wait, and detaches", async () => {
+        const ws = new FakeWs();
+        const p = sendCdpCommand(asWs(ws), "Page.captureScreenshot", {}, 60_000);
+        ws.emit("close");
+        await expect(p).rejects.toThrow("socket is closed");
+        expect(ws.listenerCount("message")).toBe(0);
+        expect(ws.listenerCount("close")).toBe(0);
+    });
+});
+
+describe("evaluateJson and a dialog", () => {
+    it("reports a dialog that opens during the read instead of timing out", async () => {
+        const ws = new FakeWs();
+        const p = evaluateJson(asWs(ws), "1", 60_000);
+        noteDialogOpened(ws, { type: "alert", message: "Saved", url: "http://x/" });
+        await expect(p).rejects.toThrow(/alert dialog: "Saved".*handle_dialog/s);
     });
 });
