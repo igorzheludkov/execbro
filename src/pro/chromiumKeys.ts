@@ -8,6 +8,7 @@ import type { ConnectedApp } from "../core/types.js";
 import { evaluateJson } from "../core/cdpCommand.js";
 import { buildDomKeyFocusJs, chromiumKey, collectDomTargets, pickDomTarget, MOD, type KeyDef } from "../core/chromium.js";
 import { ACTIVE_ELEMENT_JS } from "../core/chromiumScreen.js";
+import { raceDialog, formatDialog, type DialogInfo } from "../core/chromiumDialogs.js";
 
 /** Lets a keydown handler re-render before the focused element is read back. */
 const KEY_SETTLE_MS = 80;
@@ -36,9 +37,29 @@ export async function chromiumPressKey(
             if (!r.focused) return fail(`<${pick.cand.tag}> matched but did not take focus (disabled, inert or hidden?), so no key was sent.`);
         }
         const focusedBefore = await evaluateJson<Active>(app.ws, ACTIVE_ELEMENT_JS);
-        for (let n = 0; n < a.repeat; n++) await chromiumKey(app, a.combo);
-        await new Promise((r) => setTimeout(r, KEY_SETTLE_MS));
-        const focusedAfter = await evaluateJson<Active>(app.ws, ACTIVE_ELEMENT_JS);
+        let dialog: DialogInfo | undefined;
+        let sent = 0;
+        for (; sent < a.repeat && !dialog; sent++) {
+            const r = await raceDialog(app.ws, chromiumKey(app, a.combo));
+            if (r.kind === "dialog") dialog = r.dialog;
+        }
+        let focusedAfter: Active | undefined;
+        if (!dialog) {
+            await new Promise((r) => setTimeout(r, KEY_SETTLE_MS));
+            // A handler can open the dialog from a timer after the last keyUp.
+            const r = await raceDialog(app.ws, evaluateJson<Active>(app.ws, ACTIVE_ELEMENT_JS));
+            if (r.kind === "dialog") dialog = r.dialog;
+            else focusedAfter = r.value;
+        }
+        if (dialog) {
+            // focusedAfter is left out on purpose: reading it would evaluate in the paused page.
+            const body = {
+                success: true, platform: "chromium", device: app.deviceInfo.deviceName, key: a.input, repeat: a.repeat, sent,
+                focusedBefore, dialog,
+                note: `The key opened ${formatDialog(dialog)}; ${a.repeat - sent} remaining presses were not sent. Answer it with handle_dialog.`,
+            };
+            return { content: [{ type: "text" as const, text: JSON.stringify(body, null, 2) }], isError: false };
+        }
 
         const body: Record<string, unknown> = {
             success: true,

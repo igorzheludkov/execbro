@@ -74,11 +74,17 @@ export function waitForDialogClosed(ws: object, timeoutMs: number): Promise<bool
 }
 
 /**
- * Wait for p, unless a dialog opens first. The losing p is left running (its CDP
- * reply arrives once the dialog closes) with its rejection swallowed, so a late
- * timeout cannot become an unhandled rejection.
+ * Wait for p, unless a dialog is open or opens first. The losing p is left running
+ * (its CDP reply arrives once the dialog closes) with its rejection swallowed, so a
+ * late timeout cannot become an unhandled rejection. An already-open dialog wins at
+ * once: it may have opened during a settle delay, after its event had fired.
  */
 export function raceDialog<T>(ws: object, p: Promise<T>): Promise<{ kind: "done"; value: T } | { kind: "dialog"; dialog: DialogInfo }> {
+    const already = open.get(ws);
+    if (already) {
+        p.catch(() => {});
+        return Promise.resolve({ kind: "dialog", dialog: already });
+    }
     return new Promise((resolve, reject) => {
         const off = onDialogOpened(ws, (dialog) => { off(); p.catch(() => {}); resolve({ kind: "dialog", dialog }); });
         p.then(

@@ -290,6 +290,8 @@ export interface TapResult {
     suggestion?: string;
     screenshot?: TapScreenshot;
     verification?: TapVerification;
+    /** chromium: a JavaScript dialog opened on this tap; the page is paused until handle_dialog answers it. */
+    dialog?: import("../core/chromiumDialogs.js").DialogInfo;
     warning?: string;
     deviceNote?: string;
     // Failure-artifact signals (populated by captureFailureArtifact when outcome warrants).

@@ -10,6 +10,7 @@ import { trackAutoReconnect } from "./telemetry.js";
 import { probeCdpAlive } from "./probe.js";
 import { buildContextPreamble } from "./appContext.js";
 import { registerHandle, clearHandlesForDevice } from "./promiseHandles.js";
+import { onDialogOpened, formatDialog } from "./chromiumDialogs.js";
 
 // Hermes runtime compatibility: polyfill for 'global' which doesn't exist in Hermes
 // In Hermes, globalThis is the standard way to access global scope
@@ -718,7 +719,9 @@ function executeCDP(
         return Promise.resolve({ success: false, error: "WebSocket connection is not open." });
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolveRaw) => {
+        let offDialog = () => {};
+        const resolve = (r: ExecutionResult) => { offDialog(); resolveRaw(r); };
         const timeoutId = setTimeout(() => {
             pendingExecutions.delete(currentMessageId);
 
@@ -750,6 +753,21 @@ function executeCDP(
 
             resolve({ success: false, error: errorMessage });
         }, TIMEOUT_MS);
+
+        // A chromium page that opens alert/confirm/prompt pauses the evaluation.
+        // Report the dialog now instead of the stale-connection timeout text.
+        if (app.platform === "chromium") {
+            offDialog = onDialogOpened(app.ws, (d) => {
+                clearTimeout(timeoutId);
+                pendingExecutions.delete(currentMessageId);
+                resolve({
+                    success: false,
+                    error: `The expression opened ${formatDialog(d)}. The page is paused until it is answered: call handle_dialog({ action: "accept" }) or ({ action: "dismiss" }). The expression finishes once the dialog closes; its result is not returned.`,
+                    errorContext: "js_dialog_open",
+                    failureKind: "js_dialog_open",
+                });
+            });
+        }
 
         // Tag with the socket so a close event can fail this call immediately
         // rather than letting it sit until TIMEOUT_MS.
@@ -971,6 +989,10 @@ async function executeInAppInner(
 
         lastError = result.error;
 
+        // An open JavaScript dialog is app state, and its error text quotes the
+        // page: never let that text steer a reconnect.
+        if (result.failureKind === "js_dialog_open") return result;
+
         // Check if this is a context error that might be recoverable
         if (isContextError(result.error)) {
             if (autoReconnect && attempt < maxRetries) {
@@ -1097,6 +1119,7 @@ export async function executeInApp(
         trackAutoReconnect("not_needed", toolName);
         return withClampMeta(first);
     }
+    if (first.failureKind === "js_dialog_open") return withClampMeta(first);
 
     const source: "cdp" | "server-timer" | "logical" = first.error?.startsWith(
         "Timeout: Expression took too long",
