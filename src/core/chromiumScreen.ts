@@ -88,6 +88,37 @@ function visibleRect(el, box) {
     }
     return x2 - x1 >= 1 && y2 - y1 >= 1 ? { x: x1, y: y1, w: x2 - x1, h: y2 - y1 } : "off";
 }
+// The element a wheel at (x, y) scrolls on this axis: the nearest ancestor whose
+// overflow scrolls and whose content overflows, else the page if it scrolls. A
+// scroller on the other axis is returned when nothing scrolls on this one, so the
+// verdict can say "wrong axis" instead of "nothing here".
+function canScroll(el, horizontal) {
+    var s = getComputedStyle(el);
+    return /(auto|scroll|overlay)/.test(horizontal ? s.overflowX : s.overflowY) &&
+        (horizontal ? el.scrollWidth > el.clientWidth : el.scrollHeight > el.clientHeight);
+}
+function scrollerAt(x, y, horizontal) {
+    var root = document.scrollingElement || document.documentElement;
+    var other = null;
+    for (var el = document.elementFromPoint(x, y); el && el !== root && el !== document.body; el = el.parentElement) {
+        if (canScroll(el, horizontal)) return el;
+        if (!other && canScroll(el, !horizontal)) other = el;
+    }
+    var hidden = function (e) { var s = getComputedStyle(e); return (horizontal ? s.overflowX : s.overflowY) === "hidden"; };
+    if (document.elementFromPoint(x, y) && !hidden(root) && !hidden(document.body) &&
+        (horizontal ? root.scrollWidth > root.clientWidth : root.scrollHeight > root.clientHeight)) return root;
+    return other;
+}
+function readScroller(el) {
+    if (!el || el.isConnected === false) return { container: null };
+    var isRoot = el === (document.scrollingElement || document.documentElement);
+    return {
+        container: isRoot ? "the page" : describe(el),
+        top: el.scrollTop, left: el.scrollLeft,
+        maxTop: isRoot || canScroll(el, false) ? Math.max(0, el.scrollHeight - el.clientHeight) : 0,
+        maxLeft: isRoot || canScroll(el, true) ? Math.max(0, el.scrollWidth - el.clientWidth) : 0
+    };
+}
 // Pressables with no other pressable inside. Only these own the text under them as
 // their label: a click-wrapper (a modal backdrop, an app shell listening for clicks
 // outside) would otherwise swallow every text line on the screen.
@@ -491,3 +522,27 @@ export async function chromiumMeasure(app: ConnectedApp, componentName: string, 
     const outOfView = await evaluateJson<boolean>(app.ws, buildOutOfViewJs(c.i));
     return formatChromiumMeasure(componentName, c.rect, found.viewport, outOfView);
 }
+
+/** Find the scroller under CSS (x, y), remember it for SCROLL_READ_JS, and read its offsets. */
+export function buildScrollProbeJs(x: number, y: number, horizontal: boolean): string {
+    return `(function () {
+    ${DOM_HELPERS_JS}
+    var el = scrollerAt(${x}, ${y}, ${horizontal});
+    globalThis.__eb_scroller = el;
+    return JSON.stringify(readScroller(el));
+})()`;
+}
+
+/** Re-read the scroller the last probe found, so before and after compare the same element. */
+export const SCROLL_READ_JS = `(function () {
+    ${DOM_HELPERS_JS}
+    return JSON.stringify(readScroller(globalThis.__eb_scroller));
+})()`;
+
+/** document.activeElement, named: tag, testID, label, and its value (a password never leaves the page). */
+export const ACTIVE_ELEMENT_JS = `(function () {
+    ${DOM_HELPERS_JS}
+    var el = document.activeElement;
+    if (!el || el === document.body || el === document.documentElement) return JSON.stringify(null);
+    return JSON.stringify({ element: describe(el), testID: testIdOf(el), label: labelOf(el), value: isEditable(el) ? safeValue(el) : null });
+})()`;
