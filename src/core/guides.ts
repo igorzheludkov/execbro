@@ -25,7 +25,7 @@ const guides: Guide[] = [
 - **Android:** ADB must be in PATH (comes with Android SDK Platform Tools)
 
 ## Quick Start
-1. scan_metro — auto-discovers Metro on ports 8081-8090 and connects. Note: this occupies the CDP slot, which prevents the built-in React Native debugger from connecting. See "Switch to Native Debugger" below.
+1. scan_metro — auto-discovers Metro on ports 8081-8090 and connects. Also probes Chromium/Electron debug ports: 9222 is listed but not auto-connected (attach with connect_metro({ port: 9222, device })), ports in EXECBRO_CHROMIUM_PORTS auto-connect. Note: this occupies the CDP slot, which prevents the built-in React Native debugger from connecting. See "Switch to Native Debugger" below.
 2. get_apps — verify the app appears in connected list
 3. get_connection_status — check connection health
 
@@ -53,8 +53,8 @@ exactly like "my fix didn't work".
 - Use scan_metro to reconnect when done with native debugger
 
 ## Key Tools
-- scan_metro: auto-discover and connect (preferred)
-- connect_metro: connect to specific port (when you know it)
+- scan_metro: auto-discover and connect React Native (Metro) and Chromium/Electron (CDP) targets (preferred)
+- connect_metro: connect to a specific port (when you know it); device=<name> to attach one Chromium target
 - disconnect_metro: close all connections (free CDP slot for native debugger)
 - ensure_connection: health check with healthCheck=true
 - get_connection_status: check uptime and gaps
@@ -673,6 +673,7 @@ export const UNTRUSTED_DATA_RULE: string = [
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_screen_state, get_screen_layout.",
     "Platform-specific ios_* / android_* tools (ios_button, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible. input_text covers native-only text entry too, via native:true.",
+    "Chromium/Electron targets (platform chromium) support logs, network capture, execute_in_app, globals, redux and component inspection; other tools refuse them with a message saying so.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
