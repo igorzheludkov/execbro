@@ -12,7 +12,7 @@ import { spawn } from "child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import type { DeviceInfo } from "./types.js";
-import { fetchDevices, isChromiumTarget } from "./metro.js";
+import { fetchDevices, isChromiumTarget, isUntitledPage } from "./metro.js";
 import { CONFIG_DIR } from "./paths.js";
 
 export interface LaunchPlan { cmd: string; args: string[]; cwd: string; runner: "electron-vite" | "electron" }
@@ -20,11 +20,6 @@ export interface LaunchPlan { cmd: string; args: string[]; cwd: string; runner: 
 const POLL_MS = 500;
 /** How long a window may keep its URL as its title before it is connected anyway. */
 const TITLE_GRACE_MS = 5000;
-
-/** Before document.title is set, Chromium lists a page's URL (scheme dropped) as its title. */
-function untitled(d: DeviceInfo): boolean {
-    return !d.title || (d.url ?? "").endsWith(d.title);
-}
 
 /** node_modules/.bin/<name>, walking up from start, so a hoisted monorepo install is found. */
 export function findBin(start: string, name: string): string | null {
@@ -123,7 +118,7 @@ export async function launchElectron(
         // them, so connecting before the page sets its title would name the window
         // after its URL.
         firstSeen ??= Date.now();
-        if (devices.some(untitled) && Date.now() - firstSeen < TITLE_GRACE_MS) continue;
+        if (devices.some(isUntitledPage) && Date.now() - firstSeen < TITLE_GRACE_MS) continue;
         return { ok: true, pid: child.pid!, port: actual, logPath, devices };
     }
     return {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import {
     isChromiumTarget,
     isBrowserInternalTarget,
@@ -9,6 +9,10 @@ import {
     isChromiumListing,
     keepChromiumPages,
     selectConnectTargets,
+    fetchDevices,
+    isUntitledPage,
+    pinChromiumName,
+    __resetChromiumNames,
 } from "../../core/metro.js";
 import type { DeviceInfo } from "../../core/types.js";
 
@@ -70,14 +74,16 @@ describe("isBrowserInternalTarget", () => {
     });
 });
 
+beforeEach(() => __resetChromiumNames());
+
 describe("nameChromiumTargets", () => {
-    it("names by title, suffixes collisions in target-id order, and stores the url as appId", () => {
-        const a = target({ id: "zzz", title: "FluentTalk", url: "http://localhost:5173/#/popover" });
-        const b = target({ id: "aaa", title: "FluentTalk", url: "http://localhost:5173/#/settings" });
+    it("names by title, suffixes collisions in url order, and stores the url as appId", () => {
+        const a = target({ id: "aaa", title: "FluentTalk", url: "http://localhost:5173/index.html?window=popover" });
+        const b = target({ id: "zzz", title: "FluentTalk", url: "http://localhost:5173/index.html?window=main" });
         nameChromiumTargets([a, b]);
         expect(b.deviceName).toBe("FluentTalk");
         expect(a.deviceName).toBe("FluentTalk#2");
-        expect(a.appId).toBe("http://localhost:5173/#/popover");
+        expect(a.appId).toBe("http://localhost:5173/index.html?window=popover");
     });
 
     it("gives the same names regardless of listing order", () => {
@@ -111,7 +117,99 @@ describe("nameChromiumTargets across fetches", () => {
         expect(second.find((d) => d.id === "m-connected")?.deviceName).toBe("Stable");
         expect(second.find((d) => d.id === "a-newcomer")?.deviceName).toBe("Stable#2");
     });
+    it("keeps a live window's name when its title changes", () => {
+        nameChromiumTargets([target({ id: "w", title: "Inbox", url: "http://a" })]);
+        const [w] = nameChromiumTargets([target({ id: "w", title: "Inbox (3)", url: "http://a" })]);
+        expect(w.deviceName).toBe("Inbox");
+    });
+
+    it("a reopened window reclaims its old name, not the free plain one", () => {
+        const pop = () => target({ id: "pop", title: "FluentTalk", url: "http://x/?window=popover" });
+        nameChromiumTargets([pop()]);
+        const first = nameChromiumTargets([pop(), target({ id: "m1", title: "FluentTalk", url: "http://x/?window=main" })]);
+        expect(first.find((d) => d.id === "m1")?.deviceName).toBe("FluentTalk#2");
+        // Popover gone, main reopened with a new target id.
+        const [main] = nameChromiumTargets([target({ id: "m2", title: "FluentTalk", url: "http://x/?window=main" })]);
+        expect(main.deviceName).toBe("FluentTalk#2");
+        // The popover's name stays reserved for the popover.
+        const [other] = nameChromiumTargets([target({ id: "n", title: "FluentTalk", url: "http://x/?window=other" })]);
+        expect(other.deviceName).toBe("FluentTalk#3");
+    });
+
+    it("gives two same-url tabs distinct names and both reclaim them", () => {
+        const mk = (a: string, b: string) => [
+            target({ id: a, title: "Docs", url: "http://d" }),
+            target({ id: b, title: "Docs", url: "http://d" }),
+        ];
+        expect(nameChromiumTargets(mk("a1", "b1")).map((d) => d.deviceName).sort()).toEqual(["Docs", "Docs#2"]);
+        expect(nameChromiumTargets(mk("a2", "b2")).map((d) => d.deviceName).sort()).toEqual(["Docs", "Docs#2"]);
+    });
+
+    it("gives an untitled window a provisional name that is not pinned", () => {
+        const url = "http://localhost:5173/index.html?window=main";
+        const popover = () => target({ id: "p", title: "FluentTalk", url: "http://localhost:5173/index.html?window=popover" });
+        nameChromiumTargets([popover()]);
+        const [early] = nameChromiumTargets([target({ id: "m", title: "localhost:5173/index.html?window=main", url })]);
+        expect(early.deviceName).toBe("localhost:5173/index.html?window=main");
+        const later = nameChromiumTargets([popover(), target({ id: "m", title: "FluentTalk", url })]);
+        expect(later.find((d) => d.id === "m")?.deviceName).toBe("FluentTalk#2");
+    });
+
+    it("keeps an untitled window's name once it was connected (pinned)", () => {
+        const url = "http://localhost:5173/index.html?window=main";
+        const [early] = nameChromiumTargets([target({ id: "m", title: "", url })]);
+        pinChromiumName(early);
+        const [later] = nameChromiumTargets([target({ id: "m", title: "FluentTalk", url })]);
+        expect(later.deviceName).toBe(early.deviceName);
+    });
 });
+
+describe("isUntitledPage", () => {
+    it("treats an empty title and the scheme-less url as placeholders", () => {
+        expect(isUntitledPage(target({ title: "", url: "http://localhost:5173/" }))).toBe(true);
+        expect(isUntitledPage(target({ title: "localhost:5173/", url: "http://localhost:5173/" }))).toBe(true);
+        expect(isUntitledPage(target({ title: "FluentTalk", url: "http://localhost:5173/" }))).toBe(false);
+    });
+});
+
+describe("fetchDevices title grace", () => {
+    const realFetch = globalThis.fetch;
+    afterEach(() => { globalThis.fetch = realFetch; });
+    const listing = (title: string) => [{ id: "g", type: "page", title, url: "http://localhost:5173/", description: "", webSocketDebuggerUrl: "ws://x/g" }];
+    function serve(...bodies: unknown[]) {
+        let i = 0;
+        const calls = { n: 0 };
+        globalThis.fetch = (async () => {
+            calls.n++;
+            return { ok: true, json: async () => bodies[Math.min(i++, bodies.length - 1)] };
+        }) as unknown as typeof fetch;
+        return calls;
+    }
+
+    it("waits for a new window's title before naming it", async () => {
+        serve(listing(""), listing("localhost:5173/"), listing("Vite App"));
+        const [d] = await fetchDevices(9999, 1000);
+        expect(d.deviceName).toBe("Vite App");
+    });
+
+    it("gives up after the grace and names it by url", async () => {
+        serve(listing(""));
+        const [d] = await fetchDevices(9999, 150);
+        expect(d.deviceName).toBe("http://localhost:5173/");
+    });
+
+    it("does not wait for a Metro listing or an already pinned window", async () => {
+        const calls = serve([{ id: "he", type: "node", title: "Hermes React Native", description: "", deviceName: "Pixel", webSocketDebuggerUrl: "ws://x" }]);
+        await fetchDevices(9998, 1000);
+        expect(calls.n).toBe(1);
+        const [d] = nameChromiumTargets(listing("") as unknown as DeviceInfo[]);
+        pinChromiumName(d);
+        const again = serve(listing(""));
+        await fetchDevices(9999, 1000);
+        expect(again.n).toBe(1);
+    });
+});
+
 
 describe("filterDebuggableDevices with chromium targets", () => {
     it("keeps two same-titled windows apart once named", () => {

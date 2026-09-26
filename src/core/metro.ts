@@ -54,39 +54,77 @@ export function isBrowserInternalTarget(d: DeviceInfo): boolean {
     return d.type === "page" && hasExcludedScheme(d);
 }
 
-// Names already handed out, by target id + title. A window keeps its name for
-// as long as it lives, so opening a same-titled window never renames one that
-// is connected (buffers and `device` matching are keyed by name).
+/** Before document.title is set, Chromium lists a page's URL (scheme dropped), or nothing, as its title. */
+export function isUntitledPage(d: DeviceInfo): boolean {
+    return !d.title || (d.url ?? "").endsWith(d.title);
+}
+
+// Names handed out this session. `byId` keeps a live window's name through
+// reloads and title changes. `reserved` remembers which page each name was given
+// for, so a closed and reopened window (new target id, same url) gets its name
+// back and no other window ever takes it: buffers, epochs and mock rules are
+// keyed by name, and must never move to a different window.
 // ponytail: grows by one small entry per window ever seen; bound it if a
 // session ever opens thousands of tabs.
-const chromiumNames = new Map<string, string>();
+const byId = new Map<string, string>();
+const reserved = new Map<string, { url: string; base: string }>();
+
+/** Test seam. */
+export function __resetChromiumNames(): void {
+    byId.clear();
+    reserved.clear();
+}
+
+function baseName(d: DeviceInfo): string {
+    return d.title || d.url || "Chromium";
+}
+
+/**
+ * Fix a window's current name for the rest of the session. Called on connect,
+ * because that is when buffers and the registry take the name: a window
+ * connected before its title loaded keeps its url name rather than being
+ * renamed under the agent on the next scan.
+ */
+export function pinChromiumName(d: DeviceInfo): void {
+    if (!isChromiumTarget(d) || !d.deviceName || byId.has(d.id)) return;
+    byId.set(d.id, d.deviceName);
+    if (!reserved.has(d.deviceName)) reserved.set(d.deviceName, { url: d.url || "", base: baseName(d) });
+}
 
 /**
  * Chromium /json carries no deviceName, which is why the spike printed
  * "Connected to FluentTalk (undefined)". Name each window after its title,
- * suffixing collisions (`FluentTalk`, `FluentTalk#2`). Known windows keep their
- * name; new ones are named in target-id order so a fetch's listing order (Chrome
- * lists most-recent first) never decides who gets the plain name.
+ * suffixing collisions (`FluentTalk`, `FluentTalk#2`). A known window keeps its
+ * name; a new one first reclaims a free name reserved for its own url, else
+ * takes the first name nobody holds or reserved, in url order, so the same set
+ * of windows gets the same names on every fresh start (target ids are random per
+ * window, and ordering by them swapped names whenever a window was reopened).
+ * An untitled window's name is provisional until it has a title or is connected.
  */
 export function nameChromiumTargets(devices: DeviceInfo[]): DeviceInfo[] {
-    const chromium = devices.filter((d) => isChromiumTarget(d) && !d.deviceName)
-        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    const key = (d: DeviceInfo) => `${d.id}\u0000${d.title || d.url || "Chromium"}`;
-    const taken = new Set<string>();
+    const chromium = devices.filter((d) => isChromiumTarget(d) && !d.deviceName);
+    const live = new Set<string>();
     for (const d of chromium) {
-        const known = chromiumNames.get(key(d));
-        if (known) taken.add(known);
+        const known = byId.get(d.id);
+        if (known) live.add(known);
+    }
+    const order = (d: DeviceInfo) => `${d.url || ""}\u0000${d.id}`;
+    const fresh = chromium.filter((d) => !byId.has(d.id)).sort((a, b) => (order(a) < order(b) ? -1 : 1));
+    for (const d of fresh) {
+        const base = baseName(d);
+        const url = d.url || "";
+        let name = [...reserved].find(([n, r]) => r.url === url && r.base === base && !live.has(n))?.[0];
+        if (!name) {
+            const free = (n: string) => !live.has(n) && (reserved.get(n)?.url ?? url) === url;
+            name = base;
+            for (let n = 2; !free(name); n++) name = `${base}#${n}`;
+        }
+        live.add(name);
+        d.deviceName = name;
+        if (!isUntitledPage(d)) pinChromiumName(d);
     }
     for (const d of chromium) {
-        let name = chromiumNames.get(key(d));
-        if (!name) {
-            const base = d.title || d.url || "Chromium";
-            name = base;
-            for (let n = 2; taken.has(name); n++) name = `${base}#${n}`;
-            chromiumNames.set(key(d), name);
-        }
-        taken.add(name);
-        d.deviceName = name;
+        d.deviceName ||= byId.get(d.id)!;
         if (!d.appId) d.appId = d.url || "";
     }
     return devices;
@@ -155,18 +193,27 @@ export async function scanMetroPorts(
 }
 
 // Fetch connected devices from Metro /json endpoint
-export async function fetchDevices(port: number): Promise<DeviceInfo[]> {
-    try {
-        const response = await fetch(`http://localhost:${port}/json`);
-        if (!response.ok) {
+export async function fetchDevices(port: number, titleGraceMs = 1500): Promise<DeviceInfo[]> {
+    const deadline = Date.now() + titleGraceMs;
+    for (;;) {
+        let devices: DeviceInfo[];
+        try {
+            const response = await fetch(`http://localhost:${port}/json`);
+            if (!response.ok) {
+                return [];
+            }
+            // The one reader of /json: filtering here keeps browser internals out of
+            // scan, connect_metro, ensure_connection and the reconnect fallback alike.
+            devices = keepChromiumPages(((await response.json()) as DeviceInfo[])
+                .filter((d) => d.webSocketDebuggerUrl && !isBrowserInternalTarget(d)));
+        } catch {
             return [];
         }
-        const devices = (await response.json()) as DeviceInfo[];
-        // The one reader of /json: filtering here keeps browser internals out of
-        // scan, connect_metro, ensure_connection and the reconnect fallback alike.
-        return nameChromiumTargets(keepChromiumPages(devices.filter((d) => d.webSocketDebuggerUrl && !isBrowserInternalTarget(d))));
-    } catch {
-        return [];
+        // A window listed before its document.title loaded would be named after its
+        // url, and connecting it would pin that name. The title follows within ~300 ms.
+        const waiting = devices.some((d) => isChromiumTarget(d) && !d.deviceName && !byId.has(d.id) && isUntitledPage(d));
+        if (!waiting || Date.now() >= deadline) return nameChromiumTargets(devices);
+        await new Promise((r) => setTimeout(r, 100));
     }
 }
 
