@@ -176,7 +176,12 @@ export function buildDomCollectJs(q: DomQuery): string {
     }
     function testIdOf(el) { return el.getAttribute("data-testid") || el.getAttribute("data-test-id") || el.id || null; }
     function labelOf(el) { return norm(el.getAttribute("aria-label") || (el.labels && el.labels[0] ? el.labels[0].innerText : "")) || null; }
-    function valueOf(el) { return el.isContentEditable ? el.innerText : (el.value == null ? null : String(el.value)); }
+    // A password never leaves the page (same rule as chromiumScreen's safeValue).
+    function valueOf(el) {
+        if (el.isContentEditable) return el.innerText;
+        if (el.value == null) return null;
+        return String(el.type).toLowerCase() === "password" ? (el.value ? "[password]" : "") : String(el.value);
+    }
     function textOf(el) { return el.tagName === "INPUT" ? norm(el.value || el.getAttribute("aria-label")) : norm(el.innerText || el.getAttribute("aria-label")); }
     function visible(el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; }
     var all = document.body ? Array.prototype.slice.call(document.body.querySelectorAll("*")) : [];

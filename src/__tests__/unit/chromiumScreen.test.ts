@@ -1,0 +1,145 @@
+import { describe, it, expect } from "@jest/globals";
+import { DOM_HELPERS_JS, buildScreenCollectJs, rawToScreenState, type RawScreen } from "../../core/chromiumScreen.js";
+import { formatScreenStateSummary } from "../../core/screenState.js";
+
+// Pull one injected helper out as a callable, with the browser globals it reads.
+function helper<T>(name: string, globals: Record<string, unknown> = {}): T {
+    const keys = Object.keys(globals);
+    return new Function(...keys, `${DOM_HELPERS_JS}; return ${name};`)(...keys.map((k) => globals[k])) as T;
+}
+
+interface Box { left: number; top: number; right: number; bottom: number; width: number; height: number }
+const box = (x: number, y: number, w: number, h: number): Box => ({ left: x, top: y, right: x + w, bottom: y + h, width: w, height: h });
+
+describe("safeValue", () => {
+    const safeValue = helper<(el: unknown) => string | null>("safeValue");
+    it("never returns a password", () => {
+        expect(safeValue({ type: "password", value: "hunter2" })).toBe("[password]");
+        expect(safeValue({ type: "PASSWORD", value: "" })).toBe("");
+    });
+    it("returns other values and contenteditable text", () => {
+        expect(safeValue({ type: "text", value: "vote" })).toBe("vote");
+        expect(safeValue({ isContentEditable: true, innerText: "hi" })).toBe("hi");
+        expect(safeValue({ tagName: "DIV" })).toBeNull();
+    });
+});
+
+describe("visibleRect", () => {
+    const doc = { body: {}, documentElement: {} };
+    const styles = new Map<unknown, { overflowX: string; overflowY: string }>();
+    const visibleRect = helper<(el: unknown, b?: Box) => unknown>("visibleRect", {
+        document: doc,
+        innerWidth: 400,
+        innerHeight: 600,
+        getComputedStyle: (el: unknown) => styles.get(el) ?? { overflowX: "visible", overflowY: "visible" },
+    });
+    const scroller = { getBoundingClientRect: () => box(0, 100, 400, 300), parentElement: doc.body };
+    styles.set(scroller, { overflowX: "hidden", overflowY: "auto" });
+    const inList = (y: number) => ({ getBoundingClientRect: () => box(0, y, 400, 40), parentElement: scroller });
+
+    it("is null for an element that is not rendered", () => {
+        expect(visibleRect({ getBoundingClientRect: () => box(0, 0, 0, 0), parentElement: doc.body })).toBeNull();
+    });
+    it("is 'off' for a row scrolled out of its overflow container, though inside the viewport", () => {
+        expect(visibleRect(inList(20))).toBe("off");
+        expect(visibleRect(inList(450))).toBe("off");
+    });
+    it("clips a partly visible row to the container, so its centre is on screen", () => {
+        expect(visibleRect(inList(380))).toEqual({ x: 0, y: 380, w: 400, h: 20 });
+    });
+    it("clips to the viewport", () => {
+        expect(visibleRect({ getBoundingClientRect: () => box(-50, 580, 100, 40), parentElement: doc.body })).toEqual({ x: 0, y: 580, w: 50, h: 20 });
+    });
+    it("honours checkVisibility when the browser has it", () => {
+        expect(visibleRect({ getBoundingClientRect: () => box(0, 0, 10, 10), parentElement: doc.body, checkVisibility: () => false })).toBeNull();
+    });
+});
+
+describe("nameOf", () => {
+    const nameOf = helper<(t: unknown) => string | null>("nameOf");
+    it("names functions, memo and forwardRef wrappers, and skips host strings", () => {
+        function Card() {}
+        expect(nameOf(Card)).toBe("Card");
+        expect(nameOf({ $$typeof: "memo", type: Card })).toBe("Card");
+        expect(nameOf({ render: function Row() {} })).toBe("Row");
+        expect(nameOf({ displayName: "Named" })).toBe("Named");
+        expect(nameOf("div")).toBeNull();
+        expect(nameOf(null)).toBeNull();
+    });
+});
+
+describe("buildScreenCollectJs", () => {
+    it("parses", () => {
+        expect(() => new Function(`return ${buildScreenCollectJs()};`)).not.toThrow();
+    });
+});
+
+const raw = (over: Partial<RawScreen> = {}): RawScreen => ({
+    viewport: { w: 380, h: 600, dpr: 2 },
+    url: "http://localhost:5173/popover.html?lang=uk#/recent",
+    title: "FluentTalk",
+    overlays: [],
+    nodes: [],
+    offscreen: 0,
+    dropped: 0,
+    ...over,
+});
+
+describe("rawToScreenState", () => {
+    it("converts CSS px to delivered px with pxPerCss (dpr 2)", () => {
+        const ss = rawToScreenState(raw({
+            nodes: [{ kind: "press", rect: { x: 10, y: 20, w: 100, h: 30 }, overlay: null, covered: false, label: "Speak", component: "SpeakButton", testID: null }],
+        }));
+        expect(ss.pressables[0]).toMatchObject({ center: { x: 120, y: 70 }, bounds: { x: 20, y: 40, width: 200, height: 60 }, label: "Speak", component: "SpeakButton" });
+    });
+
+    it("lowers the factor past the 2000 px cap, matching the screenshot", () => {
+        const ss = rawToScreenState(raw({
+            viewport: { w: 1100, h: 612, dpr: 2 },
+            nodes: [{ kind: "text", rect: { x: 1000, y: 0, w: 100, h: 10 }, overlay: null, covered: false, text: "end" }],
+        }));
+        // pxPerCss = 2000 / 1100
+        expect(ss.texts[0].bounds).toEqual({ x: 1818, y: 0, width: 182, height: 18 });
+    });
+
+    it("uses the page location as the route", () => {
+        const ss = rawToScreenState(raw());
+        expect(ss.route).toEqual({ name: "/popover.html#/recent", params: { lang: "uk" }, stack: ["/popover.html#/recent"] });
+        expect(ss.notes?.join("\n")).toContain('"FluentTalk"');
+    });
+
+    it("puts overlay content in its overlay and covered elements under Blocked", () => {
+        const ss = rawToScreenState(raw({
+            overlays: [{ type: "Unknown", title: "<div#eb-cover>" }],
+            nodes: [
+                { kind: "press", rect: { x: 0, y: 0, w: 50, h: 20 }, overlay: 0, covered: false, label: "Close", component: null, testID: "close" },
+                { kind: "press", rect: { x: 0, y: 100, w: 50, h: 20 }, overlay: 0, covered: true, label: "Saved Words", component: null, testID: null },
+            ],
+        }));
+        expect(ss.overlays[0].pressables.map((p) => p.label)).toEqual(["Close"]);
+        expect(ss.pressables[0]).toMatchObject({ label: "Saved Words", blockedByOverlay: true });
+        const out = formatScreenStateSummary(ss);
+        expect(out).toContain('🔲 Unknown — "<div#eb-cover>"');
+        expect(out).toContain("🚫 Blocked by overlay");
+        expect(out).toMatch(/🚫[\s\S]*"Saved Words"/);
+    });
+
+    it("renders inputs and checkboxes through the shared formatter", () => {
+        const out = formatScreenStateSummary(rawToScreenState(raw({
+            viewport: { w: 400, h: 600, dpr: 1 },
+            nodes: [
+                { kind: "press", rect: { x: 0, y: 0, w: 200, h: 30 }, overlay: null, covered: false, label: null, component: "MainApp", testID: null, input: { value: null, placeholder: "Search" } },
+                { kind: "press", rect: { x: 0, y: 50, w: 20, h: 20 }, overlay: null, covered: false, label: "Keep open (debug)", component: null, testID: null, checked: true },
+            ],
+        })));
+        expect(out).toContain('[input] empty, placeholder:"Search"');
+        expect(out).toContain("[switch:ON]");
+    });
+
+    it("says when the window is hidden, and counts off-screen and dropped elements", () => {
+        const notes = rawToScreenState(raw({ viewport: { w: 380, h: 600, dpr: 1, hidden: true }, offscreen: 7, dropped: 3 })).notes!.join("\n");
+        expect(notes).toContain("hidden");
+        expect(notes).toContain("7 more");
+        expect(notes).toContain("3 element(s) past");
+    });
+});
