@@ -27,6 +27,7 @@ import type { PhysicalIosDevice } from "../core/iosPhysical.js";
 import { writeFileSync } from "node:fs";
 import type { ConnectedApp } from "../core/types.js";
 import { chromiumAppFor } from "../core/connection.js";
+import { chromiumScreenState } from "../core/chromiumScreen.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { chromiumCapture } from "../core/chromium.js";
 
@@ -616,6 +617,9 @@ async function chromiumScreenshotResponse(app: ConnectedApp, outputPath?: string
         source: "screenshot",
         metadata: { width: shot.width, height: shot.height, scaleFactor: shot.scaleFactor, platform: "chromium" },
     });
+    // Same summary the mobile screenshots append. Best effort: a failed read
+    // never fails a capture that worked.
+    const summary = await chromiumScreenState(app).then((ss) => formatScreenStateSummary(ss)).catch(() => null);
     const { w, h, dpr } = shot.viewport;
     const downscaled = shot.scaleFactor !== 1
         ? `, downscaled from ${Math.round(w * dpr)}x${Math.round(h * dpr)} to fit API limits`
@@ -623,8 +627,8 @@ async function chromiumScreenshotResponse(app: ConnectedApp, outputPath?: string
     const text =
         `Screenshot ${shot.width}x${shot.height} px of ${app.deviceInfo.deviceName} ` +
         `(chromium viewport ${w}x${h} CSS px at devicePixelRatio ${dpr}${downscaled}).\n` +
-        `Pass pixel coordinates from this image straight to tap(x, y, device). ` +
-        `No element summary on chromium yet: find_components / inspect_component read the React tree.`;
+        `Pass pixel coordinates from this image straight to tap(x, y, device).` +
+        (summary ? `\n\n${summary}` : "");
     return {
         content: [
             { type: "text" as const, text },
@@ -704,10 +708,10 @@ export function registerScreenshotTools(server: McpServer): void {
         {
             description:
                 "Take a screenshot of whichever target `device` resolves to: an iOS simulator, an Android device, or a chromium (Electron / Chrome) window.\n" +
-                "PURPOSE: One capture tool for every platform. On iOS and Android it is exactly ios_screenshot / android_screenshot, pressables summary included. On chromium it captures the page viewport (no window chrome) over CDP.\n" +
+                "PURPOSE: One capture tool for every platform. On iOS and Android it is exactly ios_screenshot / android_screenshot, pressables summary included. On chromium it captures the page viewport (no window chrome) over CDP, with the same element summary as get_screen_state.\n" +
                 "COORDINATES: pixels in the returned image are the coordinates tap(x, y) takes, on every platform. Never scale them yourself.\n" +
                 "GOOD: screenshot(); screenshot({ device: \"FluentTalk\" })\n" +
-                "LIMITATIONS: a chromium capture has no element summary yet (use find_components / inspect_component). A hidden or minimised window may not paint, and the capture then times out.",
+                "LIMITATIONS: a hidden or minimised chromium window does not paint and cannot be captured: the call fails at once and says so.",
             inputSchema: {
                 device: z
                     .string()

@@ -20,6 +20,12 @@ function makeApp(id: string, deviceName: string, platform: ConnectedApp["platfor
 }
 
 describe("chromiumGate", () => {
+    it("lets the P5 screen-reading tools through on chromium", () => {
+        for (const t of ["get_screen_state", "get_screen_layout", "inspect_at_point", "measure"]) {
+            expect(chromiumGate(t, "chromium")).toBeNull();
+        }
+    });
+
     it("lets an allowlisted tool through on chromium", () => {
         expect(chromiumGate("get_logs", "chromium")).toBeNull();
     });

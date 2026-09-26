@@ -25,6 +25,8 @@ import {
     getConnectedAppByDevice,
     getFirstConnectedApp,
 } from "../core/index.js";
+import { chromiumAppFor } from "../core/connection.js";
+import { chromiumScreenState } from "../core/chromiumScreen.js";
 import {
     screenStateToScreenSpace,
     toDeliveredPxY,
@@ -69,6 +71,15 @@ function collectMetaNotes(r: ExecutionResult): string[] {
         out.push(`[warning: timeoutMs ${r._meta.timeoutClampedFrom} clamped to 120000]`);
     }
     return out;
+}
+
+/** Chromium branches return plain text or throw; this is their one response shape. */
+async function chromiumText(run: () => Promise<string>) {
+    try {
+        return { content: [{ type: "text" as const, text: await run() }] };
+    } catch (err) {
+        return { content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }], isError: true as const };
+    }
 }
 
 export function registerComponentTools(server: McpServer): void {
@@ -279,11 +290,18 @@ export function registerComponentTools(server: McpServer): void {
                 device: z.string().optional().describe(DEVICE_ARG_DESC),
                 pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false. Pressables include Switch/checkbox elements (onValueChange), each rendered with its current value as [switch:ON] / [switch:OFF] — tap those by testID or component instead of guessing an x from a screenshot."),
                 fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false."),
-                fullParams: z.boolean().optional().describe("Emit the route params' values. Default false — only the param key names are listed, because the full blob is usually hundreds of characters of ids and image URLs."),
-                includeHistory: z.boolean().optional().describe("Append the route trail — which screens the app has been on, most recent first, with dwell time and the route each was entered from. Recorded from connection time; an app restart shows an epoch divider. If no navigation listener could be attached the trail reports itself as sampled, meaning transitions between calls may be missing. Default false.")
+                fullParams: z.boolean().optional().describe("Emit the route params' values. Default false — only the param key names are listed, because the full blob is usually hundreds of characters of ids and image URLs. On chromium (Electron / Chrome) the route is the page URL, its query string the params, and elements come from the DOM."),
+                includeHistory: z.boolean().optional().describe("Append the route trail — which screens the app has been on, most recent first, with dwell time and the route each was entered from. Recorded from connection time; an app restart shows an epoch divider. If no navigation listener could be attached the trail reports itself as sampled, meaning transitions between calls may be missing. Default false. Not recorded on chromium targets.")
             }
         },
         async ({ device, pressablesOnly, fullText, fullParams, includeHistory }) => {
+            const chromeApp = chromiumAppFor("get_screen_state", device);
+            if (chromeApp) {
+                return await chromiumText(async () => {
+                    const ss = await chromiumScreenState(chromeApp);
+                    return formatScreenStateSummary(ss, undefined, { pressablesOnly, fullText, fullParams });
+                });
+            }
             if (!await awaitMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_state");
                 return {
