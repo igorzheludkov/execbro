@@ -80,6 +80,11 @@ describe("formatDialog and dialogGate", () => {
         expect(s).toMatch(/^a prompt dialog: "x+…"$/);
         expect(s.length).toBeLessThan(230);
     });
+    it("uses the right article for an alert", () => {
+        const a = {};
+        noteDialogOpened(a, opening("Saved", "alert"));
+        expect(formatDialog(openDialog(a)!)).toBe('an alert dialog: "Saved"');
+    });
     it("refuses a page-touching tool with the exact handle_dialog call", () => {
         const a = {};
         noteDialogOpened(a, opening("Delete it?"));
