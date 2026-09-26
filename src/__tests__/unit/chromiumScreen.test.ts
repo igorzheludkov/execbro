@@ -24,6 +24,23 @@ describe("safeValue", () => {
     });
 });
 
+describe("labelOf", () => {
+    const labelOf = helper<(el: unknown) => string | null>("labelOf");
+    const attrs = (a: Record<string, string> = {}) => (n: string) => a[n] ?? null;
+    it("names a select by its selected option, not by a wrapping label's text of every option", () => {
+        const select = {
+            tagName: "SELECT", getAttribute: attrs(), selectedIndex: 1,
+            options: [{ text: "Choose…" }, { text: "English" }],
+            labels: [{ innerText: "Native Choose… English Ukrainian" }],
+        };
+        expect(labelOf(select)).toBe("English");
+    });
+    it("prefers aria-label, then the field's label", () => {
+        expect(labelOf({ tagName: "BUTTON", getAttribute: attrs({ "aria-label": "Speak" }), innerText: "🔊" })).toBe("Speak");
+        expect(labelOf({ tagName: "INPUT", type: "checkbox", getAttribute: attrs(), labels: [{ innerText: "Keep open (debug)" }] })).toBe("Keep open (debug)");
+    });
+});
+
 describe("visibleRect", () => {
     const doc = { body: {}, documentElement: {} };
     const styles = new Map<unknown, { overflowX: string; overflowY: string }>();
