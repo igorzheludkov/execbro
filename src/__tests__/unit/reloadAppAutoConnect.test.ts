@@ -20,7 +20,8 @@ jest.unstable_mockModule("../../core/metro.js", () => ({
     selectMainDevice: jest.fn(),
     filterBridgelessDevices: jest.fn(),
     discoverMetroDevices: jest.fn(),
-    checkMetroState: jest.fn()
+    checkMetroState: jest.fn(),
+    isChromiumTarget: () => false
 }));
 
 const { connectedApps } = await import("../../core/state.js");
