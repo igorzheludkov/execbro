@@ -23,10 +23,12 @@ import { refreshMirror } from "../core/sdkMirrorPoller.js";
 import { withRestartDividers, evictionNotice, resolveEpochFilter } from "../core/epochRender.js";
 import { formatRequest } from "../core/network.js";
 import { pushMockRules } from "../core/networkInterceptor.js";
+import { connectedApps } from "../core/state.js";
 import {
     addRule,
     removeRule,
     clearRules,
+    clearAllRules,
     clearConditionRules,
     listRules,
     serializeRules,
@@ -402,7 +404,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "WORKFLOW: network_mock({action:\"add\", url:\"/orders\", status:500}) -> reproduce -> get_network_requests (rows show [MOCK m1]) -> network_mock({action:\"clear\"}).\n" +
                 "MODES: replace returns a canned response; tamper fetches the real one and mutates it (set/remove take dotted paths).\n" +
                 "MATCHING: url is a substring by default; wrap it in slashes for a regex (\"/\\\\/orders\\\\/\\\\d+$/\"). First matching rule wins, so add specific rules before broad ones.\n" +
-                "LIMITATIONS: JS-originated HTTP only — native-module traffic (native SDKs, <Image> loading) is not intercepted. Rules are per-device and survive reload_app; clear them when done.\n" +
+                "LIMITATIONS: JS-originated HTTP only — native-module traffic (native SDKs, <Image> loading) is not intercepted. Rules are per-device and survive reload_app; clear them when done (a bare clear covers every device).\n" +
                 "GOOD: network_mock({action:\"add\", url:\"/orders\", mode:\"tamper\", remove:[\"data.email\"]})\n" +
                 "BAD: leaving a rule active and then debugging why the app 'always fails' — check network_mock({action:\"list\"}) hit counts first.",
             inputSchema: {
@@ -440,6 +442,21 @@ export function registerNetworkTools(server: McpServer): void {
             }
         },
         async (args) => {
+            // A bare clear covers every device, as the read banner that lists them all
+            // promises, and reaches a closed window's rules, which no device name resolves.
+            if (args.action === "clear" && args.device === undefined) {
+                const counts = clearAllRules();
+                for (const app of connectedApps.values()) {
+                    const name = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+                    if (counts.has(name)) pushMockRules(app.ws, serializeRules(name));
+                }
+                const total = [...counts.values()].reduce((a, b) => a + b, 0);
+                const per = [...counts].map(([name, n]) => `${n} on ${name}`).join(", ");
+                return {
+                    content: [{ type: "text" as const, text: `Cleared ${total} mock rule(s) on every device${per ? ` (${per})` : ""}.` }]
+                };
+            }
+
             const { ws, deviceName } = resolveMockTarget(args.device);
 
             if (args.action === "list") {

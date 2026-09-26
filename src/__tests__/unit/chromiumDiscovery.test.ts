@@ -171,6 +171,21 @@ describe("nameChromiumTargets across fetches", () => {
     });
 });
 
+describe("nameChromiumTargets, closed and reopened windows", () => {
+    it("a window connected while untitled reclaims its url name when it reopens with a real title", () => {
+        const url = "http://localhost:5173/index.html?window=main";
+        const [early] = nameChromiumTargets([target({ id: "m1", title: "localhost:5173/index.html?window=main", url })]);
+        pinChromiumName(early);
+        const [reopened] = nameChromiumTargets([target({ id: "m2", title: "FluentTalk", url })]);
+        expect(reopened.deviceName).toBe(early.deviceName);
+    });
+    it("the same title on two ports gets two names", () => {
+        const [a] = nameChromiumTargets([target({ id: "a", title: "FluentTalk", url: "http://localhost:5173/" })]);
+        const [b] = nameChromiumTargets([target({ id: "b", title: "FluentTalk", url: "http://localhost:5174/" })]);
+        expect([a.deviceName, b.deviceName]).toEqual(["FluentTalk", "FluentTalk#2"]);
+    });
+});
+
 describe("isUntitledPage", () => {
     it("treats an empty title and the scheme-less url as placeholders", () => {
         expect(isUntitledPage(target({ title: "", url: "http://localhost:5173/" }))).toBe(true);

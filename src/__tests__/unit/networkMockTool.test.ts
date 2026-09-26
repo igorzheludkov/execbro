@@ -5,6 +5,7 @@ import {
     activeMockBanner,
     formatRuleList,
     __resetMockRules,
+    clearAllRules,
 } from "../../core/mockRules.js";
 
 describe("network_mock supporting behaviour", () => {
@@ -82,5 +83,18 @@ describe("formatRuleList", () => {
         const r = addRule("iPhone", { url: "/retry", mode: "replace", times: 1 });
         r.hits = 1;
         expect(formatRuleList("iPhone")).toContain("spent");
+    });
+});
+
+describe("clearAllRules (bare network_mock clear)", () => {
+    beforeEach(() => __resetMockRules());
+
+    it("clears every device, including a closed window no tool can name any more, and says how many each had", () => {
+        addRule("iPhone", { url: "/a", mode: "replace" });
+        addRule("FluentTalk", { url: "/b", mode: "replace" });
+        addRule("FluentTalk#2", { url: "/c", mode: "replace" });
+        addRule("FluentTalk#2", { url: "/d", mode: "replace" });
+        expect([...clearAllRules()]).toEqual([["iPhone", 1], ["FluentTalk", 1], ["FluentTalk#2", 2]]);
+        expect(activeMockBanner()).toBe("");
     });
 });
