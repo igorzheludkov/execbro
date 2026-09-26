@@ -27,7 +27,7 @@ export const CHROMIUM_TOOLS: Set<string> = new Set([
     // Component inspection via the fiber tree (DOM fallback). The surface argent rejects.
     "get_component_tree", "find_components", "inspect_component",
     // Screen and input via CDP (Page / Input domains)
-    "screenshot",
+    "screenshot", "tap",
 ]);
 
 const OVERRIDES: Record<string, string> = {

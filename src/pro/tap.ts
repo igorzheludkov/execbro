@@ -15,7 +15,8 @@ import {
 import { androidTap, androidFindElement } from "../core/android.js";
 import { compareScreenshots, type DiffRegion } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
-import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice } from "../core/connection.js";
+import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice, chromiumAppFor } from "../core/connection.js";
+import { chromiumTap } from "./chromiumTap.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { notifyDriverMissing } from "../core/logbox.js";
 import { captureFailureArtifact, type ArtifactOutcome, type CaptureSignals } from "../core/failureArtifact.js";
@@ -2028,6 +2029,11 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             error: "Both x and y coordinates must be provided"
         };
     }
+
+    // Chromium targets take a separate path: DOM lookup plus CDP mouse events.
+    // Asked the way the capability gate asks, so the two cannot disagree.
+    const chromiumApp = chromiumAppFor("tap", options.device);
+    if (chromiumApp) return chromiumTap(chromiumApp, query, options);
 
     // Native mode: bypass React Native connection, tap directly via ADB/simctl
     if (options.native && hasCoordinates) {

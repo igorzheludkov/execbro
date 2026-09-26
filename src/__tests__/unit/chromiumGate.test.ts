@@ -132,3 +132,9 @@ describe("screenshot on chromium", () => {
         expect(chromiumGate("android_screenshot", "chromium")?.content[0].text).toContain("screenshot({ device");
     });
 });
+
+describe("tap on chromium", () => {
+    it("is allowlisted", () => {
+        expect(chromiumGate("tap", "chromium")).toBeNull();
+    });
+});
