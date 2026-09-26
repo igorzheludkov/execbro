@@ -12,6 +12,7 @@
 import sharp from "sharp";
 import type { ConnectedApp } from "./types.js";
 import { sendCdpCommand, evaluateJson } from "./cdpCommand.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 /** Same API image cap ios.ts and android.ts apply. */
 export const CHROMIUM_MAX_DIMENSION = 2000;
@@ -84,4 +85,189 @@ export async function chromiumClick(app: ConnectedApp, x: number, y: number, hol
 /** Insert text at the focused element's caret, through the browser's own input pipeline (fires input events React sees). */
 export async function chromiumInsertText(app: ConnectedApp, text: string): Promise<void> {
     await sendCdpCommand(app.ws, "Input.insertText", { text });
+}
+
+export interface DomQuery {
+    mode: "tap" | "input";
+    testID?: string;
+    text?: string;
+    component?: string;
+    textMatch?: string;
+}
+
+export interface DomCandidate {
+    /** Position in globalThis.__eb_domTargets. */
+    i: number;
+    tag: string;
+    text: string;
+    testID: string | null;
+    label: string | null;
+    placeholder: string | null;
+    value: string | null;
+    /** CSS px, viewport-relative. */
+    rect: { x: number; y: number; w: number; h: number };
+}
+
+export interface DomCollection {
+    viewport: ChromiumViewport;
+    candidates: DomCandidate[];
+    /** Every match, even past the 50 returned. */
+    total: number;
+    /** input mode, untargeted: an editable element had focus. */
+    focused: boolean;
+}
+
+export type DomPick =
+    | { kind: "ok"; cand: DomCandidate }
+    | { kind: "none" }
+    | { kind: "ambiguous"; matches: DomCandidate[] };
+
+export function normText(s: string): string {
+    return s.split(/\s+/).join(" ").trim();
+}
+
+/**
+ * Choose one candidate. The collector already kept only case-insensitive
+ * substring matches for text, so the tiers only rank them: exact, then
+ * case-insensitive exact, then the rest. Never guesses between equals.
+ */
+export function pickDomTarget(cands: DomCandidate[], text: string | undefined, index: number | undefined): DomPick {
+    let pool = cands;
+    if (text !== undefined) {
+        const want = normText(text);
+        const tiers: Array<(c: DomCandidate) => boolean> = [
+            (c) => c.text === want,
+            (c) => c.text.toLowerCase() === want.toLowerCase(),
+            () => true,
+        ];
+        pool = tiers.map((t) => cands.filter(t)).find((p) => p.length > 0) ?? [];
+    }
+    if (index !== undefined) return pool[index] ? { kind: "ok", cand: pool[index] } : { kind: "none" };
+    if (pool.length === 0) return { kind: "none" };
+    return pool.length === 1 ? { kind: "ok", cand: pool[0] } : { kind: "ambiguous", matches: pool };
+}
+
+export function buildDomCollectJs(q: DomQuery): string {
+    return `(function () {
+    ${FIBER_ROOTS_JS}
+    var q = ${JSON.stringify(q)};
+    function norm(s) { return String(s == null ? "" : s).split(/\\s+/).join(" ").trim(); }
+    var NOT_TEXT = ["button", "submit", "reset", "checkbox", "radio", "file", "image", "range", "color", "hidden"];
+    function isEditable(el) {
+        if (!el || !el.tagName) return false;
+        if (el.isContentEditable || el.tagName === "TEXTAREA") return true;
+        return el.tagName === "INPUT" && NOT_TEXT.indexOf(String(el.type).toLowerCase()) < 0;
+    }
+    function editableIn(el) {
+        if (isEditable(el)) return el;
+        var inner = el.querySelectorAll ? el.querySelectorAll("input, textarea, [contenteditable]") : [];
+        for (var n = 0; n < inner.length; n++) if (isEditable(inner[n])) return inner[n];
+        return null;
+    }
+    function testIdOf(el) { return el.getAttribute("data-testid") || el.getAttribute("data-test-id") || el.id || null; }
+    function labelOf(el) { return norm(el.getAttribute("aria-label") || (el.labels && el.labels[0] ? el.labels[0].innerText : "")) || null; }
+    function valueOf(el) { return el.isContentEditable ? el.innerText : (el.value == null ? null : String(el.value)); }
+    function textOf(el) { return el.tagName === "INPUT" ? norm(el.value || el.getAttribute("aria-label")) : norm(el.innerText || el.getAttribute("aria-label")); }
+    function visible(el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; }
+    var all = document.body ? Array.prototype.slice.call(document.body.querySelectorAll("*")) : [];
+    var els = [];
+    var focused = false;
+    if (q.testID) {
+        els = all.filter(function (el) { return testIdOf(el) === q.testID; });
+    } else if (q.component) {
+        var wantC = q.component.toLowerCase();
+        __eb_fiberRoots(true).forEach(function (root) {
+            (function walk(f) {
+                for (; f; f = f.sibling) {
+                    var t = f.type, name = t && (t.displayName || t.name);
+                    if (typeof name === "string" && name.toLowerCase() === wantC) {
+                        var h = f;
+                        while (h && !(h.stateNode instanceof Element)) h = h.child;
+                        if (h && els.indexOf(h.stateNode) < 0) els.push(h.stateNode);
+                    }
+                    walk(f.child);
+                }
+            })(root.current);
+        });
+    } else if (q.text) {
+        var wantT = norm(q.text).toLowerCase();
+        els = all.filter(function (el) {
+            return norm(el.tagName === "INPUT" ? el.value : el.textContent).toLowerCase().indexOf(wantT) >= 0 ||
+                norm(el.getAttribute("aria-label")).toLowerCase().indexOf(wantT) >= 0;
+        }).filter(visible);
+        // ponytail: O(k^2) innermost filter over matches; k is small (matches plus their ancestors).
+        els = els.filter(function (el) { return !els.some(function (o) { return o !== el && el.contains(o); }); });
+    }
+    if (q.mode === "input") {
+        if (q.textMatch) {
+            var wantM = norm(q.textMatch).toLowerCase();
+            els = all.filter(isEditable).filter(function (el) {
+                return [el.getAttribute("placeholder"), labelOf(el), valueOf(el)].some(function (s) {
+                    return norm(s).toLowerCase().indexOf(wantM) >= 0;
+                });
+            });
+        } else if (q.testID || q.component) {
+            els = els.map(editableIn).filter(function (el, n, a) { return el && a.indexOf(el) === n; });
+        } else {
+            var active = document.activeElement;
+            focused = isEditable(active);
+            els = focused ? [active] : all.filter(isEditable);
+        }
+    }
+    els = els.filter(visible);
+    globalThis.__eb_domTargets = els;
+    return JSON.stringify({
+        viewport: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio },
+        focused: focused,
+        total: els.length,
+        candidates: els.slice(0, 50).map(function (el, n) {
+            var r = el.getBoundingClientRect();
+            return {
+                i: n, tag: el.tagName.toLowerCase(), text: textOf(el).slice(0, 200), testID: testIdOf(el),
+                label: labelOf(el), placeholder: el.getAttribute("placeholder"),
+                value: isEditable(el) ? valueOf(el) : null,
+                rect: { x: r.x, y: r.y, w: r.width, h: r.height }
+            };
+        })
+    });
+})()`;
+}
+
+export function buildDomPrepareJs(i: number): string {
+    return `(function () {
+    var el = (globalThis.__eb_domTargets || [])[${i}];
+    if (!el || !el.isConnected) return JSON.stringify({ error: "The element left the page between lookup and tap. Retry." });
+    var r = el.getBoundingClientRect();
+    var cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    var scrolled = false;
+    if (cx < 0 || cy < 0 || cx >= innerWidth || cy >= innerHeight) {
+        el.scrollIntoView({ block: "center", inline: "center" });
+        r = el.getBoundingClientRect();
+        cx = r.x + r.width / 2;
+        cy = r.y + r.height / 2;
+        scrolled = true;
+    }
+    var hit = document.elementFromPoint(cx, cy);
+    var covered = hit && hit !== el && !el.contains(hit) && !hit.contains(el)
+        ? "<" + hit.tagName.toLowerCase() + (hit.id ? "#" + hit.id : "") +
+          (hit.getAttribute("data-testid") ? ' data-testid="' + hit.getAttribute("data-testid") + '"' : "") + ">"
+        : null;
+    return JSON.stringify({ x: cx, y: cy, scrolled: scrolled, covered: covered });
+})()`;
+}
+
+export function collectDomTargets(app: ConnectedApp, q: DomQuery): Promise<DomCollection> {
+    return evaluateJson<DomCollection>(app.ws, buildDomCollectJs(q));
+}
+
+export async function prepareDomTarget(
+    app: ConnectedApp,
+    i: number
+): Promise<{ x: number; y: number; scrolled: boolean; covered: string | null }> {
+    const r = await evaluateJson<{ error?: string; x: number; y: number; scrolled: boolean; covered: string | null }>(
+        app.ws,
+        buildDomPrepareJs(i)
+    );
+    if (r.error) throw new Error(r.error);
+    return r;
 }
