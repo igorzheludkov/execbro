@@ -8,7 +8,7 @@ import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
 import { resolveAdbSerialForDeviceName } from "./android.js";
-import { fetchDevices, selectMainDevice, scanMetroPorts } from "./metro.js";
+import { fetchDevices, selectMainDevice, scanMetroPorts, isChromiumTarget } from "./metro.js";
 import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
@@ -1289,7 +1289,7 @@ export async function connectToDevice(
 
             // Connection established — run setup
             connectionLocks.delete(appKey);
-            connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: "android" });
+            connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: isChromiumTarget(device) ? "chromium" : "android" });
             recordDeviceSeen(device.deviceName || device.title);
             markConnectionEstablished();
 
@@ -1372,7 +1372,7 @@ export async function connectToDevice(
             //   - Android: adb serial via resolveAdbSerialForDeviceName (AVD name, else model)
             // Both are best-effort; failures are swallowed. Identifiers enable
             // automatic device scoping and power the registry-first resolver fast path.
-            if (device.deviceName) {
+            if (device.deviceName && !isChromiumTarget(device)) {
                 const [simulatorUdid, adbSerial] = await Promise.all([
                     findSimulatorByName(device.deviceName).catch(() => null),
                     resolveAdbSerialForDeviceName(device.deviceName).catch(() => null)
@@ -1442,7 +1442,11 @@ export async function connectToDevice(
                 }
             });
 
-            resolve(`Connected to ${device.title} (${device.deviceName})`);
+            resolve(isChromiumTarget(device)
+                // Other CDP clients on this page (chrome-devtools-mcp, a human's DevTools)
+                // will now see a patched fetch/XHR with nothing in their own output to say why.
+                ? `Connected to ${device.deviceName} (chromium, ${device.url ?? "no url"}). Note: execbro injected an XHR/fetch interceptor into this page; other CDP clients inspecting it will observe the patched network layer.`
+                : `Connected to ${device.title} (${device.deviceName})`);
         } catch (error) {
             // Connection failed (both with and without Origin header)
             connectionLocks.delete(appKey);

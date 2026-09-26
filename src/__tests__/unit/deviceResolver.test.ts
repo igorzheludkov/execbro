@@ -4,7 +4,7 @@ type ConnectedAppRegistryEntry = {
     key?: string;
     isConnected?: boolean;
     app: {
-        platform: "ios" | "android";
+        platform: "ios" | "android" | "chromium";
         simulatorUdid?: string;
         adbSerial?: string;
         deviceInfo: { deviceName: string };
@@ -61,6 +61,16 @@ describe("resolveDeviceTarget", () => {
         recordDeviceMock.mockReset();
         listDevicesMock.mockReset();
         listDevicesMock.mockReturnValue([]);
+    });
+
+    it("never resolves a chromium app as a native device target", async () => {
+        getConnectedAppsMock.mockReturnValue([
+            { key: "9222-p1", isConnected: true, app: { platform: "chromium", deviceInfo: { deviceName: "FluentTalk" } } }
+        ]);
+
+        const r = await resolveDeviceTarget("FluentTalk");
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error.code).toBe("DEVICE_NOT_FOUND");
     });
 
     it("resolves an iOS simulator UDID directly to a booted iOS target", async () => {

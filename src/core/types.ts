@@ -50,7 +50,7 @@ export interface ConnectedApp {
     ws: WebSocket;
     deviceInfo: DeviceInfo;
     port: number;
-    platform: "ios" | "android";
+    platform: "ios" | "android" | "chromium";
     simulatorUdid?: string;
     // Android emulator/device serial (e.g. "emulator-5554"). Populated at
     // connect time when getAdbIdForAvd matches deviceName to a running
@@ -281,7 +281,7 @@ export interface ConnectionCheckResult {
 export interface EnsureConnectionDeviceInfo {
     deviceName: string;
     deviceTitle: string;
-    platform: "ios" | "android";
+    platform: "ios" | "android" | "chromium";
     port: number;
     uptime: string;
     contextId: number | null;

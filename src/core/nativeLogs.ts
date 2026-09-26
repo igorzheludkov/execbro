@@ -38,7 +38,7 @@ export function identityFromApp(
     deviceKeyOverride?: string
 ): AppIdentity | undefined {
     const deviceKey = deviceKeyOverride ?? deviceKeyOf(app);
-    if (!deviceKey || !app.deviceInfo.appId) return undefined;
+    if (!deviceKey || !app.deviceInfo.appId || app.platform === "chromium") return undefined;
     return { deviceKey, platform: app.platform, appId: app.deviceInfo.appId };
 }
 

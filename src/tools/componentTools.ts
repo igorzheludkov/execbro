@@ -50,7 +50,9 @@ import { DEVICE_ARG_DESC } from "./_deviceArg.js";
  */
 async function resolveScreenSpaceMetricsFor(device?: string): Promise<ScreenSpaceMetrics> {
     const app = (device ? getConnectedAppByDevice(device) : getFirstConnectedApp()) ?? getFirstConnectedApp();
-    if (!app) return { platform: "ios", topInset: 0 };
+    // topInset 0 means "leave coordinates alone", which is also the right answer
+    // for chromium: CSS pixels have no status bar to subtract.
+    if (!app || app.platform === "chromium") return { platform: "ios", topInset: 0 };
     return resolveScreenSpaceMetrics({
         platform: app.platform,
         udid: app.simulatorUdid,
