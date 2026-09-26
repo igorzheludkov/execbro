@@ -88,6 +88,13 @@ function visibleRect(el, box) {
     }
     return x2 - x1 >= 1 && y2 - y1 >= 1 ? { x: x1, y: y1, w: x2 - x1, h: y2 - y1 } : "off";
 }
+// Pressables with no other pressable inside. Only these own the text under them as
+// their label: a click-wrapper (a modal backdrop, an app shell listening for clicks
+// outside) would otherwise swallow every text line on the screen.
+// ponytail: O(n^2) contains() over pressables; fine for hundreds, index by depth if pages get huge.
+function leafPresses(els) {
+    return els.filter(function (el) { return !els.some(function (o) { return o !== el && el.contains(o); }); });
+}
 function joinRect(a, b) {
     if (!a) return b;
     if (!b) return a;
@@ -166,7 +173,7 @@ export function buildScreenCollectJs(): string {
         return !!(p && (p.onClick || p.onMouseDown || p.onMouseUp || p.onPointerDown || p.onPointerUp));
     }
     var pressEls = all.filter(isPress);
-    var pressSet = new Set(pressEls);
+    var pressSet = new Set(leafPresses(pressEls));
     function insidePress(el) { for (var p = el; p; p = p.parentElement) if (pressSet.has(p)) return true; return false; }
     function shown(el) { var r = visibleRect(el); return r && r !== "off"; }
     var layers = all.filter(function (el) { return el.matches(OVERLAY_SEL) && shown(el); });
