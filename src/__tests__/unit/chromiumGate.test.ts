@@ -150,6 +150,7 @@ describe("input_text on chromium", () => {
         expect(chromiumGate("input_text", "chromium")).toBeNull();
         expect(chromiumGate("swipe", "chromium")).toBeNull();
         expect(chromiumGate("press_key", "chromium")).toBeNull();
-        expect(chromiumGate("pinch", "chromium")?.content[0].text).toContain("screenshot, tap, input_text, swipe (wheel scroll and drag), press_key");
+        expect(chromiumGate("handle_dialog", "chromium")).toBeNull();
+        expect(chromiumGate("pinch", "chromium")?.content[0].text).toContain("screenshot, tap, input_text, swipe (wheel scroll and drag), press_key, handle_dialog");
     });
 });
