@@ -64,9 +64,22 @@ Linking is only for the dashboard: it attaches your installs to your account so 
 - **Per-Device Buffers** - Logs and network requests are captured separately per device for clean debugging
 - **Cross-Platform Comparison** - Debug iOS and Android side-by-side, comparing logs, network traffic, and component trees
 
+### Electron & Chromium (experimental)
+
+- **Desktop React apps over CDP** - An Electron window or a Chrome tab connects as a `chromium` target alongside your simulators, and every tool takes the same `device` argument
+- **What works today** - Console logs, network capture and replay, `execute_in_app`, debug globals, Redux, `http_request` / `app_request`, and React component inspection (`get_component_tree`, `find_components`, `inspect_component`), including on Vite apps whose DevTools hook has no renderers
+- **Not yet** - Screenshots, `tap`, text input, screen layout, and network mocking. These tools refuse a chromium target with a message saying so, rather than acting on the wrong device
+- **Opt in** - Add one dev-only line to the Electron main process, then run `scan_metro`. Port 9222 is listed but not auto-connected, because connecting injects a network interceptor into the page. Attach with `connect_metro({ port: 9222, device: "<window title>" })`, or set `EXECBRO_CHROMIUM_PORTS=9222` to auto-connect
+
+  ```ts
+  if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222')
+  ```
+
+  Keep the `!app.isPackaged` guard: an open debugging port on a packaged build lets anything that can reach it run code in your renderer
+
 ### Under the Hood
 
-- **Auto-Discovery** - Scans Metro on ports 8081, 8082, 19000-19002 automatically
+- **Auto-Discovery** - Scans Metro on ports 8081-8090 automatically, and lists Chromium/Electron targets on 9222 (plus any ports in `EXECBRO_CHROMIUM_PORTS`)
 - **Multi-Device Support** - Connects to all Bridgeless targets simultaneously, with per-device log and network buffers
 - **Auto-Reconnection** - Exponential backoff (up to 8 attempts) when connection drops
 - **Efficient Buffering** - Circular buffers: 500 logs, 200 network requests, 100 inspector selections
