@@ -80,6 +80,29 @@ describe("DOM collector, text mode", () => {
     });
 });
 
+describe("DOM collector, text mode on a deep page", () => {
+    it("keeps innermost matches in linear time, not one contains() per pair", () => {
+        let leaf = el("SPAN", { textContent: "x", innerText: "x" });
+        for (let n = 0; n < 300; n++) leaf = el("DIV", { textContent: "x", innerText: "x" }, [leaf]);
+        const sibling = el("P", { textContent: "x", innerText: "x" });
+        mount(el("BODY", {}, [leaf, sibling]));
+        let calls = 0;
+        for (const d of [leaf, ...descendants(leaf), sibling]) {
+            const node = d as unknown as { contains: (o: unknown) => boolean };
+            const orig = node.contains;
+            node.contains = (o: unknown) => { calls++; return orig(o); };
+        }
+        const r = collect({ mode: "tap", text: "x" });
+        expect(r.candidates.map((c) => c.tag)).toEqual(["span", "p"]);
+        expect(calls).toBeLessThan(1000);
+    });
+    it("reports a hidden window in its viewport", () => {
+        mount(el("BODY", {}, []));
+        (g.document as Record<string, unknown>).visibilityState = "hidden";
+        expect(collect({ mode: "tap", text: "x" }).viewport.hidden).toBe(true);
+    });
+});
+
 describe("DOM collector, input mode on a wrapper", () => {
     it("lists every field under a wrapper testID instead of picking the first", () => {
         const form = el("FORM", { attrs: { "data-testid": "login-form" } }, [

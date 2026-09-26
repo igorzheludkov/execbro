@@ -34,9 +34,17 @@ export async function chromiumTap(
         let k: number;
         let pressed: string | undefined;
         let warning: string | undefined;
+        // Checked before the click whatever verify says: a hidden window does not
+        // paint, so the click could not be verified or seen, and would land later.
+        const hiddenError = (vp: { hidden?: boolean }) => vp.hidden
+            ? { ...base, success: false, error: "The window is hidden (document.visibilityState is \"hidden\"), so nothing was clicked. Show the window and retry." }
+            : null;
 
         if (query.x !== undefined && query.y !== undefined) {
-            k = pxPerCss(await chromiumViewport(app));
+            const vp = await chromiumViewport(app);
+            const hidden = hiddenError(vp);
+            if (hidden) return hidden;
+            k = pxPerCss(vp);
             css = { x: query.x / k, y: query.y / k };
         } else {
             const found = await collectDomTargets(app, {
@@ -45,6 +53,8 @@ export async function chromiumTap(
                 text: query.text,
                 component: query.component,
             });
+            const hidden = hiddenError(found.viewport);
+            if (hidden) return hidden;
             k = pxPerCss(found.viewport);
             const pick = pickDomTarget(found.candidates, query.text, options.index);
             if (pick.kind === "ambiguous") {
