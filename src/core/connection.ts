@@ -1123,7 +1123,7 @@ export async function connectToDevice(
                 });
 
                 if (isAlive) {
-                    resolve(`Already connected to ${device.title}`);
+                    resolve(`Already connected to ${device.deviceName || device.title}`);
                     return;
                 }
 
