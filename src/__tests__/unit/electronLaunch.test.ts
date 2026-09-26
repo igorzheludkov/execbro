@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { planElectronLaunch, launchElectron, findBin } from "../../core/electronLaunch.js";
 
@@ -75,6 +77,35 @@ describe("launchElectron", () => {
         } finally {
             if (prev === undefined) delete process.env.ELECTRON_RUN_AS_NODE;
             else process.env.ELECTRON_RUN_AS_NODE = prev;
+        }
+    });
+});
+
+describe("launchElectron, app pins its own port", () => {
+    let server: Server;
+    afterEach(() => new Promise<void>((r) => server.close(() => r())));
+
+    it("follows the port Chromium reports in the log when the app overrides the flag", async () => {
+        // A stand-in /json listing: one Electron window, as Chromium serves it.
+        server = createServer((_req, res) => {
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify([{ id: "A1", type: "page", title: "Pinned", description: "", url: "http://localhost:5173/", webSocketDebuggerUrl: "ws://127.0.0.1/devtools/page/A1" }]));
+        });
+        await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+        const real = (server.address() as AddressInfo).port;
+        const dir = project(join(root, "app"), { electron: "33" }, {
+            electron: `#!/bin/sh\necho "DevTools listening on ws://127.0.0.1:${real}/devtools/browser/x"\nexec sleep 30\n`,
+        });
+        const plan = planElectronLaunch(dir, 1);
+        if ("error" in plan) throw new Error(plan.error);
+        const r = await launchElectron(plan, 1, 10_000, join(root, "logs"));
+        try {
+            expect(r.ok).toBe(true);
+            if (!r.ok) return;
+            expect(r.port).toBe(real);
+            expect(r.devices.map((d) => d.title)).toEqual(["Pinned"]);
+        } finally {
+            if (r.ok) process.kill(-r.pid);
         }
     });
 });

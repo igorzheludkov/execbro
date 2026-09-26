@@ -33,7 +33,8 @@ export function registerDeviceTools(server: McpServer): void {
                 "HOW: electron-vite projects run `electron-vite dev --remoteDebuggingPort <port>`, others `electron . --remote-debugging-port=<port>`, using the project's own installed binary.\n" +
                 "SAFETY: only a source folder is launched, so the app runs unpackaged. A packaged .app is refused: a CDP port on a packaged build lets anything that reaches it run code in the app.\n" +
                 "GOOD: electron_launch_app({ projectPath: \"~/code/myapp/apps/desktop\" })\n" +
-                "LIMITATIONS: an app that sets its own port with appendSwitch('remote-debugging-port') overrides this flag; pass that port instead. Electron Forge and custom dev scripts are not detected.",
+                "An app that pins its own port with appendSwitch('remote-debugging-port') is followed to that port (read from Chromium's startup line).\n" +
+                "LIMITATIONS: Electron Forge and custom dev scripts are not detected.",
             inputSchema: {
                 projectPath: z.string().describe("The Electron project's source folder (the one with package.json). A leading ~ is expanded."),
                 port: z.coerce.number().int().min(1024).max(65535).optional().default(9222).describe("CDP port to open (default 9222). Must be free."),
@@ -49,10 +50,11 @@ export function registerDeviceTools(server: McpServer): void {
             }
             const r = await launchElectron(plan, port, timeoutMs);
             if (!r.ok) return fail(`${r.error}\n\nLog: ${r.logPath}`);
-            const lines = [`Launched ${basename(plan.cwd)} with ${plan.runner} (pid ${r.pid}), CDP on 127.0.0.1:${port}. Log: ${r.logPath}`];
+            const moved = r.port !== port ? ` (the app sets its own port with appendSwitch, which overrides ${port})` : "";
+            const lines = [`Launched ${basename(plan.cwd)} with ${plan.runner} (pid ${r.pid}), CDP on 127.0.0.1:${r.port}${moved}. Log: ${r.logPath}`];
             for (const d of r.devices) {
                 try {
-                    lines.push(`  - ${await connectToDevice(d, port)}`);
+                    lines.push(`  - ${await connectToDevice(d, r.port)}`);
                 } catch (error) {
                     lines.push(`  - ${d.deviceName ?? d.title}: Failed - ${error}`);
                 }
