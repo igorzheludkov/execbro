@@ -14,7 +14,7 @@ import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
 import { startSdkMirrorPoller, stopSdkMirrorPoller } from "./sdkMirrorPoller.js";
-import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate } from "./chromiumDialogs.js";
+import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate, formatDialog } from "./chromiumDialogs.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
     MIN_STABLE_CONNECTION_MS,
@@ -2202,11 +2202,20 @@ export async function ensureConnection(options: {
 
     // Per-device health-check; reconnect failed devices individually so a dead
     // Android doesn't take down a healthy iOS report and vice versa.
-    const perApp: Array<{ app: ConnectedApp; healthy: boolean }> = [];
+    const perApp: Array<{ app: ConnectedApp; healthy: boolean; dialog?: string }> = [];
 
     for (const candidate of openApps) {
         let app = candidate;
         let healthy = true;
+
+        // A page paused by a JavaScript dialog fails the evaluate but is not
+        // stale. Reconnecting would lose the dialog for good: Page.enable does not
+        // replay it, and a new session can neither see nor answer it.
+        const dialog = app.platform === "chromium" ? openDialog(app.ws) : null;
+        if (dialog) {
+            perApp.push({ app, healthy: false, dialog: formatDialog(dialog) });
+            continue;
+        }
 
         if (healthCheck) {
             healthy = await runQuickHealthCheck(app);
@@ -2249,7 +2258,7 @@ export async function ensureConnection(options: {
         perApp.push({ app, healthy });
     }
 
-    const connectionInfos = perApp.map(({ app, healthy }) => {
+    const connectionInfos = perApp.map(({ app, healthy, dialog }) => {
         const appKey = `${app.port}-${app.deviceInfo.id}`;
         const connectionState = getConnectionState(appKey);
         const contextHealth = getContextHealth(appKey);
@@ -2265,6 +2274,7 @@ export async function ensureConnection(options: {
             uptime,
             contextId: contextHealth?.contextId ?? null,
             healthCheckPassed: healthy,
+            ...(dialog && { dialog }),
         };
     });
 

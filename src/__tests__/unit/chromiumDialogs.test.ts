@@ -3,7 +3,7 @@ import {
     noteDialogOpened, noteDialogClosed, openDialog, lastClosedDialog, onDialogOpened,
     waitForDialogClosed, raceDialog, formatDialog, dialogGate, DIALOG_BLOCKED_TOOLS,
 } from "../../core/chromiumDialogs.js";
-import { handleCDPMessage, dialogGateFor } from "../../core/connection.js";
+import { handleCDPMessage, dialogGateFor, ensureConnection } from "../../core/connection.js";
 import { connectedApps } from "../../core/state.js";
 
 const opening = (message = "Delete it?", type = "confirm") => ({ type, message, url: "http://x/", defaultPrompt: "" });
@@ -80,6 +80,11 @@ describe("formatDialog and dialogGate", () => {
         expect(s).toMatch(/^a prompt dialog: "x+…"$/);
         expect(s.length).toBeLessThan(230);
     });
+    it("stores the page message truncated, so the structured dialog field cannot carry a huge payload", () => {
+        const a = {};
+        noteDialogOpened(a, opening("y".repeat(50000)));
+        expect(openDialog(a)!.message).toBe("y".repeat(200) + "…");
+    });
     it("uses the right article for an alert", () => {
         const a = {};
         noteDialogOpened(a, opening("Saved", "alert"));
@@ -130,5 +135,25 @@ describe("CDP events and the gate", () => {
     });
     it("an unknown device never throws out of the gate", () => {
         expect(dialogGateFor("tap", "NoSuchDevice")).toBeNull();
+    });
+});
+
+describe("ensure_connection with a dialog open", () => {
+    it("reports the dialog and keeps the socket, because a new session could neither see nor answer it", async () => {
+        let closed = false;
+        const ws = { readyState: 1, send: () => {}, on: () => {}, removeListener: () => {}, close: () => { closed = true; } };
+        const dev = { id: "PageD", title: "PageD", deviceName: "PageD", webSocketDebuggerUrl: "ws://x/PageD", type: "page", url: "http://x/PageD" };
+        connectedApps.set("9996-PageD", { ws, deviceInfo: dev, port: 9996, platform: "chromium" } as never);
+        try {
+            noteDialogOpened(ws, opening("Keep me"));
+            const r = await ensureConnection({ healthCheck: true });
+            expect(closed).toBe(false);
+            expect(connectedApps.has("9996-PageD")).toBe(true);
+            expect(r.wasReconnected).toBe(false);
+            expect(r.connectionInfos[0]).toMatchObject({ healthCheckPassed: false, dialog: 'a confirm dialog: "Keep me"' });
+        } finally {
+            connectedApps.delete("9996-PageD");
+            noteDialogClosed(ws, { result: true });
+        }
     });
 });

@@ -26,12 +26,16 @@ const openSubs = new WeakMap<object, Set<(d: DialogInfo) => void>>();
 const closeSubs = new WeakMap<object, Set<() => void>>();
 
 const TYPES: DialogType[] = ["alert", "confirm", "prompt", "beforeunload"];
+const MAX_MESSAGE = 200;
+
+/** Page-controlled text is capped once, here, so every output that carries a DialogInfo is bounded. */
+const cap = (s: string) => (s.length > MAX_MESSAGE ? `${s.slice(0, MAX_MESSAGE)}…` : s);
 
 export function noteDialogOpened(ws: object, p: { type: string; message: string; defaultPrompt?: string; url: string }): void {
     const d: DialogInfo = {
         type: (TYPES as string[]).includes(p.type) ? (p.type as DialogType) : "alert",
-        message: String(p.message ?? ""),
-        ...(p.defaultPrompt ? { defaultPrompt: p.defaultPrompt } : {}),
+        message: cap(String(p.message ?? "")),
+        ...(p.defaultPrompt ? { defaultPrompt: cap(String(p.defaultPrompt)) } : {}),
         url: String(p.url ?? ""),
         openedAt: Date.now(),
     };
@@ -94,11 +98,8 @@ export function raceDialog<T>(ws: object, p: Promise<T>): Promise<{ kind: "done"
     });
 }
 
-const MAX_MESSAGE = 200;
-
 export function formatDialog(d: DialogInfo): string {
-    const m = d.message.length > MAX_MESSAGE ? `${d.message.slice(0, MAX_MESSAGE)}…` : d.message;
-    return `${d.type === "alert" ? "an" : "a"} ${d.type} dialog: "${m}"`;
+    return `${d.type === "alert" ? "an" : "a"} ${d.type} dialog: "${d.message}"`;
 }
 
 /** Tools that evaluate in, capture, or send input to the page: all of them wait on an open dialog. */

@@ -286,6 +286,8 @@ export interface EnsureConnectionDeviceInfo {
     uptime: string;
     contextId: number | null;
     healthCheckPassed: boolean;
+    /** chromium: the page is paused by this JavaScript dialog (formatDialog text), so it was not health-checked or reconnected. */
+    dialog?: string;
 }
 
 // Result of ensure_connection. `connected` is true when at least one app has
