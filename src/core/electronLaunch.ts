@@ -54,6 +54,24 @@ export function planElectronLaunch(projectPath: string, port: number): LaunchPla
         : { cmd, args: [".", `--remote-debugging-port=${port}`], cwd, runner };
 }
 
+/**
+ * The port Chromium actually opened. An app that calls
+ * appendSwitch('remote-debugging-port', ...) overrides the flag, and Chromium
+ * prints "DevTools listening on ws://127.0.0.1:<port>/..." either way.
+ */
+export function devToolsPortFromLog(log: string): number | null {
+    const m = /DevTools listening on ws:\/\/[^:/]+:(\d+)\//.exec(log);
+    return m ? Number(m[1]) : null;
+}
+
+function readLog(path: string): string {
+    try {
+        return readFileSync(path, "utf8");
+    } catch {
+        return "";
+    }
+}
+
 function tail(path: string, lines = 20): string {
     try {
         return readFileSync(path, "utf8").trimEnd().split("\n").slice(-lines).join("\n");
@@ -67,7 +85,7 @@ export async function launchElectron(
     port: number,
     timeoutMs: number,
     logDir: string = join(CONFIG_DIR, "electron")
-): Promise<{ ok: true; pid: number; logPath: string; devices: DeviceInfo[] } | { ok: false; error: string; logPath: string }> {
+): Promise<{ ok: true; pid: number; port: number; logPath: string; devices: DeviceInfo[] } | { ok: false; error: string; logPath: string }> {
     mkdirSync(logDir, { recursive: true });
     const logPath = join(logDir, `${basename(plan.cwd)}.log`);
     const fd = openSync(logPath, "w");
@@ -90,8 +108,9 @@ export async function launchElectron(
         if (exited !== null) {
             return { ok: false, error: `The app exited (${exited}) before its CDP port answered. Last log lines:\n${tail(logPath)}`, logPath };
         }
-        const devices = (await fetchDevices(port)).filter(isChromiumTarget);
-        if (devices.length > 0) return { ok: true, pid: child.pid!, logPath, devices };
+        const actual = devToolsPortFromLog(readLog(logPath)) ?? port;
+        const devices = (await fetchDevices(actual)).filter(isChromiumTarget);
+        if (devices.length > 0) return { ok: true, pid: child.pid!, port: actual, logPath, devices };
     }
     return {
         ok: false,
