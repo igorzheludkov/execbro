@@ -90,6 +90,13 @@ describe("DOM collector, input mode on a wrapper", () => {
         expect(collect({ mode: "input", testID: "login-form" }).candidates).toHaveLength(2);
     });
 
+    it("never names a tap target or matches text by a password's value", () => {
+        const pw = el("INPUT", { type: "password", value: "hunter2", attrs: { id: "password" } });
+        mount(el("BODY", {}, [pw]));
+        expect(collect({ mode: "tap", testID: "password" }).candidates.map((c) => c.text)).toEqual(["[password]"]);
+        expect(collect({ mode: "tap", text: "hunter" }).candidates).toEqual([]);
+    });
+
     it("never lists a password field's value", () => {
         const form = el("FORM", { attrs: { "data-testid": "login-form" } }, [
             el("INPUT", { type: "email", value: "a@b.co" }),

@@ -182,7 +182,7 @@ export function buildDomCollectJs(q: DomQuery): string {
         if (el.value == null) return null;
         return String(el.type).toLowerCase() === "password" ? (el.value ? "[password]" : "") : String(el.value);
     }
-    function textOf(el) { return el.tagName === "INPUT" ? norm(el.value || el.getAttribute("aria-label")) : norm(el.innerText || el.getAttribute("aria-label")); }
+    function textOf(el) { return el.tagName === "INPUT" ? norm(valueOf(el) || el.getAttribute("aria-label")) : norm(el.innerText || el.getAttribute("aria-label")); }
     function visible(el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; }
     var all = document.body ? Array.prototype.slice.call(document.body.querySelectorAll("*")) : [];
     var els = [];
@@ -207,7 +207,8 @@ export function buildDomCollectJs(q: DomQuery): string {
     } else if (q.text) {
         var wantT = norm(q.text).toLowerCase();
         els = all.filter(function (el) {
-            return norm(el.tagName === "INPUT" ? el.value : el.textContent).toLowerCase().indexOf(wantT) >= 0 ||
+            // valueOf, not el.value: matching by a password's value would make tap a guessing oracle.
+            return norm(el.tagName === "INPUT" ? valueOf(el) : el.textContent).toLowerCase().indexOf(wantT) >= 0 ||
                 norm(el.getAttribute("aria-label")).toLowerCase().indexOf(wantT) >= 0;
         });
         // Innermost first, visibility second: textContent includes hidden
@@ -320,7 +321,8 @@ export function buildDomFocusJs(i: number, replace: boolean, clearOnly: boolean)
         before: before,
         field: field,
         focused: document.activeElement === el,
-        maxLength: field && el.maxLength > 0 ? el.maxLength : null
+        maxLength: field && el.maxLength > 0 ? el.maxLength : null,
+        password: field && String(el.type).toLowerCase() === "password"
     });
 })()`;
 }
@@ -354,6 +356,18 @@ export function judgeTextEntry(a: {
     };
 }
 
+const maskPw = (v: string) => `[password, ${v.length} chars]`;
+
+/** A password write keeps its verdict, but none of its text reaches the transcript. */
+export function maskPasswordEntry(r: TextEntryResult): TextEntryResult {
+    return {
+        ...r,
+        ...(typeof r.value === "string" ? { value: maskPw(r.value) } : {}),
+        ...(typeof r.sent === "string" ? { sent: maskPw(r.sent) } : {}),
+        ...(typeof r.landed === "string" ? { landed: maskPw(r.landed) } : {}),
+    };
+}
+
 export async function chromiumInputText(
     app: ConnectedApp,
     a: { text: string; testID?: string; component?: string; textMatch?: string; index?: number; replace?: boolean }
@@ -384,7 +398,7 @@ export async function chromiumInputText(
                     "testID matches data-testid / data-test-id / id.",
             };
         }
-        const prep = await evaluateJson<{ error?: string; before: string; field: boolean; focused: boolean; maxLength: number | null }>(
+        const prep = await evaluateJson<{ error?: string; before: string; field: boolean; focused: boolean; maxLength: number | null; password: boolean }>(
             app.ws,
             buildDomFocusJs(pick.cand.i, replace, replace && a.text === "")
         );
@@ -396,7 +410,8 @@ export async function chromiumInputText(
         // typed, before the write (an empty editor reads "\n") as well as after.
         const trim = (v: string) => (prep.field ? v : v.replace(/\n$/, ""));
         const landed = value === null ? null : trim(value);
-        return judgeTextEntry({ before: trim(prep.before), sent: a.text, replace, landed, maxLength: prep.maxLength });
+        const verdict = judgeTextEntry({ before: trim(prep.before), sent: a.text, replace, landed, maxLength: prep.maxLength });
+        return prep.password ? maskPasswordEntry(verdict) : verdict;
     } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
