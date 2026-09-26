@@ -155,6 +155,13 @@ describe("nameChromiumTargets across fetches", () => {
         expect(later.find((d) => d.id === "m")?.deviceName).toBe("FluentTalk#2");
     });
 
+    it("pinChromiumName returns the name already pinned by a later fetch, so connect uses it", () => {
+        const url = "http://localhost:5173/index.html?window=main";
+        const [early] = nameChromiumTargets([target({ id: "m", title: "", url })]);
+        nameChromiumTargets([target({ id: "m", title: "FluentTalk", url })]); // title loaded, pinned meanwhile
+        expect(pinChromiumName(early)).toBe("FluentTalk");
+    });
+
     it("keeps an untitled window's name once it was connected (pinned)", () => {
         const url = "http://localhost:5173/index.html?window=main";
         const [early] = nameChromiumTargets([target({ id: "m", title: "", url })]);
@@ -196,6 +203,15 @@ describe("fetchDevices title grace", () => {
         serve(listing(""));
         const [d] = await fetchDevices(9999, 150);
         expect(d.deviceName).toBe("http://localhost:5173/");
+    });
+
+    it("makes a window that never gets a title wait only once", async () => {
+        const first = serve(listing(""));
+        await fetchDevices(9999, 150);
+        expect(first.n).toBeGreaterThan(1);
+        const second = serve(listing(""));
+        await fetchDevices(9999, 150);
+        expect(second.n).toBe(1);
     });
 
     it("does not wait for a Metro listing or an already pinned window", async () => {

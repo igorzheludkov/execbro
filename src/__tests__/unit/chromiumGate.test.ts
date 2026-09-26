@@ -123,6 +123,15 @@ describe("chromiumAppFor", () => {
         expect(peekTargetPlatform("tap", "localhost")).toBeUndefined(); // ambiguous: fails open
     });
 
+    it("never lets a page url turn a mobile device name ambiguous", () => {
+        const page = makeApp("p", "Preview", "chromium");
+        page.deviceInfo.url = "http://localhost:5173/?preview=iphone";
+        connectedApps.set("p", page);
+        connectedApps.set("i", makeApp("i", "iPhone Air", "ios"));
+        expect(peekTargetPlatform("tap", "iPhone")).toBe("ios");
+        expect(peekTargetPlatform("tap", "preview=iphone")).toBe("chromium");
+    });
+
     it("returns null for a mobile target", () => {
         connectedApps.set("a", makeApp("a", "iPhone 17 Pro", "ios"));
         connectedApps.set("b", makeApp("b", "FluentTalk", "chromium"));

@@ -1302,8 +1302,9 @@ export async function connectToDevice(
 
             // Connection established — run setup
             connectionLocks.delete(appKey);
+            // The name buffers and the registry now use; a no-op for RN.
+            device.deviceName = pinChromiumName(device);
             connectedApps.set(appKey, { ws, deviceInfo: device, port, platform: isChromiumTarget(device) ? "chromium" : "android" });
-            pinChromiumName(device); // the name buffers and the registry now use; no-op for RN
             recordDeviceSeen(device.deviceName || device.title);
             markConnectionEstablished();
 
@@ -1825,13 +1826,20 @@ export function resolveConnectedAppByDevice(device?: string): DeviceResolution {
         const haystacks = [
             normalizeDeviceId(deviceLabel(app)),
             normalizeDeviceId(app.simulatorUdid),
-            normalizeDeviceId(app.adbSerial),
-            // A chromium window's page url: `device: "window=main"` addresses it
-            // whatever it is named, including after a server restart renames it.
-            normalizeDeviceId(app.deviceInfo.url)
+            normalizeDeviceId(app.adbSerial)
         ].filter((s) => s.length > 0);
         if (haystacks.some((h) => h.includes(normDevice))) {
             matches.push(app);
+        }
+    }
+    // Only when no name matched: a chromium window's page url, so
+    // `device: "window=main"` addresses it whatever it is named, including after a
+    // server restart renames it. A fallback, so a url that happens to contain
+    // "iphone" can never turn a working mobile name ambiguous.
+    if (matches.length === 0) {
+        for (const app of openApps) {
+            const url = normalizeDeviceId(app.deviceInfo.url);
+            if (url && url.includes(normDevice)) matches.push(app);
         }
     }
 
