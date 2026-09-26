@@ -2,6 +2,16 @@ import { findDisconnectedDeviceName, getConnectedApps } from "./connection.js";
 import { listAllDevices, resetDeviceDiscoveryCache } from "./deviceDiscovery.js";
 import { listDevices, recordDevice } from "./projectMemory.js";
 
+// Chromium apps have no simulator or adb identity, so every native path below
+// is meaningless for them. Filtering here (not widening DeviceTarget) keeps
+// tap/swipe's native branches unreachable for a chromium device string.
+type NativeRegistryEntry = ReturnType<typeof getConnectedApps>[number] & {
+    app: { platform: "ios" | "android" };
+};
+function nativeRegistry(): NativeRegistryEntry[] {
+    return getConnectedApps().filter((e): e is NativeRegistryEntry => e.app.platform !== "chromium");
+}
+
 export type DeviceTargetSource =
     | "registry"
     | "udid"
@@ -158,7 +168,7 @@ async function resolveDeviceTargetInner(
             // API 36") matches what every other code path emits; the AVD
             // identifier ("Pixel_9_-_16kb") is confusing as a response label.
             // OB2 (2026-05-20).
-            const registryApp = getConnectedApps().find(
+            const registryApp = nativeRegistry().find(
                 (e) => e.app.platform === "android" && e.app.adbSerial === trimmed
             );
             return ok({
@@ -170,7 +180,7 @@ async function resolveDeviceTargetInner(
         }
         const phys = inv.android.physical.find((p) => p.serial === trimmed);
         if (phys) {
-            const registryApp = getConnectedApps().find(
+            const registryApp = nativeRegistry().find(
                 (e) => e.app.platform === "android" && e.app.adbSerial === trimmed
             );
             return ok({
@@ -193,7 +203,7 @@ async function resolveDeviceTargetInner(
 
     // Step 3: Registry substring match.
     if (trimmed) {
-        const apps = getConnectedApps();
+        const apps = nativeRegistry();
         const needle = normalizeName(trimmed);
         const matches = apps.filter((entry) => {
             const name = normalizeName(entry.app.deviceInfo.deviceName);
@@ -323,7 +333,7 @@ async function resolveDeviceTargetInner(
     if (totalRunning === 0) {
         // Final fallback: if a single RN app is connected (e.g. physical iOS
         // not in simctl), use it.
-        const apps = getConnectedApps();
+        const apps = nativeRegistry();
         if (apps.length === 1) {
             const m = apps[0].app;
             return ok({
@@ -424,7 +434,7 @@ export async function resolveDeviceTarget(
             const identifier = t.iosUdid ?? t.androidSerial ?? t.deviceName;
             let appId: string | undefined;
             try {
-                appId = getConnectedApps().find(
+                appId = nativeRegistry().find(
                     (e) =>
                         e.app.simulatorUdid === identifier ||
                         e.app.adbSerial === identifier ||

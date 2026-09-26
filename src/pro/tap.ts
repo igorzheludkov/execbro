@@ -1805,6 +1805,7 @@ async function diagnoseCoordinateMiss(args: {
         if (!ss.success || !ss.screenState) return undefined;
 
         const app = (args.deviceName ? getConnectedAppByDevice(args.deviceName) : null) ?? getFirstConnectedApp();
+        if (app?.platform === "chromium") return undefined;
         const metrics = await resolveScreenSpaceMetrics({
             platform: app?.platform ?? "ios",
             udid: app?.simulatorUdid,
