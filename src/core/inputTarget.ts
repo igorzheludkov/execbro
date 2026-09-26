@@ -47,6 +47,7 @@ export type InputCandidate = {
 };
 
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 export type InputOp =
     | { kind: "find" }
@@ -146,15 +147,9 @@ function prelude(query: InputQuery | undefined): string {
 
     return `
   var hook = global.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-  if (!hook) return { found: false, reason: "no devtools hook" };
-
-  var allRoots = [];
-  var rendererIds = Array.from(hook.renderers.keys());
-  for (var ri = 0; ri < rendererIds.length; ri++) {
-    var rs = Array.from(hook.getFiberRoots(rendererIds[ri]) || []);
-    for (var rj = 0; rj < rs.length; rj++) allRoots.push(rs[rj]);
-  }
-  if (allRoots.length === 0) return { found: false, reason: "no fiber roots" };
+  ${FIBER_ROOTS_JS}
+  var allRoots = __eb_fiberRoots(true);
+  if (allRoots.length === 0) return hook ? { found: false, reason: "no fiber roots" } : { found: false, reason: "no devtools hook" };
 
   var HOSTS = ${HOST_INPUT_TYPES};
   var wantTestID = ${wantTestID};

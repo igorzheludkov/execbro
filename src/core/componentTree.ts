@@ -1,6 +1,7 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp } from "./jsExecute.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 // ============================================================================
 // React Component Tree (via DevTools Global Hook)
@@ -90,24 +91,11 @@ export async function getComponentTree(
     const expression = `
         (function() {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return { error: 'React DevTools hook not found. Make sure you are running a development build.' };
-
-            // Try to get fiber roots (renderer ID is usually 1)
-            let roots = [];
-            if (hook.getFiberRoots) {
-                roots = [...(hook.getFiberRoots(1) || [])];
-            }
-            if (roots.length === 0 && hook.renderers) {
-                // Try all renderers
-                for (const [id] of hook.renderers) {
-                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
-                    if (r.length > 0) {
-                        roots = r;
-                        break;
-                    }
-                }
-            }
-            if (roots.length === 0) return { error: 'No fiber roots found. The app may not have rendered yet.' };
+            ${FIBER_ROOTS_JS}
+            const roots = __eb_fiberRoots(false);
+            if (roots.length === 0) return hook
+                ? { error: 'No fiber roots found. The app may not have rendered yet.' }
+                : { error: 'React DevTools hook not found. Make sure you are running a development build.' };
 
             const maxDepth = ${maxDepth};
             const includeProps = ${includeProps};

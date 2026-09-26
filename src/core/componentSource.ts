@@ -1,6 +1,7 @@
 import type { ComponentStack, SelectionFrame } from "./selectionBuffer.js";
 import { parseStackString, symbolicateFrames } from "./symbolicate.js";
 import type { StackFrame } from "./symbolicate.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 export interface ProbeResult {
     active: boolean;
@@ -21,17 +22,8 @@ export interface HarvestResult {
 /** Shared fiber-root lookup. Hermes-safe: var + function only. */
 const ROOTS_SNIPPET = `
     var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    var roots = [];
-    if (hook && hook.getFiberRoots) {
-        if (hook.renderers) {
-            for (var entry of hook.renderers) {
-                try { roots = roots.concat(Array.from(hook.getFiberRoots(entry[0]) || [])); } catch (e) {}
-            }
-        }
-        if (roots.length === 0) {
-            try { roots = Array.from(hook.getFiberRoots(1) || []); } catch (e) {}
-        }
-    }
+    ${FIBER_ROOTS_JS}
+    var roots = __eb_fiberRoots(true);
 `;
 
 /**

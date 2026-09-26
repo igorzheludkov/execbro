@@ -16,7 +16,8 @@ describe("buildMeasureComponentExpression", () => {
     it("iterates renderer ids (does not hardcode renderer id 2)", () => {
         const expr = buildMeasureComponentExpression("X", 0);
         expect(expr).toContain("hook.renderers");
-        expect(expr).toContain("renderers.keys()");
+        // The shared helper (injected/fiberRoots.ts) walks the renderers map.
+        expect(expr).toContain("renderers.forEach");
         expect(expr).not.toMatch(/getFiberRoots\(\s*2\s*\)/);
     });
 

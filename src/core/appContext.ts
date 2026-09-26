@@ -1,4 +1,5 @@
 import { buildRequireSource } from "./moduleRegistry.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 /**
  * RESOLUTION ORDER — read this before adding a new handle to the context.
@@ -70,13 +71,10 @@ ${buildRequireSource()}
 // scope, so this shadows nothing, and var keeps it local to the evaluated
 // program rather than mutating globalThis.
 var require = __eb_require;
+${FIBER_ROOTS_JS}
 var __eb_fiberFind = function (predicate) {
     try {
-        var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-        if (!hook || typeof hook.getFiberRoots !== 'function' || !hook.renderers) return null;
         var found = null;
-        var ids = [];
-        hook.renderers.forEach(function (_, k) { ids.push(k); });
         var walk = function (f, d) {
             if (!f || d > 1600 || found) return;
             var p = f.memoizedProps;
@@ -87,11 +85,7 @@ var __eb_fiberFind = function (predicate) {
             if (f.child) walk(f.child, d + 1);
             if (f.sibling) walk(f.sibling, d);
         };
-        for (var i = 0; i < ids.length; i++) {
-            var roots = hook.getFiberRoots(ids[i]);
-            if (!roots) continue;
-            roots.forEach(function (r) { walk(r.current, 0); });
-        }
+        __eb_fiberRoots(true).forEach(function (r) { walk(r.current, 0); });
         return found;
     } catch (e) { return null; }
 };

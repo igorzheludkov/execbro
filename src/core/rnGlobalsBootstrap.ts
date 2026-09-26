@@ -1,6 +1,7 @@
 import { executeInApp } from "./jsExecute.js";
 import { buildRecorderInstallExpression } from "./fastRefreshRecorder.js";
 import { bootstrappedApps, connectedApps } from "./state.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 /**
  * Best-effort fiber walk that probes for the seven curated RN modules
@@ -62,7 +63,8 @@ export function buildRnGlobalsBootstrapExpression(): string {
                 if (fiber.child) visit(fiber.child, depth + 1);
                 if (fiber.sibling) visit(fiber.sibling, depth + 1);
             };
-            const roots = hook.getFiberRoots(1) || hook.getFiberRoots(0);
+            ${FIBER_ROOTS_JS}
+            const roots = __eb_fiberRoots(false);
             if (roots && roots.forEach) {
                 roots.forEach((root) => {
                     if (root && root.current) visit(root.current, 0);
