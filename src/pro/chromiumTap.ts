@@ -160,6 +160,7 @@ export async function verifyChromiumAction(
                     changedPixels: d.changedPixels,
                     totalPixels: d.totalPixels,
                     regions: d.regions,
+                    action: action === "click" ? "tap" : "swipe",
                 }),
             };
         }
