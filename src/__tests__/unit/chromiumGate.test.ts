@@ -20,8 +20,8 @@ function makeApp(id: string, deviceName: string, platform: ConnectedApp["platfor
 }
 
 describe("chromiumGate", () => {
-    it("lets the P5 screen-reading tools through on chromium", () => {
-        for (const t of ["get_screen_state", "get_screen_layout", "inspect_at_point", "measure"]) {
+    it("lets the P5 screen-reading and launch tools through on chromium", () => {
+        for (const t of ["get_screen_state", "get_screen_layout", "inspect_at_point", "measure", "electron_launch_app"]) {
             expect(chromiumGate(t, "chromium")).toBeNull();
         }
     });

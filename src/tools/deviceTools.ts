@@ -13,11 +13,54 @@ import {
 } from "../core/index.js";
 import { platformUniqueBanner } from "../core/toolHelpers.js";
 import { listAllDevices } from "../core/deviceDiscovery.js";
-import { getConnectedApps } from "../core/connection.js";
+import { getConnectedApps, connectToDevice } from "../core/connection.js";
+import { isPortOpen } from "../core/metro.js";
+import { planElectronLaunch, launchElectron } from "../core/electronLaunch.js";
+import { basename } from "path";
+import { homedir } from "os";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import { listPhysicalIosDevices } from "../core/iosPhysical.js";
 
 export function registerDeviceTools(server: McpServer): void {
+    // Tool: start an Electron project with its CDP port open (chromium target)
+    registerToolWithTelemetry(
+        server,
+        "electron_launch_app",
+        {
+            description:
+                "Start an Electron project from its source folder with the Chrome DevTools port open, then connect to its windows. No change to the app is needed.\n" +
+                "PURPOSE: Zero-config desktop debugging. After it returns, the windows are connected as chromium targets: get_screen_state, screenshot, tap, input_text, logs, network and component inspection work on them.\n" +
+                "HOW: electron-vite projects run `electron-vite dev --remoteDebuggingPort <port>`, others `electron . --remote-debugging-port=<port>`, using the project's own installed binary.\n" +
+                "SAFETY: only a source folder is launched, so the app runs unpackaged. A packaged .app is refused: a CDP port on a packaged build lets anything that reaches it run code in the app.\n" +
+                "GOOD: electron_launch_app({ projectPath: \"~/code/myapp/apps/desktop\" })\n" +
+                "LIMITATIONS: an app that sets its own port with appendSwitch('remote-debugging-port') overrides this flag; pass that port instead. Electron Forge and custom dev scripts are not detected.",
+            inputSchema: {
+                projectPath: z.string().describe("The Electron project's source folder (the one with package.json). A leading ~ is expanded."),
+                port: z.coerce.number().int().min(1024).max(65535).optional().default(9222).describe("CDP port to open (default 9222). Must be free."),
+                timeoutMs: z.coerce.number().optional().default(60000).describe("How long to wait for the first window (default 60000; electron-vite compiles first)."),
+            },
+        },
+        async ({ projectPath, port, timeoutMs }) => {
+            const fail = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true as const });
+            const plan = planElectronLaunch(projectPath.replace(/^~(?=\/|$)/, homedir()), port);
+            if ("error" in plan) return fail(plan.error);
+            if (await isPortOpen(port)) {
+                return fail(`Port ${port} is already in use. If it is this app, connect_metro({ port: ${port} }) attaches to it; otherwise pick another port.`);
+            }
+            const r = await launchElectron(plan, port, timeoutMs);
+            if (!r.ok) return fail(`${r.error}\n\nLog: ${r.logPath}`);
+            const lines = [`Launched ${basename(plan.cwd)} with ${plan.runner} (pid ${r.pid}), CDP on 127.0.0.1:${port}. Log: ${r.logPath}`];
+            for (const d of r.devices) {
+                try {
+                    lines.push(`  - ${await connectToDevice(d, port)}`);
+                } catch (error) {
+                    lines.push(`  - ${d.deviceName ?? d.title}: Failed - ${error}`);
+                }
+            }
+            lines.push(`Stop it with: kill -- -${r.pid}`);
+            return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+        }
+    );
     // ============================================================================
 
     // Tool: List all devices (cross-platform, works without React Native)

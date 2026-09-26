@@ -15,7 +15,7 @@ export const CHROMIUM_TOOLS: Set<string> = new Set([
     "scan_metro", "connect_metro", "disconnect_metro", "ensure_connection",
     "get_connection_status", "get_apps", "get_usage_guide", "list_devices",
     "get_license_status", "activate_license", "delete_account",
-    "send_feedback", "reset_telemetry", "get_images",
+    "send_feedback", "reset_telemetry", "get_images", "electron_launch_app",
     // Logs
     "get_logs", "search_logs", "clear_logs", "get_log_details",
     // Network: capture and replay. network_mock / network_condition join after device verification.
