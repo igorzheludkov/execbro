@@ -1076,8 +1076,8 @@ export function registerInteractionTools(server: McpServer): void {
                         "On iOS, character keys are key positions, so a non-US active keyboard layout types that layout's letter."
                     ),
                 repeat: z.number().int().min(1).max(50).optional().describe("Press it this many times. Default 1."),
-                testID: z.string().optional().describe("Focus this element first (on chromium: data-testid / data-test-id / id)."),
-                text: z.string().optional().describe("Focus the element with this visible text first."),
+                testID: z.string().optional().describe("Focus this element first. On chromium (data-testid / data-test-id / id) it only focuses. On iOS and Android it focuses by TAPPING the element, which fires a button's onPress and puts the caret where the tap lands: target a text field there, or focus it yourself and omit testID."),
+                text: z.string().optional().describe("Focus the element with this visible text first (same tap caveat on iOS and Android as testID)."),
                 device: z.string().optional().describe("Target device or chromium window name (substring match). Omit when one is connected; see get_apps."),
             },
         },

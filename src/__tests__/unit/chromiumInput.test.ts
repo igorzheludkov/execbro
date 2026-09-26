@@ -113,6 +113,10 @@ describe("scrollVerdict", () => {
     it("not scrollable on this axis", () => {
         expect(scrollVerdict(at(0), at(0), { dx: 100, dy: 0 }).warning).toMatch(/not scrollable horizontally/);
     });
+    it("an inner list at its end hands the wheel to the page: that counts as scrolled, attributed to the page", () => {
+        const inner = (pageTop: number): ScrollProbe => ({ container: "<div.list>", top: 1000, left: 0, maxTop: 1000, maxLeft: 0, page: { top: pageTop, left: 0 } });
+        expect(scrollVerdict(inner(0), inner(264), { dx: 0, dy: 264 })).toEqual({ moved: 264, chainedTo: "the page" });
+    });
     it("mid-scroll and did not move", () => {
         expect(scrollVerdict(at(500), at(500), { dx: 0, dy: 100 }).warning).toMatch(/did not move/);
     });

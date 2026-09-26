@@ -100,7 +100,7 @@ function canScroll(el, horizontal) {
 function scrollerAt(x, y, horizontal) {
     var root = document.scrollingElement || document.documentElement;
     var other = null;
-    for (var el = document.elementFromPoint(x, y); el && el !== root && el !== document.body; el = el.parentElement) {
+    for (var el = document.elementFromPoint(x, y); el && el !== root; el = el.parentElement) {
         if (canScroll(el, horizontal)) return el;
         if (!other && canScroll(el, !horizontal)) other = el;
     }
@@ -119,7 +119,10 @@ function readScroller(el) {
         container: isRoot ? "the page" : describe(el),
         top: el.scrollTop, left: el.scrollLeft,
         maxTop: isRoot || canScroll(el, false) ? Math.max(0, el.scrollHeight - el.clientHeight) : 0,
-        maxLeft: isRoot || canScroll(el, true) ? Math.max(0, el.scrollWidth - el.clientWidth) : 0
+        maxLeft: isRoot || canScroll(el, true) ? Math.max(0, el.scrollWidth - el.clientWidth) : 0,
+        // A scroller at its end hands the wheel on to the page; these show whether it moved.
+        // ponytail: only the scrolling element is watched, not intermediate scrollers in the chain.
+        page: isRoot ? undefined : { top: (document.scrollingElement || document.documentElement).scrollTop, left: (document.scrollingElement || document.documentElement).scrollLeft }
     };
 }
 // Pressables with no other pressable inside. Only these own the text under them as
