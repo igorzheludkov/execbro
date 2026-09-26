@@ -1296,7 +1296,7 @@ export async function connectToDevice(
                 } else {
                     clearConnectionMetadata(appKey);
                 }
-                resolve(`Skipped ${device.deviceName || device.title} (stale CDP target — no response from JS context)`);
+                resolve(staleTargetMessage(device));
                 return;
             }
 
@@ -1881,6 +1881,18 @@ export function chromiumAppFor(toolName: string, device?: string): ConnectedApp 
     return device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
 }
 
+/**
+ * The line a rejected target gets. On chromium the usual cause is a JavaScript
+ * dialog left open: the page is paused, Page.enable does not replay the dialog,
+ * and a new session can neither see nor answer it. Restarting Metro is no fix there.
+ */
+export function staleTargetMessage(device: DeviceInfo): string {
+    const name = device.deviceName || device.title;
+    return isChromiumTarget(device)
+        ? `Skipped ${name} (stale CDP target — the page does not answer. A JavaScript dialog (alert / confirm / prompt) may be open in the window: close it with the window's own buttons, then scan again)`
+        : `Skipped ${name} (stale CDP target — no response from JS context)`;
+}
+
 /** The dialog refusal for a call aimed at a chromium page with a dialog open, else null. Never throws. */
 export function dialogGateFor(toolName: string, device: unknown) {
     // Checked first: resolving the device costs a registry walk on every tool call.
@@ -2176,7 +2188,7 @@ export async function ensureConnection(options: {
                     wasReconnected: false,
                     healthCheckPassed: false,
                     connectionInfos: [],
-                    error: `${connectResult}. The CDP page advertised by Metro is no longer responsive — restart the React Native app, then retry.`,
+                    error: isChromiumTarget(mainDevice) ? connectResult : `${connectResult}. The CDP page advertised by Metro is no longer responsive — restart the React Native app, then retry.`,
                 };
             }
 

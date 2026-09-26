@@ -223,7 +223,8 @@ export function registerConnectionTools(server: McpServer): void {
             }
 
             // Advisory if any CDP targets failed the liveness probe
-            const staleCount = results.filter((r) => r.startsWith("  - STALE")).length;
+            // Chromium stale lines carry their own advice (a JavaScript dialog), and Metro is not involved.
+            const staleCount = results.filter((r) => r.startsWith("  - STALE") && !r.includes("JavaScript dialog")).length;
             if (staleCount > 0) {
                 results.push("");
                 results.push(`Note: ${staleCount} stale CDP target(s) advertised by Metro were rejected.`);
