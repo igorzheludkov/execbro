@@ -154,6 +154,12 @@ function hostsOf(f, acc) {
     }
     return acc;
 }
+// A password field's value stays in the page, in props as everywhere else.
+function maskProps(props, isPassword) {
+    if (!isPassword) return props;
+    ["value", "defaultValue"].forEach(function (k) { if (props[k] != null && props[k] !== "") props[k] = "[password]"; });
+    return props;
+}
 var STYLE_KEYS = ["display", "position", "flexDirection", "justifyContent", "alignItems", "gap", "padding", "margin",
     "width", "height", "backgroundColor", "color", "fontSize", "fontWeight", "borderRadius", "opacity", "overflow", "zIndex"];
 var STYLE_SKIP = ["", "0px", "none", "normal", "static", "visible", "auto", "rgba(0, 0, 0, 0)"];
@@ -464,7 +470,7 @@ export function buildInspectJs(cssX: number, cssY: number, includeProps: boolean
         res.component = nameOf(named.type);
         var src = named._debugSource;
         if (src && src.fileName) res.source = { file: src.fileName, line: src.lineNumber, column: src.columnNumber };
-        if (${includeProps}) res.props = propsOf(named.memoizedProps);
+        if (${includeProps}) res.props = maskProps(propsOf(named.memoizedProps), el.tagName === "INPUT" && String(el.type).toLowerCase() === "password");
     } else {
         for (var p = el.parentElement; p && res.hierarchy.length < 8; p = p.parentElement) res.hierarchy.push({ name: describe(p), frame: box(p) });
     }
@@ -504,39 +510,47 @@ export async function chromiumInspectAtPoint(
     return formatChromiumInspect(raw, opts.includeFrame);
 }
 
-export function formatChromiumMeasure(name: string, rect: CssRect, vp: ChromiumViewport, outOfView: boolean): string {
+export function formatChromiumMeasure(name: string, rect: CssRect, vp: ChromiumViewport, visible: CssRect | "off" | null): string {
     const k = pxPerCss(vp);
-    const [x, y, w, h] = [rect.x, rect.y, rect.w, rect.h].map((v) => v * k);
-    const lines = [
-        `Component: ${name}`,
-        `Frame: (${x.toFixed(1)}, ${y.toFixed(1)}) ${w.toFixed(1)}x${h.toFixed(1)}`,
-        `Center: (${(x + w / 2).toFixed(1)}, ${(y + h / 2).toFixed(1)})`,
-    ];
-    if (outOfView) {
+    const fmt = (r: CssRect) => {
+        const [x, y, w, h] = [r.x, r.y, r.w, r.h].map((v) => v * k);
+        return { frame: `(${x.toFixed(1)}, ${y.toFixed(1)}) ${w.toFixed(1)}x${h.toFixed(1)}`, centre: `(${(x + w / 2).toFixed(1)}, ${(y + h / 2).toFixed(1)})` };
+    };
+    const full = fmt(rect);
+    const lines = [`Component: ${name}`, `Frame: ${full.frame}`, `Center: ${full.centre}`];
+    if (visible === "off") {
         lines.push("It is scrolled or clipped out of view (outside the viewport or its scroll container), so a tap at this centre lands on whatever is shown there. tap({ component }) scrolls it into view first.");
+    } else if (visible && (Math.abs(visible.w - rect.w) >= 1 || Math.abs(visible.h - rect.h) >= 1)) {
+        const v = fmt(visible);
+        lines.push(`Visible part: ${v.frame}`, `Visible centre: ${v.centre} (the element is partly scrolled or clipped; tap here, not at Center)`);
     }
     return lines.join("\n");
 }
 
-/** visibleRect of a collected target: "off" when scrolled or clipped away, as get_screen_state counts it. */
-function buildOutOfViewJs(i: number): string {
+export function measureRangeError(name: string, index: number, total: number): string {
+    return total === 0
+        ? `No visible element renders component "${name}". find_components lists component names.`
+        : `index ${index} is out of range: ${total} visible instance(s) of "${name}".`;
+}
+
+/** Frame and visible part of any collected target, not only the first 50 the collector returns. */
+function buildMeasureJs(i: number): string {
     return `(function () {
     ${DOM_HELPERS_JS}
     var el = (globalThis.__eb_domTargets || [])[${i}];
-    return JSON.stringify(!!el && visibleRect(el) === "off");
+    if (!el) return JSON.stringify(null);
+    var r = el.getBoundingClientRect();
+    return JSON.stringify({ rect: { x: r.x, y: r.y, w: r.width, h: r.height }, visible: visibleRect(el) });
 })()`;
 }
 
 export async function chromiumMeasure(app: ConnectedApp, componentName: string, index: number): Promise<string> {
     const found = await collectDomTargets(app, { mode: "tap", component: componentName });
-    const c = found.candidates[index];
-    if (!c) {
-        throw new Error(found.total === 0
-            ? `No visible element renders component "${componentName}". find_components lists component names.`
-            : `index ${index} is out of range: ${found.total} visible instance(s) of "${componentName}".`);
-    }
-    const outOfView = await evaluateJson<boolean>(app.ws, buildOutOfViewJs(c.i));
-    return formatChromiumMeasure(componentName, c.rect, found.viewport, outOfView);
+    const m = index >= 0 && index < found.total
+        ? await evaluateJson<{ rect: CssRect; visible: CssRect | "off" | null } | null>(app.ws, buildMeasureJs(index))
+        : null;
+    if (!m) throw new Error(measureRangeError(componentName, index, found.total));
+    return formatChromiumMeasure(componentName, m.rect, found.viewport, m.visible);
 }
 
 /** Find the scroller under CSS (x, y), remember it for SCROLL_READ_JS, and read its offsets. */
