@@ -26,7 +26,7 @@ import {
     getFirstConnectedApp,
 } from "../core/index.js";
 import { chromiumAppFor } from "../core/connection.js";
-import { chromiumScreenState } from "../core/chromiumScreen.js";
+import { chromiumScreenState, chromiumScreenLayout } from "../core/chromiumScreen.js";
 import {
     screenStateToScreenSpace,
     toDeliveredPxY,
@@ -119,6 +119,10 @@ export function registerComponentTools(server: McpServer): void {
             }
         },
         async ({ extended, summary, device, timeoutMs }) => {
+            const chromeApp = chromiumAppFor("get_screen_layout", device);
+            if (chromeApp) {
+                return await chromiumText(async () => `Screen Layout:\n\n${await chromiumScreenLayout(chromeApp, { extended, summary })}`);
+            }
             if (!await awaitMetro()) {
                 const hint = await metroMissingHintIfAbsent("get_screen_layout");
                 return {

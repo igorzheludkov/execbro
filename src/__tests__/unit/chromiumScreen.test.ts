@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { DOM_HELPERS_JS, buildScreenCollectJs, rawToScreenState, type RawScreen } from "../../core/chromiumScreen.js";
+import { DOM_HELPERS_JS, buildScreenCollectJs, rawToScreenState, buildLayoutCollectJs, formatChromiumLayout, type RawScreen, type RawLayout } from "../../core/chromiumScreen.js";
 import { formatScreenStateSummary } from "../../core/screenState.js";
 
 // Pull one injected helper out as a callable, with the browser globals it reads.
@@ -141,5 +141,50 @@ describe("rawToScreenState", () => {
         expect(notes).toContain("hidden");
         expect(notes).toContain("7 more");
         expect(notes).toContain("3 element(s) past");
+    });
+});
+
+const layout = (nodes: RawLayout["nodes"], over: Partial<RawLayout> = {}): RawLayout =>
+    ({ viewport: { w: 380, h: 600, dpr: 2 }, nodes, offscreen: 0, dropped: 0, ...over });
+
+describe("formatChromiumLayout", () => {
+    it("indents by component depth, in delivered px", () => {
+        const out = formatChromiumLayout(layout([
+            { depth: 0, name: "PopoverApp", rect: { x: 0, y: 0, w: 380, h: 600 } },
+            { depth: 1, name: "SpeakButton", rect: { x: 10, y: 20, w: 30, h: 30 }, testID: "speak" },
+        ]), false);
+        expect(out).toContain("PopoverApp (0,0 760x1200)");
+        expect(out).toContain('  SpeakButton (20,40 60x60) testID="speak"');
+    });
+    it("prints a text once, on the deepest component that carries it", () => {
+        const out = formatChromiumLayout(layout([
+            { depth: 0, name: "Row", rect: { x: 0, y: 0, w: 10, h: 10 }, text: "vote" },
+            { depth: 1, name: "Label", rect: { x: 0, y: 0, w: 10, h: 10 }, text: "vote" },
+        ]), false);
+        expect(out.match(/"vote"/g)).toHaveLength(1);
+        expect(out).toContain('  Label (0,0 20x20) "vote"');
+    });
+    it("prints extended styles inline", () => {
+        const out = formatChromiumLayout(layout([{ depth: 0, name: "A", rect: { x: 0, y: 0, w: 1, h: 1 }, style: { display: "flex", gap: "8px" } }]), false);
+        expect(out).toContain("{display: flex, gap: 8px}");
+    });
+    it("summary counts components by name", () => {
+        const out = formatChromiumLayout(layout([
+            { depth: 0, name: "Row", rect: { x: 0, y: 0, w: 1, h: 1 } },
+            { depth: 0, name: "Row", rect: { x: 0, y: 1, w: 1, h: 1 } },
+            { depth: 0, name: "App", rect: { x: 0, y: 0, w: 1, h: 1 } },
+        ]), true);
+        expect(out.split("\n")[0]).toBe("Row: 2");
+    });
+    it("reports off-screen and dropped counts", () => {
+        const out = formatChromiumLayout(layout([], { offscreen: 4, dropped: 2 }), false);
+        expect(out).toContain("4 component(s)");
+        expect(out).toContain("2 component(s) past");
+    });
+});
+
+describe("buildLayoutCollectJs", () => {
+    it("parses", () => {
+        expect(() => new Function(`return ${buildLayoutCollectJs(true)};`)).not.toThrow();
     });
 });
