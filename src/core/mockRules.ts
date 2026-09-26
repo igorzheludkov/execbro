@@ -229,6 +229,17 @@ export function clearRules(device?: string): number {
 }
 
 /**
+ * Every device's rules, by name, including a name no connected app holds any
+ * more (a closed window's rules cannot be cleared by device). Returns what each had.
+ */
+export function clearAllRules(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const [name, list] of rulesByDevice) if (list.length > 0) counts.set(name, list.length);
+    rulesByDevice.clear();
+    return counts;
+}
+
+/**
  * Removes only the rules `network_condition` owns, leaving agent-authored mocks
  * in place. Returns how many were removed.
  */

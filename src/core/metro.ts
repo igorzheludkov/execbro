@@ -67,7 +67,9 @@ export function isUntitledPage(d: DeviceInfo): boolean {
 // ponytail: grows by one small entry per window ever seen; bound it if a
 // session ever opens thousands of tabs.
 const byId = new Map<string, string>();
-const reserved = new Map<string, { url: string; base: string }>();
+// `untitled`: the name was pinned before the page had a title, so it is url-shaped
+// and the reopened window, titled by then, must still match it.
+const reserved = new Map<string, { url: string; base: string; untitled: boolean }>();
 // Windows that already used up fetchDevices' title grace once. A page that never
 // gets a title (about:blank, a page with no <title>) would otherwise make every
 // fetch on its port wait the full grace.
@@ -97,7 +99,7 @@ export function pinChromiumName(d: DeviceInfo): string {
     const pinned = byId.get(d.id);
     if (pinned) return pinned;
     byId.set(d.id, d.deviceName);
-    if (!reserved.has(d.deviceName)) reserved.set(d.deviceName, { url: d.url || "", base: baseName(d) });
+    if (!reserved.has(d.deviceName)) reserved.set(d.deviceName, { url: d.url || "", base: baseName(d), untitled: isUntitledPage(d) });
     return d.deviceName;
 }
 
@@ -123,7 +125,7 @@ export function nameChromiumTargets(devices: DeviceInfo[]): DeviceInfo[] {
     for (const d of fresh) {
         const base = baseName(d);
         const url = d.url || "";
-        let name = [...reserved].find(([n, r]) => r.url === url && r.base === base && !live.has(n))?.[0];
+        let name = [...reserved].find(([n, r]) => r.url === url && (r.base === base || r.untitled) && !live.has(n))?.[0];
         if (!name) {
             const free = (n: string) => !live.has(n) && (reserved.get(n)?.url ?? url) === url;
             name = base;

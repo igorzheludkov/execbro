@@ -25,6 +25,7 @@ import {
     closeConnectionGap,
     saveConnectionMetadata,
     clearConnectionMetadata,
+    clearConnectionState,
     getConnectionMetadata,
     saveReconnectionTimer,
     cancelReconnectionTimer,
@@ -1556,6 +1557,16 @@ async function attemptReconnection(
         // Try to find the same device first, otherwise select main device
         const device = pickReconnectTarget(devices, metadata.deviceInfo);
 
+        if (!device && isChromiumTarget(metadata.deviceInfo)) {
+            // A chromium target id never comes back once its window closes (a reopen
+            // gets a new id, and scan_metro connects it). Retrying only kept an open
+            // gap that made every device's log and network reads warn "disconnected".
+            console.error(`[execbro] Window closed: ${appKey}`);
+            recordConnectionEvent("window-closed", appKey, deviceTitle, "target no longer listed");
+            clearConnectionState(appKey);
+            clearConnectionMetadata(appKey);
+            return false;
+        }
         if (!device) {
             console.error(`[execbro] Device no longer available for ${appKey}`);
             recordConnectionEvent("reconnect-failed", appKey, deviceTitle, "device no longer advertised by Metro");
