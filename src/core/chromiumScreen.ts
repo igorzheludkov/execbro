@@ -104,10 +104,13 @@ function scrollerAt(x, y, horizontal) {
         if (canScroll(el, horizontal)) return el;
         if (!other && canScroll(el, !horizontal)) other = el;
     }
-    var hidden = function (e) { var s = getComputedStyle(e); return (horizontal ? s.overflowX : s.overflowY) === "hidden"; };
-    if (document.elementFromPoint(x, y) && !hidden(root) && !hidden(document.body) &&
-        (horizontal ? root.scrollWidth > root.clientWidth : root.scrollHeight > root.clientHeight)) return root;
-    return other;
+    function pageScrolls(h) {
+        var hidden = function (e) { var s = getComputedStyle(e); return (h ? s.overflowX : s.overflowY) === "hidden"; };
+        return !hidden(root) && !hidden(document.body) && (h ? root.scrollWidth > root.clientWidth : root.scrollHeight > root.clientHeight);
+    }
+    if (!document.elementFromPoint(x, y)) return null;
+    if (pageScrolls(horizontal)) return root;
+    return other || (pageScrolls(!horizontal) ? root : null);
 }
 function readScroller(el) {
     if (!el || el.isConnected === false) return { container: null };

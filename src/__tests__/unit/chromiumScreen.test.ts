@@ -315,6 +315,12 @@ describe("scrollerAt / readScroller", () => {
         expect(readScroller(root)).toMatchObject({ container: "the page", maxTop: 2400 });
         root.scrollHeight = 600;
     });
+    it("returns a vertically scrolling page for a horizontal wheel, so the verdict says wrong axis, not nothing here", () => {
+        root.scrollHeight = 3000;
+        expect(scrollerAt(10, 500, true)).toBe(root);
+        expect(readScroller(root)).toMatchObject({ container: "the page", maxLeft: 0 });
+        root.scrollHeight = 600;
+    });
 });
 
 describe("scroll probe and active element scripts", () => {
