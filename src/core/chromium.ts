@@ -23,6 +23,8 @@ export interface ChromiumViewport {
     w: number;
     h: number;
     dpr: number;
+    /** document.visibilityState is "hidden": a hidden window does not paint, so it cannot be captured. */
+    hidden?: boolean;
 }
 
 /** Delivered-screenshot pixels per CSS pixel: devicePixelRatio, lowered only when the capture would exceed the cap. */
@@ -31,7 +33,8 @@ export function pxPerCss(vp: ChromiumViewport): number {
     return longest * vp.dpr > CHROMIUM_MAX_DIMENSION ? CHROMIUM_MAX_DIMENSION / longest : vp.dpr;
 }
 
-export const VIEWPORT_JS = "JSON.stringify({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio })";
+export const VIEWPORT_JS =
+    "JSON.stringify({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio, hidden: document.visibilityState === \"hidden\" })";
 
 export function chromiumViewport(app: ConnectedApp): Promise<ChromiumViewport> {
     return evaluateJson<ChromiumViewport>(app.ws, VIEWPORT_JS);
@@ -48,6 +51,11 @@ export interface ChromiumShot {
 
 export async function chromiumCapture(app: ConnectedApp): Promise<ChromiumShot> {
     const viewport = await chromiumViewport(app);
+    // Checked up front: Page.captureScreenshot on a hidden window never answers,
+    // which cost the full capture timeout (verified on the FluentTalk popover).
+    if (viewport.hidden) {
+        throw new Error("The window is hidden (document.visibilityState is \"hidden\"), and a hidden window does not paint, so it cannot be captured. Show the window and retry.");
+    }
     let data: string;
     try {
         ({ data } = await sendCdpCommand<{ data: string }>(app.ws, "Page.captureScreenshot", { format: "png" }, CAPTURE_TIMEOUT_MS));
