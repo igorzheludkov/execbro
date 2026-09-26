@@ -26,7 +26,7 @@ export const RESPONSE_BODY_CAP = 32 * 1024;
  * request headers, request body, response headers, response body,
  * content type, and the post-redirect URL.
  */
-export function getInterceptorScript(): string {
+export function getInterceptorScript(nativeFetch = false): string {
     // Two-phase injection to capture both early and late requests:
     // Phase 1 (sync): Set __RN_NET_INJECTED__ flag and define helper functions.
     //   Patch XMLHttpRequest.prototype (this is the path axios takes).
@@ -41,6 +41,8 @@ export function getInterceptorScript(): string {
     var _prefix = 'js-' + Math.random().toString(36).substring(2, 6) + '-';
     var _REQ_CAP = ${REQUEST_BODY_CAP};
     var _RES_CAP = ${RESPONSE_BODY_CAP};
+    // True only on chromium targets, where fetch is native and bypasses XHR.
+    var _NATIVE_FETCH = ${nativeFetch ? "true" : "false"};
 
     function _genId() {
       return _prefix + (++_counter);
@@ -578,11 +580,96 @@ export function getInterceptorScript(): string {
       } catch(e) { return false; }
     }
 
+    /**
+     * Mocks one call to a NATIVE fetch (a browser page). Only reached when the
+     * server injected with nativeFetch: on React Native fetch rides on XHR and
+     * the XHR layer already mocks it, so matching here too would mock twice.
+     *
+     * Emits the same request / mock / response|error sequence as the XHR path,
+     * so the server side needs no fetch-specific handling.
+     */
+    function _mockFetch(origFetch, args, rule, method, url, input, init) {
+      var id = _genId();
+      var start = Date.now();
+      var headers = {};
+      try {
+        var h = new Headers((init && init.headers) || (input && typeof input === 'object' && input.headers) || undefined);
+        h.forEach(function(v, k) { headers[k] = v; });
+      } catch (e) {}
+      _report({
+        type: 'request', id: id, method: method, url: url, timestamp: start, headers: headers,
+        body: _cap(_bodyToString(init && init.body), _REQ_CAP), mocked: true
+      });
+      var delay = (typeof rule.delayMs === 'number' && rule.delayMs > 0) ? rule.delayMs : 0;
+      var wait = function() { return new Promise(function(r) { setTimeout(r, delay); }); };
+      var fail = function(msg, warning) {
+        _reportAlways({ type: 'mock', id: id, ruleId: rule.id, warning: warning });
+        _report({ type: 'error', id: id, error: msg, duration: Date.now() - start, mocked: true });
+        throw new TypeError(msg);
+      };
+      var respond = function(text, status, statusText, headersInit, warning) {
+        // The Response constructor throws on a body for these statuses.
+        var nullBody = status === 101 || status === 204 || status === 205 || status === 304;
+        var res;
+        try {
+          res = new Response(nullBody ? null : text, { status: status, statusText: statusText || '', headers: headersInit || {} });
+        } catch (e) {
+          return fail('Mock response rejected: ' + String(e && e.message ? e.message : e),
+            'status ' + status + ' cannot be delivered through fetch');
+        }
+        try { Object.defineProperty(res, 'url', { value: url }); } catch (e) {}
+        var rh = {};
+        try { res.headers.forEach(function(v, k) { rh[k] = v; }); } catch (e) {}
+        _reportAlways({ type: 'mock', id: id, ruleId: rule.id, warning: warning });
+        var evt = {
+          type: 'response', id: id, status: status, statusText: statusText || '',
+          duration: Date.now() - start, responseHeaders: rh,
+          body: _cap(nullBody ? '' : text, _RES_CAP), mocked: true
+        };
+        if (rh['content-type']) evt.mimeType = rh['content-type'];
+        _report(evt);
+        return res;
+      };
+
+      if (rule.networkError) {
+        return wait().then(function() { return fail(String(rule.networkError)); });
+      }
+      if (rule.mode === 'tamper') {
+        return origFetch.apply(globalThis, args).then(
+          function(real) {
+            return real.text().then(function(realText) {
+              var out = _applyTamper(rule, realText);
+              var rh = {};
+              try { real.headers.forEach(function(v, k) { rh[k] = v; }); } catch (e) {}
+              var status = (typeof rule.status === 'number') ? rule.status : real.status;
+              return wait().then(function() { return respond(out.body, status, real.statusText, rh, out.warning); });
+            });
+          },
+          function() {
+            return wait().then(function() { return fail('Failed to fetch', 'shadow request failed'); });
+          }
+        );
+      }
+      var body = (rule.body === null || rule.body === undefined) ? '' : String(rule.body);
+      var status = (typeof rule.status === 'number') ? rule.status : 200;
+      return wait().then(function() { return respond(body, status, '', rule.headers); });
+    }
+
     function _wrapFetch(origFetch) {
       if (typeof origFetch !== 'function') return origFetch;
       if (origFetch.__rn_net_wrapped__) return origFetch;
 
       var wrapped = function(input, init) {
+        if (_NATIVE_FETCH) {
+          try {
+            var mMethod = String((init && init.method) || (input && typeof input === 'object' && input.method) || 'GET').toUpperCase();
+            var mUrl = (input && typeof input === 'object' && input.url) ? String(input.url) : String(input);
+            // CDP rows show absolute URLs, which is what a rule is copied from.
+            try { mUrl = new URL(mUrl, globalThis.location && globalThis.location.href).href; } catch (e) {}
+            var mRule = _matchRule(mMethod, mUrl);
+          } catch (e) { mRule = null; }
+          if (mRule) return _mockFetch(origFetch, arguments, mRule, mMethod, mUrl, input, init);
+        }
         // Decided once per call, not per report: if the XHR patch lands
         // mid-flight, a request whose start was reported here must still
         // have its response reported here, or it hangs as 'pending' forever.
@@ -732,13 +819,17 @@ export function pushMockRules(ws: WebSocket, rulesJson: string): void {
 /**
  * Injects the network interceptor script into the app via Runtime.evaluate.
  * Fire-and-forget — does not wait for a response.
+ *
+ * `nativeFetch` is true for chromium targets: their fetch is native, so the
+ * mock layer has to intercept it directly. Never true for React Native, whose
+ * fetch rides on XHR and is already mocked there.
  */
-export function injectNetworkInterceptor(ws: WebSocket): void {
+export function injectNetworkInterceptor(ws: WebSocket, nativeFetch = false): void {
     const message = JSON.stringify({
         id: getNextMessageId(),
         method: "Runtime.evaluate",
         params: {
-            expression: getInterceptorScript(),
+            expression: getInterceptorScript(nativeFetch),
             silent: true,
         },
     });

@@ -1034,7 +1034,7 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             // Re-inject network interceptor and re-check CDP Network support
             const ctxApp = connectedApps.get(appKey);
             if (ctxApp?.ws?.readyState === WebSocket.OPEN) {
-                injectNetworkInterceptor(ctxApp.ws);
+                injectNetworkInterceptor(ctxApp.ws, ctxApp.platform === "chromium");
                 // The fresh context starts with __RN_NET_DISABLED__ undefined,
                 // so the just-injected interceptor would emit alongside the SDK
                 // until something flips it back. The probe's edge detector
@@ -1346,7 +1346,7 @@ export async function connectToDevice(
             );
 
             // Inject JS network interceptor (immediate capture, may fail if context not ready)
-            injectNetworkInterceptor(ws);
+            injectNetworkInterceptor(ws, isChromiumTarget(device));
             // Rules for this device may already exist — from a previous session
             // of the same server process, or a reconnect after the app was
             // killed. Runtime.executionContextCreated is not guaranteed to

@@ -673,7 +673,7 @@ export const UNTRUSTED_DATA_RULE: string = [
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_screen_state, get_screen_layout.",
     "Platform-specific ios_* / android_* tools (ios_button, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible. input_text covers native-only text entry too, via native:true.",
-    "Chromium/Electron targets (platform chromium) support logs, network capture, execute_in_app, globals, redux, component inspection, screen reading (get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap and input_text; other tools refuse them with a message saying so. electron_launch_app starts an Electron project with the CDP port open.",
+    "Chromium/Electron targets (platform chromium) support logs, network capture and mocking, execute_in_app, globals, redux, component inspection, screen reading (get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap and input_text; other tools refuse them with a message saying so. electron_launch_app starts an Electron project with the CDP port open.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
