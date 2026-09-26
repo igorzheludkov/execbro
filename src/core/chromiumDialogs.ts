@@ -98,7 +98,7 @@ const MAX_MESSAGE = 200;
 
 export function formatDialog(d: DialogInfo): string {
     const m = d.message.length > MAX_MESSAGE ? `${d.message.slice(0, MAX_MESSAGE)}…` : d.message;
-    return `a ${d.type} dialog: "${m}"`;
+    return `${d.type === "alert" ? "an" : "a"} ${d.type} dialog: "${m}"`;
 }
 
 /** Tools that evaluate in, capture, or send input to the page: all of them wait on an open dialog. */
