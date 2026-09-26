@@ -46,7 +46,7 @@ import { DEVICE_ALL_DESC } from "./_deviceArg.js";
  * rule added while an iPhone and an emulator are both connected must not fire
  * on both — so unlike the read tools this one never merges.
  */
-function resolveMockTarget(device?: string): { ws: import("ws").WebSocket; deviceName: string } {
+function resolveMockTarget(device?: string): { ws: import("ws").WebSocket; deviceName: string; platform: string | undefined } {
     const app = getConnectedAppByDevice(device);
     if (!app) {
         throw new UserInputError(
@@ -56,7 +56,8 @@ function resolveMockTarget(device?: string): { ws: import("ws").WebSocket; devic
     }
     return {
         ws: app.ws,
-        deviceName: app.deviceInfo.deviceName || app.deviceInfo.title || "unknown"
+        deviceName: app.deviceInfo.deviceName || app.deviceInfo.title || "unknown",
+        platform: app.platform
     };
 }
 
@@ -553,7 +554,7 @@ export function registerNetworkTools(server: McpServer): void {
             }
         },
         async (args) => {
-            const { ws, deviceName } = resolveMockTarget(args.device);
+            const { ws, deviceName, platform } = resolveMockTarget(args.device);
 
             // Only this tool's own rule is removed. Clearing the device would
             // destroy the agent's network_mock rules as a side effect of asking
@@ -590,9 +591,10 @@ export function registerNetworkTools(server: McpServer): void {
             pushMockRules(ws, serializeRules(deviceName));
 
             // NetInfo only matters at the two ends of the range. "slow" leaves
-            // the device reporting connected, which is the truth.
+            // the device reporting connected, which is the truth. A chromium page
+            // has no Metro require to find NetInfo with, so it is not asked.
             const parts = [`${summary} (${deviceName})`];
-            if (args.mode !== "slow") {
+            if (args.mode !== "slow" && platform !== "chromium") {
                 const result = await executeInApp(
                     buildNetInfoPatchScript(args.mode === "offline"),
                     false,

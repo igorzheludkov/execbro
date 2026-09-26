@@ -18,8 +18,9 @@ export const CHROMIUM_TOOLS: Set<string> = new Set([
     "send_feedback", "reset_telemetry", "get_images", "electron_launch_app",
     // Logs
     "get_logs", "search_logs", "clear_logs", "get_log_details",
-    // Network: capture and replay. network_mock / network_condition join after device verification.
+    // Network: capture, replay and mocking (the injected layer intercepts native fetch there too)
     "get_network_requests", "search_network", "get_request_details", "clear_network", "network_replay",
+    "network_mock", "network_condition",
     // Credentials and requests
     "list_secrets", "http_request", "app_request",
     // JS state
@@ -45,7 +46,7 @@ export function chromiumGate(toolName: string, platform: string | undefined) {
     if (platform !== "chromium" || CHROMIUM_TOOLS.has(toolName)) return null;
     const text = OVERRIDES[toolName] ??
         `${toolName} is not supported on chromium targets (Electron / Chrome) yet. ` +
-        "Supported there: logs, network capture and replay, execute_in_app, debug globals, redux, http_request/app_request, component inspection and screen reading (get_component_tree, find_components, inspect_component, get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap, input_text. " +
+        "Supported there: logs, network capture, replay and mocking, execute_in_app, debug globals, redux, http_request/app_request, component inspection and screen reading (get_component_tree, find_components, inspect_component, get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap, input_text. " +
         "To run it against a React Native app instead, pass device=<name> (get_apps lists connected targets).";
     return {
         content: [{ type: "text" as const, text }] as [{ type: "text"; text: string }],
