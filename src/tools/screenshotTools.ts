@@ -24,6 +24,11 @@ import {
 import { screenStateToScreenSpace } from "../core/screenSpace.js";
 import { resolvePhysicalIosDevice, physicalIosScreenshot } from "../core/iosPhysical.js";
 import type { PhysicalIosDevice } from "../core/iosPhysical.js";
+import { writeFileSync } from "node:fs";
+import type { ConnectedApp } from "../core/types.js";
+import { chromiumAppFor } from "../core/connection.js";
+import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
+import { chromiumCapture } from "../core/chromium.js";
 
 /**
  * Screenshot a USB-attached iPhone/iPad.
@@ -80,6 +85,554 @@ async function capturePhysicalDevice(
     };
 }
 
+async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?: string; udid?: string; device?: string }) {
+    const resolved = await resolveIosUdid(udid ?? device);
+    if (!resolved.ok) {
+        // Only reached when the hint matched no simulator, so the physical
+        // lookup costs nothing on the normal path. A physical device is not
+        // in simctl's world at all — its UDID makes simctl answer
+        // "Invalid device" — so this is a fallback, not a second resolver.
+        const hint = udid ?? device;
+        const phys = hint ? await resolvePhysicalIosDevice(hint) : null;
+        if (phys) return await capturePhysicalDevice(phys, outputPath);
+        return resolved.response;
+    }
+    // Resolve ONCE to a single canonical UDID and use it for BOTH the
+    // framebuffer capture and the pressable/screen-state enrichment, so
+    // the pixels and the element list always describe the same simulator.
+    // Previously the capture used the fuzzy-resolved UDID while enrichment
+    // fell back to the raw arg (getActiveOrBootedSimulatorUdid) — on a
+    // multi-sim setup that split the image and the tree across two sims.
+    const targetUdid = resolved.udid ?? (await getActiveOrBootedSimulatorUdid());
+
+    // The framebuffer capture, the accessibility probe (screen size / safe
+    // area) and the fiber screen-state describe the same moment but do not
+    // depend on each other. Running them sequentially made the tool cost
+    // their sum (measured 369 + 189 + 372ms); started together it costs the
+    // slowest one. Each leg keeps its own failure handling, so a rejected
+    // probe degrades exactly as it did before.
+    const capturePromise = iosScreenshot(outputPath, targetUdid ?? undefined);
+    const describePromise = iosDescribeAll(targetUdid ?? undefined).catch(() => null);
+    const earlyTargetApp = targetUdid ? getConnectedAppBySimulatorUdid(targetUdid) : null;
+    const screenStatePromise = earlyTargetApp
+        ? getScreenState({ device: earlyTargetApp.deviceInfo.deviceName }).catch(() => null)
+        : Promise.resolve(null);
+
+    const result = await capturePromise;
+    
+    if (!result.success) {
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: `Error: ${result.error}`
+                }
+            ],
+            isError: true
+        };
+    }
+    
+    // Include image data if available
+    if (result.data) {
+        // Build info text with coordinate guidance for iOS
+        const pixelWidth = result.originalWidth || 0;
+        const pixelHeight = result.originalHeight || 0;
+    
+        // Resolve the RN app running on THIS simulator so enrichment pulls
+        // fiber/layout data from the right app (not the first-connected one,
+        // which may belong to a different simulator).
+        const resolvedUdid = targetUdid;
+        const targetApp = resolvedUdid ? getConnectedAppBySimulatorUdid(resolvedUdid) : null;
+        const targetDeviceName = targetApp?.deviceInfo.deviceName;
+    
+        // Store screenshot metadata on the matching app (not an arbitrary one)
+        if (targetApp) {
+            targetApp.lastScreenshot = {
+                originalWidth: pixelWidth,
+                originalHeight: pixelHeight,
+                scaleFactor: result.scaleFactor || 1,
+            };
+        }
+    
+        // Try to get actual screen dimensions and safe area from accessibility tree
+        let pointWidth = 0;
+        let pointHeight = 0;
+        let scaleFactor = 3; // Default to 3x for modern iPhones
+        let safeAreaTop = 59; // Default safe area offset
+        try {
+            const describeResult = await describePromise;
+            if (describeResult && describeResult.success && describeResult.elements && describeResult.elements.length > 0) {
+                // First element is typically the Application with full screen frame
+                const rootElement = describeResult.elements[0];
+                // Try parsed frame first, then parse AXFrame string
+                if (rootElement.frame) {
+                    pointWidth = Math.round(rootElement.frame.width);
+                    pointHeight = Math.round(rootElement.frame.height);
+                    // The frame.y of the root element indicates where content starts (after status bar)
+                    if (rootElement.frame.y > 0) {
+                        safeAreaTop = Math.round(rootElement.frame.y);
+                    }
+                } else if (rootElement.AXFrame) {
+                    // Parse format: "{{x, y}, {width, height}}"
+                    const match = rootElement.AXFrame.match(
+                        /\{\{([\d.]+),\s*([\d.]+)\},\s*\{([\d.]+),\s*([\d.]+)\}\}/
+                    );
+                    if (match) {
+                        const frameY = parseFloat(match[2]);
+                        pointWidth = Math.round(parseFloat(match[3]));
+                        pointHeight = Math.round(parseFloat(match[4]));
+                        if (frameY > 0) {
+                            safeAreaTop = Math.round(frameY);
+                        }
+                    }
+                }
+                // Calculate actual scale factor
+                if (pointWidth > 0) {
+                    scaleFactor = Math.round(pixelWidth / pointWidth);
+                }
+            }
+        } catch {
+            // Fallback: use 3x scale for modern devices
+        }
+    
+        // Fallback if we couldn't get dimensions
+        if (pointWidth === 0) {
+            pointWidth = Math.round(pixelWidth / scaleFactor);
+            pointHeight = Math.round(pixelHeight / scaleFactor);
+        }
+    
+        const safeAreaOffsetPixels = safeAreaTop * scaleFactor;
+    
+        // The Screen Layout tree was previously appended here but produced huge noisy
+        // output (nested Svg/G/Path duplicates). Agents should use get_screen_layout
+        // explicitly when they need the tree. The Pressable elements block below is
+        // the signal most consumers actually want.
+        let pressablesText: string | null = null;
+        let pressablesIsScreenState = false;
+
+        // Enrich with the screen-state summary (route + overlay-grouped pressables —
+        // same engine as get_screen_state, so blocked pressables behind sheets are
+        // excluded). Requires a connected RN app; otherwise fall back to the flat
+        // pressables list (which degrades further to the iOS accessibility tree).
+        if (targetApp) {
+            try {
+                const ssResult = await screenStatePromise;
+                if (ssResult && ssResult.success && ssResult.screenState) {
+                    const screenshotScale = result.scaleFactor || 1;
+                    const toPx = (v: number) => Math.round((v * scaleFactor) / screenshotScale);
+                    // Normalise once, then scale. The y-shift used to live inline here
+                    // (and in a second copy for the flat pressables path), which is how
+                    // the pixel output ended up correct while the point-space tools were
+                    // an inset off — see core/screenSpace.ts.
+                    const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
+                        platform: "ios",
+                        topInset: safeAreaTop
+                    });
+                    pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
+                        center: { x: toPx(p.center.x), y: toPx(p.center.y) },
+                        frame: {
+                            x: toPx(p.bounds.x),
+                            y: toPx(p.bounds.y),
+                            width: toPx(p.bounds.width),
+                            height: toPx(p.bounds.height),
+                        },
+                    }));
+                    pressablesIsScreenState = true;
+                }
+            } catch {
+                // Non-fatal: fall through to the flat pressables list below
+            }
+        }
+        // No second rendering path on purpose. This used to fall back to a flat
+        // getPressableElements list, which is what let the two renderings drift:
+        // the screenState path groups overlay/keyboard-blocked elements, the flat
+        // one did not, so an Android screenshot with the keyboard up advertised 12
+        // blocked elements as tappable. The flat path also mis-mapped Android
+        // coordinates (five distinct rows sharing one 11x57 frame). screenState is
+        // the single source of truth; if it fails the screenshot ships without
+        // enrichment rather than with a worse answer.
+
+        const deliveredWidth = result.scaleFactor && result.scaleFactor > 1
+            ? Math.round(pixelWidth / result.scaleFactor)
+            : pixelWidth;
+        const deliveredHeight = result.scaleFactor && result.scaleFactor > 1
+            ? Math.round(pixelHeight / result.scaleFactor)
+            : pixelHeight;
+        let infoText: string;
+        if (result.scaleFactor && result.scaleFactor > 1) {
+            infoText = `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${deliveredWidth}x${deliveredHeight} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`;
+        } else {
+            infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+        }
+        if (resolved.udid) {
+            recordScreenMetrics(resolved.udid, {
+                rawWidth: pixelWidth,
+                rawHeight: pixelHeight,
+                deliveredWidth,
+                deliveredHeight,
+                downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
+                pointWidth,
+                pointHeight,
+                scale: scaleFactor,
+                capturedAt: Date.now(),
+            });
+        }
+        // Echo the simulator actually captured so a wrong-device grab is
+        // detectable at a glance (esp. with multiple sims booted).
+        if (targetUdid) {
+            infoText += `\n📸 Captured from: ${targetDeviceName ? `${targetDeviceName} ` : ""}(${targetUdid})`;
+        }
+        infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
+        infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
+        infoText += `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
+        if (pressablesText) {
+            infoText += pressablesIsScreenState
+                ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
+                : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
+            infoText += `\n${pressablesText}`;
+            infoText += `\n\n💡 Next steps:`;
+            infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
+            infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
+            infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
+            infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
+        } else {
+            if (!targetApp && connectedApps.size > 0) {
+                infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to simulator ${resolvedUdid}.`;
+                infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
+            }
+            infoText += `\n\n💡 Next steps:`;
+            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+            infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
+        }
+    
+        // Check for LogBox overlay — only on the matching RN app; skip otherwise
+        // to avoid surfacing warnings from a different simulator's app.
+        if (targetApp) {
+            try {
+                const logBoxState = await detectLogBox(targetDeviceName);
+                if (logBoxState && logBoxState.total > 0) {
+                    infoText += formatLogBoxWarning(logBoxState);
+                }
+            } catch {
+                // Non-fatal: LogBox detection failure should not break screenshot
+            }
+        }
+    
+        // I1 (2026-05-16): detect native iOS system overlays (auth sheets, alerts,
+        // permission dialogs) that sit on top of the RN app. The pressables list
+        // reflects the RN screen underneath; without this warning the agent will
+        // happily tap inert RN buttons and loop. Runs whether or not there's a
+        // matching RN app — the overlay belongs to the simulator, not the app.
+        try {
+            const overlay = await detectIOSSystemOverlay(resolvedUdid ?? undefined);
+            if (overlay) {
+                infoText += formatIOSSystemOverlayWarning(overlay);
+            }
+        } catch {
+            // Non-fatal: overlay detection failure should not break screenshot
+        }
+    
+        imageBuffer.add({
+            id: `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            image: result.data,
+            timestamp: Date.now(),
+            source: "ios_screenshot",
+            metadata: {
+                width: result.originalWidth || 0,
+                height: result.originalHeight || 0,
+                scaleFactor: result.scaleFactor || 1,
+                platform: "ios",
+            },
+        });
+    
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: infoText
+                },
+                {
+                    type: "image" as const,
+                    data: result.data.toString("base64"),
+                    mimeType: "image/jpeg"
+                }
+            ]
+        };
+    }
+    
+    return {
+        content: [
+            {
+                type: "text" as const,
+                text: `Screenshot saved to: ${result.result}`
+            }
+        ]
+    };
+}
+
+async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, device }: { outputPath?: string; deviceId?: string; device?: string }) {
+    const deviceId = deviceIdArg ?? device;
+    const resolved = await resolveAndroidDeviceId(deviceId);
+    if (!resolved.ok) return resolved.response;
+    // Same parallelisation as iOS: the capture, the two adb metric probes
+    // and the fiber screen-state are independent legs of one snapshot.
+    // Every device lookup below keys off `resolved.serial`, never the raw
+    // argument: a caller may pass a fuzzy hint ("Pixel") that only
+    // resolveAndroidDeviceId can turn into the adb serial the app is linked to.
+    const androidTargetApp = getConnectedAppByAndroidDeviceId(resolved.serial);
+    const capturePromise = androidScreenshot(outputPath, resolved.serial);
+    const statusBarPromise = androidGetStatusBarHeight(resolved.serial).catch(() => null);
+    const densityPromise = androidGetDensity(resolved.serial).catch(() => null);
+    const screenStatePromise = androidTargetApp
+        ? getScreenState({ device: androidTargetApp.deviceInfo.deviceName }).catch(() => null)
+        : Promise.resolve(null);
+
+    const result = await capturePromise;
+    
+    if (!result.success) {
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: `Error: ${result.error}`
+                }
+            ],
+            isError: true
+        };
+    }
+    
+    // Include image data if available
+    if (result.data) {
+        // Build info text with coordinate conversion guidance
+        const pixelWidth = result.originalWidth || 0;
+        const pixelHeight = result.originalHeight || 0;
+    
+        // Resolve the RN app running on THIS Android device so enrichment
+        // pulls data from the right app (not whichever app is "first").
+        const targetApp = getConnectedAppByAndroidDeviceId(resolved.serial);
+        const targetDeviceName = targetApp?.deviceInfo.deviceName;
+    
+        // Store screenshot metadata on the matching app (not an arbitrary one)
+        if (targetApp) {
+            targetApp.lastScreenshot = {
+                originalWidth: pixelWidth,
+                originalHeight: pixelHeight,
+                scaleFactor: result.scaleFactor || 1,
+            };
+        }
+    
+        const androidDeliveredW = result.scaleFactor && result.scaleFactor > 1
+            ? Math.round(pixelWidth / result.scaleFactor)
+            : pixelWidth;
+        const androidDeliveredH = result.scaleFactor && result.scaleFactor > 1
+            ? Math.round(pixelHeight / result.scaleFactor)
+            : pixelHeight;
+        let infoText = result.scaleFactor && result.scaleFactor > 1
+            ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${androidDeliveredW}x${androidDeliveredH} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`
+            : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+
+        if (resolved.serial) {
+            // Android device scale/points (dp) require the density fetched
+            // below; omit them here rather than store the API downscale as
+            // `scale`. raw/delivered/downscale are correct and sufficient.
+            recordScreenMetrics(resolved.serial, {
+                rawWidth: pixelWidth,
+                rawHeight: pixelHeight,
+                deliveredWidth: androidDeliveredW,
+                deliveredHeight: androidDeliveredH,
+                downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
+                capturedAt: Date.now(),
+            });
+        }
+
+        // Get status bar height for coordinate guidance
+        let statusBarPixels = 63; // Default fallback
+        let statusBarDp = 24;
+        let densityDpi = 440; // Common default
+        try {
+            const statusBarResult = await statusBarPromise;
+            if (statusBarResult && statusBarResult.success && statusBarResult.heightPixels) {
+                statusBarPixels = statusBarResult.heightPixels;
+                statusBarDp = statusBarResult.heightDp || 24;
+            }
+            const densityResult = await densityPromise;
+            if (densityResult && densityResult.success && densityResult.density) {
+                densityDpi = densityResult.density;
+            }
+        } catch {
+            // Use defaults
+        }
+    
+        // Enrich with screen layout data (component names + tap coordinates).
+        // On Bridgeless/Fabric Android (the only target architecture we support;
+        // legacy arch is <5% of users and not a priority), both code paths that
+        // feed this enrichment return DEVICE PIXELS:
+        //   - fiber path: React's measureInWindow on Fabric returns native pixels.
+        //   - a11y fallback: uiautomator's bounds are already device pixels.
+        // The earlier formula multiplied by densityDpi/160 on the (incorrect)
+        // assumption that fiber returned DP — inflating every coordinate by
+        // ~2.6× on a 420dpi emulator and producing numbers like (1170, 4054)
+        // for a button visually sitting near (445, 1370) in the JPEG. Drop the
+        // density factor; only the scaleFactor downscale is needed.
+        let pressablesText: string | null = null;
+        let pressablesIsScreenState = false;
+        // Screen Layout tree previously appended here was dropped — it was noisy
+        // (nested Svg/G/Path duplicates). Use get_screen_layout when the tree is needed.
+
+        // Prefer the screen-state summary (route + overlay-grouped pressables).
+        // Coordinates are fiber dp scaled by density + status-bar offset — the same
+        // best-effort conversion as the pressables fallback path (see pressables.ts);
+        // tap(text=)/tap(testID=) remain the precise options.
+        if (targetApp) {
+            try {
+                const ssResult = await screenStatePromise;
+                if (ssResult && ssResult.success && ssResult.screenState) {
+                    const screenshotScale = result.scaleFactor || 1;
+                    const densityScale = densityDpi / 160;
+                    const toPx = (v: number) => Math.round((v * densityScale) / screenshotScale);
+                    // Same normalise-then-scale as iOS. Android's inset is the status bar,
+                    // which measureInWindow excludes because it reports app-window
+                    // coordinates — see core/screenSpace.ts.
+                    const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
+                        platform: "android",
+                        topInset: statusBarDp
+                    });
+                    pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
+                        center: { x: toPx(p.center.x), y: toPx(p.center.y) },
+                        frame: {
+                            x: toPx(p.bounds.x),
+                            y: toPx(p.bounds.y),
+                            width: toPx(p.bounds.width),
+                            height: toPx(p.bounds.height),
+                        },
+                    }));
+                    pressablesIsScreenState = true;
+                }
+            } catch {
+                // Non-fatal: fall through to the flat pressables list below
+            }
+        }
+
+        // No flat-pressables fallback here either — see the iOS branch for why.
+
+        infoText += `\n📱 Android uses PIXELS for all coordinates`;
+    
+        if (result.scaleFactor && result.scaleFactor > 1) {
+            infoText += `\n📐 tap() handles coordinate conversion automatically — pass pixel coords from this image directly`;
+        } else {
+            infoText += `\n📐 Screenshot coords = tap coords (no conversion needed)`;
+        }
+    
+        infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
+        infoText += `\n📊 Display density: ${densityDpi}dpi`;
+        if (pressablesText) {
+            infoText += pressablesIsScreenState
+                ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
+                : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
+            infoText += `\n${pressablesText}`;
+            infoText += `\n\n💡 Next steps:`;
+            infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
+            infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
+            infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
+            infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
+        } else {
+            if (!targetApp && connectedApps.size > 0) {
+                infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to device ${deviceId ?? "(default)"}.`;
+                infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
+            }
+            infoText += `\n\n💡 Next steps:`;
+            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+            infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
+        }
+    
+        // Check for LogBox overlay — only on the matching RN app; skip otherwise
+        // to avoid surfacing warnings from a different device's app.
+        if (targetApp) {
+            try {
+                const logBoxState = await detectLogBox(targetDeviceName);
+                if (logBoxState && logBoxState.total > 0) {
+                    infoText += formatLogBoxWarning(logBoxState);
+                }
+            } catch {
+                // Non-fatal: LogBox detection failure should not break screenshot
+            }
+        }
+    
+        imageBuffer.add({
+            id: `android-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            image: result.data,
+            timestamp: Date.now(),
+            source: "android_screenshot",
+            metadata: {
+                width: result.originalWidth || 0,
+                height: result.originalHeight || 0,
+                scaleFactor: result.scaleFactor || 1,
+                platform: "android",
+            },
+        });
+    
+        return {
+            content: [
+                {
+                    type: "text" as const,
+                    text: infoText
+                },
+                {
+                    type: "image" as const,
+                    data: result.data.toString("base64"),
+                    mimeType: "image/jpeg"
+                }
+            ]
+        };
+    }
+    
+    return {
+        content: [
+            {
+                type: "text" as const,
+                text: `Screenshot saved to: ${result.result}`
+            }
+        ]
+    };
+}
+
+async function chromiumScreenshotResponse(app: ConnectedApp, outputPath?: string) {
+    let shot;
+    try {
+        shot = await chromiumCapture(app);
+    } catch (err) {
+        return {
+            content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true as const,
+        };
+    }
+    if (outputPath) writeFileSync(outputPath, shot.buffer);
+    imageBuffer.add({
+        id: `chromium-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        image: shot.buffer,
+        timestamp: Date.now(),
+        source: "screenshot",
+        metadata: { width: shot.width, height: shot.height, scaleFactor: shot.scaleFactor, platform: "chromium" },
+    });
+    const { w, h, dpr } = shot.viewport;
+    const downscaled = shot.scaleFactor !== 1
+        ? `, downscaled from ${Math.round(w * dpr)}x${Math.round(h * dpr)} to fit API limits`
+        : "";
+    const text =
+        `Screenshot ${shot.width}x${shot.height} px of ${app.deviceInfo.deviceName} ` +
+        `(chromium viewport ${w}x${h} CSS px at devicePixelRatio ${dpr}${downscaled}).\n` +
+        `Pass pixel coordinates from this image straight to tap(x, y, device). ` +
+        `No element summary on chromium yet: find_components / inspect_component read the React tree.`;
+    return {
+        content: [
+            { type: "text" as const, text },
+            { type: "image" as const, data: shot.buffer.toString("base64"), mimeType: "image/jpeg" },
+        ],
+    };
+}
+
 export function registerScreenshotTools(server: McpServer): void {
     // Tool: iOS screenshot
     registerToolWithTelemetry(
@@ -110,291 +663,7 @@ export function registerScreenshotTools(server: McpServer): void {
                     .describe("Alias for `udid` — same accepted values. Provided for consistency with tap/get_screen_layout/get_screen_state, which all use `device`. If both are given, `udid` wins.")
             }
         },
-        async ({ outputPath, udid, device }) => {
-            const resolved = await resolveIosUdid(udid ?? device);
-            if (!resolved.ok) {
-                // Only reached when the hint matched no simulator, so the physical
-                // lookup costs nothing on the normal path. A physical device is not
-                // in simctl's world at all — its UDID makes simctl answer
-                // "Invalid device" — so this is a fallback, not a second resolver.
-                const hint = udid ?? device;
-                const phys = hint ? await resolvePhysicalIosDevice(hint) : null;
-                if (phys) return await capturePhysicalDevice(phys, outputPath);
-                return resolved.response;
-            }
-            // Resolve ONCE to a single canonical UDID and use it for BOTH the
-            // framebuffer capture and the pressable/screen-state enrichment, so
-            // the pixels and the element list always describe the same simulator.
-            // Previously the capture used the fuzzy-resolved UDID while enrichment
-            // fell back to the raw arg (getActiveOrBootedSimulatorUdid) — on a
-            // multi-sim setup that split the image and the tree across two sims.
-            const targetUdid = resolved.udid ?? (await getActiveOrBootedSimulatorUdid());
-
-            // The framebuffer capture, the accessibility probe (screen size / safe
-            // area) and the fiber screen-state describe the same moment but do not
-            // depend on each other. Running them sequentially made the tool cost
-            // their sum (measured 369 + 189 + 372ms); started together it costs the
-            // slowest one. Each leg keeps its own failure handling, so a rejected
-            // probe degrades exactly as it did before.
-            const capturePromise = iosScreenshot(outputPath, targetUdid ?? undefined);
-            const describePromise = iosDescribeAll(targetUdid ?? undefined).catch(() => null);
-            const earlyTargetApp = targetUdid ? getConnectedAppBySimulatorUdid(targetUdid) : null;
-            const screenStatePromise = earlyTargetApp
-                ? getScreenState({ device: earlyTargetApp.deviceInfo.deviceName }).catch(() => null)
-                : Promise.resolve(null);
-
-            const result = await capturePromise;
-    
-            if (!result.success) {
-                return {
-                    content: [
-                        {
-                            type: "text" as const,
-                            text: `Error: ${result.error}`
-                        }
-                    ],
-                    isError: true
-                };
-            }
-    
-            // Include image data if available
-            if (result.data) {
-                // Build info text with coordinate guidance for iOS
-                const pixelWidth = result.originalWidth || 0;
-                const pixelHeight = result.originalHeight || 0;
-    
-                // Resolve the RN app running on THIS simulator so enrichment pulls
-                // fiber/layout data from the right app (not the first-connected one,
-                // which may belong to a different simulator).
-                const resolvedUdid = targetUdid;
-                const targetApp = resolvedUdid ? getConnectedAppBySimulatorUdid(resolvedUdid) : null;
-                const targetDeviceName = targetApp?.deviceInfo.deviceName;
-    
-                // Store screenshot metadata on the matching app (not an arbitrary one)
-                if (targetApp) {
-                    targetApp.lastScreenshot = {
-                        originalWidth: pixelWidth,
-                        originalHeight: pixelHeight,
-                        scaleFactor: result.scaleFactor || 1,
-                    };
-                }
-    
-                // Try to get actual screen dimensions and safe area from accessibility tree
-                let pointWidth = 0;
-                let pointHeight = 0;
-                let scaleFactor = 3; // Default to 3x for modern iPhones
-                let safeAreaTop = 59; // Default safe area offset
-                try {
-                    const describeResult = await describePromise;
-                    if (describeResult && describeResult.success && describeResult.elements && describeResult.elements.length > 0) {
-                        // First element is typically the Application with full screen frame
-                        const rootElement = describeResult.elements[0];
-                        // Try parsed frame first, then parse AXFrame string
-                        if (rootElement.frame) {
-                            pointWidth = Math.round(rootElement.frame.width);
-                            pointHeight = Math.round(rootElement.frame.height);
-                            // The frame.y of the root element indicates where content starts (after status bar)
-                            if (rootElement.frame.y > 0) {
-                                safeAreaTop = Math.round(rootElement.frame.y);
-                            }
-                        } else if (rootElement.AXFrame) {
-                            // Parse format: "{{x, y}, {width, height}}"
-                            const match = rootElement.AXFrame.match(
-                                /\{\{([\d.]+),\s*([\d.]+)\},\s*\{([\d.]+),\s*([\d.]+)\}\}/
-                            );
-                            if (match) {
-                                const frameY = parseFloat(match[2]);
-                                pointWidth = Math.round(parseFloat(match[3]));
-                                pointHeight = Math.round(parseFloat(match[4]));
-                                if (frameY > 0) {
-                                    safeAreaTop = Math.round(frameY);
-                                }
-                            }
-                        }
-                        // Calculate actual scale factor
-                        if (pointWidth > 0) {
-                            scaleFactor = Math.round(pixelWidth / pointWidth);
-                        }
-                    }
-                } catch {
-                    // Fallback: use 3x scale for modern devices
-                }
-    
-                // Fallback if we couldn't get dimensions
-                if (pointWidth === 0) {
-                    pointWidth = Math.round(pixelWidth / scaleFactor);
-                    pointHeight = Math.round(pixelHeight / scaleFactor);
-                }
-    
-                const safeAreaOffsetPixels = safeAreaTop * scaleFactor;
-    
-                // The Screen Layout tree was previously appended here but produced huge noisy
-                // output (nested Svg/G/Path duplicates). Agents should use get_screen_layout
-                // explicitly when they need the tree. The Pressable elements block below is
-                // the signal most consumers actually want.
-                let pressablesText: string | null = null;
-                let pressablesIsScreenState = false;
-
-                // Enrich with the screen-state summary (route + overlay-grouped pressables —
-                // same engine as get_screen_state, so blocked pressables behind sheets are
-                // excluded). Requires a connected RN app; otherwise fall back to the flat
-                // pressables list (which degrades further to the iOS accessibility tree).
-                if (targetApp) {
-                    try {
-                        const ssResult = await screenStatePromise;
-                        if (ssResult && ssResult.success && ssResult.screenState) {
-                            const screenshotScale = result.scaleFactor || 1;
-                            const toPx = (v: number) => Math.round((v * scaleFactor) / screenshotScale);
-                            // Normalise once, then scale. The y-shift used to live inline here
-                            // (and in a second copy for the flat pressables path), which is how
-                            // the pixel output ended up correct while the point-space tools were
-                            // an inset off — see core/screenSpace.ts.
-                            const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
-                                platform: "ios",
-                                topInset: safeAreaTop
-                            });
-                            pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
-                                center: { x: toPx(p.center.x), y: toPx(p.center.y) },
-                                frame: {
-                                    x: toPx(p.bounds.x),
-                                    y: toPx(p.bounds.y),
-                                    width: toPx(p.bounds.width),
-                                    height: toPx(p.bounds.height),
-                                },
-                            }));
-                            pressablesIsScreenState = true;
-                        }
-                    } catch {
-                        // Non-fatal: fall through to the flat pressables list below
-                    }
-                }
-                // No second rendering path on purpose. This used to fall back to a flat
-                // getPressableElements list, which is what let the two renderings drift:
-                // the screenState path groups overlay/keyboard-blocked elements, the flat
-                // one did not, so an Android screenshot with the keyboard up advertised 12
-                // blocked elements as tappable. The flat path also mis-mapped Android
-                // coordinates (five distinct rows sharing one 11x57 frame). screenState is
-                // the single source of truth; if it fails the screenshot ships without
-                // enrichment rather than with a worse answer.
-
-                const deliveredWidth = result.scaleFactor && result.scaleFactor > 1
-                    ? Math.round(pixelWidth / result.scaleFactor)
-                    : pixelWidth;
-                const deliveredHeight = result.scaleFactor && result.scaleFactor > 1
-                    ? Math.round(pixelHeight / result.scaleFactor)
-                    : pixelHeight;
-                let infoText: string;
-                if (result.scaleFactor && result.scaleFactor > 1) {
-                    infoText = `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${deliveredWidth}x${deliveredHeight} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`;
-                } else {
-                    infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
-                }
-                if (resolved.udid) {
-                    recordScreenMetrics(resolved.udid, {
-                        rawWidth: pixelWidth,
-                        rawHeight: pixelHeight,
-                        deliveredWidth,
-                        deliveredHeight,
-                        downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
-                        pointWidth,
-                        pointHeight,
-                        scale: scaleFactor,
-                        capturedAt: Date.now(),
-                    });
-                }
-                // Echo the simulator actually captured so a wrong-device grab is
-                // detectable at a glance (esp. with multiple sims booted).
-                if (targetUdid) {
-                    infoText += `\n📸 Captured from: ${targetDeviceName ? `${targetDeviceName} ` : ""}(${targetUdid})`;
-                }
-                infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
-                infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
-                infoText += `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
-                if (pressablesText) {
-                    infoText += pressablesIsScreenState
-                        ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
-                        : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
-                    infoText += `\n${pressablesText}`;
-                    infoText += `\n\n💡 Next steps:`;
-                    infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
-                    infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
-                    infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
-                    infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
-                } else {
-                    if (!targetApp && connectedApps.size > 0) {
-                        infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to simulator ${resolvedUdid}.`;
-                        infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
-                    }
-                    infoText += `\n\n💡 Next steps:`;
-                    infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
-                    infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
-                    infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
-                }
-    
-                // Check for LogBox overlay — only on the matching RN app; skip otherwise
-                // to avoid surfacing warnings from a different simulator's app.
-                if (targetApp) {
-                    try {
-                        const logBoxState = await detectLogBox(targetDeviceName);
-                        if (logBoxState && logBoxState.total > 0) {
-                            infoText += formatLogBoxWarning(logBoxState);
-                        }
-                    } catch {
-                        // Non-fatal: LogBox detection failure should not break screenshot
-                    }
-                }
-    
-                // I1 (2026-05-16): detect native iOS system overlays (auth sheets, alerts,
-                // permission dialogs) that sit on top of the RN app. The pressables list
-                // reflects the RN screen underneath; without this warning the agent will
-                // happily tap inert RN buttons and loop. Runs whether or not there's a
-                // matching RN app — the overlay belongs to the simulator, not the app.
-                try {
-                    const overlay = await detectIOSSystemOverlay(resolvedUdid ?? undefined);
-                    if (overlay) {
-                        infoText += formatIOSSystemOverlayWarning(overlay);
-                    }
-                } catch {
-                    // Non-fatal: overlay detection failure should not break screenshot
-                }
-    
-                imageBuffer.add({
-                    id: `ios-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                    image: result.data,
-                    timestamp: Date.now(),
-                    source: "ios_screenshot",
-                    metadata: {
-                        width: result.originalWidth || 0,
-                        height: result.originalHeight || 0,
-                        scaleFactor: result.scaleFactor || 1,
-                        platform: "ios",
-                    },
-                });
-    
-                return {
-                    content: [
-                        {
-                            type: "text" as const,
-                            text: infoText
-                        },
-                        {
-                            type: "image" as const,
-                            data: result.data.toString("base64"),
-                            mimeType: "image/jpeg"
-                        }
-                    ]
-                };
-            }
-    
-            return {
-                content: [
-                    {
-                        type: "text" as const,
-                        text: `Screenshot saved to: ${result.result}`
-                    }
-                ]
-            };
-        }
+        iosScreenshotHandler
     );
     // Tool: Android screenshot
     registerToolWithTelemetry(
@@ -426,231 +695,41 @@ export function registerScreenshotTools(server: McpServer): void {
                     .describe("Alias for `deviceId` — same accepted values. Provided for consistency with tap/get_screen_state/ios_screenshot, which all accept `device`. If both are given, `deviceId` wins.")
             }
         },
-        async ({ outputPath, deviceId: deviceIdArg, device }) => {
-            const deviceId = deviceIdArg ?? device;
-            const resolved = await resolveAndroidDeviceId(deviceId);
-            if (!resolved.ok) return resolved.response;
-            // Same parallelisation as iOS: the capture, the two adb metric probes
-            // and the fiber screen-state are independent legs of one snapshot.
-            // Every device lookup below keys off `resolved.serial`, never the raw
-            // argument: a caller may pass a fuzzy hint ("Pixel") that only
-            // resolveAndroidDeviceId can turn into the adb serial the app is linked to.
-            const androidTargetApp = getConnectedAppByAndroidDeviceId(resolved.serial);
-            const capturePromise = androidScreenshot(outputPath, resolved.serial);
-            const statusBarPromise = androidGetStatusBarHeight(resolved.serial).catch(() => null);
-            const densityPromise = androidGetDensity(resolved.serial).catch(() => null);
-            const screenStatePromise = androidTargetApp
-                ? getScreenState({ device: androidTargetApp.deviceInfo.deviceName }).catch(() => null)
-                : Promise.resolve(null);
-
-            const result = await capturePromise;
-    
-            if (!result.success) {
+        androidScreenshotHandler
+    );
+    // Tool: cross-platform screenshot — dispatches on the resolved target, like tap.
+    registerToolWithTelemetry(
+        server,
+        "screenshot",
+        {
+            description:
+                "Take a screenshot of whichever target `device` resolves to: an iOS simulator, an Android device, or a chromium (Electron / Chrome) window.\n" +
+                "PURPOSE: One capture tool for every platform. On iOS and Android it is exactly ios_screenshot / android_screenshot, pressables summary included. On chromium it captures the page viewport (no window chrome) over CDP.\n" +
+                "COORDINATES: pixels in the returned image are the coordinates tap(x, y) takes, on every platform. Never scale them yourself.\n" +
+                "GOOD: screenshot(); screenshot({ device: \"FluentTalk\" })\n" +
+                "LIMITATIONS: a chromium capture has no element summary yet (use find_components / inspect_component). A hidden or minimised window may not paint, and the capture then times out.",
+            inputSchema: {
+                device: z
+                    .string()
+                    .optional()
+                    .describe("Target: a connected app name (get_apps), or a simulator/emulator name, UDID or adb serial. Omit for the default target."),
+                outputPath: z.string().optional().describe("Optional path to also save the image to."),
+            },
+        },
+        async ({ device, outputPath }) => {
+            const chromeApp = chromiumAppFor("screenshot", device);
+            if (chromeApp) return await chromiumScreenshotResponse(chromeApp, outputPath);
+            const resolved = await resolveDeviceTarget(device);
+            if (!resolved.ok) {
                 return {
-                    content: [
-                        {
-                            type: "text" as const,
-                            text: `Error: ${result.error}`
-                        }
-                    ],
-                    isError: true
+                    content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
+                    isError: true as const,
                 };
             }
-    
-            // Include image data if available
-            if (result.data) {
-                // Build info text with coordinate conversion guidance
-                const pixelWidth = result.originalWidth || 0;
-                const pixelHeight = result.originalHeight || 0;
-    
-                // Resolve the RN app running on THIS Android device so enrichment
-                // pulls data from the right app (not whichever app is "first").
-                const targetApp = getConnectedAppByAndroidDeviceId(resolved.serial);
-                const targetDeviceName = targetApp?.deviceInfo.deviceName;
-    
-                // Store screenshot metadata on the matching app (not an arbitrary one)
-                if (targetApp) {
-                    targetApp.lastScreenshot = {
-                        originalWidth: pixelWidth,
-                        originalHeight: pixelHeight,
-                        scaleFactor: result.scaleFactor || 1,
-                    };
-                }
-    
-                const androidDeliveredW = result.scaleFactor && result.scaleFactor > 1
-                    ? Math.round(pixelWidth / result.scaleFactor)
-                    : pixelWidth;
-                const androidDeliveredH = result.scaleFactor && result.scaleFactor > 1
-                    ? Math.round(pixelHeight / result.scaleFactor)
-                    : pixelHeight;
-                let infoText = result.scaleFactor && result.scaleFactor > 1
-                    ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${androidDeliveredW}x${androidDeliveredH} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`
-                    : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
-
-                if (resolved.serial) {
-                    // Android device scale/points (dp) require the density fetched
-                    // below; omit them here rather than store the API downscale as
-                    // `scale`. raw/delivered/downscale are correct and sufficient.
-                    recordScreenMetrics(resolved.serial, {
-                        rawWidth: pixelWidth,
-                        rawHeight: pixelHeight,
-                        deliveredWidth: androidDeliveredW,
-                        deliveredHeight: androidDeliveredH,
-                        downscale: result.scaleFactor && result.scaleFactor > 1 ? 1 / result.scaleFactor : 1,
-                        capturedAt: Date.now(),
-                    });
-                }
-
-                // Get status bar height for coordinate guidance
-                let statusBarPixels = 63; // Default fallback
-                let statusBarDp = 24;
-                let densityDpi = 440; // Common default
-                try {
-                    const statusBarResult = await statusBarPromise;
-                    if (statusBarResult && statusBarResult.success && statusBarResult.heightPixels) {
-                        statusBarPixels = statusBarResult.heightPixels;
-                        statusBarDp = statusBarResult.heightDp || 24;
-                    }
-                    const densityResult = await densityPromise;
-                    if (densityResult && densityResult.success && densityResult.density) {
-                        densityDpi = densityResult.density;
-                    }
-                } catch {
-                    // Use defaults
-                }
-    
-                // Enrich with screen layout data (component names + tap coordinates).
-                // On Bridgeless/Fabric Android (the only target architecture we support;
-                // legacy arch is <5% of users and not a priority), both code paths that
-                // feed this enrichment return DEVICE PIXELS:
-                //   - fiber path: React's measureInWindow on Fabric returns native pixels.
-                //   - a11y fallback: uiautomator's bounds are already device pixels.
-                // The earlier formula multiplied by densityDpi/160 on the (incorrect)
-                // assumption that fiber returned DP — inflating every coordinate by
-                // ~2.6× on a 420dpi emulator and producing numbers like (1170, 4054)
-                // for a button visually sitting near (445, 1370) in the JPEG. Drop the
-                // density factor; only the scaleFactor downscale is needed.
-                let pressablesText: string | null = null;
-                let pressablesIsScreenState = false;
-                // Screen Layout tree previously appended here was dropped — it was noisy
-                // (nested Svg/G/Path duplicates). Use get_screen_layout when the tree is needed.
-
-                // Prefer the screen-state summary (route + overlay-grouped pressables).
-                // Coordinates are fiber dp scaled by density + status-bar offset — the same
-                // best-effort conversion as the pressables fallback path (see pressables.ts);
-                // tap(text=)/tap(testID=) remain the precise options.
-                if (targetApp) {
-                    try {
-                        const ssResult = await screenStatePromise;
-                        if (ssResult && ssResult.success && ssResult.screenState) {
-                            const screenshotScale = result.scaleFactor || 1;
-                            const densityScale = densityDpi / 160;
-                            const toPx = (v: number) => Math.round((v * densityScale) / screenshotScale);
-                            // Same normalise-then-scale as iOS. Android's inset is the status bar,
-                            // which measureInWindow excludes because it reports app-window
-                            // coordinates — see core/screenSpace.ts.
-                            const screenSpaceSs = screenStateToScreenSpace(ssResult.screenState, {
-                                platform: "android",
-                                topInset: statusBarDp
-                            });
-                            pressablesText = formatScreenStateSummary(screenSpaceSs, (p) => ({
-                                center: { x: toPx(p.center.x), y: toPx(p.center.y) },
-                                frame: {
-                                    x: toPx(p.bounds.x),
-                                    y: toPx(p.bounds.y),
-                                    width: toPx(p.bounds.width),
-                                    height: toPx(p.bounds.height),
-                                },
-                            }));
-                            pressablesIsScreenState = true;
-                        }
-                    } catch {
-                        // Non-fatal: fall through to the flat pressables list below
-                    }
-                }
-
-                // No flat-pressables fallback here either — see the iOS branch for why.
-
-                infoText += `\n📱 Android uses PIXELS for all coordinates`;
-    
-                if (result.scaleFactor && result.scaleFactor > 1) {
-                    infoText += `\n📐 tap() handles coordinate conversion automatically — pass pixel coords from this image directly`;
-                } else {
-                    infoText += `\n📐 Screenshot coords = tap coords (no conversion needed)`;
-                }
-    
-                infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
-                infoText += `\n📊 Display density: ${densityDpi}dpi`;
-                if (pressablesText) {
-                    infoText += pressablesIsScreenState
-                        ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
-                        : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
-                    infoText += `\n${pressablesText}`;
-                    infoText += `\n\n💡 Next steps:`;
-                    infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
-                    infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
-                    infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
-                    infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
-                } else {
-                    if (!targetApp && connectedApps.size > 0) {
-                        infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to device ${deviceId ?? "(default)"}.`;
-                        infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
-                    }
-                    infoText += `\n\n💡 Next steps:`;
-                    infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
-                    infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
-                    infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
-                }
-    
-                // Check for LogBox overlay — only on the matching RN app; skip otherwise
-                // to avoid surfacing warnings from a different device's app.
-                if (targetApp) {
-                    try {
-                        const logBoxState = await detectLogBox(targetDeviceName);
-                        if (logBoxState && logBoxState.total > 0) {
-                            infoText += formatLogBoxWarning(logBoxState);
-                        }
-                    } catch {
-                        // Non-fatal: LogBox detection failure should not break screenshot
-                    }
-                }
-    
-                imageBuffer.add({
-                    id: `android-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                    image: result.data,
-                    timestamp: Date.now(),
-                    source: "android_screenshot",
-                    metadata: {
-                        width: result.originalWidth || 0,
-                        height: result.originalHeight || 0,
-                        scaleFactor: result.scaleFactor || 1,
-                        platform: "android",
-                    },
-                });
-    
-                return {
-                    content: [
-                        {
-                            type: "text" as const,
-                            text: infoText
-                        },
-                        {
-                            type: "image" as const,
-                            data: result.data.toString("base64"),
-                            mimeType: "image/jpeg"
-                        }
-                    ]
-                };
-            }
-    
-            return {
-                content: [
-                    {
-                        type: "text" as const,
-                        text: `Screenshot saved to: ${result.result}`
-                    }
-                ]
-            };
+            const t = resolved.target;
+            return t.platform === "ios"
+                ? await iosScreenshotHandler({ outputPath, udid: t.iosUdid ?? device })
+                : await androidScreenshotHandler({ outputPath, deviceId: t.androidSerial ?? device });
         }
     );
     // Tool: Get images from shared image buffer

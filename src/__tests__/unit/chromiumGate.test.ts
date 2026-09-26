@@ -6,7 +6,7 @@ import WebSocket from "ws";
 import type { ConnectedApp } from "../../core/types.js";
 
 const { connectedApps } = await import("../../core/state.js");
-const { peekTargetPlatform, getFirstConnectedApp } = await import("../../core/connection.js");
+const { peekTargetPlatform, getFirstConnectedApp, chromiumAppFor } = await import("../../core/connection.js");
 const { CHROMIUM_TOOLS, chromiumGate } = await import("../../core/chromiumCapabilities.js");
 const { toolRegistry } = await import("../../index.js");
 
@@ -89,5 +89,46 @@ describe("peekTargetPlatform", () => {
         (closed.ws as unknown as { readyState: number }).readyState = WebSocket.CLOSED;
         connectedApps.set("a", closed);
         expect(peekTargetPlatform("get_screen_state", undefined)).toBeUndefined();
+    });
+});
+
+describe("chromiumAppFor", () => {
+    beforeEach(() => connectedApps.clear());
+    afterEach(() => connectedApps.clear());
+
+    it("returns the named chromium window, not the first one", () => {
+        connectedApps.set("a", makeApp("a", "FluentTalk", "chromium"));
+        connectedApps.set("b", makeApp("b", "FluentTalk#2", "chromium"));
+        expect(chromiumAppFor("tap", "FluentTalk#2")?.deviceInfo.id).toBe("b");
+        expect(chromiumAppFor("tap", "FluentTalk")?.deviceInfo.id).toBe("a");
+    });
+
+    it("returns null for a mobile target", () => {
+        connectedApps.set("a", makeApp("a", "iPhone 17 Pro", "ios"));
+        connectedApps.set("b", makeApp("b", "FluentTalk", "chromium"));
+        expect(chromiumAppFor("tap", "iPhone")).toBeNull();
+    });
+
+    it("bare call: chromium only when chromium is the default target", () => {
+        connectedApps.set("a", makeApp("a", "FluentTalk", "chromium"));
+        expect(chromiumAppFor("screenshot", undefined)?.deviceInfo.id).toBe("a");
+        // Mixed session: the RN app is the bare default, so the mobile path runs unchanged.
+        connectedApps.set("b", makeApp("b", "iPhone 17 Pro", "ios"));
+        expect(chromiumAppFor("screenshot", undefined)).toBeNull();
+    });
+
+    it("returns null (fails open) for an ambiguous or unknown device string", () => {
+        connectedApps.set("a", makeApp("a", "FluentTalk", "chromium"));
+        connectedApps.set("b", makeApp("b", "FluentTalk#2", "chromium"));
+        expect(chromiumAppFor("tap", "Fluent")).toBeNull();
+        expect(chromiumAppFor("tap", "nothing-like-this")).toBeNull();
+    });
+});
+
+describe("screenshot on chromium", () => {
+    it("is allowlisted, and the mobile screenshot tools point at it", () => {
+        expect(chromiumGate("screenshot", "chromium")).toBeNull();
+        expect(chromiumGate("ios_screenshot", "chromium")?.content[0].text).toContain("screenshot({ device");
+        expect(chromiumGate("android_screenshot", "chromium")?.content[0].text).toContain("screenshot({ device");
     });
 });

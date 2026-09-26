@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 62,
+    "count": 63,
     "tools": [
         "activate_license",
         "android_key_event",
@@ -58,6 +58,7 @@
         "redux_get_state",
         "reload_app",
         "scan_metro",
+        "screenshot",
         "search_logs",
         "search_network",
         "send_feedback",
@@ -401,6 +402,10 @@
         "scan_metro": [
             "endPort",
             "startPort"
+        ],
+        "screenshot": [
+            "device",
+            "outputPath"
         ],
         "search_logs": [
             "device",

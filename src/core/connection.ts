@@ -1840,6 +1840,16 @@ export function peekTargetPlatform(toolName: string, device: unknown): Connected
     return getFirstConnectedApp()?.platform;
 }
 
+/**
+ * The chromium app a tool call targets, or null when it targets anything else.
+ * Asks peekTargetPlatform, the same question the capability gate asks, so a
+ * handler's chromium branch and the gate cannot disagree about the target.
+ */
+export function chromiumAppFor(toolName: string, device?: string): ConnectedApp | null {
+    if (peekTargetPlatform(toolName, device) !== "chromium") return null;
+    return device ? getConnectedAppByDevice(device) : getFirstConnectedApp();
+}
+
 export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
     const resolution = resolveConnectedAppByDevice(device);
     if (resolution.kind === "ok") return resolution.app;

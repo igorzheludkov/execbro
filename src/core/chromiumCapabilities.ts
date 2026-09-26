@@ -26,6 +26,8 @@ export const CHROMIUM_TOOLS: Set<string> = new Set([
     "execute_in_app", "list_debug_globals", "inspect_global", "redux_get_state", "redux_dispatch",
     // Component inspection via the fiber tree (DOM fallback). The surface argent rejects.
     "get_component_tree", "find_components", "inspect_component",
+    // Screen and input via CDP (Page / Input domains)
+    "screenshot",
 ]);
 
 const OVERRIDES: Record<string, string> = {
@@ -33,9 +35,9 @@ const OVERRIDES: Record<string, string> = {
         "navigate drives React Navigation and Expo Router only, which a chromium target does not have. " +
         "Use execute_in_app to move the page instead, e.g. `location.hash = '#/settings'` or your router's own API.",
     ios_screenshot:
-        "ios_screenshot captures the iOS simulator, not a chromium window. A cross-platform screenshot for chromium targets is not available yet.",
+        "ios_screenshot captures the iOS simulator, not a chromium window. Use screenshot({ device }) instead: it captures any target, chromium included.",
     android_screenshot:
-        "android_screenshot captures an Android device, not a chromium window. A cross-platform screenshot for chromium targets is not available yet.",
+        "android_screenshot captures an Android device, not a chromium window. Use screenshot({ device }) instead: it captures any target, chromium included.",
 };
 
 export function chromiumGate(toolName: string, platform: string | undefined) {
