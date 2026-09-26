@@ -13,7 +13,7 @@
 import type { ConnectedApp } from "./types.js";
 import { evaluateJson } from "./cdpCommand.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
-import { pxPerCss, type ChromiumViewport } from "./chromium.js";
+import { pxPerCss, chromiumViewport, collectDomTargets, type ChromiumViewport } from "./chromium.js";
 import type { ScreenState, ScreenStateOverlay, ScreenStatePressable } from "./screenState.js";
 
 export interface CssRect { x: number; y: number; w: number; h: number }
@@ -353,4 +353,119 @@ export async function chromiumScreenLayout(app: ConnectedApp, opts: { extended: 
     const raw = await evaluateJson<RawLayout>(app.ws, buildLayoutCollectJs(opts.extended));
     if (raw.error) throw new Error(raw.error);
     return formatChromiumLayout(raw, opts.summary);
+}
+
+export interface RawInspect {
+    viewport: ChromiumViewport;
+    error?: string;
+    element: string;
+    testID: string | null;
+    frame: CssRect;
+    style: Record<string, string>;
+    component?: string;
+    props?: Record<string, unknown>;
+    source?: { file: string; line: number; column: number };
+    hierarchy: Array<{ name: string; frame: CssRect | null }>;
+}
+
+export function buildInspectJs(cssX: number, cssY: number, includeProps: boolean): string {
+    return `(function () {
+    ${DOM_HELPERS_JS}
+    var vp = ${VIEWPORT_FIELDS_JS};
+    var el = document.elementFromPoint(${cssX}, ${cssY});
+    if (!el) return JSON.stringify({ viewport: vp, error: "Nothing at this point: it is outside the viewport." });
+    function box(e) { var r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }
+    function unionBox(els) { var r = null; els.forEach(function (e) { var b = box(e); if (b.w > 0 || b.h > 0) r = joinRect(r, b); }); return r; }
+    function propsOf(mp) {
+        var out = {};
+        Object.keys(mp || {}).forEach(function (k) {
+            if (k === "children") return;
+            var v = mp[k];
+            if (typeof v === "function") out[k] = "[Function" + (v.name ? " " + v.name : "") + "]";
+            else if (v && typeof v === "object") {
+                if (v.nodeType === 1) { out[k] = describe(v); return; }
+                try {
+                    var s = JSON.stringify(v);
+                    out[k] = s.length > 200 ? (Array.isArray(v) ? "[Array(" + v.length + ")]" : "[Object]") : v;
+                } catch (e) { out[k] = "[Object]"; }
+            } else out[k] = v;
+        });
+        return out;
+    }
+    var res = { viewport: vp, element: describe(el), testID: testIdOf(el), frame: box(el), style: styleOf(el), hierarchy: [] };
+    var named = null, seen = {};
+    for (var f = reactProp(el, "__reactFiber$"); f; f = f.return) {
+        var n = typeof f.type === "string" ? null : nameOf(f.type);
+        if (!n) continue;
+        if (!named) named = f;
+        if (seen[n] || res.hierarchy.length >= 15) continue;
+        seen[n] = true;
+        res.hierarchy.push({ name: n, frame: unionBox(hostsOf(f, [])) });
+    }
+    if (named) {
+        res.component = nameOf(named.type);
+        var src = named._debugSource;
+        if (src && src.fileName) res.source = { file: src.fileName, line: src.lineNumber, column: src.columnNumber };
+        if (${includeProps}) res.props = propsOf(named.memoizedProps);
+    } else {
+        for (var p = el.parentElement; p && res.hierarchy.length < 8; p = p.parentElement) res.hierarchy.push({ name: describe(p), frame: box(p) });
+    }
+    return JSON.stringify(res);
+})()`;
+}
+
+export function formatChromiumInspect(raw: RawInspect, includeFrame: boolean): string {
+    const k = pxPerCss(raw.viewport);
+    const frame = (r: CssRect) => ({ x: Math.round(r.x * k), y: Math.round(r.y * k), width: Math.round(r.w * k), height: Math.round(r.h * k) });
+    const out = {
+        element: raw.element,
+        ...(raw.component ? { component: raw.component } : {}),
+        ...(raw.testID ? { testID: raw.testID } : {}),
+        ...(includeFrame ? { frame: frame(raw.frame) } : {}),
+        style: raw.style,
+        ...(raw.props ? { props: raw.props } : {}),
+        hierarchy: raw.hierarchy.map((h) => (includeFrame && h.frame ? { name: h.name, frame: frame(h.frame) } : { name: h.name })),
+    };
+    const source = raw.source
+        ? `Source: ${raw.source.file}:${raw.source.line}:${raw.source.column}`
+        : "Source: unavailable on chromium (React 19 records no _debugSource). Grep the component name to find its file.";
+    return `${JSON.stringify(out, null, 2)}\n\n${source}`;
+}
+
+export async function chromiumInspectAtPoint(
+    app: ConnectedApp,
+    x: number,
+    y: number,
+    opts: { includeProps: boolean; includeFrame: boolean }
+): Promise<string> {
+    const k = pxPerCss(await chromiumViewport(app));
+    const raw = await evaluateJson<RawInspect>(app.ws, buildInspectJs(x / k, y / k, opts.includeProps));
+    if (raw.error) throw new Error(raw.error);
+    return formatChromiumInspect(raw, opts.includeFrame);
+}
+
+export function formatChromiumMeasure(name: string, rect: CssRect, vp: ChromiumViewport): string {
+    const k = pxPerCss(vp);
+    const [x, y, w, h] = [rect.x, rect.y, rect.w, rect.h].map((v) => v * k);
+    const lines = [
+        `Component: ${name}`,
+        `Frame: (${x.toFixed(1)}, ${y.toFixed(1)}) ${w.toFixed(1)}x${h.toFixed(1)}`,
+        `Center: (${(x + w / 2).toFixed(1)}, ${(y + h / 2).toFixed(1)})`,
+    ];
+    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    if (cx < 0 || cy < 0 || cx >= vp.w || cy >= vp.h) {
+        lines.push("Its centre is outside the viewport (scrolled away). tap({ component }) scrolls it into view first; tap(x, y) here would miss.");
+    }
+    return lines.join("\n");
+}
+
+export async function chromiumMeasure(app: ConnectedApp, componentName: string, index: number): Promise<string> {
+    const found = await collectDomTargets(app, { mode: "tap", component: componentName });
+    const c = found.candidates[index];
+    if (!c) {
+        throw new Error(found.total === 0
+            ? `No visible element renders component "${componentName}". find_components lists component names.`
+            : `index ${index} is out of range: ${found.total} visible instance(s) of "${componentName}".`);
+    }
+    return formatChromiumMeasure(componentName, c.rect, found.viewport);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { DOM_HELPERS_JS, buildScreenCollectJs, rawToScreenState, buildLayoutCollectJs, formatChromiumLayout, type RawScreen, type RawLayout } from "../../core/chromiumScreen.js";
+import { DOM_HELPERS_JS, buildScreenCollectJs, rawToScreenState, buildLayoutCollectJs, formatChromiumLayout, buildInspectJs, formatChromiumInspect, formatChromiumMeasure, type RawScreen, type RawLayout, type RawInspect } from "../../core/chromiumScreen.js";
 import { formatScreenStateSummary } from "../../core/screenState.js";
 
 // Pull one injected helper out as a callable, with the browser globals it reads.
@@ -186,5 +186,51 @@ describe("formatChromiumLayout", () => {
 describe("buildLayoutCollectJs", () => {
     it("parses", () => {
         expect(() => new Function(`return ${buildLayoutCollectJs(true)};`)).not.toThrow();
+    });
+});
+
+const inspectRaw = (over: Partial<RawInspect> = {}): RawInspect => ({
+    viewport: { w: 380, h: 600, dpr: 2 },
+    element: "<button.speak>",
+    testID: null,
+    frame: { x: 10, y: 20, w: 30, h: 40 },
+    style: { display: "flex" },
+    component: "SpeakButton",
+    props: { onClick: "[Function handleSpeak]" },
+    hierarchy: [{ name: "SpeakButton", frame: { x: 10, y: 20, w: 30, h: 40 } }, { name: "PopoverApp", frame: null }],
+    ...over,
+});
+
+describe("formatChromiumInspect", () => {
+    it("converts every frame to delivered px", () => {
+        const out = formatChromiumInspect(inspectRaw(), true);
+        const json = JSON.parse(out.slice(0, out.indexOf("\n\nSource")));
+        expect(json.frame).toEqual({ x: 20, y: 40, width: 60, height: 80 });
+        expect(json.hierarchy[0].frame).toEqual({ x: 20, y: 40, width: 60, height: 80 });
+        expect(json.hierarchy[1]).toEqual({ name: "PopoverApp" });
+        expect(json.props.onClick).toBe("[Function handleSpeak]");
+    });
+    it("omits frames when includeFrame is false", () => {
+        const out = formatChromiumInspect(inspectRaw(), false);
+        expect(out).not.toContain('"frame"');
+    });
+    it("prints source when React provides it, and says why when it does not", () => {
+        expect(formatChromiumInspect(inspectRaw({ source: { file: "/src/Speak.tsx", line: 12, column: 3 } }), true)).toContain("Source: /src/Speak.tsx:12:3");
+        expect(formatChromiumInspect(inspectRaw(), true)).toContain("Source: unavailable");
+    });
+});
+
+describe("formatChromiumMeasure", () => {
+    it("reports frame and centre in delivered px, and flags an off-viewport element", () => {
+        const out = formatChromiumMeasure("Row", { x: 0, y: 700, w: 380, h: 40 }, { w: 380, h: 600, dpr: 2 });
+        expect(out).toContain("Frame: (0.0, 1400.0) 760.0x80.0");
+        expect(out).toContain("Center: (380.0, 1440.0)");
+        expect(out).toContain("outside the viewport");
+    });
+});
+
+describe("buildInspectJs", () => {
+    it("parses", () => {
+        expect(() => new Function(`return ${buildInspectJs(10, 20, true)};`)).not.toThrow();
     });
 });
