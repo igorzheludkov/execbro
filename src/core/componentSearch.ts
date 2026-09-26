@@ -2,6 +2,7 @@ import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { formatSummaryCompact } from "./screenLayout.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 // ============================================================================
 // Component Search (findComponents, inspectComponent)
@@ -80,19 +81,9 @@ export async function inspectComponent(
     const expression = `
         (function() {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return { error: 'React DevTools hook not found.' };
-
-            let roots = [];
-            if (hook.getFiberRoots) {
-                roots = [...(hook.getFiberRoots(1) || [])];
-            }
-            if (roots.length === 0 && hook.renderers) {
-                for (const [id] of hook.renderers) {
-                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
-                    if (r.length > 0) { roots = r; break; }
-                }
-            }
-            if (roots.length === 0) return { error: 'No fiber roots found.' };
+            ${FIBER_ROOTS_JS}
+            const roots = __eb_fiberRoots(false);
+            if (roots.length === 0) return hook ? { error: 'No fiber roots found.' } : { error: 'React DevTools hook not found.' };
 
             const targetName = '${escapedName}';
             const targetIndex = ${index};
@@ -498,19 +489,9 @@ export async function findComponents(
     const expression = `
         (function() {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return { error: 'React DevTools hook not found.' };
-
-            let roots = [];
-            if (hook.getFiberRoots) {
-                roots = [...(hook.getFiberRoots(1) || [])];
-            }
-            if (roots.length === 0 && hook.renderers) {
-                for (const [id] of hook.renderers) {
-                    const r = hook.getFiberRoots ? [...(hook.getFiberRoots(id) || [])] : [];
-                    if (r.length > 0) { roots = r; break; }
-                }
-            }
-            if (roots.length === 0) return { error: 'No fiber roots found.' };
+            ${FIBER_ROOTS_JS}
+            const roots = __eb_fiberRoots(false);
+            if (roots.length === 0) return hook ? { error: 'No fiber roots found.' } : { error: 'React DevTools hook not found.' };
 
             const pattern = '${escapedPattern}';
             const regex = new RegExp(pattern, 'i');

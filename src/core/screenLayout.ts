@@ -3,6 +3,7 @@ import { executeInApp, delay } from "./jsExecute.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 export interface ComponentSummary {
     component: string;
@@ -329,19 +330,9 @@ export async function getScreenLayout(
     const dispatchExpression = `
         (function() {
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return { error: 'React DevTools hook not found.' };
-
-            var roots = [];
-            if (hook.getFiberRoots) {
-                roots = Array.from(hook.getFiberRoots(1) || []);
-            }
-            if (roots.length === 0 && hook.renderers) {
-                for (var entry of hook.renderers) {
-                    var r = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
-                    if (r.length > 0) { roots = r; break; }
-                }
-            }
-            if (roots.length === 0) return { error: 'No fiber roots found.' };
+            ${FIBER_ROOTS_JS}
+            var roots = __eb_fiberRoots(false);
+            if (roots.length === 0) return hook ? { error: 'No fiber roots found.' } : { error: 'React DevTools hook not found.' };
 
             function getMeasurable(fiber) {
                 var sn = fiber.stateNode;

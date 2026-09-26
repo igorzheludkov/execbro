@@ -1,6 +1,7 @@
 import { executeInApp, delay } from "./jsExecute.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 /**
  * What the scroll surface under a gesture looks like right now.
@@ -53,16 +54,8 @@ export async function probeScrollAt(
 ): Promise<ScrollProbe> {
     const dispatch = `
 (function() {
-    var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    if (!hook) return JSON.stringify({ found: false });
-    var roots = [];
-    if (hook.getFiberRoots) roots = Array.from(hook.getFiberRoots(1) || []);
-    if (roots.length === 0 && hook.renderers) {
-        for (var entry of hook.renderers) {
-            var rr = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
-            if (rr.length > 0) { roots = rr; break; }
-        }
-    }
+    ${FIBER_ROOTS_JS}
+    var roots = __eb_fiberRoots(false);
     if (roots.length === 0) return JSON.stringify({ found: false });
 
     function nameOf(f) {

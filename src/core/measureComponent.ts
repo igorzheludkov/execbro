@@ -19,6 +19,7 @@ export type MeasureToolResult =
     | { success: false; outcome: Exclude<MeasureOutcome, "measured">; error: string };
 
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 export function buildMeasureComponentExpression(componentName: string, index: number): string {
     const escapedName = componentName.replace(/'/g, "\\'");
@@ -27,14 +28,9 @@ export function buildMeasureComponentExpression(componentName: string, index: nu
   try {
     ${SHEET_HELPERS_JS}
     const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    if (!hook) { resolve({ outcome: "error", error: "React DevTools hook not found." }); return; }
-    let root = null;
-    const ids = Array.from(hook.renderers ? hook.renderers.keys() : []);
-    for (const id of ids) {
-      const roots = hook.getFiberRoots ? Array.from(hook.getFiberRoots(id) || []) : [];
-      if (roots.length > 0) { root = roots[0]; break; }
-    }
-    if (!root) { resolve({ outcome: "error", error: "No fiber roots found." }); return; }
+    ${FIBER_ROOTS_JS}
+    const root = __eb_fiberRoots(false)[0] || null;
+    if (!root) { resolve({ outcome: "error", error: hook ? "No fiber roots found." : "React DevTools hook not found." }); return; }
 
     const targetName = '${escapedName}';
     const targetIndex = ${safeIndex};

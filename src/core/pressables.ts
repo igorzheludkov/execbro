@@ -3,6 +3,7 @@ import { executeInApp, delay } from "./jsExecute.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC } from "./injectedFilters.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 // ============================================================================
 // Pressable Elements & onPress invocation
@@ -127,19 +128,11 @@ export async function pressElement(options: {
     const dispatchExpression = `
         (function() {
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return { error: 'React DevTools hook not found. Ensure app is running in __DEV__ mode.' };
-
-            var roots = [];
-            if (hook.getFiberRoots) {
-                roots = Array.from(hook.getFiberRoots(1) || []);
-            }
-            if (roots.length === 0 && hook.renderers) {
-                for (var entry of hook.renderers) {
-                    var r = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
-                    if (r.length > 0) { roots = r; break; }
-                }
-            }
-            if (roots.length === 0) return { error: 'No fiber roots found. Is a React Native app mounted?' };
+            ${FIBER_ROOTS_JS}
+            var roots = __eb_fiberRoots(false);
+            if (roots.length === 0) return hook
+                ? { error: 'No fiber roots found. Is a React Native app mounted?' }
+                : { error: 'React DevTools hook not found. Ensure app is running in __DEV__ mode.' };
 
             var wantLongPress = ${longPress ? "true" : "false"};
 

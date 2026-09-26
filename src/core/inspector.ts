@@ -5,6 +5,7 @@ import type { RawComponentStack } from "./componentSource.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 // ============================================================================
 // Coordinate-Based Element Inspection (via DevTools Inspector API)
@@ -19,13 +20,8 @@ export async function isInspectorActive(device?: string): Promise<boolean> {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             if (!hook) return false;
 
-            let roots = [...(hook.getFiberRoots?.(1) || [])];
-            if (roots.length === 0) {
-                for (const [id] of (hook.renderers || [])) {
-                    roots = [...(hook.getFiberRoots?.(id) || [])];
-                    if (roots.length > 0) break;
-                }
-            }
+            ${FIBER_ROOTS_JS}
+            const roots = __eb_fiberRoots(false);
             if (roots.length === 0) return false;
 
             function findComponent(fiber, targetName, depth = 0) {
@@ -89,21 +85,11 @@ export async function inspectAtPoint(
     const expression = `
         new Promise(function(resolve) {
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook) return resolve({ error: 'React DevTools hook not available. Make sure you are running a development build.' });
-
-            var roots = [];
-            if (hook.getFiberRoots) {
-                try { roots = Array.from(hook.getFiberRoots(1) || []); } catch(e) {}
-            }
-            if (roots.length === 0 && hook.renderers) {
-                for (var entry of hook.renderers) {
-                    try {
-                        var r = Array.from(hook.getFiberRoots ? (hook.getFiberRoots(entry[0]) || []) : []);
-                        if (r.length > 0) { roots = r; break; }
-                    } catch(e) {}
-                }
-            }
-            if (roots.length === 0) return resolve({ error: 'No fiber roots found. The app may not have rendered yet.' });
+            ${FIBER_ROOTS_JS}
+            var roots = __eb_fiberRoots(false);
+            if (roots.length === 0) return resolve(hook
+                ? { error: 'No fiber roots found. The app may not have rendered yet.' }
+                : { error: 'React DevTools hook not available. Make sure you are running a development build.' });
 
             // Paper: measureInWindow is on stateNode directly.
             // Fabric: measureInWindow is on stateNode.canonical.publicInstance.

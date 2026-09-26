@@ -1,8 +1,10 @@
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 import { executeInApp } from "./executor.js";
 
 const FIBER_WALK = `
-var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-if (!hook || !hook.renderers || !hook.getFiberRoots) {
+${FIBER_ROOTS_JS}
+var roots = __eb_fiberRoots(true);
+if (roots.length === 0) {
     return JSON.stringify({ ok: false, error: 'React DevTools hook not available — app must be run in dev mode with React Native renderer registered.' });
 }
 function isStore(v) {
@@ -22,13 +24,7 @@ function walk(f, d) {
     if (f.child) walk(f.child, d + 1);
     if (f.sibling) walk(f.sibling, d);
 }
-var ids = [];
-hook.renderers.forEach(function (_, k) { ids.push(k); });
-for (var i = 0; i < ids.length; i++) {
-    var roots = hook.getFiberRoots(ids[i]);
-    if (!roots) continue;
-    roots.forEach(function (r) { walk(r.current, 0); });
-}
+roots.forEach(function (r) { walk(r.current, 0); });
 if (found.length === 0) {
     return JSON.stringify({ ok: false, error: 'No <Provider store> with a redux-shaped store found in the fiber tree.' });
 }

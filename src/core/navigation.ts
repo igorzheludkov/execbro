@@ -1,4 +1,5 @@
 import { buildRequireSource } from "./moduleRegistry.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 
 /**
  * Injected source resolving BOTH navigation handles.
@@ -26,6 +27,7 @@ import { buildRequireSource } from "./moduleRegistry.js";
 export function buildNavHandlesSource(): string {
     return `
 ${buildRequireSource()}
+${FIBER_ROOTS_JS}
 var __eb_nav = (function () {
     function isExpoRouter(v) {
         return !!v && typeof v.navigate === 'function' && typeof v.dismiss === 'function';
@@ -36,12 +38,8 @@ var __eb_nav = (function () {
     function findFiberNav() {
         if (globalThis.__EB_TEST_FIBER_NAV__) return globalThis.__EB_TEST_FIBER_NAV__;
         try {
-            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook || typeof hook.getFiberRoots !== 'function' || !hook.renderers) return null;
             var best = null;
             var bestDepth = 1e9;
-            var ids = [];
-            hook.renderers.forEach(function (_, k) { ids.push(k); });
             var walk = function (f, d) {
                 if (!f || d > 1600) return;
                 var p = f.memoizedProps;
@@ -52,11 +50,7 @@ var __eb_nav = (function () {
                 if (f.child) walk(f.child, d + 1);
                 if (f.sibling) walk(f.sibling, d);
             };
-            for (var i = 0; i < ids.length; i++) {
-                var roots = hook.getFiberRoots(ids[i]);
-                if (!roots) continue;
-                roots.forEach(function (r) { walk(r.current, 0); });
-            }
+            __eb_fiberRoots(true).forEach(function (r) { walk(r.current, 0); });
             return best;
         } catch (e) { return null; }
     }
@@ -100,11 +94,7 @@ var __eb_nav = (function () {
         }
         if (globalThis.__EB_TEST_SCREEN_NAV__) return toRoot(globalThis.__EB_TEST_SCREEN_NAV__);
         try {
-            var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-            if (!hook || typeof hook.getFiberRoots !== 'function' || !hook.renderers) return null;
             var found = null;
-            var ids = [];
-            hook.renderers.forEach(function (_, k) { ids.push(k); });
             var walk = function (f, d) {
                 if (!f || found || d > 1600) return;
                 var p = f.memoizedProps;
@@ -115,11 +105,7 @@ var __eb_nav = (function () {
                 if (f.child) walk(f.child, d + 1);
                 if (f.sibling) walk(f.sibling, d);
             };
-            for (var j = 0; j < ids.length && !found; j++) {
-                var rs = hook.getFiberRoots(ids[j]);
-                if (!rs) continue;
-                rs.forEach(function (r) { walk(r.current, 0); });
-            }
+            __eb_fiberRoots(true).forEach(function (r) { walk(r.current, 0); });
             return found ? toRoot(found) : null;
         } catch (e) { return null; }
     }
