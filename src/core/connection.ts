@@ -1818,6 +1818,24 @@ export function resolveConnectedAppByDevice(device?: string): DeviceResolution {
     return { kind: "none", device, connected: openApps };
 }
 
+/**
+ * Which platform a tool call will act on, read from the registry alone. Runs on
+ * every tool call, so it must never touch a device. Returns undefined whenever
+ * the answer is not certain, and the gate then fails open: blocking a mobile call
+ * on a wrong guess is far worse than letting a chromium call reach a clearer
+ * downstream failure.
+ */
+export function peekTargetPlatform(toolName: string, device: unknown): ConnectedApp["platform"] | undefined {
+    if (typeof device === "string" && device.length > 0) {
+        const resolved = resolveConnectedAppByDevice(device);
+        return resolved.kind === "ok" ? resolved.app.platform : undefined;
+    }
+    // A bare ios_/android_ call targets the OS device, not a connected app.
+    if (toolName.startsWith("ios_") || toolName.startsWith("android_")) return undefined;
+    const platforms = new Set(getConnectedApps().filter((e) => e.isConnected).map((e) => e.app.platform));
+    return platforms.size === 1 ? [...platforms][0] : undefined;
+}
+
 export function getConnectedAppByDevice(device?: string): ConnectedApp | null {
     const resolution = resolveConnectedAppByDevice(device);
     if (resolution.kind === "ok") return resolution.app;
