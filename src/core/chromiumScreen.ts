@@ -12,6 +12,7 @@
  */
 import type { ConnectedApp } from "./types.js";
 import { evaluateJson } from "./cdpCommand.js";
+import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 import { pxPerCss, type ChromiumViewport } from "./chromium.js";
 import type { ScreenState, ScreenStateOverlay, ScreenStatePressable } from "./screenState.js";
 
@@ -285,4 +286,71 @@ export function rawToScreenState(raw: RawScreen): ScreenState {
 
 export async function chromiumScreenState(app: ConnectedApp): Promise<ScreenState> {
     return rawToScreenState(await evaluateJson<RawScreen>(app.ws, buildScreenCollectJs()));
+}
+
+export const LAYOUT_NODE_CAP = 500;
+
+export interface RawLayoutNode { depth: number; name: string; rect: CssRect; testID?: string; text?: string; style?: Record<string, string> }
+export interface RawLayout { viewport: ChromiumViewport; nodes: RawLayoutNode[]; offscreen: number; dropped: number; error?: string }
+
+/** The visible React component tree: each component framed by the visible union of the DOM it renders. */
+export function buildLayoutCollectJs(extended: boolean): string {
+    return `(function () {
+    ${FIBER_ROOTS_JS}
+    ${DOM_HELPERS_JS}
+    var vp = ${VIEWPORT_FIELDS_JS};
+    var roots = __eb_fiberRoots(true);
+    if (roots.length === 0) return JSON.stringify({ viewport: vp, nodes: [], offscreen: 0, dropped: 0, error: "No React root found on this page. get_screen_state lists its DOM elements without React." });
+    var out = [], offscreen = 0, dropped = 0;
+    function walk(f, depth) {
+        for (; f; f = f.sibling) {
+            var name = typeof f.type === "string" ? null : nameOf(f.type);
+            if (!name) { walk(f.child, depth); continue; }
+            var hs = hostsOf(f, []), r = null, any = false;
+            hs.forEach(function (h) { var v = visibleRect(h); if (v === "off") any = true; else if (v) r = joinRect(r, v); });
+            if (!r) { if (any) offscreen++; continue; }
+            if (out.length >= ${LAYOUT_NODE_CAP}) { dropped++; continue; }
+            var node = { depth: depth, name: name, rect: r };
+            var tid = hs[0] && testIdOf(hs[0]);
+            if (tid) node.testID = tid;
+            var txt = hs.length === 1 ? norm(hs[0].innerText) : "";
+            if (txt && txt.length <= 60) node.text = txt;
+            if (${extended} && hs[0]) node.style = styleOf(hs[0]);
+            out.push(node);
+            walk(f.child, depth + 1);
+        }
+    }
+    roots.forEach(function (root) { walk(root.current, 0); });
+    return JSON.stringify({ viewport: vp, nodes: out, offscreen: offscreen, dropped: dropped });
+})()`;
+}
+
+export function formatChromiumLayout(raw: RawLayout, summary: boolean): string {
+    const k = pxPerCss(raw.viewport);
+    const px = (v: number) => Math.round(v * k);
+    if (summary) {
+        const counts = new Map<string, number>();
+        for (const n of raw.nodes) counts.set(n.name, (counts.get(n.name) ?? 0) + 1);
+        return [...counts].sort((a, b) => b[1] - a[1]).map(([name, c]) => `${name}: ${c}`).join("\n");
+    }
+    const lines = raw.nodes.map((n, i) => {
+        const next = raw.nodes[i + 1];
+        // A parent whose only DOM is its child's repeats the child's text; keep the deepest.
+        const text = n.text && !(next && next.depth > n.depth && next.text === n.text) ? ` "${n.text}"` : "";
+        const style = n.style && Object.keys(n.style).length > 0
+            ? ` {${Object.entries(n.style).map(([a, b]) => `${a}: ${b}`).join(", ")}}`
+            : "";
+        return `${"  ".repeat(n.depth)}${n.name} (${px(n.rect.x)},${px(n.rect.y)} ${px(n.rect.w)}x${px(n.rect.h)})` +
+            `${n.testID ? ` testID="${n.testID}"` : ""}${text}${style}`;
+    });
+    if (raw.viewport.hidden) lines.push("", "The window is hidden (document.visibilityState). Nothing listed is visible until it is shown.");
+    if (raw.offscreen > 0) lines.push("", `${raw.offscreen} component(s) are scrolled or clipped out of view and not listed.`);
+    if (raw.dropped > 0) lines.push("", `${raw.dropped} component(s) past the ${LAYOUT_NODE_CAP}-component cap are not listed.`);
+    return lines.join("\n");
+}
+
+export async function chromiumScreenLayout(app: ConnectedApp, opts: { extended: boolean; summary: boolean }): Promise<string> {
+    const raw = await evaluateJson<RawLayout>(app.ws, buildLayoutCollectJs(opts.extended));
+    if (raw.error) throw new Error(raw.error);
+    return formatChromiumLayout(raw, opts.summary);
 }
