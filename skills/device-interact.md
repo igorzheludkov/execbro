@@ -163,6 +163,11 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 - Differences the FIELD introduced — `autoCapitalize` turning `abc` into `Abc`, autocorrect respacing, a display mask — count as verified, not as a failed write. A `maxLength` truncation is named as the cause instead of retried
 - `keyboardType`: both write paths bypass the on-screen keyboard, so letters land in a `number-pad` field. Allowed, and noted in the response
 
+**Keys** — `mcp__execbro__press_key`, one tool across chromium, Android and the iOS simulator:
+- A named key (`Enter`, `Escape`, `Tab`, `Backspace`, arrows, `Home`/`End`, `F1`-`F12`) or one character, with optional modifiers (`Shift+Tab`, `Meta+K`); `repeat` up to 50
+- `testID`/`text` focus a target first. Android refuses modifiers; iOS character keys follow the active keyboard layout; a physical iPhone is refused
+- `android_key_event` stays for Android-only keys (BACK, HOME, MENU)
+
 **Hardware buttons:**
 - iOS: `mcp__execbro__ios_button` (HOME, LOCK, SIDE_BUTTON, SIRI, APPLE_PAY)
 - Android: `mcp__execbro__android_key_event` (HOME, BACK, ENTER, DEL, MENU, etc.)
@@ -217,6 +222,7 @@ After interactions, verify the result:
 - `mcp__execbro__swipe` / `mcp__execbro__pinch`
 - `mcp__execbro__input_text` / `mcp__execbro__dismiss_keyboard`
 - `mcp__execbro__android_long_press` (no-RN coordinate holds)
+- `mcp__execbro__press_key`
 - `mcp__execbro__ios_button` / `android_key_event`
 - `mcp__execbro__ios_open_url`
 
