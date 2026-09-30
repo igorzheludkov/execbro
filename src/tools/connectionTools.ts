@@ -40,6 +40,7 @@ import {
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
+import { hostAddressChangeHint } from "../core/hostAddress.js";
 import { chromiumScanPorts, isChromiumListing, isChromiumTarget, isPortOpen, selectConnectTargets } from "../core/metro.js";
 
 export function registerConnectionTools(server: McpServer): void {
@@ -161,7 +162,8 @@ export function registerConnectionTools(server: McpServer): void {
             for (const port of openPorts) {
                 const devices = portDevices.get(port);
                 if (!devices) {
-                    results.push(`Port ${port}: No debuggable devices found`);
+                    const addressHint = hostAddressChangeHint(port);
+                    results.push(`Port ${port}: No debuggable devices found${addressHint ? `\n${addressHint}` : ""}`);
                     continue;
                 }
     
