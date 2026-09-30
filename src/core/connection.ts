@@ -14,6 +14,7 @@ import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
 import { startSdkMirrorPoller, stopSdkMirrorPoller } from "./sdkMirrorPoller.js";
+import { rememberHostAddresses, hostAddressChangeHint } from "./hostAddress.js";
 import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate, formatDialog, DIALOG_BLOCKED_TOOLS } from "./chromiumDialogs.js";
 import {
     DEFAULT_RECONNECTION_CONFIG,
@@ -1338,11 +1339,13 @@ export async function connectToDevice(
                 initContextHealth(appKey);
                 console.error(`[execbro] Reconnected to ${device.title}`);
                 recordConnectionEvent("reconnect-success", appKey, device.title);
+                rememberHostAddresses();
             } else {
                 initConnectionState(appKey);
                 initContextHealth(appKey);
                 console.error(`[execbro] Connected to ${device.title}`);
                 recordConnectionEvent("connect-success", appKey, device.title);
+                rememberHostAddresses();
             }
 
             // Enable Runtime domain to receive console messages
@@ -1504,7 +1507,8 @@ function scheduleReconnection(
     if (attempts >= config.maxAttempts) {
         console.error(`[execbro] Max reconnection attempts (${config.maxAttempts}) reached for ${appKey}`);
         updateConnectionState(appKey, { status: "disconnected" });
-        recordConnectionEvent("max-attempts-reached", appKey, deviceTitle, `${config.maxAttempts} attempts exhausted`);
+        const addressHint = hostAddressChangeHint(meta?.port);
+        recordConnectionEvent("max-attempts-reached", appKey, deviceTitle, `${config.maxAttempts} attempts exhausted${addressHint ? `\n${addressHint}` : ""}`);
         return;
     }
 
@@ -2187,7 +2191,7 @@ export async function ensureConnection(options: {
                 wasReconnected: false,
                 healthCheckPassed: false,
                 connectionInfos: [],
-                error: `No debuggable devices found on port ${targetPort}. Make sure the app is running.`,
+                error: hostAddressChangeHint(targetPort) ?? `No debuggable devices found on port ${targetPort}. Make sure the app is running.`,
                 failureKind: "no_debuggable_devices",
             };
         }
