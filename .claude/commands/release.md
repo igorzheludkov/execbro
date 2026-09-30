@@ -68,7 +68,11 @@ and no agent reading it could discover the parameter.
 ### 2. Get Version Bump Type
 
 - Check `$ARGUMENTS` for version type: `patch`, `minor`, or `major`
-- Default to `patch` if not specified
+- If not specified, choose it from what the release contains: run `git log <previous-tag>..HEAD --oneline`, and diff `tools.json` against the previous tag
+    - **minor** if there is any `feat` commit, a tool was added, a tool gained a parameter, or a new platform or target is supported
+    - **major** if a tool or parameter was removed or renamed, or existing behaviour changed incompatibly. Ask before bumping major
+    - **patch** only when the release is nothing but fixes, docs and tests
+    - If it is a close call, ask. A published version number is permanent. 2.12.4 shipped the whole Chromium/Electron platform and four new tools as a patch, and needed 2.13.0 to correct it
 
 ### 3. Get Release Notes Context
 
@@ -221,11 +225,11 @@ Two guards run automatically and need no action:
 
 ## Arguments
 
-- `$ARGUMENTS` - Optional: version bump type (`patch`, `minor`, or `major`). Defaults to `patch`.
+- `$ARGUMENTS` - Optional: version bump type (`patch`, `minor`, or `major`). When omitted, it is chosen from the release contents (see step 2).
 
 ## Usage Examples
 
-- `/release` - Patch release (1.0.23 → 1.0.24)
+- `/release` - Bump chosen from the commits since the last tag
 - `/release minor` - Minor release (1.0.23 → 1.1.0)
 - `/release major` - Major release (1.0.23 → 2.0.0)
 
