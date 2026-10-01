@@ -26,7 +26,7 @@ First, check what devices are running:
 Before interacting, understand the current screen:
 
 **Screenshot approach (recommended first step):**
-- Use `mcp__execbro__ios_screenshot` or `mcp__execbro__android_screenshot` for visual reference
+- Use `mcp__execbro__screenshot` for visual reference (any platform; pass `device` when several are connected)
 
 **Component tree approach (for finding React Native elements without screenshots):**
 - Use `mcp__execbro__get_screen_state` — the fastest orientation pass. Returns the active route + navigation stack, groups elements behind an open overlay or raised keyboard (taps will NOT reach those until it closes), and lists every on-screen element — pressables (component tag, label, testID, onPress hint), text, images — each with a tap-ready `(x, y)` centre and frame. Pass `pressablesOnly=true` for just the tappable list
@@ -215,7 +215,7 @@ After interactions, verify the result:
 - `mcp__execbro__tap`
 - `mcp__execbro__find_components`
 - `mcp__execbro__list_devices`
-- `mcp__execbro__ios_screenshot` / `android_screenshot`
+- `mcp__execbro__screenshot`
 - `mcp__execbro__get_screen_state`
 - `mcp__execbro__get_screen_layout`
 - `mcp__execbro__inspect_at_point`

@@ -38,12 +38,8 @@ Before capturing anything, get a screenshot-free read of what's on screen:
 
 Based on what's running, capture screenshots:
 
-**For iOS Simulators:**
-- Use `mcp__execbro__ios_screenshot` with the simulator UDID
+Use `mcp__execbro__screenshot` with `device` set to the simulator UDID or the Android serial.
 - Capture from both iPhone and iPad if both are running (important for responsive layouts)
-
-**For Android Devices:**
-- Use `mcp__execbro__android_screenshot` with the device serial
 
 **When you need tap coordinates:**
 - Use `mcp__execbro__get_screen_state` — every element comes back with a ready `(x, y)` in the same space as the screenshots, with no OCR round trip
@@ -87,8 +83,7 @@ If the user provides a Figma URL or design reference:
 
 - `mcp__execbro__list_devices`
 - `mcp__execbro__get_screen_state` (screenshot-free route + element read — start here)
-- `mcp__execbro__ios_screenshot`
-- `mcp__execbro__android_screenshot`
+- `mcp__execbro__screenshot`
 - `mcp__execbro__inspect_at_point` (optional: per-ancestor frames + props at coordinates)
 - `mcp__execbro__tap` (resolves by text/testID/component, OCR fallback included)
 
