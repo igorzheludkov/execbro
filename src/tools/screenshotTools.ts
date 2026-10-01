@@ -715,7 +715,7 @@ export function registerScreenshotTools(server: McpServer): void {
         "screenshot",
         {
             description:
-                "Take a screenshot of whichever target `device` resolves to: an iOS simulator, an Android device, or a chromium (Electron / Chrome) window.\n" +
+                "Take a screenshot of whichever target `device` resolves to: an iOS simulator, a USB-attached physical iPhone/iPad (capture only, pass its UDID or name from list_devices), an Android device, or a chromium (Electron / Chrome) window.\n" +
                 "PURPOSE: One capture tool for every platform. On iOS and Android it is exactly ios_screenshot / android_screenshot, pressables summary included. On chromium it captures the page viewport (no window chrome) over CDP, with the same element summary as get_screen_state.\n" +
                 "COORDINATES: pixels in the returned image are the coordinates tap(x, y) takes, on every platform. Never scale them yourself.\n" +
                 "GOOD: screenshot(); screenshot({ device: \"FluentTalk\" })\n" +
@@ -729,19 +729,26 @@ export function registerScreenshotTools(server: McpServer): void {
             },
         },
         async ({ device, outputPath }) => {
+            // _targetPlatform feeds telemetry's target platform: with no ios_/android_ prefix
+            // in the tool name, the dashboard has no other way to tell which platform this hit.
             const chromeApp = chromiumAppFor("screenshot", device);
-            if (chromeApp) return await chromiumScreenshotResponse(chromeApp, outputPath);
+            if (chromeApp) return { ...(await chromiumScreenshotResponse(chromeApp, outputPath)), _targetPlatform: "chromium" };
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
+                // A USB iPhone is invisible to the resolver (simctl + adb only),
+                // so try it on a miss, the same fallback ios_screenshot uses.
+                const phys = device ? await resolvePhysicalIosDevice(device) : null;
+                if (phys) return { ...(await capturePhysicalDevice(phys, outputPath)), _targetPlatform: "ios" };
                 return {
                     content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
                     isError: true as const,
                 };
             }
             const t = resolved.target;
-            return t.platform === "ios"
+            const shot = t.platform === "ios"
                 ? await iosScreenshotHandler({ outputPath, udid: t.iosUdid ?? device })
                 : await androidScreenshotHandler({ outputPath, deviceId: t.androidSerial ?? device });
+            return { ...shot, _targetPlatform: t.platform };
         }
     );
     // Tool: Get images from shared image buffer
