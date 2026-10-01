@@ -31,7 +31,7 @@ const guides: Guide[] = [
 
 ## If No App Running
 - list_devices — iOS simulators, Android emulators, and physical devices in one call. A USB-attached
-  iPhone/iPad appears under "iOS physical" and is screenshot-only: ios_screenshot reaches it, every
+  iPhone/iPad appears under "iOS physical" and is screenshot-only: screenshot reaches it, every
   interaction tool does not
 - ios_boot_simulator — boot an iOS simulator if needed
 - ios_launch_app / android_launch_app — launch the app
@@ -67,7 +67,7 @@ exactly like "my fix didn't work".
         content: `# Component Inspection
 
 ## Recommended Workflow: Identify a Component on Screen
-1. get_screen_state — screenshot-free, and every element comes back with a ready (x, y). Start here; only fall back to a screenshot (ios_screenshot / android_screenshot) when you need to see the element to pick it out
+1. get_screen_state — screenshot-free, and every element comes back with a ready (x, y). Start here; only fall back to screenshot when you need to see the element to pick it out
 2. Take the coordinate from that listing, or estimate it off the screenshot
 3. Pass it straight through — every layout tool, tap() and the screenshots share one screen-space coordinate system, so no conversion is needed
 4. Pick the right tool (see decision below) and call it with (x, y)
@@ -144,7 +144,7 @@ still agree with each other and with a screenshot. get_screen_state names the co
 size in a note when it applies.
 
 ## Verify UI Changes
-1. ios_screenshot / android_screenshot — capture current screen
+1. screenshot — capture current screen (any platform)
 2. Compare visually against expected result or Figma design
 3. If an issue is spotted, drill down with inspection tools
 
@@ -164,7 +164,7 @@ size in a note when it applies.
 
 ## Key Tools
 - get_screen_state: route + overlays + every element, screenshot-free (start here)
-- ios_screenshot / android_screenshot: visual capture (ios_screenshot also captures a USB-attached physical iPhone/iPad — capture only, no pressable list)
+- screenshot: visual capture on any platform (iOS simulator, USB-attached iPhone/iPad, Android, chromium). A physical iPhone is capture only, no pressable list. ios_screenshot / android_screenshot do the same per platform
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - inspect_at_point: frames per ancestor + props + source file:line (no overlay, fast)
 - measure: geometry for one named component
@@ -184,7 +184,7 @@ iOS interaction tools (tap, ios_button) require a UI driver:
 Without a UI driver installed, these tools will fail.
 
 Physical iOS devices: nothing on this page reaches one. Both drivers target the Simulator, and iOS
-exposes no touch injection to a host below iOS 17. ios_screenshot is the only tool that reaches a
+exposes no touch injection to a host below iOS 17. screenshot (or ios_screenshot) is the only tool that reaches a
 USB-attached iPhone/iPad — do not retry a failed tap against one, and do not report a physical
 device as unresponsive when the gesture was never delivered.
 
@@ -196,7 +196,7 @@ Use tap — it tries multiple strategies automatically and returns a post-tap sc
 4. tap(x=..., y=...) — coordinate-based tap from screenshot (last resort)
 5. tap(x=..., y=..., native=true) — taps directly via ADB/simctl without React Native connection (for system dialogs, non-RN apps)
 
-tap returns a screenshot after every action (screenshot=true by default) — no need to call ios_screenshot/android_screenshot after tapping.
+tap returns a screenshot after every action (screenshot=true by default) — no need to call screenshot after tapping.
 For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visual change (verify=true by default). Set screenshot=false for fastest execution.
 
 When meaningful:true, verification.regions gives bounding boxes (screenshot pixels, same space as
@@ -673,7 +673,7 @@ export const UNTRUSTED_DATA_RULE: string = [
 ].join("\n");
 
 export const DECISION_TREE: string = [
-    "Primary tools: scan_metro, get_logs / search_logs, ios_screenshot / android_screenshot, tap, get_screen_state, get_screen_layout.",
+    "Primary tools: scan_metro, get_logs / search_logs, screenshot, tap, get_screen_state, get_screen_layout.",
     "Platform-specific ios_* / android_* tools (ios_button, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible. input_text covers native-only text entry too, via native:true.",
     "Chromium/Electron targets (platform chromium) support logs, network capture and mocking, execute_in_app, globals, redux, component inspection, screen reading (get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap, input_text, swipe (wheel scroll, four-coordinate drag), press_key and handle_dialog (JavaScript alert / confirm / prompt); other tools refuse them with a message saying so. electron_launch_app starts an Electron project with the CDP port open.",
     "",
