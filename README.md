@@ -142,7 +142,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `input_text`                            | Type text — targets and focuses a field itself, or `native:true` for whatever's focused. `replace:true` clears first (Fabric) |
 | `dismiss_keyboard`                      | Blur the focused input and close the on-screen keyboard                                  |
 | `execute_in_app`                        | Run JS expressions in the app runtime (REPL-style)                                       |
-| `ios_screenshot` / `android_screenshot` | Take device screenshots — `ios_screenshot` also works on a USB-attached physical iPhone/iPad (capture only) |
+| `screenshot`                            | Take a screenshot on any platform: iOS simulator, Android, Electron or Chrome, and a USB-attached physical iPhone/iPad (capture only) |
 
 ## Usage
 
