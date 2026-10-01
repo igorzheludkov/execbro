@@ -131,6 +131,9 @@ export function registerToolWithTelemetry(
         let fiberPressableCount: string | undefined;
         let accessibilityMatchCount: string | undefined;
         let appRoute: string | undefined;
+        // Set by cross-platform tools that resolve their own target (e.g. `screenshot` on a
+        // simulator with no app connected), where invocationPlatform has nothing to read.
+        let resolvedPlatform: string | undefined;
 
         try {
             inputTokens = Math.ceil(JSON.stringify(args).length / 4);
@@ -214,6 +217,7 @@ export function registerToolWithTelemetry(
             if (result?._fiberPressableCount) fiberPressableCount = result._fiberPressableCount;
             if (result?._accessibilityMatchCount) accessibilityMatchCount = result._accessibilityMatchCount;
             if (result?._appRoute) appRoute = result._appRoute;
+            if (result?._targetPlatform) resolvedPlatform = result._targetPlatform;
             if (Array.isArray(result?.content)) {
                 let totalTokens = 0;
                 for (const item of result.content) {
@@ -301,7 +305,7 @@ export function registerToolWithTelemetry(
             // PREVIOUS tool — which is what screenStaleness needs to tell
             // "the agent moved the screen" from "someone else did".
             recordToolCall(toolName);
-            const targetPlatform = invocationPlatform(toolName, args);
+            const targetPlatform = resolvedPlatform ?? invocationPlatform(toolName, args);
             trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, targetPlatform, emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin, failureKind);
             // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
             // RN: any connected app has appDetection. Native: tool name prefixed ios_/android_. Else: null.
