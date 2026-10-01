@@ -284,7 +284,7 @@ export function registerComponentTools(server: McpServer): void {
                 "Each line carries an (x, y) center + frame bounds (so anything is a tap(x, y) target), typed by a leading marker: 🔘 pressable (with component JSX tag, label, testID, onPress hint), 📝 text, 🖼 image (with src/alt). " +
                 "Elements covered by an open overlay are grouped under 🚫 Blocked — visible for context, but taps will NOT reach them until the overlay closes.\n\n" +
                 "WHEN TO USE: After every tap/swipe that may navigate, and to read screen content (prices, labels, which image loaded) without a screenshot+OCR round-trip.\n" +
-                "COORDINATES: delivered-screenshot pixels — the same space as ios_screenshot/android_screenshot, get_screen_layout, inspect_at_point, measure and tap(). Pass them through unchanged; never scale by devicePixelRatio yourself.\n" +
+                "COORDINATES: delivered-screenshot pixels — the same space as screenshot, get_screen_layout, inspect_at_point, measure and tap(). Pass them through unchanged; never scale by devicePixelRatio yourself.\n" +
                 "LIMITATIONS: route is null without React Navigation / Expo Router. Requires a live Metro connection.\n" +
                 "HISTORY: includeHistory=true appends the route trail (dwell + origin per screen).\n" +
                 "PARAMS: route params listed by key; fullParams=true adds values.\n" +

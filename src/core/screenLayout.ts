@@ -599,7 +599,7 @@ export async function getScreenLayout(
                 success: false,
                 error:
                     "React DevTools hook not registered (likely a production / non-__DEV__ build). " +
-                    "Fiber-based layout is unavailable. Use ios_screenshot / android_screenshot for a visual " +
+                    "Fiber-based layout is unavailable. Use screenshot for a visual " +
                     "snapshot; tap(text=...) still falls back to OCR when the fiber tree is unreadable.",
             };
         }

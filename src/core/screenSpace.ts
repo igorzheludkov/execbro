@@ -126,7 +126,7 @@ export function unresolvedScaleNote(m: ScreenSpaceMetrics): string {
     return (
         `⚠️ Coordinates below are in ${unit}, NOT the usual delivered-pixel space — the ` +
         `device scale could not be read. Do not pass them to tap(); take coordinates from ` +
-        `ios_screenshot / android_screenshot instead, or reconnect the device and retry.`
+        `screenshot instead, or reconnect the device and retry.`
     );
 }
 
