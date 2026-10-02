@@ -37,7 +37,9 @@ const guides: Guide[] = [
 - ios_launch_app / android_launch_app — launch the app
 - ios_terminate_app — kill an app that is in a bad state before relaunching
 - android_list_packages — find the package name when you only know the app by sight
-- Wait 2-3 seconds, then scan_metro
+- Then ensure_connection({ waitMs: 60000 }) — returns as soon as the app's JS runtime attaches. A cold
+  first bundle can take a minute or more, and until it loads Metro lists no app: scan_metro then says
+  "Metro is running, but no app has attached yet", which means wait, not that Metro is down
 
 ## Stale Bundle After a Metro Restart
 scan_metro detects that the process serving a port CHANGED (pid via lsof) and says so. It means
@@ -56,7 +58,7 @@ exactly like "my fix didn't work".
 - scan_metro: auto-discover and connect React Native (Metro) and Chromium/Electron (CDP) targets (preferred)
 - connect_metro: connect to a specific port (when you know it); device=<name> to attach one Chromium target
 - disconnect_metro: close all connections (free CDP slot for native debugger)
-- ensure_connection: health check with healthCheck=true
+- ensure_connection: health check with healthCheck=true; waitMs=60000 waits for a just-launched app to attach
 - get_connection_status: check uptime and gaps
 - get_license_status: installation id and license tier (activate_license / delete_account manage it)`
     },
@@ -592,7 +594,7 @@ and in-memory caches for nothing.
 If no errors captured via CDP, use get_bundle_errors with platform="ios" or "android" — this triggers screenshot+OCR fallback to read errors from the device screen.
 
 ## Key Tools
-- get_bundle_status: Metro health check (did it compile?)
+- get_bundle_status: Metro health check (did it compile?). It cannot see a first bundle building, so "not reported" during a cold launch is not "idle"
 - get_refresh_status: did the running runtime accept the Fast Refresh update?
 - get_bundle_errors: compilation errors
 - reload_app: full JS bundle reload — reconnects itself, no scan_metro afterwards
