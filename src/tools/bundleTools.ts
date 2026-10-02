@@ -248,17 +248,20 @@ export function registerBundleTools(server: McpServer): void {
             inputSchema: {}
         },
         async () => {
-            // Get port from first connected app if available
+            // Before any app attaches (the cold-launch case) there is no app port to read, so fall back to a scan.
             const apps = Array.from(connectedApps.values());
-            const metroPort = apps.length > 0 ? apps[0].port : undefined;
+            const metroPort = apps.length > 0 ? apps[0].port : (await checkMetroState(0)).metroPorts[0];
     
             const { formatted } = await getBundleStatusWithErrors(bundleErrorBuffer, metroPort);
+            const coldHint = apps.length === 0 && metroPort
+                ? `\n\nNo app is attached to Metro yet. If one was just launched, ensure_connection({ waitMs: 60000 }) returns once its bundle has loaded and it attaches.`
+                : "";
     
             return {
                 content: [
                     {
                         type: "text",
-                        text: formatted
+                        text: formatted + coldHint
                     }
                 ]
             };

@@ -19,6 +19,7 @@ export interface BundleStatus {
     hasError: boolean;
     buildTime?: number;
     lastBuildTimestamp?: Date;
+    metroRunning?: boolean;
 }
 
 // Circular buffer for bundle errors
@@ -359,10 +360,12 @@ export async function fetchBundleStatus(port: number): Promise<BundleStatus> {
         }
         const text = await response.text();
 
-        // Metro returns "packager-status:running" when idle
+        // "packager-status:running" means Metro is up, not idle: it answers the same
+        // mid-build. Reading it as idle told agents a cold bundle was not building.
         return {
-            isBuilding: !text.includes("running"),
-            hasError: false
+            isBuilding: false,
+            hasError: false,
+            metroRunning: text.includes("packager-status:running")
         };
     } catch {
         return { isBuilding: false, hasError: false };
@@ -387,24 +390,22 @@ export async function getBundleStatusWithErrors(
     buffer: BundleErrorBuffer,
     metroPort?: number
 ): Promise<{ status: BundleStatus; latestError: BundleError | null; formatted: string }> {
-    // Try to get status from any connected Metro port
-    let status = buffer.getStatus();
-
-    // Check Metro port status if available
+    const status = buffer.getStatus();
     if (metroPort) {
-        const liveStatus = await fetchBundleStatus(metroPort);
-        status = {
-            ...status,
-            isBuilding: liveStatus.isBuilding
-        };
-        buffer.updateStatus(status);
+        status.metroRunning = (await fetchBundleStatus(metroPort)).metroRunning;
     }
 
     const latestError = buffer.getLatest();
 
     const lines: string[] = [];
     lines.push(`Bundle Status:`);
-    lines.push(`  Building: ${status.isBuilding ? "Yes" : "No"}`);
+    if (metroPort) {
+        lines.push(`  Metro: ${status.metroRunning ? "running" : "not answering"} on port ${metroPort}`);
+    }
+    // isBuilding only ever comes from Fast Refresh events; Metro reports no progress for a first bundle.
+    lines.push(status.isBuilding
+        ? `  Building: Yes (Fast Refresh update)`
+        : `  Building: not reported. Metro sends no progress for a first bundle, so a cold launch can be mid-build while this reads idle.`);
     lines.push(`  Has Error: ${status.hasError ? "Yes" : "No"}`);
 
     if (status.lastBuildTimestamp) {
