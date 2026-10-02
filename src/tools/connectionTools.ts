@@ -53,7 +53,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "Discover and connect to debuggable JS runtimes: React Native via Metro and Chromium/Electron via CDP. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.\n" +
                 "PURPOSE: Discover Metro on ports 8081-8090 and auto-connect every React Native debugger target it advertises. Also probes Chromium debug ports: 9222 is listed but not auto-connected (attach with connect_metro), ports in EXECBRO_CHROMIUM_PORTS auto-connect.\n" +
                 "WHEN TO USE: At the start of any session, or after the user restarts Metro / boots a new simulator.\n" +
-                "WORKFLOW: scan_metro -> get_apps -> get_logs / ios_screenshot / tap.\n" +
+                "WORKFLOW: scan_metro -> get_apps -> get_logs / screenshot / tap.\n" +
                 "GOOD: scan_metro()\n" +
                 "BAD: scan_metro() called repeatedly in a loop — use ensure_connection to re-verify an existing connection.\n",
             inputSchema: {
@@ -362,7 +362,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "List currently connected React Native apps and their connection status. If no apps are connected, run scan_metro first to establish a connection.\n" +
                 "PURPOSE: Enumerate active debug targets with device names, platforms, ports, and detected RN/Expo versions so you can target the right one.\n" +
                 "WHEN TO USE: After scan_metro to confirm what connected, or before passing a device=\"...\" filter to another tool.\n" +
-                "WORKFLOW: scan_metro -> get_apps -> get_logs / ios_screenshot / tap (with device=\"...\" if multiple).\n" +
+                "WORKFLOW: scan_metro -> get_apps -> get_logs / screenshot / tap (with device=\"...\" if multiple).\n" +
                 "LIMITATIONS: Only lists devices the MCP has successfully connected to — stale targets don't appear here, use get_connection_status for health details.\n" +
                 "GOOD: get_apps()\n" +
                 "BAD: Calling get_apps in a tight loop — the list doesn't change without a scan_metro or disconnect_metro.\n",

@@ -109,7 +109,7 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 
 | Tool                       | Description                                                 |
 | -------------------------- | ----------------------------------------------------------- |
-| `android_screenshot`       | Take a screenshot from an Android device/emulator           |
+| `android_screenshot`       | Legacy Android-only alias of `screenshot`                   |
 | `android_launch_app`       | Launch an app by package name                               |
 | `android_list_packages`    | List installed packages (with optional filter)              |
 | `android_long_press`       | Long press at raw coordinates, for holds with no RN connection (prefer `tap` with `duration`) |
@@ -119,7 +119,7 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 
 | Tool                   | Description                                               |
 | ---------------------- | --------------------------------------------------------- |
-| `ios_screenshot`       | Take a screenshot from an iOS simulator, or from a USB-attached physical iPhone/iPad (capture only — see below) |
+| `ios_screenshot`       | Legacy iOS-only alias of `screenshot`                     |
 | `ios_launch_app`       | Launch an app by bundle ID                                |
 | `ios_open_url`         | Open a URL (deep links or web URLs)                       |
 | `ios_terminate_app`    | Terminate a running app. An app that had already quit is reported as stopped, not as a failure — simctl gives the same error for an uninstalled bundle id, so the result never claims a termination happened |
@@ -128,6 +128,6 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 
 ### Physical iOS devices
 
-`screenshot` (or `ios_screenshot`) is the only tool that reaches a USB-attached iPhone or iPad. Pass the device's UDID or name from `list_devices`; the physical lookup runs only after the simulator lookup fails, so nothing changes for simulator use.
+`screenshot` is the only tool that reaches a USB-attached iPhone or iPad. Pass the device's UDID or name from `list_devices`; the physical lookup runs only after the simulator lookup fails, so nothing changes for simulator use.
 
 It is capture only — no pressable list, no `tap` / `swipe` / `input_text`. iOS exposes no touch injection to a host below iOS 17, and the iOS 17+ path is not implemented. Requires `pipx install pymobiledevice3` and a mounted DeveloperDiskImage; see [setup.md](setup.md).
