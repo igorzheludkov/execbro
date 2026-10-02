@@ -133,7 +133,8 @@
         "ensure_connection": [
             "forceRefresh",
             "healthCheck",
-            "port"
+            "port",
+            "waitMs"
         ],
         "execute_in_app": [
             "awaitPromise",

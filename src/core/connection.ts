@@ -2136,6 +2136,33 @@ export function isHealthCheckMarker(message: string): boolean {
 /**
  * Find the first available Metro port
  */
+/**
+ * What a port with no debuggable target actually means. "No debuggable devices found"
+ * read as "Metro is down" to agents, who then gave up on a cold launch whose bundle was
+ * seconds from attaching: Metro answers /status long before any app has a runtime to list.
+ */
+export async function noAppAttachedMessage(port: number, waitedMs = 0): Promise<string> {
+    const addressHint = hostAddressChangeHint(port);
+    if (addressHint) return addressHint;
+    let status = "";
+    try {
+        status = await (await fetch(`http://localhost:${port}/status`, { signal: AbortSignal.timeout(1500) })).text();
+    } catch {
+        // not an HTTP server, or not answering: reported below as not Metro
+    }
+    if (!status.includes("packager-status:running")) {
+        return `Port ${port}: open, but not answering as Metro (no packager-status) and lists no debuggable targets.`;
+    }
+    if (waitedMs > 0) {
+        return `Port ${port}: Metro is running, but no app attached in ${Math.round(waitedMs / 1000)}s. ` +
+            `Next: screenshot (a red box, or a splash that never finishes), get_bundle_errors, and check the app is running ` +
+            `(ios_launch_app / android_launch_app) and loads from this machine's Metro.`;
+    }
+    return `Port ${port}: Metro is running, but no app has attached yet. Metro is NOT down. ` +
+        `Right after a launch this is normal: the app is still downloading and running its bundle, and a cold first bundle can take a minute or more. ` +
+        `Next: ensure_connection({ waitMs: 60000 }) returns as soon as the app attaches.`;
+}
+
 async function findFirstMetroPort(): Promise<number | null> {
     const ports = await scanMetroPorts();
     return ports.length > 0 ? ports[0] : null;
@@ -2149,8 +2176,9 @@ export async function ensureConnection(options: {
     port?: number;
     healthCheck?: boolean;
     forceRefresh?: boolean;
+    waitMs?: number;
 } = {}): Promise<EnsureConnectionResult> {
-    const { port, healthCheck = true, forceRefresh = false } = options;
+    const { port, healthCheck = true, forceRefresh = false, waitMs = 0 } = options;
 
     let wasReconnected = false;
 
@@ -2183,15 +2211,20 @@ export async function ensureConnection(options: {
             };
         }
 
-        const devices = await fetchDevices(targetPort);
-        const mainDevice = selectMainDevice(devices);
+        // A cold launch lists nothing until its bundle has loaded; waitMs polls for it.
+        const deadline = Date.now() + waitMs;
+        let mainDevice = selectMainDevice(await fetchDevices(targetPort));
+        while (!mainDevice && Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            mainDevice = selectMainDevice(await fetchDevices(targetPort));
+        }
         if (!mainDevice) {
             return {
                 connected: false,
                 wasReconnected: false,
                 healthCheckPassed: false,
                 connectionInfos: [],
-                error: hostAddressChangeHint(targetPort) ?? `No debuggable devices found on port ${targetPort}. Make sure the app is running.`,
+                error: await noAppAttachedMessage(targetPort, waitMs),
                 failureKind: "no_debuggable_devices",
             };
         }

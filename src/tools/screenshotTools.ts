@@ -300,6 +300,8 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
             if (!targetApp && connectedApps.size > 0) {
                 infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to simulator ${resolvedUdid}.`;
                 infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
+            } else if (connectedApps.size === 0) {
+                infoText += `\n\nℹ️ No React Native app is connected, so there is no pressable list. If the app was just launched it may still be loading its bundle: ensure_connection({ waitMs: 60000 }) returns once it attaches.`;
             }
             infoText += `\n\n💡 Next steps:`;
             infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
@@ -541,6 +543,8 @@ async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, dev
             if (!targetApp && connectedApps.size > 0) {
                 infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to device ${deviceId ?? "(default)"}.`;
                 infoText += ` ${connectedApps.size} other app(s) are connected on different device(s) — their fiber data was intentionally not used to avoid mismatched output.`;
+            } else if (connectedApps.size === 0) {
+                infoText += `\n\nℹ️ No React Native app is connected, so there is no pressable list. If the app was just launched it may still be loading its bundle: ensure_connection({ waitMs: 60000 }) returns once it attaches.`;
             }
             infoText += `\n\n💡 Next steps:`;
             infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
