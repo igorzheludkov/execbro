@@ -20,7 +20,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `get_apps`              | List connected apps. Run `scan_metro` first if none connected                                                                |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects                                                               |
 | `electron_launch_app`   | Start an Electron project from its source folder with the CDP port open and connect its windows as chromium targets. Source folders only (a `.app` / `.asar` is refused); follows the port if the app pins its own |
-| `ensure_connection`     | Verify/establish connection with health checks                                                                               |
+| `ensure_connection`     | Verify/establish connection with health checks; `waitMs` waits for a just-launched app to attach                             |
 | `get_logs`              | Retrieve console logs (filtering, truncation, summary)                                                                       |
 | `search_logs`           | Search logs for specific text (truncation)                                                                                   |
 | `clear_logs`            | Clear the log buffer                                                                                                         |
