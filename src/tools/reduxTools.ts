@@ -15,8 +15,8 @@ export function registerReduxTools(server: McpServer): void {
                 "Dispatch a Redux action to the store bound to the app's <Provider>, triggering useSelector subscribers and React re-renders. Resolves the live store by walking the React fiber tree on each call (no SDK setup needed; works even if no store was registered with init()).\n" +
                 "PURPOSE: Drive state-controlled UI (loaders, modals, toasts, error overlays) without exercising the real flow (network, OTP, etc.).\n" +
                 "WHY THIS EXISTS: __RN_AI_DEVTOOLS__.stores.redux often holds a different store reference than the one passed to <Provider>, so dispatching through it updates state but does NOT notify react-redux subscribers. This tool dispatches through the actual Provider store, so views re-render.\n" +
-                "WHEN TO USE: Verify state-driven UI by seeding redux state directly. Example: dispatch app/setIsLoading: true, then ios_screenshot to confirm the loader rendered.\n" +
-                "WORKFLOW: redux_dispatch({ action: { type: 'app/setIsLoading', payload: true } }) -> ios_screenshot -> redux_dispatch({ action: { type: 'app/setIsLoading', payload: false } }).\n" +
+                "WHEN TO USE: Verify state-driven UI by seeding redux state directly. Example: dispatch app/setIsLoading: true, then screenshot to confirm the loader rendered.\n" +
+                "WORKFLOW: redux_dispatch({ action: { type: 'app/setIsLoading', payload: true } }) -> screenshot -> redux_dispatch({ action: { type: 'app/setIsLoading', payload: false } }).\n" +
                 "BATCH: action accepts an array — dispatched in order, one round trip.\n" +
                 "LIMITATIONS: Requires React DevTools hook (dev mode). Action must be plain JSON-serializable (no thunks/functions). If the app has multiple <Provider> roots, pass storeIndex (default 0).\n" +
                 "GOOD: redux_dispatch({ action: { type: 'app/setIsLoading', payload: true } })\n" +

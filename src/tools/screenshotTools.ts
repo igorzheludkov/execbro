@@ -651,15 +651,7 @@ export function registerScreenshotTools(server: McpServer): void {
         server,
         "ios_screenshot",
         {
-            description: "Take a screenshot from an iOS simulator. Returns the image plus a screen-state summary: active route (name + navigation stack), overlay-grouped tappable elements (pressables behind an open sheet/modal are excluded), component names as JSX tags, labels, testIDs, and frames — all in ready-to-tap pixel coordinates. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the list — this is the most reliable way to tap icons or visually-identified elements. Use component names for inspect_component/find_components.\n" +
-                "PURPOSE: Snapshot what the user sees on iOS AND get tap-ready pressables + a structured component map in one call.\n" +
-                "WHEN TO USE: Any visual verification, before/after comparison, or as the starting point for tapping UI by coordinates.\n" +
-                "WORKFLOW: ios_screenshot -> pick element from pressables -> tap(x, y) or tap(testID=...) -> ios_screenshot to verify.\n" +
-                "PHYSICAL DEVICES: a USB-attached iPhone/iPad works too (pass its UDID or name from list_devices) — capture only, via pymobiledevice3. No pressables, no tap/swipe/input_text: iOS has no touch injection below 17.\n" +
-                "LIMITATIONS: Otherwise requires a booted iOS simulator (simctl). For system dialogs without RN, combine with tap(..., native=true).\n" +
-                "GOOD: ios_screenshot()\n" +
-                "BAD: ios_screenshot({ udid: \"guess\" }) with a made-up UDID — run list_devices first.\n" +
-                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y) — it returns the absolute file and line.\n",
+            description: "PURPOSE: Legacy iOS-only alias of screenshot, kept so older prompts keep working. Prefer screenshot({ device }): same capture and pressables summary, on every platform.\n",
             inputSchema: {
                 outputPath: z
                     .string()
@@ -682,14 +674,7 @@ export function registerScreenshotTools(server: McpServer): void {
         server,
         "android_screenshot",
         {
-            description: "Take a screenshot from an Android device/emulator. Returns the image plus a screen-state summary: active route (name + navigation stack), overlay-grouped tappable elements (pressables behind an open sheet/modal are excluded), component names as JSX tags, labels, testIDs, and frames — all in ready-to-tap pixel coordinates. Prefer tap(text=\"...\") when text is exact and unique; otherwise use tap(x, y) with coordinates from the list — this is the most reliable way to tap icons or visually-identified elements. Use component names for inspect_component/find_components.\n" +
-                "PURPOSE: Snapshot what the user sees on Android AND get tap-ready pressables + a structured component map in one call.\n" +
-                "WHEN TO USE: Any visual verification, before/after comparison, or as the starting point for tapping UI by coordinates on Android.\n" +
-                "WORKFLOW: android_screenshot -> pick element from pressables -> tap(x, y) or tap(testID=...) -> android_screenshot to verify.\n" +
-                "LIMITATIONS: Requires adb in PATH and a running device/emulator. For non-RN surfaces (system dialogs, permission prompts), combine with tap(..., native=true).\n" +
-                "GOOD: android_screenshot()\n" +
-                "BAD: android_screenshot({ deviceId: \"guess\" }) with a made-up serial — run list_devices first.\n" +
-                "SOURCE: to jump from a pixel to the code that renders it, call inspect_at_point(x, y).\n",
+            description: "PURPOSE: Legacy Android-only alias of screenshot, kept so older prompts keep working. Prefer screenshot({ device }): same capture and pressables summary, on every platform.\n",
             inputSchema: {
                 outputPath: z
                     .string()
@@ -715,11 +700,16 @@ export function registerScreenshotTools(server: McpServer): void {
         "screenshot",
         {
             description:
-                "Take a screenshot of whichever target `device` resolves to: an iOS simulator, a USB-attached physical iPhone/iPad (capture only, pass its UDID or name from list_devices), an Android device, or a chromium (Electron / Chrome) window.\n" +
-                "PURPOSE: One capture tool for every platform. On iOS and Android it is exactly ios_screenshot / android_screenshot, pressables summary included. On chromium it captures the page viewport (no window chrome) over CDP, with the same element summary as get_screen_state.\n" +
-                "COORDINATES: pixels in the returned image are the coordinates tap(x, y) takes, on every platform. Never scale them yourself.\n" +
+                "Take a screenshot of whichever target `device` resolves to: iOS simulator, USB-attached iPhone/iPad, Android device/emulator, or chromium (Electron / Chrome) window. Returns the image plus a screen-state summary: active route, overlay-grouped tappable elements (pressables behind an open sheet/modal excluded), component names as JSX tags, labels, testIDs and frames in ready-to-tap pixel coordinates. Use component names for inspect_component/find_components.\n" +
+                "PURPOSE: The capture tool for every platform. See what the user sees AND get tap-ready pressables in one call.\n" +
+                "WHEN TO USE: Visual verification, before/after comparison, or the starting point for tapping by coordinates.\n" +
+                "WORKFLOW: screenshot -> pick a pressable -> tap(text=...) if exact and unique, else tap(x, y) -> screenshot to verify.\n" +
+                "COORDINATES: image pixels are the coordinates tap(x, y) takes, on every platform. Never scale them yourself.\n" +
+                "PHYSICAL iOS: pass the UDID or name from list_devices. Capture only: no pressables, no tap/swipe/input_text.\n" +
+                "LIMITATIONS: a hidden or minimised chromium window cannot be captured: the call fails at once and says so.\n" +
                 "GOOD: screenshot(); screenshot({ device: \"FluentTalk\" })\n" +
-                "LIMITATIONS: a hidden or minimised chromium window does not paint and cannot be captured: the call fails at once and says so.",
+                "BAD: a made-up device name or UDID, run list_devices first.\n" +
+                "SOURCE: inspect_at_point(x, y) maps a pixel to the file and line that renders it.",
             inputSchema: {
                 device: z
                     .string()
@@ -757,7 +747,7 @@ export function registerScreenshotTools(server: McpServer): void {
         "get_images",
         {
             description:
-                "Access the shared image buffer containing screenshots from all tools (ios_screenshot, android_screenshot, tap verification). Returns metadata only by default — use id or groupId+frameIndex to retrieve actual image data. Tap burst verification stores frame groups here when burst=true is used.\n" +
+                "Access the shared image buffer containing screenshots from all tools (screenshot, tap verification). Returns metadata only by default — use id or groupId+frameIndex to retrieve actual image data. Tap burst verification stores frame groups here when burst=true is used.\n" +
                 "PURPOSE: Retrieve prior screenshots — especially tap burst frames — without re-taking them, for visual diffing or reviewing transient UI states.\n" +
                 "WHEN TO USE: After tap(burst=true) reports transientChangeDetected, or to compare before/after frames without another screenshot round-trip.\n" +
                 "WORKFLOW: tap(burst=true) -> note verification.burstGroupId -> get_images(groupId, frameIndex=N) to inspect individual frames.\n" +

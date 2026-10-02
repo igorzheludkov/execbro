@@ -2101,7 +2101,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         reason: err instanceof Error ? err.message : String(err)
                     }
                 ],
-                suggestion: `Tap timed out. Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) and retry with coordinates.`
+                suggestion: `Tap timed out. Call screenshot and retry with coordinates.`
             });
         }
         if (result.success) {
@@ -2152,7 +2152,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return formatTapFailure({
             query,
             attempted: [{ strategy: "native-coordinate", reason: result.reason }],
-            suggestion: `Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) to verify coordinates.`
+            suggestion: `Call screenshot to verify coordinates.`
         });
     }
 
@@ -2952,7 +2952,7 @@ function buildSuggestion(query: TapQuery, triedStrategies: string[], platform: s
     }
 
     suggestions.push(
-        `Take a screenshot (${platform === "ios" ? "ios_screenshot" : "android_screenshot"}) ` +
+        `Call screenshot ` +
             "to verify the element is visible, then use x/y coordinates"
     );
 

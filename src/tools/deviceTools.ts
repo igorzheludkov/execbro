@@ -289,7 +289,7 @@ export function registerDeviceTools(server: McpServer): void {
             description: "Open a URL in the iOS simulator (opens in default handler or Safari).\n" +
                 "PURPOSE: Drive an iOS simulator into a deep link or universal link entry point so you can exercise routing from an external entry.\n" +
                 "WHEN TO USE: Testing deep-link handlers, universal link routing, OAuth/SSO callback URLs, or any flow that enters the app via a URL.\n" +
-                "WORKFLOW: ios_boot_simulator -> ios_launch_app (or have the app running) -> ios_open_url -> ios_screenshot / get_screen_layout to verify the target screen rendered.\n" +
+                "WORKFLOW: ios_boot_simulator -> ios_launch_app (or have the app running) -> ios_open_url -> screenshot / get_screen_layout to verify the target screen rendered.\n" +
                 "GOOD: ios_open_url(url=\"myapp://product/42\") to land directly on a product screen.\n" +
                 "BAD: ios_open_url(url=\"...\") used as a substitute for in-app navigation when the user would normally tap — prefer `tap` for normal interaction flows.\n" +
                 platformUniqueBanner("testing iOS deep links or universal links"),
