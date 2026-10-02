@@ -40,7 +40,7 @@ import {
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
-import { hostAddressChangeHint } from "../core/hostAddress.js";
+import { noAppAttachedMessage } from "../core/connection.js";
 import { chromiumScanPorts, isChromiumListing, isChromiumTarget, isPortOpen, selectConnectTargets } from "../core/metro.js";
 
 export function registerConnectionTools(server: McpServer): void {
@@ -162,8 +162,7 @@ export function registerConnectionTools(server: McpServer): void {
             for (const port of openPorts) {
                 const devices = portDevices.get(port);
                 if (!devices) {
-                    const addressHint = hostAddressChangeHint(port);
-                    results.push(`Port ${port}: No debuggable devices found${addressHint ? `\n${addressHint}` : ""}`);
+                    results.push(await noAppAttachedMessage(port));
                     continue;
                 }
     
@@ -271,6 +270,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "PURPOSE: Health-check the existing CDP connection and transparently reconnect if it has gone stale, without rescanning all Metro ports.\n" +
                 "WHEN TO USE: After a suspected disconnect (silent gaps, reload_app, app crash) or before long-running flows where a mid-flow drop would be costly. Cheaper than scan_metro when you already connected once this session.\n" +
                 "WORKFLOW: scan_metro (once) -> ensure_connection(healthCheck=true) -> resume tool calls. Use forceRefresh=true if the first probe still looks dead.\n" +
+                "COLD LAUNCH: right after ios_launch_app / android_launch_app, or when scan_metro says Metro is running but no app has attached, use ensure_connection({ waitMs: 60000 }): it returns as soon as the app's JS runtime attaches. Waits only when nothing is connected yet.\n" +
                 "GOOD: ensure_connection({ healthCheck: true })\n" +
                 "BAD: ensure_connection() before scan_metro has ever run — call scan_metro first.\n",
             inputSchema: {
@@ -284,11 +284,19 @@ export function registerConnectionTools(server: McpServer): void {
                     .boolean()
                     .optional()
                     .default(false)
-                    .describe("Force close existing connection and reconnect (default: false)")
+                    .describe("Force close existing connection and reconnect (default: false)"),
+                waitMs: z
+                    .coerce
+                    .number()
+                    .min(0)
+                    .max(300000)
+                    .optional()
+                    .default(0)
+                    .describe("When Metro is up but no app has attached yet (cold launch, bundle still loading), keep polling up to this long and return as soon as one attaches. 60000 covers most cold bundles. Default: 0 (no wait).")
             }
         },
-        async ({ port, healthCheck, forceRefresh }) => {
-            const result = await ensureConnection({ port, healthCheck, forceRefresh });
+        async ({ port, healthCheck, forceRefresh, waitMs }) => {
+            const result = await ensureConnection({ port, healthCheck, forceRefresh, waitMs });
     
             if (!result.connected) {
                 return {
