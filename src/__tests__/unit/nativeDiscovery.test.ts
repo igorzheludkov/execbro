@@ -1,6 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
 import type { ConnectedApp } from "../../core/types.js";
-import { parseExecbroSockets, discoverAndConnectNativeApps } from "../../core/nativeDiscovery.js";
+import { parseExecbroSockets, discoverAndConnectNativeApps, connectNativePackage } from "../../core/nativeDiscovery.js";
 
 const PROC_NET_UNIX = [
     "Num       RefCount Protocol Flags    Type St Inode Path",
@@ -49,5 +49,26 @@ describe("discoverAndConnectNativeApps", () => {
             "Android native (emulator-5554): connected to Good (com.good) via execbro-sdk-android",
             "Android native (emulator-5554): found com.bad but could not connect: protocol 2"
         ]);
+    });
+});
+
+describe("connectNativePackage", () => {
+    it("reports nothing when no device serves the package, so connect_metro falls through to its port", async () => {
+        // adb forward succeeds even with no such socket; only the WebSocket open fails.
+        const lines = await connectNativePackage("github.com", {
+            adbAvailable: async () => true,
+            serials: async () => ["emulator-5554"],
+            connect: async () => { throw new Error("socket hang up"); }
+        });
+        expect(lines).toEqual([]);
+    });
+
+    it("reports the app it connected", async () => {
+        const lines = await connectNativePackage("com.good", {
+            adbAvailable: async () => true,
+            serials: async () => ["emulator-5554"],
+            connect: async () => ({ deviceInfo: { deviceName: "Good" } }) as ConnectedApp
+        });
+        expect(lines).toEqual(["Android native (emulator-5554): connected to Good (com.good) via execbro-sdk-android"]);
     });
 });
