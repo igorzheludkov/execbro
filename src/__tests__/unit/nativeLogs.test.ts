@@ -367,6 +367,41 @@ describe("resolveLogTargets", () => {
         });
     });
 
+    it("keeps the React Native app's identity when a native SDK app shares the device", async () => {
+        // A native (execbro-sdk-android) app always carries adbSerial, so the
+        // serial-keyed lookup would pick it over the RN app whose adbSerial is
+        // null, and logcat would be attributed to the wrong package.
+        const rn = {
+            deviceInfo: { deviceName: "sdk_gphone16k_arm64 - 16 - API 36", appId: "com.rndebuggertestapp" },
+            platform: "android",
+            adbSerial: null,
+        } as unknown as ConnectedApp;
+        const native = {
+            deviceInfo: { deviceName: "TouchDisabler", appId: "com.ihorzheludkov.touchdisabler" },
+            platform: "android",
+            adbSerial: "emulator-5554",
+            runtime: "native",
+            nativePackage: "com.ihorzheludkov.touchdisabler",
+        } as unknown as ConnectedApp;
+        connectedAppsMock.set("native:emulator-5554:com.ihorzheludkov.touchdisabler", native);
+        connectedAppsMock.set("rn-key", rn);
+
+        execAsyncMock.mockResolvedValue({ stdout: "sdk_gphone16k_arm64\n", stderr: "" });
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            android: {
+                available: true,
+                emulators: [{ name: "Pixel_9_-_16kb", serial: "emulator-5554", state: "running" }],
+                physical: [],
+            },
+        });
+
+        const targets = await resolveLogTargets();
+
+        expect(targets).toHaveLength(1);
+        expect(targets[0].identity?.appId).toBe("com.rndebuggertestapp");
+    });
+
     it("yields no live identity when the model does not match any connected app", async () => {
         const app = {
             deviceInfo: {
