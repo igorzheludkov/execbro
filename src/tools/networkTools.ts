@@ -447,6 +447,7 @@ export function registerNetworkTools(server: McpServer): void {
             if (args.action === "clear" && args.device === undefined) {
                 const counts = clearAllRules();
                 for (const app of connectedApps.values()) {
+                    if (app.runtime === "native") continue; // mock rules live in a JS runtime
                     const name = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
                     if (counts.has(name)) pushMockRules(app.ws, serializeRules(name));
                 }

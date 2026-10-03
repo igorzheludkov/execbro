@@ -239,6 +239,7 @@ export async function refreshMirror(device?: string): Promise<void> {
             return;
         }
         for (const app of connectedApps.values()) {
+            if (app.runtime === "native") continue; // no JS runtime to mirror
             await mirrorOnce(app.deviceInfo.deviceName || app.deviceInfo.title || "unknown");
         }
     } catch {

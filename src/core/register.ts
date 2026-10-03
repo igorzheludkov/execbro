@@ -9,7 +9,8 @@ import {
     isTelemetryEnabled,
 } from "./telemetry.js";
 import { getTargetPlatform } from "./state.js";
-import { resolveConnectedAppByDevice, peekTargetPlatform, dialogGateFor } from "./connection.js";
+import { resolveConnectedAppByDevice, peekTargetApp, dialogGateFor } from "./connection.js";
+import { nativeGate } from "./nativeCapabilities.js";
 import { chromiumGate } from "./chromiumCapabilities.js";
 import { recordToolCall } from "./screenStaleness.js";
 import { EnvironmentError, UserInputError, type FailureKind } from "./errors.js";
@@ -145,7 +146,11 @@ export function registerToolWithTelemetry(
             // Chromium capability gate. Inside the try so a refusal is recorded
             // in telemetry as a returned failure: that count is how we learn
             // which unsupported tool agents reach for first on desktop.
-            const result = chromiumGate(toolName, peekTargetPlatform(toolName, args?.device))
+            const target = peekTargetApp(toolName, args?.device);
+            // Native apps report their own platform value, so dashboards can split them from React Native on Android.
+            if (target?.runtime === "native") resolvedPlatform = "android-native";
+            const result = chromiumGate(toolName, target?.platform)
+                ?? nativeGate(toolName, target?.runtime)
                 ?? dialogGateFor(toolName, args?.device)
                 ?? await handler(args);
             // Secret redaction, applied once for every tool rather than at each
