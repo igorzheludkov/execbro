@@ -58,6 +58,12 @@ export interface ConnectedApp {
     // a dedicated matcher later. Used by deviceResolver to short-circuit
     // OS-level lookups.
     adbSerial?: string;
+    // Set for a native Android app reached through execbro-sdk-android over an
+    // adb-forwarded local socket instead of CDP. Absent means CDP (React Native
+    // or chromium). platform stays "android" so the adb paths recognise it.
+    runtime?: "native";
+    nativePackage?: string;
+    nativeCapabilities?: string[];
     lastScreenshot?: {
         originalWidth: number;
         originalHeight: number;
