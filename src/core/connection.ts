@@ -1607,8 +1607,8 @@ export function getConnectedApps(): Array<{
 // Get first connected app with an OPEN WebSocket (or null if none)
 export function getFirstConnectedApp(): ConnectedApp | null {
     // Find first app with OPEN WebSocket, cleaning up stale entries. A React
-    // Native app wins over a native or chromium one: map order shifts on every
-    // reconnect, and a bare call in a mixed session means the RN app.
+    // Native app wins, then chromium, then a native (SDK) app: map order shifts
+    // on every reconnect, and a bare call in a mixed session means the RN app.
     let chromium: ConnectedApp | null = null;
     let native: ConnectedApp | null = null;
     for (const [key, app] of connectedApps.entries()) {
@@ -1625,7 +1625,7 @@ export function getFirstConnectedApp(): ConnectedApp | null {
         console.error(`[execbro] Cleaning up stale connection in getFirstConnectedApp: ${key} (state: ${getWebSocketStateName(app.ws.readyState)})`);
         connectedApps.delete(key);
     }
-    return native ?? chromium;
+    return chromium ?? native;
 }
 
 /**
