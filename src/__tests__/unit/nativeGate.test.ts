@@ -71,11 +71,17 @@ describe("native target resolution", () => {
         expect(peekTargetApp("navigate", "com.example.app")).toBeUndefined();
     });
 
-    it("prefers a React Native app for a bare call, then a native one", () => {
+    it("prefers a React Native app for a bare call, then a native one when nothing else is open", () => {
         connectedApps.set("n", nativeApp("emulator-5554", "com.example.app", "Example"));
         connectedApps.set("rn", rnApp("rn", "Pixel 9"));
         expect(getFirstConnectedApp()?.runtime).toBeUndefined();
         connectedApps.delete("rn");
         expect(getFirstConnectedApp()?.runtime).toBe("native");
+    });
+
+    it("keeps a chromium app ahead of a native one for a bare call, as before native support", () => {
+        connectedApps.set("n", nativeApp("emulator-5554", "com.example.app", "Example"));
+        connectedApps.set("c", { ...rnApp("c", "FluentTalk"), platform: "chromium", port: 9222 } as ConnectedApp);
+        expect(getFirstConnectedApp()?.platform).toBe("chromium");
     });
 });
