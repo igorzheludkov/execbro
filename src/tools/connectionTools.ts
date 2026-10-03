@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { discoverAndConnectNativeApps, connectNativePackage } from "../core/nativeDiscovery.js";
 import { registerToolWithTelemetry } from "../core/register.js";
 import {
     metroProcessChanged,
@@ -52,6 +53,7 @@ export function registerConnectionTools(server: McpServer): void {
             description:
                 "Discover and connect to debuggable JS runtimes: React Native via Metro and Chromium/Electron via CDP. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.\n" +
                 "PURPOSE: Discover Metro on ports 8081-8090 and auto-connect every React Native debugger target it advertises. Also probes Chromium debug ports: 9222 is listed but not auto-connected (attach with connect_metro), ports in EXECBRO_CHROMIUM_PORTS auto-connect.\n" +
+                "NATIVE ANDROID: also finds native apps that include execbro-sdk-android on every online adb device and connects them (runtime native).\n" +
                 "WHEN TO USE: At the start of any session, or after the user restarts Metro / boots a new simulator.\n" +
                 "WORKFLOW: scan_metro -> get_apps -> get_logs / screenshot / tap.\n" +
                 "GOOD: scan_metro()\n" +
@@ -64,6 +66,7 @@ export function registerConnectionTools(server: McpServer): void {
         async ({ startPort, endPort }) => {
             // Clear reconnection suppression (in case user previously called disconnect_metro)
             clearReconnectionSuppression();
+            const nativeLines = await discoverAndConnectNativeApps();
             const openPorts = await scanMetroPorts(startPort, endPort);
 
             // Chromium ports: configured ones join the normal connect flow, while
@@ -78,11 +81,14 @@ export function registerConnectionTools(server: McpServer): void {
             }
 
             if (openPorts.length === 0 && listOnlyPorts.length === 0) {
+                if (nativeLines.length > 0) {
+                    return { content: [{ type: "text", text: `Native Android apps:\n${nativeLines.join("\n")}\n\nNo Metro servers or Chromium debug ports found.` }] };
+                }
                 return {
                     content: [
                         {
                             type: "text",
-                            text: "No Metro servers or Chromium debug ports found. For React Native, make sure Metro is running (npm start or expo start). For Electron/Chrome, start it with --remote-debugging-port=9222."
+                            text: "No Metro servers, Chromium debug ports or native Android apps with execbro-sdk-android found. For React Native, make sure Metro is running (npm start or expo start). For Electron/Chrome, start it with --remote-debugging-port=9222. For a native Android app, add execbro-sdk-android and launch the debug build."
                         }
                     ]
                 };
@@ -253,7 +259,7 @@ export function registerConnectionTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: `Metro scan results:\n${results.join("\n")}`
+                        text: `Metro scan results:\n${results.join("\n")}${nativeLines.length > 0 ? `\n\nNative Android apps:\n${nativeLines.join("\n")}` : ""}`
                     }
                 ]
             };
@@ -296,9 +302,13 @@ export function registerConnectionTools(server: McpServer): void {
             }
         },
         async ({ port, healthCheck, forceRefresh, waitMs }) => {
+            const nativeLines = await discoverAndConnectNativeApps();
             const result = await ensureConnection({ port, healthCheck, forceRefresh, waitMs });
     
             if (!result.connected) {
+                if (nativeLines.length > 0) {
+                    return { content: [{ type: "text", text: `=== Connection Ensured ===\n\n${nativeLines.join("\n")}\n\n(no React Native app connected)` }] };
+                }
                 return {
                     content: [
                         {
@@ -354,6 +364,8 @@ export function registerConnectionTools(server: McpServer): void {
                     lines.push("Consider using forceRefresh=true or reload_app to get a fresh context.");
                 }
             }
+
+            if (nativeLines.length > 0) lines.push("", ...nativeLines);
     
             return {
                 content: [{ type: "text", text: lines.join("\n") }]
@@ -417,7 +429,7 @@ export function registerConnectionTools(server: McpServer): void {
                 const statusSuffix = isConnected
                     ? ""
                     : ` [${getWebSocketStateName(app.ws.readyState).toLowerCase()} — reconnecting]`;
-                const lines = [`  ${i + 1}. ${name} — ${appId} (${app.platform}, port ${app.port})${statusSuffix}`];
+                const lines = [`  ${i + 1}. ${name} — ${appId} (${app.runtime === "native" ? "android native, execbro-sdk-android" : app.platform}, port ${app.port})${statusSuffix}`];
                 if (app.simulatorUdid) {
                     lines.push(`     Simulator UDID: ${app.simulatorUdid}`);
                 }
@@ -623,6 +635,7 @@ export function registerConnectionTools(server: McpServer): void {
                 "Connect to a debug port directly: a Metro server outside 8081-8090, or a Chromium/Electron target (e.g. port 9222, which scan_metro lists but does not auto-connect).\n" +
                 "PURPOSE: Establish a CDP WebSocket connection to the targets on one known port.\n" +
                 "WHEN TO USE: Metro is on a port outside 8081-8090, or you want to attach a Chromium target scan_metro listed. For Metro in that range, scan_metro is strictly better.\n" +
+                "NATIVE ANDROID: connect_metro({ device: \"com.example.app\" }) connects a native app with execbro-sdk-android directly by package, for devices where scan_metro cannot list sockets.\n" +
                 "GOOD: connect_metro({ port: 9222, device: \"FluentTalk\" })\n" +
                 "SEE ALSO: scan_metro for auto-discovery; get_apps afterwards to confirm the device attached.",
             inputSchema: {
@@ -631,6 +644,11 @@ export function registerConnectionTools(server: McpServer): void {
             }
         },
         async ({ port, device }) => {
+            // A device string shaped like a package name targets a native app by its socket name.
+            if (device && /^[a-zA-Z][\w]*(\.[a-zA-Z][\w]*)+$/.test(device)) {
+                const nativeLines = await connectNativePackage(device);
+                if (nativeLines.length > 0) return { content: [{ type: "text", text: nativeLines.join("\n") }] };
+            }
             try {
                 const devices = await fetchDevices(port);
                 const selection = devices.length > 0 ? selectConnectTargets(devices, device) : { targets: devices };
