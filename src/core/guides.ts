@@ -637,6 +637,43 @@ Suggested prompt the user can paste to trigger this:
 - The user can review and edit the issue body before submitting
 - No GitHub account setup or CLI tools needed — just a browser`
     },
+    {
+        id: "native",
+        title: "Native Android Apps",
+        summary: "State, commands and navigation in a native (Kotlin) Android app via execbro-sdk-android",
+        content: `# Native Android Apps
+
+A native Android app has no JavaScript runtime, so execute_in_app cannot reach it. Instead the app adds execbro-sdk-android to its debug build and registers what the agent may read and do.
+
+## App setup (the developer does this once)
+\`\`\`kotlin
+debugImplementation("com.execbro:execbro-sdk-android:0.1.0")
+releaseImplementation("com.execbro:execbro-sdk-android-noop:0.1.0")
+
+// Application.onCreate
+ExecBro.init(this) {
+    state("lock") { lockState.isLocked }
+    command("lock", "Engage the lock") { args -> engage(); "locked" }
+}
+
+// Where the NavController is created
+DisposableEffect(nav) { val h = ExecBro.navigation(nav); onDispose { h.close() } }
+\`\`\`
+
+## Workflow
+1. scan_metro: finds the app on every online adb device and connects (get_apps shows "android native").
+2. list_debug_globals: the registered state and commands.
+3. inspect_global({ objectName: "lock" }): read one state value.
+4. run_app_command({ name: "lock" }): run a command, then inspect_global again to confirm.
+5. navigate({ routeTable: true }) to list routes, then navigate({ to: "settings" }), navigate({ action: "back" }).
+6. android_screenshot to see the result.
+
+## Limits
+- Supported tools on a native app: list_debug_globals, inspect_global, run_app_command, navigate, android_screenshot, android_key_event, android_long_press, android_launch_app, android_list_packages. Others refuse with a message.
+- Navigation: Jetpack Navigation only. to is a route pattern; params fill its placeholders.
+- If scan_metro finds nothing on a device, connect directly by package: connect_metro({ device: "com.example.app" }).
+- After the app is killed or reinstalled, relaunch it and call ensure_connection.`
+    },
 ];
 
 /**
@@ -678,6 +715,7 @@ export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, screenshot, tap, get_screen_state, get_screen_layout.",
     "Platform-specific ios_* / android_* tools (ios_button, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible. input_text covers native-only text entry too, via native:true.",
     "Chromium/Electron targets (platform chromium) support logs, network capture and mocking, execute_in_app, globals, redux, component inspection, screen reading (get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap, input_text, swipe (wheel scroll, four-coordinate drag), press_key and handle_dialog (JavaScript alert / confirm / prompt); other tools refuse them with a message saying so. electron_launch_app starts an Electron project with the CDP port open.",
+    "Native Android apps with execbro-sdk-android (runtime native) support list_debug_globals, inspect_global (registered state), run_app_command (registered commands), navigate (Jetpack Navigation) and the android_* tools; other tools refuse them with a message saying so.",
     "",
     "Call get_usage_guide(topic=...) for end-to-end workflows. Available topics:",
     "  setup       — session setup (scan_metro, connect_metro, ensure_connection)",
@@ -688,7 +726,8 @@ export const DECISION_TREE: string = [
     "  network     — network request inspection (get_network_requests, search_network)",
     "  state       — app state & JS execution (execute_in_app, list_debug_globals)",
     "  bundle      — bundle / Metro error checks (get_bundle_status, get_bundle_errors)",
-    "  feedback    — share feedback, feature requests, or bug reports (send_feedback)"
+    "  feedback    — share feedback, feature requests, or bug reports (send_feedback)",
+    "  native      — native Android apps via execbro-sdk-android (inspect_global, run_app_command, navigate)"
 ].join("\n");
 
 export function getGuideOverview(): string {

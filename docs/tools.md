@@ -47,6 +47,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `execute_in_app`     | Run a JS expression in the app. `state`/`store`, `apollo`/`cache()`/`deref()`, `router`, `summary()` and `require()` are pre-resolved in scope; oversized results are bounded structurally. `timeoutMs` sizes the promise poll ladder; a promise that outlives it returns a handle to collect with `collect`/`waitMs` |
 | `app_request`        | Issue an HTTP request from inside the app as the logged-in user. `auth="auto"` resolves the bearer token in-app, so no credential enters the transcript |
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.)                         |
+| `run_app_command` | Run a command a native Android app registered with execbro-sdk-android; with no name, list them |
 | `inspect_global`     | Inspect a global object to see its properties and callable methods                          |
 | `reload_app`         | Reload the app (auto-connects if needed, and reconnects afterwards - the reply says so when the fresh runtime is still booting). Use sparingly - Fast Refresh handles most changes |
 
