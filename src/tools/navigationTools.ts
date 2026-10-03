@@ -2,6 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
 import { performNavigation } from "../core/navigate.js";
+import { nativeAppFor } from "../core/connection.js";
+import { nativeNavigate } from "../core/nativeApp.js";
 
 export function registerNavigationTools(server: McpServer): void {
     registerToolWithTelemetry(
@@ -16,6 +18,7 @@ export function registerNavigationTools(server: McpServer): void {
                 "WORKFLOW: navigate({ to: \"/settings\" }) -> check changed -> get_screen_state.\n" +
                 "LIMITATIONS: push/replace are unavailable on a React Navigation root ref (stack-scoped). changed=false means it settled without moving; indeterminate=true means no settled reading.\n" +
                 "DISCOVERY: navigate({ routeTable: true }) with no destination just LISTS the registered route names — call it first when you do not know them.\n" +
+                "NATIVE ANDROID: on an app with execbro-sdk-android, drives its Jetpack Navigation NavController. to is a route pattern (\"settings\", \"detail/{id}\") and params fill its placeholders.\n" +
                 "GOOD: navigate({ to: \"TarotNav\" }); navigate({ action: \"back\" }); navigate({ routeTable: true })\n" +
                 "BAD: navigate({ to: \"/TarotNav\" }) on React Navigation — that is a path, not a route name.",
             inputSchema: {
@@ -42,13 +45,9 @@ export function registerNavigationTools(server: McpServer): void {
             }
         },
         async ({ to, params, action, routeTable, device }) => {
-            const result = await performNavigation({
-                action: action ?? "navigate",
-                to,
-                params,
-                device,
-                includeRouteTable: routeTable
-            });
+            const options = { action: action ?? "navigate", to, params, device, includeRouteTable: routeTable } as const;
+            const native = nativeAppFor("navigate", device);
+            const result = native ? await nativeNavigate(native, options) : await performNavigation(options);
 
             if (!result.success) {
                 return {
