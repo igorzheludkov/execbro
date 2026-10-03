@@ -302,8 +302,9 @@ export function registerConnectionTools(server: McpServer): void {
             }
         },
         async ({ port, healthCheck, forceRefresh, waitMs }) => {
-            const nativeLines = await discoverAndConnectNativeApps();
             const result = await ensureConnection({ port, healthCheck, forceRefresh, waitMs });
+            // After ensureConnection, so a forceRefresh that closed every app is followed by a fresh native connect.
+            const nativeLines = await discoverAndConnectNativeApps();
     
             if (!result.connected) {
                 if (nativeLines.length > 0) {
