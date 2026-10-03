@@ -2213,9 +2213,11 @@ export async function ensureConnection(options: {
         }
     }
 
-    let openApps: ConnectedApp[] = getConnectedApps()
-        .filter(a => a.isConnected)
-        .map(a => a.app);
+    // Native (execbro-sdk-android) apps speak no CDP: a CDP health check always
+    // fails on them and would close a healthy socket. Their connection is
+    // managed by nativeDiscovery, so this function only looks at CDP apps.
+    const cdpApps = () => getConnectedApps().filter(a => a.isConnected && a.app.runtime !== "native").map(a => a.app);
+    let openApps: ConnectedApp[] = cdpApps();
 
     // Nothing connected — establish a single-device connection from scratch.
     if (openApps.length === 0) {
@@ -2272,7 +2274,7 @@ export async function ensureConnection(options: {
             // Race window: settle briefly and retry getting the open app list.
             for (let i = 0; i < 5 && openApps.length === 0; i++) {
                 if (i > 0) await new Promise(resolve => setTimeout(resolve, 100));
-                openApps = getConnectedApps().filter(a => a.isConnected).map(a => a.app);
+                openApps = cdpApps();
             }
         } catch (error) {
             let errorMessage: string;
