@@ -72,9 +72,28 @@ export async function discoverAndConnectNativeApps(overrides: Partial<DiscoveryD
 }
 
 /** connect_metro({ device: "<package>" }) fallback for devices whose /proc/net/unix is unreadable. */
-export async function connectNativePackage(pkg: string): Promise<string[]> {
-    if (!(await isAdbAvailable())) return [];
+export async function connectNativePackage(
+    pkg: string,
+    overrides: Partial<DiscoveryDeps> & { serials?: () => Promise<string[]> } = {}
+): Promise<string[]> {
+    const deps = { ...defaultDeps, ...overrides };
+    if (!(await deps.adbAvailable())) return [];
+    const serials = await (overrides.serials ?? onlineSerials)();
+    const lines: string[] = [];
+    for (const serial of serials) {
+        try {
+            const app = await deps.connect(serial, pkg);
+            lines.push(`Android native (${serial}): connected to ${app.deviceInfo.deviceName} (${pkg}) via execbro-sdk-android`);
+        } catch {
+            // No SDK socket for this package on this device. Report only successes, so a
+            // device string that merely looks like a package (a page title such as
+            // "github.com") falls through to connect_metro's port path.
+        }
+    }
+    return lines;
+}
+
+async function onlineSerials(): Promise<string[]> {
     const list = await listAndroidDevices();
-    const online = (list.devices ?? []).filter((d) => d.status === "device").map((d) => d.id);
-    return discoverAndConnectNativeApps({ discover: async () => online.map((serial) => ({ serial, pkg })) });
+    return (list.devices ?? []).filter((d) => d.status === "device").map((d) => d.id);
 }
