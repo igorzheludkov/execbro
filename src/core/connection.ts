@@ -1607,11 +1607,16 @@ export function getConnectedApps(): Array<{
 // Get first connected app with an OPEN WebSocket (or null if none)
 export function getFirstConnectedApp(): ConnectedApp | null {
     // Find first app with OPEN WebSocket, cleaning up stale entries. A React
-    // Native app wins over a chromium one: map order shifts on every reconnect,
-    // and a bare call in a simulator + Electron session means the RN app.
+    // Native app wins over a native or chromium one: map order shifts on every
+    // reconnect, and a bare call in a mixed session means the RN app.
     let chromium: ConnectedApp | null = null;
+    let native: ConnectedApp | null = null;
     for (const [key, app] of connectedApps.entries()) {
         if (app.ws.readyState === WebSocket.OPEN) {
+            if (app.runtime === "native") {
+                native ??= app;
+                continue;
+            }
             if (app.platform !== "chromium") return app;
             chromium ??= app;
             continue;
@@ -1620,7 +1625,7 @@ export function getFirstConnectedApp(): ConnectedApp | null {
         console.error(`[execbro] Cleaning up stale connection in getFirstConnectedApp: ${key} (state: ${getWebSocketStateName(app.ws.readyState)})`);
         connectedApps.delete(key);
     }
-    return chromium;
+    return native ?? chromium;
 }
 
 /**
@@ -1841,7 +1846,8 @@ export function resolveConnectedAppByDevice(device?: string): DeviceResolution {
         const haystacks = [
             normalizeDeviceId(deviceLabel(app)),
             normalizeDeviceId(app.simulatorUdid),
-            normalizeDeviceId(app.adbSerial)
+            normalizeDeviceId(app.adbSerial),
+            normalizeDeviceId(app.nativePackage)
         ].filter((s) => s.length > 0);
         if (haystacks.some((h) => h.includes(normDevice))) {
             matches.push(app);
@@ -1876,14 +1882,28 @@ export function resolveConnectedAppByDevice(device?: string): DeviceResolution {
  * downstream failure.
  */
 export function peekTargetPlatform(toolName: string, device: unknown): ConnectedApp["platform"] | undefined {
+    return peekTargetApp(toolName, device)?.platform;
+}
+
+/**
+ * The connected app a tool call targets, read from the in-memory registry with
+ * no I/O, or undefined when that cannot be decided (the gates fail open on it).
+ */
+export function peekTargetApp(toolName: string, device: unknown): ConnectedApp | undefined {
     if (typeof device === "string" && device.length > 0) {
         const resolved = resolveConnectedAppByDevice(device);
-        return resolved.kind === "ok" ? resolved.app.platform : undefined;
+        return resolved.kind === "ok" ? resolved.app : undefined;
     }
     // A bare ios_/android_ call targets the OS device, not a connected app.
     if (toolName.startsWith("ios_") || toolName.startsWith("android_")) return undefined;
     // The same app the handler's own default resolves to, so the two cannot disagree.
-    return getFirstConnectedApp()?.platform;
+    return getFirstConnectedApp() ?? undefined;
+}
+
+/** The native (execbro-sdk-android) app a tool call targets, or null when it targets anything else. */
+export function nativeAppFor(toolName: string, device?: string): ConnectedApp | null {
+    const app = peekTargetApp(toolName, device);
+    return app?.runtime === "native" ? app : null;
 }
 
 /**

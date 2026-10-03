@@ -249,7 +249,8 @@ export function registerBundleTools(server: McpServer): void {
         },
         async () => {
             // Before any app attaches (the cold-launch case) there is no app port to read, so fall back to a scan.
-            const apps = Array.from(connectedApps.values());
+            // A native app's port is an adb forward, not Metro.
+            const apps = Array.from(connectedApps.values()).filter((a) => a.runtime !== "native");
             const metroPort = apps.length > 0 ? apps[0].port : (await checkMetroState(0)).metroPorts[0];
     
             const { formatted } = await getBundleStatusWithErrors(bundleErrorBuffer, metroPort);

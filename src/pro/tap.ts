@@ -2180,7 +2180,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // entry whose identifier matches the resolved target; fall back to a
     // device-name match (handy when registry entries lack identifiers yet);
     // last resort is the first connected app on the matching platform.
-    const allApps = Array.from(connectedApps.values());
+    // Native (execbro-sdk-android) apps have no fiber tree or Metro: never a tap strategy target.
+    const allApps = Array.from(connectedApps.values()).filter((a) => a.runtime !== "native");
     let hasMetro = allApps.length > 0;
     let app: ConnectedApp | undefined;
     if (resolved.target.iosUdid) {
@@ -2221,7 +2222,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                 Math.min(remainingMs(), 3000),
                 "auto-connect"
             );
-            const apps = Array.from(connectedApps.values());
+            const apps = Array.from(connectedApps.values()).filter((a) => a.runtime !== "native");
             hasMetro = apps.length > 0;
             app = apps.find((a) => a.platform === platform) ?? apps[0];
             if (platform === "ios" && !targetUdid) {
