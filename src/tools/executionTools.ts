@@ -8,6 +8,8 @@ import { projectJsonText, formatProjectionNote } from "../core/jsonProjection.js
 import { buildCollectExpression, dropHandle } from "../core/promiseHandles.js";
 import { buildPollDelays } from "../core/jsExecute.js";
 import { DEVICE_ARG_DESC } from "./_deviceArg.js";
+import { nativeAppFor } from "../core/connection.js";
+import { nativeListDebugGlobals, nativeInspectGlobal, nativeRunCommand } from "../core/nativeApp.js";
 
 export function registerExecutionTools(server: McpServer): void {
     // Tool: Execute JavaScript in app
@@ -243,12 +245,20 @@ export function registerExecutionTools(server: McpServer): void {
                 "SDK INTEGRATION: When init({ stores, navigation, custom }) from execbro-sdk (formerly react-native-ai-devtools-sdk) was called, the response includes an sdk.paths array of dotted paths (e.g. __RN_AI_DEVTOOLS__.stores.redux). Pass them to inspect_global or execute_in_app.\n" +
                 "RN NAMESPACE: The rn field reports globalThis.__rn__ — a curated set of seven RN modules (I18nManager, PixelRatio, Platform, StyleSheet, AppRegistry, NativeModules, Dimensions) populated by SDK exposeRnGlobals() or the executor's fallback bootstrap. Use paths like __rn__.Platform.OS. rn=null → bootstrap not yet run; keys=[] → ran but no match.\n" +
                 "OUTPUT: { sdk: {...}|null, rn: {keys, hint}|null, categories: {...} }\n" +
-                "LIMITATIONS: Only sees variables explicitly assigned to a global. Module-scoped state is invisible — expose it first or use the SDK.\n",
+                "LIMITATIONS: Only sees variables explicitly assigned to a global. Module-scoped state is invisible — expose it first or use the SDK.\n" +
+                "NATIVE ANDROID: on an app with execbro-sdk-android, lists the state and commands the app registered.\n",
             inputSchema: {
                 device: z.string().optional().describe(DEVICE_ARG_DESC)
             }
         },
         async ({ device }) => {
+            const native = nativeAppFor("list_debug_globals", device);
+            if (native) {
+                const r = await nativeListDebugGlobals(native);
+                return r.success
+                    ? { content: [{ type: "text", text: r.result ?? "" }] }
+                    : { content: [{ type: "text", text: `Error: ${r.error}` }], isError: true };
+            }
             const result = await listDebugGlobals(device);
     
             if (!result.success) {
@@ -288,7 +298,8 @@ export function registerExecutionTools(server: McpServer): void {
                 "LIMITATIONS: Only reads one level deep; nested objects show as a 100-char JSON preview — re-inspect the child path. Returns an error object (not a throw) when the path doesn't resolve.\n" +
                 "WIDE OBJECTS: a global with hundreds of keys is bounded structurally rather than dumped; use query to pull one entry in full.\n" +
                 "GOOD: inspect_global({ objectName: \"__APOLLO_CLIENT__\" }) | inspect_global({ objectName: \"__RN_AI_DEVTOOLS__.stores.redux\", query: \"cache\" })\n" +
-                "BAD: inspect_global({ objectName: \"store.getState()\" }) — call expressions aren't supported; use execute_in_app.\n",
+                "BAD: inspect_global({ objectName: \"store.getState()\" }) — call expressions aren't supported; use execute_in_app.\n" +
+                "NATIVE: pass a registered state name.\n",
             inputSchema: {
                 objectName: z
                     .string()
@@ -308,7 +319,8 @@ export function registerExecutionTools(server: McpServer): void {
             }
         },
         async ({ objectName, query, maxResultLength, device }) => {
-            const result = await inspectGlobal(objectName, device);
+            const native = nativeAppFor("inspect_global", device);
+            const result = native ? await nativeInspectGlobal(native, objectName) : await inspectGlobal(objectName, device);
     
             if (!result.success) {
                 let errorText = `Error: ${result.error}`;
@@ -353,6 +365,40 @@ export function registerExecutionTools(server: McpServer): void {
                     }
                 ]
             };
+        }
+    );
+
+    // Tool: Run a command a native Android app registered with execbro-sdk-android
+    registerToolWithTelemetry(
+        server,
+        "run_app_command",
+        {
+            description:
+                "Run a named command that a native Android app registered with execbro-sdk-android (ExecBro.init { command(\"name\") { ... } }).\n" +
+                "PURPOSE: Drive app behaviour (lock, log out, reset state, seed data) through actions the app's developer exposed, without tapping through the UI. The native counterpart of calling a store action with execute_in_app.\n" +
+                "WORKFLOW: list_debug_globals (lists commands) -> run_app_command({ name }) -> inspect_global to confirm the state changed. Call with no name to list the commands.\n" +
+                "LIMITATIONS: Native Android apps with execbro-sdk-android only. Commands run on the app's main thread with a 5 s limit.\n" +
+                "GOOD: run_app_command({ name: \"lock\" }); run_app_command({ name: \"seed\", args: { users: 3 } })\n" +
+                "BAD: run_app_command on a React Native app: use execute_in_app there.",
+            inputSchema: {
+                name: z.string().optional().describe("Command name. Omit to list the registered commands."),
+                args: z.record(z.unknown()).optional().describe("Arguments passed to the command as a JSON object."),
+                device: z.string().optional().describe(DEVICE_ARG_DESC)
+            }
+        },
+        async ({ name, args, device }) => {
+            const native = nativeAppFor("run_app_command", device);
+            if (!native) {
+                return {
+                    content: [{ type: "text", text: "run_app_command is available in native Android apps with execbro-sdk-android. For a React Native app, call the action with execute_in_app (for example a store dispatch)." }],
+                    isError: true,
+                    _failureKind: "platform_mismatch" as const
+                };
+            }
+            const r = await nativeRunCommand(native, name, args);
+            return r.success
+                ? { content: [{ type: "text", text: r.result ?? "" }] }
+                : { content: [{ type: "text", text: `Error: ${r.error}` }], isError: true };
         }
     );
 

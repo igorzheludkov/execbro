@@ -47,7 +47,7 @@ describe("nativeGate", () => {
     });
 
     it("allowlists only tools that actually exist", () => {
-        const devOnly = new Set(["reset_telemetry", "run_app_command"]);
+        const devOnly = new Set(["reset_telemetry"]);
         for (const name of NATIVE_TOOLS) if (!devOnly.has(name)) expect(toolRegistry.has(name)).toBe(true);
     });
 });
