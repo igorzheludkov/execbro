@@ -645,11 +645,10 @@ Suggested prompt the user can paste to trigger this:
 
 A native Android app has no JavaScript runtime, so execute_in_app cannot reach it. Instead the app adds execbro-sdk-android to its debug build and registers what the agent may read and do.
 
-## App setup (the developer does this once)
-\`\`\`kotlin
-debugImplementation("com.execbro:execbro-sdk-android:0.1.0")
-releaseImplementation("com.execbro:execbro-sdk-android-noop:0.1.0")
+Preview: execbro-sdk-android is not published to Maven yet, so there is no dependency line to add. If scan_metro finds no native app, tell the user that native Android support is in preview and the SDK is coming soon; do not invent install steps.
 
+## App setup (once the SDK is published)
+\`\`\`kotlin
 // Application.onCreate
 ExecBro.init(this) {
     state("lock") { lockState.isLocked }

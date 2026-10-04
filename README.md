@@ -78,6 +78,11 @@ Linking is only for the dashboard: it attaches your installs to your account so 
 
   Keep the `!app.isPackaged` guard: an open debugging port on a packaged build lets anything that can reach it run code in your renderer
 
+### Native Android (preview)
+
+- **Kotlin apps without a JavaScript runtime** - A native app that includes `execbro-sdk-android` in its debug build registers named state and commands. `scan_metro` finds it over adb, `list_debug_globals` and `inspect_global` read its state, `run_app_command` runs its commands, and `navigate` drives Jetpack Navigation
+- **Coming soon** - The SDK is not published to Maven yet. Execbro already supports it; install instructions will follow with the SDK release
+
 ### Under the Hood
 
 - **Auto-Discovery** - Scans Metro on ports 8081-8090 automatically, and lists Chromium/Electron targets on 9222 (plus any ports in `EXECBRO_CHROMIUM_PORTS`)

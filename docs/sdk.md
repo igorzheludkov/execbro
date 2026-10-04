@@ -42,14 +42,13 @@ if (__DEV__) {
 
 `init()` alone (no arguments) already unlocks full log and network capture. Wiring `stores`, `navigation`, or `custom` references is what hands the agent direct control — it can read and act through any object you pass in, not just your state and navigation but AsyncStorage, MMKV, or any other reference you choose to expose. See the [SDK README](https://github.com/igorzheludkov/execbro-sdk#readme) for every config option.
 
-## Native Android apps
+## Native Android apps (preview)
 
 Native (Kotlin) Android apps use a separate library, `execbro-sdk-android`. It plays the same role as `init({ stores, custom })` here, but since a native app has no JavaScript runtime, it registers named state readers and named commands instead of object references.
 
-```kotlin
-debugImplementation("com.execbro:execbro-sdk-android:0.1.0")
-releaseImplementation("com.execbro:execbro-sdk-android-noop:0.1.0")
+**Coming soon:** the library is not published to Maven yet. Execbro already supports it, and install instructions will appear here when it is released. The API looks like this:
 
+```kotlin
 ExecBro.init(this) {
     state("lock") { lockState.isLocked }
     command("lock", "Engage the lock") { args -> engage(); "locked" }
