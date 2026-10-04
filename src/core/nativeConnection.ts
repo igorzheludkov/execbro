@@ -136,6 +136,9 @@ export async function openNativeSocket(
             nativeCapabilities: hello.capabilities
         };
         connectedApps.set(key, app);
+        // The open-time error listener is gone after its first error; an error with no
+        // listener throws and would take the whole server down. The close handler cleans up.
+        ws.on("error", () => {});
         ws.on("close", () => {
             if (connectedApps.get(key)?.ws === ws) connectedApps.delete(key);
             onClosed();
@@ -151,10 +154,26 @@ async function removeForward(serial: string, port: number): Promise<void> {
     await execFileAsync("adb", ["-s", serial, "forward", "--remove", `tcp:${port}`], { timeout: 5000 }).catch(() => {});
 }
 
-/** Forwards execbro_<pkg> on the device to a free local port and connects to it. */
-export async function connectNativeApp(serial: string, pkg: string): Promise<ConnectedApp> {
-    const existing = connectedApps.get(nativeAppKey(serial, pkg));
-    if (existing && existing.ws.readyState === WebSocket.OPEN) return existing;
+const connecting = new Map<string, Promise<ConnectedApp>>();
+
+/**
+ * Forwards execbro_<pkg> on the device to a free local port and connects to it.
+ * Concurrent calls for one app (scan_metro and ensure_connection in parallel)
+ * share a single attempt instead of opening a second forward and socket.
+ */
+export function connectNativeApp(serial: string, pkg: string): Promise<ConnectedApp> {
+    const key = nativeAppKey(serial, pkg);
+    const existing = connectedApps.get(key);
+    if (existing && existing.ws.readyState === WebSocket.OPEN) return Promise.resolve(existing);
+    let attempt = connecting.get(key);
+    if (!attempt) {
+        attempt = forwardAndOpen(serial, pkg).finally(() => connecting.delete(key));
+        connecting.set(key, attempt);
+    }
+    return attempt;
+}
+
+async function forwardAndOpen(serial: string, pkg: string): Promise<ConnectedApp> {
     const { stdout } = await execFileAsync("adb", ["-s", serial, "forward", "tcp:0", `localabstract:execbro_${pkg}`], { timeout: 5000 });
     const port = Number.parseInt(stdout.trim(), 10);
     if (!Number.isInteger(port) || port <= 0) throw new Error(`adb forward returned no port: "${stdout.trim()}"`);
