@@ -52,6 +52,14 @@ describe("openNativeSocket", () => {
         expect(connectedApps.size).toBe(0);
         expect(closed).toBe(true);
     });
+    it("survives socket errors after the connection is open", async () => {
+        fake = await startFakeSdk(handler);
+        const app = await openNativeSocket(fake.url, { ...target, port: fake.port });
+        expect(() => {
+            app.ws.emit("error", new Error("ECONNRESET"));
+            app.ws.emit("error", new Error("ECONNRESET"));
+        }).not.toThrow();
+    });
 });
 
 describe("nativeRequest", () => {
