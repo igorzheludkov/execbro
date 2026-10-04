@@ -51,7 +51,7 @@ export function registerConnectionTools(server: McpServer): void {
         "scan_metro",
         {
             description:
-                "Discover and connect to debuggable JS runtimes: React Native via Metro and Chromium/Electron via CDP. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.\n" +
+                "Discover and connect to debuggable apps: React Native via Metro, Chromium/Electron via CDP, and native Android apps that include execbro-sdk-android. This is typically the FIRST tool to call when starting a debugging session - it establishes the connection needed for other tools like get_logs, list_debug_globals, execute_in_app, and reload_app.\n" +
                 "PURPOSE: Discover Metro on ports 8081-8090 and auto-connect every React Native debugger target it advertises. Also probes Chromium debug ports: 9222 is listed but not auto-connected (attach with connect_metro), ports in EXECBRO_CHROMIUM_PORTS auto-connect.\n" +
                 "NATIVE ANDROID: also finds native apps that include execbro-sdk-android on every online adb device and connects them (runtime native).\n" +
                 "WHEN TO USE: At the start of any session, or after the user restarts Metro / boots a new simulator.\n" +
@@ -633,7 +633,7 @@ export function registerConnectionTools(server: McpServer): void {
         "connect_metro",
         {
             description:
-                "Connect to a debug port directly: a Metro server outside 8081-8090, or a Chromium/Electron target (e.g. port 9222, which scan_metro lists but does not auto-connect).\n" +
+                "Connect to a debug port directly: a Metro server outside 8081-8090, or a Chromium/Electron target (e.g. port 9222, which scan_metro lists but does not auto-connect). Also connects a native Android app with execbro-sdk-android by package name.\n" +
                 "PURPOSE: Establish a CDP WebSocket connection to the targets on one known port.\n" +
                 "WHEN TO USE: Metro is on a port outside 8081-8090, or you want to attach a Chromium target scan_metro listed. For Metro in that range, scan_metro is strictly better.\n" +
                 "NATIVE ANDROID: connect_metro({ device: \"com.example.app\" }) connects a native app with execbro-sdk-android directly by package, for devices where scan_metro cannot list sockets.\n" +
