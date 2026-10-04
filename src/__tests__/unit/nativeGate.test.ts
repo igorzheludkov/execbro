@@ -5,7 +5,7 @@ import WebSocket from "ws";
 import type { ConnectedApp } from "../../core/types.js";
 
 const { connectedApps } = await import("../../core/state.js");
-const { peekTargetApp, nativeAppFor, getFirstConnectedApp } = await import("../../core/connection.js");
+const { peekTargetApp, nativeAppFor, getFirstConnectedApp, getConnectedAppByAndroidDeviceId } = await import("../../core/connection.js");
 const { NATIVE_TOOLS, nativeGate } = await import("../../core/nativeCapabilities.js");
 const { toolRegistry } = await import("../../index.js");
 
@@ -29,7 +29,7 @@ function nativeApp(serial: string, pkg: string, label: string): ConnectedApp {
 
 describe("nativeGate", () => {
     it("lets allowlisted tools through on native", () => {
-        for (const t of ["navigate", "list_debug_globals", "inspect_global", "run_app_command", "android_screenshot", "scan_metro"]) {
+        for (const t of ["navigate", "list_debug_globals", "inspect_global", "run_app_command", "screenshot", "android_screenshot", "scan_metro"]) {
             expect(nativeGate(t, "native")).toBeNull();
         }
     });
@@ -38,7 +38,7 @@ describe("nativeGate", () => {
         const r = nativeGate("tap", "native");
         expect(r?.isError).toBe(true);
         expect(r?.content[0].text).toContain("tap");
-        expect(r?.content[0].text).toContain("android_screenshot");
+        expect(r?.content[0].text).toContain("screenshot");
         expect(r?._failureKind).toBe("platform_mismatch");
     });
 
@@ -55,6 +55,16 @@ describe("nativeGate", () => {
 describe("native target resolution", () => {
     beforeEach(() => connectedApps.clear());
     afterEach(() => connectedApps.clear());
+
+    it("never hands a native app to the React Native lookup by adb serial", () => {
+        connectedApps.set("n", nativeApp("emulator-5554", "com.example.app", "Example"));
+        expect(getConnectedAppByAndroidDeviceId("emulator-5554")).toBeNull();
+        expect(getConnectedAppByAndroidDeviceId()).toBeNull();
+        const rn = { ...rnApp("rn", "Pixel 9"), adbSerial: "emulator-5554" } as ConnectedApp;
+        connectedApps.set("rn", rn);
+        expect(getConnectedAppByAndroidDeviceId("emulator-5554")).toBe(rn);
+        expect(getConnectedAppByAndroidDeviceId()).toBe(rn);
+    });
 
     it("matches a native app by package, label or serial", () => {
         connectedApps.set("rn", rnApp("rn", "Pixel 9"));
