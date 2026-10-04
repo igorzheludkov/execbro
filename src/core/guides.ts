@@ -665,10 +665,10 @@ DisposableEffect(nav) { val h = ExecBro.navigation(nav); onDispose { h.close() }
 3. inspect_global({ objectName: "lock" }): read one state value.
 4. run_app_command({ name: "lock" }): run a command, then inspect_global again to confirm.
 5. navigate({ routeTable: true }) to list routes, then navigate({ to: "settings" }), navigate({ action: "back" }).
-6. android_screenshot to see the result.
+6. screenshot to see the result.
 
 ## Limits
-- Supported tools on a native app: list_debug_globals, inspect_global, run_app_command, navigate, android_screenshot, android_key_event, android_long_press, android_launch_app, android_list_packages. Others refuse with a message.
+- Supported tools on a native app: list_debug_globals, inspect_global, run_app_command, navigate, screenshot, android_key_event, android_long_press, android_launch_app, android_list_packages. Others refuse with a message.
 - Navigation: Jetpack Navigation only. to is a route pattern; params fill its placeholders.
 - If scan_metro finds nothing on a device, connect directly by package: connect_metro({ device: "com.example.app" }).
 - After the app is killed or reinstalled, relaunch it and call ensure_connection.`

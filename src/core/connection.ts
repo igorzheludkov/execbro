@@ -1668,7 +1668,8 @@ export function getConnectedAppByAndroidDeviceId(deviceId?: string): ConnectedAp
             connectedApps.delete(key);
             continue;
         }
-        if (app.platform === "android") androidApps.push(app);
+        // Callers read the React screen state over CDP, which a native SDK app does not speak.
+        if (app.platform === "android" && app.runtime !== "native") androidApps.push(app);
     }
 
     if (androidApps.length === 0) return null;
