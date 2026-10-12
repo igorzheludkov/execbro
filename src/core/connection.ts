@@ -214,6 +214,19 @@ export function clearReconnectionSuppression(): void {
     reconnectionSuppressed.clear();
 }
 
+// Metro's inspector proxy (@react-native/dev-middleware) allows one debugger per
+// app and closes the current one with this reason when another attaches: React
+// Native DevTools, a second execbro server, another agent session. Reconnecting
+// from the close handler evicts that debugger, whose own auto-reconnect evicts
+// us back, and the two flap until one runs out of attempts. So a displaced
+// connection is left closed and only a tool call takes the app back.
+const NEW_DEBUGGER_OPENED = "[NEW_DEBUGGER_OPENED]";
+const displacedApps: Set<string> = new Set();
+
+export function isDisplacedClose(reason: unknown): boolean {
+    return String(reason ?? "").includes(NEW_DEBUGGER_OPENED);
+}
+
 const STALE_ACTIVITY_THRESHOLD_MS = 30_000;
 // WebSocket ping/pong keepalive interval. Was 1s with a single missed tick
 // allowed, which terminated healthy sockets ~2s after connect while their own
@@ -1186,7 +1199,7 @@ export async function connectToDevice(
             let pingInterval: NodeJS.Timeout | null = null;
             let staleRejected = false;
 
-            const handleClose = () => {
+            const handleClose = (code?: number, reason?: Buffer) => {
                 if (staleRejected) return; // probe-fail path handles its own cleanup
                 if (pingInterval) {
                     clearInterval(pingInterval);
@@ -1252,10 +1265,16 @@ export async function connectToDevice(
                 const uptimeMs = state?.lastConnectedTime ? Date.now() - state.lastConnectedTime.getTime() : 0;
                 const earlyPhase = state ? "" : " (before state init)";
                 console.error(`[execbro] Disconnected from ${device.title}${earlyPhase}`);
-                recordConnectionEvent("closed", appKey, device.title, `uptime ${formatDuration(uptimeMs)}${wasStable ? " (stable)" : " (unstable)"}${earlyPhase}`);
+                const closeReason = String(reason ?? "");
+                recordConnectionEvent("closed", appKey, device.title, `uptime ${formatDuration(uptimeMs)}${wasStable ? " (stable)" : " (unstable)"}${earlyPhase}, code ${code ?? "?"}${closeReason ? ` ${closeReason}` : ""}`);
 
-                // Schedule auto-reconnection if enabled (skip if intentionally disconnected)
-                if (reconnectionConfig.enabled && !reconnectionSuppressed.has(appKey)) {
+                // Schedule auto-reconnection if enabled (skip if intentionally
+                // disconnected, or if another debugger took the app over)
+                if (isDisplacedClose(reason) && !reconnectionSuppressed.has(appKey)) {
+                    displacedApps.add(appKey);
+                    console.error(`[execbro] Another debugger took over ${device.title}; not reconnecting`);
+                    recordConnectionEvent("displaced", appKey, device.title, "another debugger opened this app (Metro allows one); not reconnecting, ensure_connection takes it back");
+                } else if (reconnectionConfig.enabled && !reconnectionSuppressed.has(appKey)) {
                     // If close fired before initConnectionState, scheduleReconnection
                     // would early-return (it requires existing state). Init it now
                     // so the reconnect loop can still run.
@@ -1324,6 +1343,8 @@ export async function connectToDevice(
             // does not take the only copy with it. No-op when the SDK is absent
             // or EXECBRO_DISABLE_SDK_MIRROR=1.
             startSdkMirrorPoller(device.deviceName);
+
+            displacedApps.delete(appKey);
 
             // Initialize or update connection state
             // Note: We do NOT reset reconnectionAttempts here - that happens
@@ -2472,6 +2493,10 @@ export function passiveConnectionBanner(targetAppKey?: string): string {
     const passive = getPassiveConnectionStatus(targetAppKey);
     if (passive.connected) return "";
     if (passive.reason === "no_connection") {
+        const displaced = targetAppKey ? displacedApps.has(targetAppKey) : displacedApps.size > 0;
+        if (displaced) {
+            return "\n\n[CONNECTION] Another debugger took this app over (Metro allows one per app: React Native DevTools, another execbro server or session). Showing cached data. New data is not being captured. Call ensure_connection to take it back, which disconnects the other debugger.";
+        }
         return "\n\n[CONNECTION] Disconnected. Showing cached data. New data is not being captured.";
     }
     return `\n\n[CONNECTION] Status unknown for this read (${passive.reason}) — inferred, not measured. The data above is real; if you suspect capture stopped, call ensure_connection({healthCheck:true}) rather than scan_metro.`;
@@ -2509,6 +2534,7 @@ export async function checkAndEnsureConnection(device?: string): Promise<Connect
         }
     }
 
+    const wasDisplaced = displacedApps.size > 0;
     const result = await ensureConnection({ forceRefresh: true, healthCheck: true });
 
     if (result.connected && result.healthCheckPassed) {
@@ -2516,7 +2542,9 @@ export async function checkAndEnsureConnection(device?: string): Promise<Connect
         return {
             connected: true,
             wasReconnected: true,
-            message: "[CONNECTION] Was stale, re-established. Earlier data may be incomplete; new data will appear on next call.",
+            message: wasDisplaced
+                ? "[CONNECTION] Another debugger had taken this app over (Metro allows one per app). Took it back, which disconnected that debugger. Data from the time in between was not captured; new data will appear on next call."
+                : "[CONNECTION] Was stale, re-established. Earlier data may be incomplete; new data will appear on next call.",
         };
     }
 
