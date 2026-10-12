@@ -396,6 +396,7 @@ export type ConnectionEventType =
     | "reconnect-failed"
     | "max-attempts-reached"
     | "reconnect-suppressed"
+    | "displaced"
     | "metro-down"
     | "window-closed";
 

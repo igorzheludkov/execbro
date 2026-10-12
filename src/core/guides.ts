@@ -53,6 +53,9 @@ exactly like "my fix didn't work".
 - disconnect_metro — closes all CDP connections and stops auto-reconnect
 - The built-in React Native debugger can now connect
 - Use scan_metro to reconnect when done with native debugger
+- Only one debugger can attach to an app. When another one opens it (React Native DevTools, a second
+  execbro server or session), execbro steps aside instead of reconnecting: get_connection_status shows
+  a "displaced" event and reads carry a banner. ensure_connection takes the app back.
 
 ## Key Tools
 - scan_metro: auto-discover and connect React Native (Metro) and Chromium/Electron (CDP) targets (preferred)

@@ -145,5 +145,5 @@ If the user wants to use the built-in React Native debugger:
 - `get_connection_status` reports connection gaps: a large gap means logs or network events from that period may be missing
 - If the app was previously connected and Metro reconnected automatically, `scan_metro` may report "already connected" — this is fine
 - To restart the app cleanly (e.g., reset navigation state), use `ios_terminate_app` followed by `ios_launch_app` rather than `reload_app`
-- Only one debugger client can connect to a device at a time via CDP. If the built-in React Native debugger needs the connection, use `disconnect_metro` to release it
+- Only one debugger client can connect to a device at a time via CDP. If the built-in React Native debugger needs the connection, use `disconnect_metro` to release it. If another debugger takes the app over, execbro steps aside without reconnecting (a `displaced` event in `get_connection_status`); `ensure_connection` takes it back
 - **MCP server alias note:** examples use the alias `execbro` (tools prefixed `mcp__execbro__`). If you previously registered the server with the older alias `rn-ai-devtools`, substitute `mcp__rn-ai-devtools__` in these examples — both work, only the alias differs.
