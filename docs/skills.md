@@ -21,18 +21,21 @@ See [`skills/overview.md`](../skills/overview.md) for a decision guide on which 
 
 ## Installing Skills
 
-Copy the skill files into your project's `.claude/skills/` directory:
+Claude Code loads a skill from a folder named after it, with the content in `SKILL.md`: `.claude/skills/debug-logs/SKILL.md`, not `.claude/skills/debug-logs.md`. A flat file in `.claude/skills/` is never loaded. Install each file from [`skills/`](../skills/) into its own folder:
 
 ```bash
 # Install all skills
-mkdir -p .claude/skills
 curl -s https://api.github.com/repos/igorzheludkov/execbro/contents/skills \
   | grep download_url \
   | cut -d '"' -f 4 \
-  | xargs -I {} sh -c 'curl -sL {} -o .claude/skills/$(basename {})'
+  | while read -r url; do
+      name=$(basename "$url" .md)
+      mkdir -p ".claude/skills/$name"
+      curl -sL "$url" -o ".claude/skills/$name/SKILL.md"
+    done
 ```
 
-Or pick individual skills from the [`skills/`](../skills/) folder and drop them into `.claude/skills/`.
+To install one skill by hand, save `skills/<name>.md` as `.claude/skills/<name>/SKILL.md`.
 
 Then invoke in Claude Code:
 

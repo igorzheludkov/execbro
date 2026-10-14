@@ -19,4 +19,29 @@
  */
 process.setSourceMapsEnabled(true);
 
+// Answered here, before the server module loads: `execbro --help` used to
+// start the MCP server and sit waiting on stdin, which is what an agent told to
+// try `<tool> --help` saw in the 2026-10 benchmark.
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h") || args.includes("--version") || args.includes("-v")) {
+    const { readFileSync } = await import("node:fs");
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
+    if (args.includes("--version") || args.includes("-v")) {
+        console.log(version);
+    } else {
+        console.log(`execbro ${version}: MCP server that gives AI agents runtime access to React Native, Electron and native Android apps.
+
+Usage:
+  execbro                 Start the MCP server on stdio. MCP clients launch it this way; there is nothing to run by hand.
+  execbro --help, -h      Show this help.
+  execbro --version, -v   Print the version.
+
+Add it to Claude Code:
+  claude mcp add execbro --scope project -- npx -y execbro@latest
+
+Docs: https://github.com/igorzheludkov/execbro#readme`);
+    }
+    process.exit(0);
+}
+
 await import("./index.js");
