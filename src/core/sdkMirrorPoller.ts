@@ -18,6 +18,26 @@ const lastRunId = new Map<string, string>();
 const consecutiveFailures = new Map<string, number>();
 const MAX_CONSECUTIVE_FAILURES = 5;
 
+// Per device: server-clock periods when CDP was delivering console events.
+// The SDK patches console in-app, so every line logged while CDP is live
+// reaches the buffer twice: once as Runtime.consoleAPICalled, once through
+// this mirror. Verified live (iPhone Air, 2026-10-14): 5 console calls, 10
+// entries. Text matching cannot pair the copies (an object arg renders as
+// `{a: 1, nested: Object}` over CDP and as JSON in the SDK), so the mirror
+// skips SDK lines stamped inside a live period instead, and keeps lines from
+// before the connection and from reconnect gaps, which only the SDK has.
+//
+// A period counts only once a console event actually arrives on it, so a
+// socket whose console subscription is broken never hides the SDK's copy.
+interface CdpConsoleWindow {
+    start: number;
+    end?: number;
+    armed: boolean;
+}
+const cdpConsoleWindows = new Map<string, CdpConsoleWindow[]>();
+// ponytail: bounded history, enough for any realistic reconnect churn within one SDK buffer's lifetime.
+const MAX_CONSOLE_WINDOWS = 20;
+
 interface RawNetworkEntry {
     id: string;
     timestamp: number;
@@ -69,6 +89,38 @@ function seenSet(device: string): Set<string> {
     return set;
 }
 
+/** A CDP socket for the device opened and subscribed to console events. */
+export function markCdpConsoleOpen(device: string, at: number = Date.now()): void {
+    const windows = cdpConsoleWindows.get(device) ?? [];
+    // A replaced socket's close may never be processed (it is superseded), so
+    // a new open ends whatever period is still running.
+    const last = windows[windows.length - 1];
+    if (last && last.end === undefined) last.end = at;
+    windows.push({ start: at, armed: false });
+    if (windows.length > MAX_CONSOLE_WINDOWS) windows.shift();
+    cdpConsoleWindows.set(device, windows);
+}
+
+/** A console event arrived over CDP: the current period is proven live. */
+export function markCdpConsoleSeen(device: string): void {
+    const windows = cdpConsoleWindows.get(device);
+    const last = windows?.[windows.length - 1];
+    if (last && last.end === undefined) last.armed = true;
+}
+
+/** The device's CDP socket closed. */
+export function markCdpConsoleClosed(device: string, at: number = Date.now()): void {
+    const windows = cdpConsoleWindows.get(device);
+    const last = windows?.[windows.length - 1];
+    if (last && last.end === undefined) last.end = at;
+}
+
+function capturedByCdp(device: string, serverTs: number): boolean {
+    const windows = cdpConsoleWindows.get(device);
+    if (!windows) return false;
+    return windows.some((w) => w.armed && serverTs >= w.start && (w.end === undefined || serverTs < w.end));
+}
+
 /** Test-only: drop all mirror bookkeeping and timers. */
 export function __resetMirrorState(): void {
     for (const timer of timers.values()) clearTimeout(timer);
@@ -76,6 +128,7 @@ export function __resetMirrorState(): void {
     mirrored.clear();
     lastRunId.clear();
     consecutiveFailures.clear();
+    cdpConsoleWindows.clear();
 }
 
 // Both SDK buffers in one round-trip, plus a per-runtime nonce. The accessor
@@ -92,9 +145,10 @@ export function __resetMirrorState(): void {
 const READ_EXPRESSION = `JSON.stringify((function(){
   var runId = globalThis.__EXECBRO_RUN_ID__ || (globalThis.__EXECBRO_RUN_ID__ = String(Math.random()).slice(2) + "-" + Date.now());
   var sdk = globalThis.__EXECBRO__ || globalThis.__RN_AI_DEVTOOLS__;
-  if (!sdk) return { runId: runId, network: [], console: [] };
+  if (!sdk) return { runId: runId, now: Date.now(), network: [], console: [] };
   return {
     runId: runId,
+    now: Date.now(),
     network: typeof sdk.getNetworkEntries === "function" ? sdk.getNetworkEntries() : [],
     console: typeof sdk.getConsoleEntries === "function" ? sdk.getConsoleEntries() : []
   };
@@ -120,6 +174,7 @@ const READ_EXPRESSION = `JSON.stringify((function(){
  */
 export async function mirrorOnce(device: string): Promise<{ logs: number; network: number; failed?: boolean }> {
     let raw;
+    const sentAt = Date.now();
     try {
         raw = await executeInApp(
             READ_EXPRESSION,
@@ -137,7 +192,9 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
     }
     if (!raw.success || !raw.result) return { logs: 0, network: 0, failed: true };
 
-    let parsed: { runId?: string; network?: RawNetworkEntry[]; console?: RawConsoleEntry[] };
+    const receivedAt = Date.now();
+
+    let parsed: { runId?: string; now?: number; network?: RawNetworkEntry[]; console?: RawConsoleEntry[] };
     try {
         parsed = JSON.parse(raw.result);
     } catch {
@@ -207,10 +264,16 @@ export async function mirrorOnce(device: string): Promise<{ logs: number; networ
         network++;
     }
 
+    // SDK timestamps are on the device clock, CDP periods on ours. The
+    // round-trip midpoint maps one onto the other (a simulator shares the
+    // host clock, an emulator or phone may not).
+    const clockOffset = typeof parsed.now === "number" ? (sentAt + receivedAt) / 2 - parsed.now : 0;
+
     for (const entry of parsed.console ?? []) {
         const key = `c:${epoch}:${entry.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        if (capturedByCdp(deviceKey, entry.timestamp + clockOffset)) continue;
         getLogBuffer(deviceKey).add({
             timestamp: new Date(entry.timestamp),
             level: mapConsoleType(entry.level),
