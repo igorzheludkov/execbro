@@ -32,6 +32,8 @@ import {
     toDeliveredPxY,
     toDeliveredPxX,
     toDeliveredPxLength,
+    fromDeliveredPxX,
+    fromDeliveredPxY,
     pxScaleConverter,
     unresolvedScaleNote,
     type ScreenSpaceMetrics
@@ -649,14 +651,22 @@ export function registerComponentTools(server: McpServer): void {
                 // If parsing fails, just return the raw result
             }
 
-            // Source resolution reuses the same hit-test point, so no extra
-            // coordinate translation is needed. Failure only adds a reason line.
+            // The source harvest hit-tests raw measureInWindow output, so the
+            // caller's delivered-pixel point has to be brought back to fiber space
+            // first. It used to receive the pixels unconverted and so tested a
+            // different spot than the frame and props above (on a 3x iPhone,
+            // (461, 1186) px landed below the 912-pt screen): the source and its
+            // ancestors described some other element, or nothing at all.
+            // Failure only adds a reason line.
             let sourceLine = "";
             if (source) {
-                const enriched = await enrichWithSource({}, await harvestStacksAtPoint(x, y, device));
+                const enriched = await enrichWithSource(
+                    {},
+                    await harvestStacksAtPoint(fromDeliveredPxX(x, pointMetrics), fromDeliveredPxY(y, pointMetrics), device)
+                );
                 const loc = enriched.source as { file: string; line: number; column: number } | undefined;
                 if (loc) {
-                    sourceLine = `\n\nSource: ${loc.file}:${loc.line}:${loc.column}`;
+                    sourceLine = `\n\nSource (where it is rendered): ${loc.file}:${loc.line}:${loc.column}`;
                     // The owner chain answers "which parent renders this?" — the one
                     // thing a single file:line cannot, and the reason to inspect at
                     // all when the innermost node is a shared primitive.
@@ -664,7 +674,11 @@ export function registerComponentTools(server: McpServer): void {
                         | Array<{ component: string; file: string; line: number }>
                         | undefined;
                     if (ancestors && ancestors.length > 1) {
-                        sourceLine += `\nSource ancestors:\n`;
+                        // Each line is where that component is RENDERED (the JSX in its
+                        // parent), not where it is defined. Unlabelled, a reader checking
+                        // `LabeledField  TapTargetsScreen.tsx:305` against the definition at
+                        // line 38 concluded the mapping was unreliable (benchmark S5).
+                        sourceLine += `\nSource ancestors (file:line where each component is rendered, i.e. its JSX in the parent; not its definition):\n`;
                         for (const a of ancestors) {
                             sourceLine += `  - ${a.component}  ${a.file}:${a.line}\n`;
                         }
