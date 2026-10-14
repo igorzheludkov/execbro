@@ -3,7 +3,7 @@ import { jest } from "@jest/globals";
 const executeInApp = jest.fn<any>();
 jest.unstable_mockModule("../../core/executor.js", () => ({ executeInApp }));
 
-const { mirrorOnce, __resetMirrorState, startSdkMirrorPoller, isSdkMirrorPollerRunning, ACTIVE_INTERVAL_MS, IDLE_INTERVAL_MS } = await import("../../core/sdkMirrorPoller.js");
+const { mirrorOnce, __resetMirrorState, markCdpConsoleOpen, markCdpConsoleSeen, markCdpConsoleClosed, startSdkMirrorPoller, isSdkMirrorPollerRunning, ACTIVE_INTERVAL_MS, IDLE_INTERVAL_MS } = await import("../../core/sdkMirrorPoller.js");
 const { getLogBuffer, getNetworkBuffer, resetEpochs, bumpEpoch, getEpoch, connectedApps, logBuffers, networkBuffers } = await import("../../core/state.js");
 const { __resetLogSeq } = await import("../../core/logs.js");
 
@@ -177,6 +177,80 @@ describe("mirrorOnce", () => {
     it("swallows a thrown eval and reports it as a failure", async () => {
         executeInApp.mockRejectedValue(new Error("boom"));
         expect(await mirrorOnce("dev")).toEqual({ logs: 0, network: 0, failed: true });
+    });
+});
+
+// Reproduced on a live iPhone Air simulator, 2026-10-14: with execbro-sdk on,
+// 5 console calls produced 10 entries, one copy from Runtime.consoleAPICalled
+// and one from this mirror. The mirror now skips SDK lines that fall inside a
+// period when CDP was delivering console events.
+describe("mirrorOnce console dedupe against CDP", () => {
+    const T = 1_800_000_000_000;
+    const at = (id: string, message: string, timestamp: number) => ({ id, timestamp, level: "log", message });
+    const messages = () => getLogBuffer("dev").getAll().map((l) => l.message);
+    const mirror = (console_: any[], now?: number) => {
+        executeInApp.mockResolvedValue({ success: true, result: JSON.stringify({ runId: "run-1", now, network: [], console: console_ }) });
+        return mirrorOnce("dev");
+    };
+
+    beforeEach(() => {
+        executeInApp.mockReset();
+        __resetMirrorState();
+        __resetLogSeq();
+        resetEpochs();
+        getLogBuffer("dev").clear();
+    });
+
+    it("skips lines CDP already delivered and keeps pre-connect history", async () => {
+        markCdpConsoleOpen("dev", T);
+        markCdpConsoleSeen("dev");
+        const result = await mirror([at("c1", "launch", T - 5000), at("c2", "live", T + 100)]);
+        expect(result.logs).toBe(1);
+        expect(messages()).toEqual(["launch"]);
+    });
+
+    it("keeps every repeat of an identical pre-connect line and drops every live one", async () => {
+        markCdpConsoleOpen("dev", T);
+        markCdpConsoleSeen("dev");
+        await mirror([at("c1", "burst", T - 10), at("c2", "burst", T - 10), at("c3", "burst", T + 10), at("c4", "burst", T + 10)]);
+        expect(messages()).toEqual(["burst", "burst"]);
+    });
+
+    // A socket whose console subscription is broken delivers nothing, so the
+    // SDK copy is the only one and must stay.
+    it("keeps lines while no CDP console event has arrived on the socket", async () => {
+        markCdpConsoleOpen("dev", T);
+        await mirror([at("c1", "only-sdk", T + 100)]);
+        expect(messages()).toEqual(["only-sdk"]);
+    });
+
+    it("keeps lines logged in a reconnect gap and skips both live periods", async () => {
+        markCdpConsoleOpen("dev", T);
+        markCdpConsoleSeen("dev");
+        markCdpConsoleClosed("dev", T + 1000);
+        markCdpConsoleOpen("dev", T + 5000);
+        markCdpConsoleSeen("dev");
+        await mirror([at("c1", "first", T + 500), at("c2", "gap", T + 2000), at("c3", "second", T + 6000)]);
+        expect(messages()).toEqual(["gap"]);
+    });
+
+    it("ends a superseded period when a new socket opens without a close", async () => {
+        markCdpConsoleOpen("dev", T);
+        markCdpConsoleOpen("dev", T + 5000);
+        markCdpConsoleSeen("dev");
+        await mirror([at("c1", "unarmed-period", T + 100), at("c2", "live", T + 6000)]);
+        expect(messages()).toEqual(["unarmed-period"]);
+    });
+
+    // A phone or emulator clock can be far off the host's; the SDK stamps
+    // lines on the device clock.
+    it("maps device timestamps onto the server clock", async () => {
+        const skew = 3_600_000; // device runs an hour ahead
+        const now = Date.now();
+        markCdpConsoleOpen("dev", now - 2000);
+        markCdpConsoleSeen("dev");
+        await mirror([at("c1", "before", now - 5000 + skew), at("c2", "live", now - 1000 + skew)], now + skew);
+        expect(messages()).toEqual(["before"]);
     });
 });
 

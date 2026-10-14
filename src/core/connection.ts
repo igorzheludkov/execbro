@@ -13,7 +13,7 @@ import { probeCdpAlive } from "./probe.js";
 import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
-import { startSdkMirrorPoller, stopSdkMirrorPoller } from "./sdkMirrorPoller.js";
+import { startSdkMirrorPoller, stopSdkMirrorPoller, markCdpConsoleOpen, markCdpConsoleSeen, markCdpConsoleClosed } from "./sdkMirrorPoller.js";
 import { rememberHostAddresses, hostAddressChangeHint } from "./hostAddress.js";
 import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate, formatDialog, DIALOG_BLOCKED_TOOLS } from "./chromiumDialogs.js";
 import {
@@ -869,6 +869,7 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
 
     // Handle Runtime.consoleAPICalled
     if (method === "Runtime.consoleAPICalled") {
+        markCdpConsoleSeen(deviceName);
         const params = message.params as {
             type?: string;
             args?: Array<CDPConsoleArg>;
@@ -1269,6 +1270,7 @@ export async function connectToDevice(
                 // Stop mirroring — the socket is gone, so every tick would just
                 // fail. No drain attempt here: there is nothing left to read.
                 stopSdkMirrorPoller(device.deviceName || device.title || "unknown");
+                markCdpConsoleClosed(device.deviceName || device.title || "unknown");
 
                 connectedApps.delete(appKey);
                 clearLastCDPMessageTime(appKey);
@@ -1380,6 +1382,9 @@ export async function connectToDevice(
             // Mirror the in-app SDK buffers into ours so a hard app restart
             // does not take the only copy with it. No-op when the SDK is absent
             // or EXECBRO_DISABLE_SDK_MIRROR=1.
+            // Runtime.enable below starts CDP console capture; the mirror then
+            // skips SDK lines that CDP already delivered.
+            markCdpConsoleOpen(bufferKey);
             startSdkMirrorPoller(device.deviceName);
 
             displacedApps.delete(appKey);
