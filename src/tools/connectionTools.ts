@@ -41,8 +41,8 @@ import {
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
-import { noAppAttachedMessage } from "../core/connection.js";
-import { chromiumScanPorts, isChromiumListing, isChromiumTarget, isPortOpen, selectConnectTargets } from "../core/metro.js";
+import { noAppAttachedMessage, orderAppsOnDevice } from "../core/connection.js";
+import { chromiumScanPorts, isChromiumListing, isChromiumTarget, isPortOpen, otherAppsOnDevice, selectConnectTargets } from "../core/metro.js";
 
 export function registerConnectionTools(server: McpServer): void {
     // Tool: Scan for Metro servers
@@ -96,12 +96,19 @@ export function registerConnectionTools(server: McpServer): void {
     
             // Phase 1: Fetch devices from all ports first
             const portDevices = new Map<number, DeviceInfo[]>();
+            // Other apps on the same device, tried in order when the first is stale.
+            const fallbacks = new Map<string, DeviceInfo[]>();
             for (const port of openPorts) {
                 const devices = await fetchDevices(port);
                 // A Chromium app inside the Metro range (the spike used 8085) is a
                 // Chromium port too: no Metro restart check, no build events.
                 if (isChromiumListing(devices)) chromiumPortSet.add(port);
-                const debuggable = filterDebuggableDevices(devices);
+                const debuggable: DeviceInfo[] = [];
+                for (const first of filterDebuggableDevices(devices)) {
+                    const [best, ...rest] = await orderAppsOnDevice(port, [first, ...otherAppsOnDevice(devices, first)]);
+                    debuggable.push(best);
+                    if (rest.length > 0) fallbacks.set(`${port}-${best.id}`, rest);
+                }
                 if (debuggable.length > 0) {
                     portDevices.set(port, debuggable);
                 }
@@ -182,7 +189,14 @@ export function registerConnectionTools(server: McpServer): void {
                         continue;
                     }
                     try {
-                        const connectionResult = await connectToDevice(device, port);
+                        let connectionResult = await connectToDevice(device, port);
+                        for (const alt of fallbacks.get(`${port}-${device.id}`) ?? []) {
+                            if (!connectionResult.includes("stale CDP target")) break;
+                            const altResult = await connectToDevice(alt, port);
+                            if (!altResult.includes("stale CDP target")) {
+                                connectionResult = `${altResult} (${device.title} on the same device does not answer: likely in the background)`;
+                            }
+                        }
                         const isStale = connectionResult.includes("stale CDP target");
                         const prefix = isStale ? "  - STALE" : "  -";
                         results.push(`${prefix} ${connectionResult}`);
@@ -235,7 +249,9 @@ export function registerConnectionTools(server: McpServer): void {
             if (staleCount > 0) {
                 results.push("");
                 results.push(`Note: ${staleCount} stale CDP target(s) advertised by Metro were rejected.`);
-                results.push("If you expected one of these to be live, restart Metro: the target is a leftover from a previous device/app session.");
+                // Verified live: an app that had just attached, its JS thread still busy
+                // after the first bundle, was skipped here and connected on the next scan.
+                results.push("An app that just launched or reloaded can miss the probe while its JS thread is busy: run scan_metro again in a few seconds. If the same target is still skipped, it is a leftover from a previous app session and restarting Metro clears it.");
             }
     
             // Proactive check: warn if iOS UI driver is missing
@@ -322,8 +338,12 @@ export function registerConnectionTools(server: McpServer): void {
                 };
             }
     
+            // A failed health check under a "Connection Ensured" headline read as
+            // success; agents went on to read a dead context. A dialog-paused page
+            // is not a failure (its check fails by design while it waits).
+            const unhealthy = result.connectionInfos.filter(i => !i.healthCheckPassed && !i.dialog);
             const lines: string[] = [];
-            lines.push("=== Connection Ensured ===\n");
+            lines.push(unhealthy.length > 0 ? "=== Connected, but health check FAILED ===\n" : "=== Connection Ensured ===\n");
     
             const infos = result.connectionInfos;
             if (infos.length === 0) {
@@ -369,7 +389,8 @@ export function registerConnectionTools(server: McpServer): void {
             if (nativeLines.length > 0) lines.push("", ...nativeLines);
     
             return {
-                content: [{ type: "text", text: lines.join("\n") }]
+                content: [{ type: "text", text: lines.join("\n") }],
+                ...(unhealthy.length > 0 && { isError: true })
             };
         }
     );

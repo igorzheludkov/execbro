@@ -52,14 +52,27 @@ export function resetEpochs(): void {
  * labelled as current. Omitted device means a merged read across devices, so
  * the newest run wins.
  */
+/**
+ * The device name `device` refers to among `names`. An exact (case-insensitive)
+ * match beats a substring one: "iPhone 17 Pro" is a substring of "iPhone 17 Pro
+ * Max", and taking the first substring hit sent the Pro's SDK mirror into the
+ * Max's buffer, where the two apps' run ids bumped the epoch on every poll.
+ */
+export function matchDeviceName(device: string, names: Iterable<string>): string | undefined {
+    const needle = device.toLowerCase();
+    let partial: string | undefined;
+    for (const name of names) {
+        const lower = name.toLowerCase();
+        if (lower === needle) return name;
+        if (partial === undefined && lower.includes(needle)) partial = name;
+    }
+    return partial;
+}
+
 export function resolveDeviceEpoch(device?: string): number {
     const keys = new Set([...logBuffers.keys(), ...networkBuffers.keys()]);
     if (device) {
-        const needle = device.toLowerCase();
-        for (const key of keys) {
-            if (key.toLowerCase().includes(needle)) return getEpoch(key);
-        }
-        return getEpoch(device);
+        return getEpoch(matchDeviceName(device, keys) ?? device);
     }
     let max = 1;
     for (const key of keys) {

@@ -239,6 +239,11 @@ export function clearAllRules(): Map<string, number> {
     return counts;
 }
 
+/** Names of every device holding rules, connected or not. */
+export function devicesWithRules(): string[] {
+    return [...rulesByDevice].filter(([, list]) => list.length > 0).map(([name]) => name);
+}
+
 /**
  * Removes only the rules `network_condition` owns, leaving agent-authored mocks
  * in place. Returns how many were removed.

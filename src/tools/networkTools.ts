@@ -29,6 +29,7 @@ import {
     removeRule,
     clearRules,
     clearAllRules,
+    devicesWithRules,
     clearConditionRules,
     listRules,
     serializeRules,
@@ -254,12 +255,15 @@ export function registerNetworkTools(server: McpServer): void {
                 "GOOD: search_network({ urlPattern: \"/graphql\" })\n" +
                 "BAD: search_network({ urlPattern: \"\" }) — empty pattern matches everything; use get_network_requests instead.\n",
             inputSchema: {
-                urlPattern: z.string().describe("URL pattern to search for. Also matches GraphQL operation names (e.g. \"GetCharacters\") — use the operation name to find one GraphQL call among many sharing the same endpoint."),
+                urlPattern: z.string().optional().describe("URL pattern to search for. Also matches GraphQL operation names (e.g. \"GetCharacters\") — use the operation name to find one GraphQL call among many sharing the same endpoint."),
+                query: z.string().optional().describe("Alias for `urlPattern`."),
                 maxResults: z.number().optional().default(50).describe("Maximum number of results to return (default: 50)"),
                 device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
-        async ({ urlPattern, maxResults, device }) => {
+        async ({ urlPattern: patternArg, query, maxResults, device }) => {
+            const urlPattern = patternArg ?? query;
+            if (urlPattern === undefined) throw new UserInputError("search_network needs `urlPattern` to search for.", "missing_url_pattern");
             await refreshMirror(device);
 
             const networkBuffer = resolveNetworkBuffer(device);
@@ -456,6 +460,16 @@ export function registerNetworkTools(server: McpServer): void {
                 return {
                     content: [{ type: "text" as const, text: `Cleared ${total} mock rule(s) on every device${per ? ` (${per})` : ""}.` }]
                 };
+            }
+
+            // Rules are server-side state, so listing them needs no connection: a
+            // disconnected session must still be able to see what it left behind.
+            if (args.action === "list" && args.device === undefined && !getConnectedAppByDevice()) {
+                const names = devicesWithRules();
+                const text = names.length === 0
+                    ? "No mock rules active."
+                    : names.map((name) => `${name}:\n${formatRuleList(name)}`).join("\n\n");
+                return { content: [{ type: "text" as const, text }] };
             }
 
             const { ws, deviceName } = resolveMockTarget(args.device);

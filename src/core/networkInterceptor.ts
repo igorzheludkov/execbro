@@ -49,6 +49,10 @@ export function getInterceptorScript(nativeFetch = false): string {
     }
 
     function _report(evt) {
+      // Mocked traffic never reaches the SDK (it patches XHR at this same
+      // layer, and a mock returns before calling through), so it is reported
+      // even when the SDK is the source of truth.
+      if (evt && evt.mocked) { _reportAlways(evt); return; }
       // Suppressed when the in-app SDK is the source of truth — the MCP
       // flips this flag via Runtime.evaluate once it detects the SDK global,
       // so the wrapper stops emitting debug lines and CDP traffic.
@@ -895,9 +899,8 @@ export function isMockEvent(jsonStr: string): boolean {
  * dedupe gate to them drops the only record that exists, and a mocked request
  * disappears from get_network_requests entirely on every CDP-capture target.
  *
- * The in-app SDK is a different case and needs no exemption: it wraps fetch
- * above the XHR layer, so it observes the mocked call itself, and these events
- * are suppressed app-side before they are ever emitted.
+ * The in-app SDK needs the same exemption: it patches XMLHttpRequest at the
+ * interceptor's own layer, and a mock returns before the SDK's send runs.
  */
 export function isMockedTrafficEvent(jsonStr: string): boolean {
     try {
@@ -960,6 +963,8 @@ export function applyInterceptedEvent(
             postData: typeof event.body === "string" ? event.body : undefined,
             completed: false,
             epoch: getEpoch(deviceName),
+            capturedBy: "interceptor",
+            ...(event.mocked === true && { mocked: true }),
         };
         networkBuffer.set(id, request);
     } else if (type === "response") {

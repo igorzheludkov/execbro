@@ -6,18 +6,22 @@ export type EpochParam = number | "current" | "all" | undefined;
  * Render entries with a visible boundary wherever the app run changes, so the
  * agent can tell "this happened before the restart" from "this is the live run".
  */
-export function withRestartDividers<T extends { epoch: number }>(
+export function withRestartDividers<T extends { epoch: number; device?: string }>(
     entries: T[],
     render: (entry: T) => string
 ): string {
+    // Epochs are per device. A merged read interleaves devices, and comparing
+    // against the previous row printed a "restart" at every device switch.
     const lines: string[] = [];
-    let previousEpoch: number | null = null;
+    const previousEpoch = new Map<string, number>();
     for (const entry of entries) {
-        if (previousEpoch !== null && entry.epoch !== previousEpoch) {
-            lines.push(`── app restarted (epoch ${entry.epoch}) ──`);
+        const key = entry.device ?? "";
+        const prev = previousEpoch.get(key);
+        if (prev !== undefined && entry.epoch !== prev) {
+            lines.push(`── ${entry.device ? `${entry.device}: ` : ""}app restarted (epoch ${entry.epoch}) ──`);
         }
         lines.push(render(entry));
-        previousEpoch = entry.epoch;
+        previousEpoch.set(key, entry.epoch);
     }
     return lines.join("\n");
 }

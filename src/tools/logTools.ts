@@ -513,7 +513,9 @@ export function registerLogTools(server: McpServer): void {
                 "GOOD: search_logs({ text: \"TypeError\" })\n" +
                 "BAD: search_logs({ text: \"\" })  (use get_logs for a raw dump)\n",
             inputSchema: {
-                text: z.string().describe("Text to search for in log messages"),
+                text: z.string().optional().describe("Text to search for in log messages"),
+                // Undeclared keys are stripped before the handler, so `query` arrived as a -32602.
+                query: z.string().optional().describe("Alias for `text`."),
                 maxResults: z.coerce
                     .number()
                     .optional()
@@ -528,7 +530,9 @@ export function registerLogTools(server: McpServer): void {
                 device: z.string().optional().describe(DEVICE_ALL_DESC)
             }
         },
-        async ({ text, maxResults, maxMessageLength, verbose, device }) => {
+        async ({ text: textArg, query, maxResults, maxMessageLength, verbose, device }) => {
+            const text = textArg ?? query;
+            if (text === undefined) throw new UserInputError("search_logs needs `text` to search for.", "missing_text");
             // The buffer already holds the SDK's entries (mirrored) plus the CDP
             // console stream, across every app run. Refresh, then read once.
             await refreshMirror(device);

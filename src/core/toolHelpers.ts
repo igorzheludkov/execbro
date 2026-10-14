@@ -8,6 +8,7 @@ import {
     NetworkBuffer,
 } from "./index.js";
 import { UserInputError } from "./errors.js";
+import { matchDeviceName } from "./state.js";
 
 /**
  * Find a buffered device name matching `device` when no app is currently
@@ -16,11 +17,7 @@ import { UserInputError } from "./errors.js";
  * the retained pre-restart entries are unreachable exactly when they matter.
  */
 function bufferedDeviceName(device: string, keys: Iterable<string>): string | undefined {
-    const needle = device.toLowerCase();
-    for (const key of keys) {
-        if (key.toLowerCase().includes(needle)) return key;
-    }
-    return undefined;
+    return matchDeviceName(device, keys);
 }
 
 /**
@@ -80,7 +77,8 @@ export function resolveNetworkBuffer(device?: string): NetworkBuffer {
             let key = req.requestId;
             if (seen.has(key)) key = `${req.requestId}@${deviceName}`;
             seen.add(key);
-            merged.set(key, req);
+            // Tagged so restart dividers can tell a device switch from a restart.
+            merged.set(key, { ...req, device: deviceName });
         }
     }
     return merged;

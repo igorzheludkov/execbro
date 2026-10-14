@@ -351,6 +351,7 @@
             "device",
             "params",
             "routeTable",
+            "screen",
             "to"
         ],
         "network_condition": [
@@ -438,12 +439,14 @@
             "device",
             "maxMessageLength",
             "maxResults",
+            "query",
             "text",
             "verbose"
         ],
         "search_network": [
             "device",
             "maxResults",
+            "query",
             "urlPattern"
         ],
         "send_feedback": [

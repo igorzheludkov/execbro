@@ -159,31 +159,37 @@ var __eb_nav = (function () {
 export function buildRouteTableSource(): string {
     return `
 function __eb_routeTable() {
-    var out = { levels: [], all: [], current: null };
+    var out = { levels: [], all: [], paths: {}, current: null, currentId: null };
     var reader = __eb_nav && __eb_nav.stateReader;
     if (!reader || typeof reader.getRootState !== 'function') return out;
     var root;
     try { root = reader.getRootState(); } catch (e) { return out; }
     var seen = {};
-    function collect(st, d) {
+    // paths[name] = the route names leading from the root to the navigator that
+    // declares it, so a nested screen can be addressed with { screen, params }.
+    function collect(st, d, chain) {
         if (!st || d > 6) return;
         if (st.routeNames && st.routeNames.length) {
             out.levels.push({ depth: d, type: st.type || 'unknown', routeNames: st.routeNames });
             for (var i = 0; i < st.routeNames.length; i++) {
                 var n = st.routeNames[i];
-                if (!Object.prototype.hasOwnProperty.call(seen, n)) { seen[n] = 1; out.all.push(n); }
+                if (!Object.prototype.hasOwnProperty.call(seen, n)) { seen[n] = 1; out.all.push(n); out.paths[n] = chain; }
             }
         }
         if (st.routes) {
             for (var j = 0; j < st.routes.length; j++) {
-                if (st.routes[j] && st.routes[j].state) collect(st.routes[j].state, d + 1);
+                if (st.routes[j] && st.routes[j].state) collect(st.routes[j].state, d + 1, chain.concat([st.routes[j].name]));
             }
         }
     }
-    collect(root, 0);
+    collect(root, 0, []);
     try {
         var cur = typeof reader.getCurrentRoute === 'function' ? reader.getCurrentRoute() : null;
         out.current = cur ? cur.name : null;
+        // Name alone misses GALLERY -> GALLERY with another id: same name, new screen.
+        var p = null;
+        try { p = JSON.stringify(cur && cur.params ? cur.params : null); } catch (e) { p = '?'; }
+        out.currentId = cur ? String(cur.key) + '|' + p : null;
     } catch (e) { out.current = null; }
     return out;
 }
@@ -278,6 +284,7 @@ export function buildNavigateSource(
     var n = nav.navigator;
     var table = __eb_routeTable();
     var before = table.current;
+    var beforeId = table.currentId;
 
     if (action !== 'back' && action !== 'reset' && !to) {
         // The route table is already in hand here. Returning it turns a dead
@@ -323,11 +330,22 @@ export function buildNavigateSource(
                            '). A React Navigation root ref exposes navigate/goBack/reset only; push and replace are stack-scoped.'
                 };
             }
-            if (params) { n[action](to, params); } else { n[action](to); }
+            var chain = (nav.kind === 'react-navigation' && action === 'navigate' && to) ? table.paths[to] : null;
+            if (chain && chain.length) {
+                // React Navigation 7 resolves a bare name only along the focused
+                // branch, so a screen in another tab was silently "not handled by
+                // any navigator". Address it from the root instead.
+                var target = to, nested = params;
+                for (var c = chain.length - 1; c >= 0; c--) {
+                    nested = nested ? { screen: target, params: nested } : { screen: target };
+                    target = chain[c];
+                }
+                n.navigate(target, nested);
+            } else if (params) { n[action](to, params); } else { n[action](to); }
         }
     } catch (e) {
         return { ok: false, kind: nav.kind, before: before, error: String(e && e.message ? e.message : e) };
     }
-    return { ok: true, kind: nav.kind, before: before };
+    return { ok: true, kind: nav.kind, before: before, beforeId: beforeId };
 })()`;
 }
