@@ -26,6 +26,8 @@ export function registerNavigationTools(server: McpServer): void {
                     .string()
                     .optional()
                     .describe("Destination: a path for Expo Router, a route name for React Navigation. Required unless action is \"back\" or \"reset\"."),
+                // Undeclared keys are stripped, so `screen` arrived as "A destination is required".
+                screen: z.string().optional().describe("Alias for `to`."),
                 params: z
                     .record(z.unknown())
                     .optional()
@@ -44,7 +46,8 @@ export function registerNavigationTools(server: McpServer): void {
                     .describe("Target device name (substring match).")
             }
         },
-        async ({ to, params, action, routeTable, device }) => {
+        async ({ to: toArg, screen, params, action, routeTable, device }) => {
+            const to = toArg ?? screen;
             const options = { action: action ?? "navigate", to, params, device, includeRouteTable: routeTable } as const;
             const native = nativeAppFor("navigate", device);
             const result = native ? await nativeNavigate(native, options) : await performNavigation(options);

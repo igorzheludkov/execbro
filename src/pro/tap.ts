@@ -403,9 +403,20 @@ export async function buildSwitchReport(args: {
     return { before: args.before, after, changed };
 }
 
+const HTML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'" };
+
+/**
+ * Agents sometimes escape the label they read ("Rose &amp; Tom"), and no screen
+ * shows a literal "&amp;". OCR saw the real text at 0.65-0.86 and still refused,
+ * so decoding here is the whole fix.
+ */
+export function decodeHtmlEntities(text: string): string {
+  return text.replace(/&(amp|lt|gt|quot|apos|#39);/g, (_, name: string) => HTML_ENTITIES[name]);
+}
+
 export function buildQuery(options: TapOptions): TapQuery {
   const query: TapQuery = {};
-  if (options.text !== undefined) query.text = options.text;
+  if (options.text !== undefined) query.text = decodeHtmlEntities(options.text);
   if (options.testID !== undefined) query.testID = options.testID;
   if (options.component !== undefined) query.component = options.component;
   if (options.x !== undefined) query.x = options.x;

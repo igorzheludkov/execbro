@@ -17,6 +17,18 @@ describe("withRestartDividers", () => {
         expect(withRestartDividers([{ epoch: 1, msg: "a" }], e => e.msg)).toBe("a");
     });
 
+    it("does not read a switch between devices as a restart", () => {
+        const entries = [
+            { epoch: 3, device: "A", msg: "a" },
+            { epoch: 1, device: "B", msg: "b" },
+            { epoch: 3, device: "A", msg: "c" },
+            { epoch: 4, device: "A", msg: "d" },
+        ];
+        expect(withRestartDividers(entries, e => e.msg)).toBe(
+            "a\nb\nc\n── A: app restarted (epoch 4) ──\nd"
+        );
+    });
+
     it("handles an empty list", () => {
         expect(withRestartDividers([] as { epoch: number; msg: string }[], e => e.msg)).toBe("");
     });

@@ -394,6 +394,34 @@ export function purgeStaleConnectionsForPorts(
     return purged;
 }
 
+/**
+ * Order one device's app runtimes for connecting: a connected app that still
+ * answers keeps the device; a connected one that does not is dropped so another
+ * app on the device can take it. Verified live: with a second app launched on a
+ * simulator, scan_metro kept the backgrounded one ("Already connected") and every
+ * read timed out against its suspended JS.
+ */
+export async function orderAppsOnDevice(port: number, candidates: DeviceInfo[]): Promise<DeviceInfo[]> {
+    if (candidates.length < 2) return candidates;
+    for (const d of candidates) {
+        const key = `${port}-${d.id}`;
+        const app = connectedApps.get(key);
+        if (!app || app.ws.readyState !== WebSocket.OPEN) continue;
+        const rest = candidates.filter((c) => c !== d);
+        if (await probeCdpAlive(app.ws, PROBE_TIMEOUT_MS)) return [d, ...rest];
+        console.error(`[execbro] ${d.title} does not answer and another app shares its device; releasing it`);
+        reconnectionSuppressed.add(key);
+        cancelReconnectionTimer(key);
+        clearLastCDPMessageTime(key);
+        clearActiveSimulatorIfSource(key);
+        try { app.ws.close(); } catch { /* ignore */ }
+        connectedApps.delete(key);
+        // Last, so it is retried if it was only busy and nothing else answers.
+        return [...rest, d];
+    }
+    return candidates;
+}
+
 // Format CDP RemoteObject to readable string
 export function formatRemoteObject(result: RemoteObject): string {
     if (result.type === "undefined") {
@@ -790,6 +818,16 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                     // (or resumes) producing console.debug lines and CDP
                     // traffic.
                     sendNetSuppressionFlag(app.ws, nextPresent);
+                    // Until this edge the server captured on its own, and the SDK
+                    // recorded the same startup requests in-app from init(); the
+                    // mirror then copies those in, so every one was listed twice
+                    // after reload_app (whose fresh connection starts with
+                    // sdkPresent unknown). The SDK's copy is the complete one.
+                    if (nextPresent) {
+                        const name = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
+                        const epoch = getEpoch(name);
+                        getNetworkBuffer(name).removeWhere((r) => r.epoch === epoch && r.capturedBy !== undefined && !r.mocked);
+                    }
                 }
             }
             return;
@@ -860,14 +898,13 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             // installed, which reads as "the rule never matched" — the exact
             // opposite of what had happened.
             const suppressed = iApp?.cdpNetworkSupported || iApp?.sdkPresent;
-            // Mocked traffic is exempt from the CDP half of the gate: the
-            // request never reaches the network, so CDP cannot report it and
-            // ours is the only record. Without this a mocked request vanishes
-            // from get_network_requests on every CDP-capture target — the one
-            // thing a mock must never do.
-            const mockedUnderCdp =
-                iApp?.cdpNetworkSupported && !iApp?.sdkPresent && isMockedTrafficEvent(interceptorJson);
-            if (!suppressed || isMockEvent(interceptorJson) || mockedUnderCdp) {
+            // Mocked traffic is exempt from both halves: the request never
+            // reaches the network, so CDP cannot report it, and execbro-sdk
+            // patches XMLHttpRequest at the same layer as the interceptor, whose
+            // mock returns before the SDK's send runs. Ours is the only record;
+            // without it a mocked request was invisible on every SDK app
+            // (verified live, RN 0.85 test app: hits=3, zero rows).
+            if (!suppressed || isMockEvent(interceptorJson) || isMockedTrafficEvent(interceptorJson)) {
                 applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName), deviceName);
             }
             return;
@@ -977,7 +1014,8 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
                 requestTime: params.timestamp
             },
             completed: false,
-            epoch: getEpoch(deviceName)
+            epoch: getEpoch(deviceName),
+            capturedBy: "cdp"
         };
 
         getNetworkBuffer(deviceName).set(params.requestId, request);
@@ -1436,6 +1474,12 @@ export async function connectToDevice(
                         connectedApp.platform = "android";
                         connectedApp.adbSerial = adbSerial;
                         console.error(`[execbro] Linked to Android emulator: ${adbSerial}`);
+                    }
+                    // Neither simctl nor adb knows it: a USB iPhone. Left at the
+                    // "android" default it was refused by every iOS tool.
+                    // ponytail: name heuristic, a renamed phone ("Igor's phone") still reads android.
+                    if (!simulatorUdid && !adbSerial && /\b(iphone|ipad|ipod)\b/i.test(device.deviceName)) {
+                        connectedApp.platform = "ios";
                     }
                 }
             }

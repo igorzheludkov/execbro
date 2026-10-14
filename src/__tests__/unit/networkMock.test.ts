@@ -125,9 +125,10 @@ describe("injected interceptor — mock matching", () => {
     });
 
     it("reports the mock even while __RN_NET_DISABLED__ suppresses capture", () => {
-        // The SDK owns capture in that mode, but it knows nothing about mocks.
-        // Suppressing this event would hide altered traffic entirely and leave
-        // the server's hit counters permanently at zero.
+        // The SDK owns capture in that mode, but it knows nothing about mocks:
+        // it patches XHR at this same layer and a mock returns before its send
+        // runs. Suppressing the mocked request too left it with no row at all
+        // (seen live on an SDK app: hits=3, zero rows).
         const t = runWithMocks([{ id: "m1", url: "/orders", mode: "replace", status: 500 }]);
         t.sandbox.__RN_NET_DISABLED__ = true;
 
@@ -137,7 +138,7 @@ describe("injected interceptor — mock matching", () => {
         t.flush();
 
         expect(xhr.status).toBe(500);
-        expect(t.events().filter((e) => e.type === "request")).toHaveLength(0);
+        expect(t.events().filter((e) => e.type === "request")).toHaveLength(1);
         expect(t.events().filter((e) => e.type === "mock")).toHaveLength(1);
     });
 

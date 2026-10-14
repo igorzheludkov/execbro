@@ -1,5 +1,5 @@
 import { executeInApp } from "./executor.js";
-import { getLogBuffer, getNetworkBuffer, getEpoch, bumpEpoch, connectedApps } from "./state.js";
+import { getLogBuffer, getNetworkBuffer, getEpoch, bumpEpoch, connectedApps, matchDeviceName } from "./state.js";
 import { mapConsoleType } from "./logs.js";
 
 export const ACTIVE_INTERVAL_MS = 3000;
@@ -56,12 +56,8 @@ function pollingDisabled(): boolean {
  * substring resolution, so the original argument still routes correctly.
  */
 function bufferKeyFor(device: string): string {
-    const needle = device.toLowerCase();
-    for (const app of connectedApps.values()) {
-        const name = app.deviceInfo.deviceName || app.deviceInfo.title || "unknown";
-        if (name.toLowerCase().includes(needle)) return name;
-    }
-    return device;
+    const names = [...connectedApps.values()].map((app) => app.deviceInfo.deviceName || app.deviceInfo.title || "unknown");
+    return matchDeviceName(device, names) ?? device;
 }
 
 function seenSet(device: string): Set<string> {

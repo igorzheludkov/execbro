@@ -73,6 +73,48 @@ describe("resolveDeviceTarget", () => {
         if (!r.ok) expect(r.error.code).toBe("DEVICE_NOT_FOUND");
     });
 
+    it("prefers an exact registry name over a longer one containing it", async () => {
+        getConnectedAppsMock.mockReturnValue([
+            { app: { platform: "ios", simulatorUdid: "AAAAAAAA-0000-0000-0000-000000000001", deviceInfo: { deviceName: "iPhone 17 Pro" } } },
+            { app: { platform: "ios", simulatorUdid: "AAAAAAAA-0000-0000-0000-000000000002", deviceInfo: { deviceName: "iPhone 17 Pro Max" } } }
+        ]);
+
+        const r = await resolveDeviceTarget("iPhone 17 Pro");
+        expect(r.ok).toBe(true);
+        if (r.ok) expect(r.target.iosUdid).toBe("AAAAAAAA-0000-0000-0000-000000000001");
+    });
+
+    it("prefers an exact booted simulator name when no app is connected", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            ios: {
+                available: true,
+                simulators: [
+                    { name: "iPhone 17 Pro Max", udid: "AAAAAAAA-0000-0000-0000-000000000002", state: "booted", runtime: "iOS 26" },
+                    { name: "iPhone 17 Pro", udid: "AAAAAAAA-0000-0000-0000-000000000001", state: "booted", runtime: "iOS 26" }
+                ]
+            }
+        });
+
+        const r = await resolveDeviceTarget("iPhone 17 Pro");
+        expect(r.ok).toBe(true);
+        if (r.ok) expect(r.target.iosUdid).toBe("AAAAAAAA-0000-0000-0000-000000000001");
+    });
+
+    it("refuses a USB iPhone instead of defaulting to a booted simulator", async () => {
+        getConnectedAppsMock.mockReturnValue([
+            { app: { platform: "ios", deviceInfo: { deviceName: "Igor's iPhone" } } }
+        ]);
+        listAllDevicesMock.mockResolvedValue({
+            ...emptyDiscovery(),
+            ios: { available: true, simulators: [{ name: "iPhone 17 Pro", udid: "AAAAAAAA-0000-0000-0000-000000000001", state: "booted", runtime: "iOS 26" }] }
+        });
+
+        const r = await resolveDeviceTarget("Igor's iPhone");
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error.message).toMatch(/physical iOS device/);
+    });
+
     it("resolves an iOS simulator UDID directly to a booted iOS target", async () => {
         listAllDevicesMock.mockResolvedValue({
             ...emptyDiscovery(),

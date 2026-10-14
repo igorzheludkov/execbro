@@ -205,10 +205,14 @@ async function resolveDeviceTargetInner(
     if (trimmed) {
         const apps = nativeRegistry();
         const needle = normalizeName(trimmed);
-        const matches = apps.filter((entry) => {
+        const partial = apps.filter((entry) => {
             const name = normalizeName(entry.app.deviceInfo.deviceName);
             return name.includes(needle);
         });
+        // An exact name beats the substrings it is contained in: "iPhone 17 Pro"
+        // must not be ambiguous with a connected "iPhone 17 Pro Max".
+        const exact = partial.filter((entry) => normalizeName(entry.app.deviceInfo.deviceName) === needle);
+        const matches = exact.length > 0 ? exact : partial;
         if (matches.length === 1) {
             const m = matches[0].app;
             // When the iOS app's UDID hasn't been backfilled yet (the
@@ -218,14 +222,24 @@ async function resolveDeviceTargetInner(
             // setup can be the OTHER device. Bug #5 (2026-05-20).
             let iosUdid = m.simulatorUdid;
             if (m.platform === "ios" && !iosUdid && m.deviceInfo.deviceName) {
+                let inv: Awaited<ReturnType<typeof listAllDevices>> | null = null;
                 try {
-                    const inv = await listAllDevices();
-                    const sim = inv.ios.simulators.find(
-                        (s) => s.state === "booted" && s.name === m.deviceInfo.deviceName
-                    );
-                    if (sim) iosUdid = sim.udid;
+                    inv = await listAllDevices();
                 } catch {
                     // best-effort; fall through with undefined udid
+                }
+                const sim = inv?.ios.simulators.find(
+                    (s) => s.state === "booted" && s.name === m.deviceInfo.deviceName
+                );
+                if (sim) iosUdid = sim.udid;
+                // No booted simulator carries this name: a USB iPhone. Returning
+                // an undefined UDID let callers default to whichever simulator
+                // is booted, so the error is what lets them try the physical path.
+                else if (inv) {
+                    return err(
+                        "DEVICE_NOT_FOUND",
+                        `"${m.deviceInfo.deviceName}" is a physical iOS device, not a simulator. screenshot captures it; tap, swipe and input_text cannot drive it (no touch injection below iOS 17).`
+                    );
                 }
             }
             return ok({
@@ -253,15 +267,18 @@ async function resolveDeviceTargetInner(
     const inv = await listAllDevices();
     if (trimmed) {
         const needle = normalizeName(trimmed);
-        const iosBootedMatches = inv.ios.simulators.filter(
-            (s) => s.state === "booted" && normalizeName(s.name).includes(needle)
-        );
-        const androidRunningMatches = inv.android.emulators.filter(
-            (e) => e.state === "running" && normalizeName(e.name).includes(needle)
-        );
-        const androidPhysicalMatches = inv.android.physical.filter(
-            (p) => p.state === "device" && normalizeName(p.model).includes(needle)
-        );
+        const iosBooted = inv.ios.simulators.filter((s) => s.state === "booted");
+        const androidRunning = inv.android.emulators.filter((e) => e.state === "running");
+        const androidOnline = inv.android.physical.filter((p) => p.state === "device");
+        // Same rule as the registry step: an exact name anywhere wins over substrings.
+        const anyExact =
+            iosBooted.some((s) => normalizeName(s.name) === needle) ||
+            androidRunning.some((e) => normalizeName(e.name) === needle) ||
+            androidOnline.some((p) => normalizeName(p.model) === needle);
+        const hit = (name: string) => (anyExact ? normalizeName(name) === needle : normalizeName(name).includes(needle));
+        const iosBootedMatches = iosBooted.filter((s) => hit(s.name));
+        const androidRunningMatches = androidRunning.filter((e) => hit(e.name));
+        const androidPhysicalMatches = androidOnline.filter((p) => hit(p.model));
 
         const totalMatches =
             iosBootedMatches.length + androidRunningMatches.length + androidPhysicalMatches.length;

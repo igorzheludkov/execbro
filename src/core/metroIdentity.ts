@@ -99,6 +99,10 @@ export function bundleStaleWarning(deviceName?: string): string | null {
         return first ?? null;
     }
     const needle = deviceName.trim().toLowerCase();
+    // An exact name first, so "iPhone 17 Pro" does not inherit "iPhone 17 Pro Max"'s warning.
+    for (const [known, reason] of staleBundleDevices.entries()) {
+        if (known.toLowerCase() === needle) return reason;
+    }
     for (const [known, reason] of staleBundleDevices.entries()) {
         const k = known.toLowerCase();
         if (k.includes(needle) || needle.includes(k)) return reason;

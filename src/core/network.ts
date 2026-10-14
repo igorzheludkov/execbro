@@ -47,6 +47,20 @@ export class NetworkBuffer {
         this.requests.set(k, request);
     }
 
+    /** Drops every entry matching `pred`. Returns how many were removed. */
+    removeWhere(pred: (req: NetworkRequest) => boolean): number {
+        const before = this.order.length;
+        this.order = this.order.filter((k) => {
+            const req = this.requests.get(k);
+            if (req && pred(req)) {
+                this.requests.delete(k);
+                return false;
+            }
+            return true;
+        });
+        return before - this.order.length;
+    }
+
     // Get a request by id. Prefers the current epoch, then scans older ones so
     // get_request_details still resolves a pre-restart id.
     get(requestId: string, epoch?: number): NetworkRequest | undefined {

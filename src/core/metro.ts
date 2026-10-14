@@ -348,6 +348,25 @@ export function filterDebuggableDevices(devices: DeviceInfo[]): DeviceInfo[] {
     return result;
 }
 
+/**
+ * The other apps' JS runtimes on the same device as `chosen`. Two React Native
+ * apps on one simulator share a deviceName, and filterDebuggableDevices keeps
+ * whichever Metro lists first, so a backgrounded (suspended) app could hold the
+ * name while the foreground one was never connected.
+ */
+export function otherAppsOnDevice(devices: DeviceInfo[], chosen: DeviceInfo): DeviceInfo[] {
+    const name = chosen.deviceName || chosen.title;
+    return devices.filter(
+        (d) =>
+            d.id !== chosen.id &&
+            d.appId !== chosen.appId &&
+            (d.deviceName || d.title) === name &&
+            !isChromiumTarget(d) &&
+            selectMainDevice([d]) === d &&
+            (d.description.includes("React Native Bridgeless") || d.title.includes("Hermes"))
+    );
+}
+
 // Scan for Metro and return all devices grouped by port
 export async function discoverMetroDevices(
     startPort: number = DEFAULT_START_PORT,

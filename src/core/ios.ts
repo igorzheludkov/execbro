@@ -1,4 +1,5 @@
 import { existsSync } from "fs";
+import { writeFile } from "fs/promises";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
@@ -66,6 +67,9 @@ async function runAxe(
   const axePath = getAxePath();
   const { stdout, stderr } = await execFileAsync(axePath, args, {
     timeout: AXE_TIMEOUT,
+    // describe-ui on a dense screen passes Node's 1 MB default and failed as
+    // "stdout maxBuffer length exceeded", silently dropping the accessibility strategy.
+    maxBuffer: 32 * 1024 * 1024,
   });
   return {
     stdout: stdout.trim(),
@@ -83,6 +87,9 @@ async function runIdb(
   const idbPath = getIdbPath();
   const { stdout, stderr } = await execFileAsync(idbPath, args, {
     timeout: IDB_TIMEOUT,
+    // describe-ui on a dense screen passes Node's 1 MB default and failed as
+    // "stdout maxBuffer length exceeded", silently dropping the accessibility strategy.
+    maxBuffer: 32 * 1024 * 1024,
   });
   return {
     stdout: stdout.trim(),
@@ -479,39 +486,35 @@ export async function findSimulatorByName(
     });
 
     const data = JSON.parse(stdout);
-    const normalizedDeviceName = deviceName.toLowerCase().trim();
-
-    for (const devices of Object.values(data.devices)) {
-      if (!Array.isArray(devices)) continue;
-
-      for (const device of devices as Array<{
-        udid: string;
-        name: string;
-        state: string;
-      }>) {
-        if (device.state !== "Booted") continue;
-
-        const normalizedSimName = device.name.toLowerCase().trim();
-
-        // Exact match
-        if (normalizedSimName === normalizedDeviceName) {
-          return device.udid;
-        }
-
-        // Partial match (deviceName contains simulator name or vice versa)
-        if (
-          normalizedSimName.includes(normalizedDeviceName) ||
-          normalizedDeviceName.includes(normalizedSimName)
-        ) {
-          return device.udid;
-        }
-      }
-    }
-
-    return null;
+    const booted = (Object.values(data.devices).filter(Array.isArray).flat() as Array<{
+      udid: string;
+      name: string;
+      state: string;
+    }>).filter((d) => d.state === "Booted");
+    return pickSimulatorByName(booted, deviceName);
   } catch {
     return null;
   }
+}
+
+/**
+ * An exact name wins over any partial one, and a partial match counts only when
+ * it is the only one. Returning the first partial hit linked "iPhone 17 Pro Max"
+ * to the booted "iPhone 17 Pro" whenever simctl listed that one first, so both
+ * apps got one UDID and every UDID-scoped tool hit the wrong simulator.
+ */
+export function pickSimulatorByName(
+  booted: Array<{ udid: string; name: string }>,
+  deviceName: string,
+): string | null {
+  const wanted = deviceName.toLowerCase().trim();
+  const exact = booted.find((d) => d.name.toLowerCase().trim() === wanted);
+  if (exact) return exact.udid;
+  const partial = booted.filter((d) => {
+    const name = d.name.toLowerCase().trim();
+    return name.includes(wanted) || wanted.includes(name);
+  });
+  return partial.length === 1 ? partial[0].udid : null;
 }
 
 /**
@@ -558,13 +561,22 @@ export async function iosScreenshot(
     // Generate output path if not provided
     const finalOutputPath = outputPath || defaultScreenshotPath();
 
-    await execFileAsync(
-      "xcrun",
-      ["simctl", "io", targetUdid, "screenshot", finalOutputPath],
-      {
-        timeout: SIMCTL_TIMEOUT,
-      },
-    );
+    const [, { rotation }] = await Promise.all([
+      execFileAsync(
+        "xcrun",
+        ["simctl", "io", targetUdid, "screenshot", finalOutputPath],
+        {
+          timeout: SIMCTL_TIMEOUT,
+        },
+      ),
+      getUiRotation(targetUdid, true),
+    ]);
+    // simctl captures the portrait framebuffer; turn it to the app's frame so
+    // the image and every layout coordinate agree.
+    if (rotation !== "none") {
+      const turned = await sharp(finalOutputPath).rotate(rotation === "ccw" ? -90 : 90).toBuffer();
+      await writeFile(finalOutputPath, turned);
+    }
 
     return await finalizeScreenshotFile(finalOutputPath);
   } catch (error) {
@@ -901,6 +913,78 @@ export async function iosBootSimulator(udid: string): Promise<iOSResult> {
 // ============================================================================
 
 /**
+ * How the app's UI is turned relative to the simulator's native portrait frame.
+ *
+ * Verified on an iOS 26 simulator: in landscape, React Native and AXe
+ * describe-ui both speak landscape points (874x402), while AXe's touch
+ * injection and simctl's screenshot stay in the portrait native frame
+ * (402x874). Every tap aimed with app coordinates missed, and still reported
+ * success. Device orientation 3 needs "ccw", 4 needs "cw" (both checked by
+ * hand); anything else with a landscape app keeps the last direction seen.
+ */
+export type UiRotation = "none" | "ccw" | "cw";
+
+const ORIENTATION_TTL_MS = 3000;
+const orientationCache = new Map<string, { value: number; expires: number }>();
+const lastLandscape = new Map<string, "ccw" | "cw">();
+
+async function readDeviceOrientation(udid: string, fresh: boolean): Promise<number | null> {
+  const cached = orientationCache.get(udid);
+  if (!fresh && cached && cached.expires > Date.now()) return cached.value;
+  try {
+    const { stdout } = await execFileAsync(
+      "xcrun",
+      ["simctl", "spawn", udid, "notifyutil", "-g", "com.apple.backboardd.orientation"],
+      { timeout: SIMCTL_TIMEOUT },
+    );
+    const value = Number(stdout.trim().split(/\s+/).pop());
+    if (!Number.isFinite(value)) return null;
+    // The cached root frame says which way the app is turned; it is stale the
+    // moment the device turns, and unknown on the first read (it may predate one).
+    if (!cached || cached.value !== value) {
+      safeAreaTopCache.delete(udid);
+      safeAreaTopCache.delete("__default__");
+    }
+    // ponytail: 3s reuse so a tap after its own screenshot pays nothing; a rotation inside that window misaims one call.
+    orientationCache.set(udid, { value, expires: Date.now() + ORIENTATION_TTL_MS });
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+export async function getUiRotation(
+  udid: string,
+  fresh = false,
+): Promise<{ rotation: UiRotation; app: { width: number; height: number } | null }> {
+  const orientation = await readDeviceOrientation(udid, fresh);
+  const app = await getIOSScreenPointSize(udid);
+  if (!app || app.width <= app.height) return { rotation: "none", app };
+  let rotation: "ccw" | "cw" = lastLandscape.get(udid) ?? "ccw";
+  if (orientation === 3) rotation = "ccw";
+  if (orientation === 4) rotation = "cw";
+  lastLandscape.set(udid, rotation);
+  return { rotation, app };
+}
+
+/** App-frame point -> the native portrait point AXe/IDB inject at. */
+export function toNativePoint(
+  x: number,
+  y: number,
+  rotation: UiRotation,
+  app: { width: number; height: number },
+): [number, number] {
+  if (rotation === "ccw") return [app.height - y, x];
+  if (rotation === "cw") return [y, app.width - x];
+  return [x, y];
+}
+
+async function nativeMapper(udid: string): Promise<(x: number, y: number) => [number, number]> {
+  const { rotation, app } = await getUiRotation(udid);
+  return (x, y) => (app ? toNativePoint(x, y, rotation, app) : [x, y]);
+}
+
+/**
  * Tap at coordinates on an iOS simulator using IDB
  */
 export async function iosTap(
@@ -913,8 +997,9 @@ export async function iosTap(
     if (!preflight.ready) return preflight.error;
     const { driver, targetUdid } = preflight;
 
-    const xRounded = Math.round(x);
-    const yRounded = Math.round(y);
+    const [nx, ny] = (await nativeMapper(targetUdid))(x, y);
+    const xRounded = Math.round(nx);
+    const yRounded = Math.round(ny);
 
     if (driver === "axe") {
       if (options?.duration !== undefined) {
@@ -956,7 +1041,7 @@ export async function iosTap(
 
     return {
       success: true,
-      result: `Tapped at (${xRounded}, ${yRounded})`,
+      result: `Tapped at (${Math.round(x)}, ${Math.round(y)})`,
     };
   } catch (error) {
     return {
@@ -981,10 +1066,9 @@ export async function iosSwipe(
     if (!preflight.ready) return preflight.error;
     const { driver, targetUdid } = preflight;
 
-    const x1 = Math.round(startX);
-    const y1 = Math.round(startY);
-    const x2 = Math.round(endX);
-    const y2 = Math.round(endY);
+    const toNative = await nativeMapper(targetUdid);
+    const [x1, y1] = toNative(startX, startY).map(Math.round);
+    const [x2, y2] = toNative(endX, endY).map(Math.round);
 
     if (driver === "axe") {
       const args: string[] = [
@@ -1022,7 +1106,7 @@ export async function iosSwipe(
 
     return {
       success: true,
-      result: `Swiped from (${x1}, ${y1}) to (${x2}, ${y2})`,
+      result: `Swiped from (${Math.round(startX)}, ${Math.round(startY)}) to (${Math.round(endX)}, ${Math.round(endY)})`,
     };
   } catch (error) {
     return {
@@ -2220,7 +2304,13 @@ export async function getDevicePixelRatio(
       }
       const screenSize = extractIOSScreenSize(stdout);
       if (screenSize) {
-        const dpr = calculateDPR(pixelWidth, screenSize.width);
+        // Long sides: in landscape the frame is 874 wide while simctl's
+        // capture stays portrait (1206), and 1206/874 rounded to a 1x scale
+        // that was then cached for the whole session.
+        const dpr = calculateDPR(
+          Math.max(pixelWidth, pixelHeight),
+          Math.max(screenSize.width, screenSize.height),
+        );
         dprCache.set(cacheKey, dpr);
         return dpr;
       }
