@@ -86,7 +86,7 @@ Returns:
 - FRAME PER ANCESTOR (position/size for every ancestor that hit-tested the point, in delivered-screenshot pixels — the same space as screenshots and tap)
 - PROPS of the innermost component (handlers as [Function], refs, testID, custom props)
 - the node's own style object
-- source {file, line, column} plus the owner chain as "Source ancestors" (set source=false to skip in tight loops)
+- source {file, line, column} plus the owner chain as "Source ancestors" (set source=false to skip in tight loops). Every line is where that component is RENDERED (its JSX in the parent), not where it is defined
 
 | Question you're asking | How it answers |
 |---|---|
