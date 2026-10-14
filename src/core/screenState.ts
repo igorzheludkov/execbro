@@ -790,30 +790,12 @@ export async function getScreenState(
         }
         if (!navState) navState = findNavState(roots[0].current, 0);
 
-        // Fallback: scan all fibers for memoizedState with navigation shape
-        // (catches anonymous BaseNavigationContainer when displayName/name is null)
-        if (!navState) {
-            function isNavState(v) {
-                return v && typeof v === 'object' && Array.isArray(v.routes) && v.routes.length > 0
-                    && typeof v.routes[0].name === 'string' && typeof v.index === 'number';
-            }
-            function findNavStateByShape(fiber, depth) {
-                if (!fiber || depth > 400) return null;
-                var s = fiber.memoizedState;
-                var checked = 0;
-                while (s && checked < 20) {
-                    if (isNavState(s.memoizedState)) return s.memoizedState;
-                    s = s.next;
-                    checked++;
-                }
-                var result = findNavStateByShape(fiber.child, depth + 1);
-                if (result) return result;
-                return findNavStateByShape(fiber.sibling, depth + 1);
-            }
-            navState = findNavStateByShape(roots[0].current, 0);
+        function isNavState(v) {
+            return v && typeof v === 'object' && Array.isArray(v.routes) && v.routes.length > 0
+                && typeof v.routes[0].name === 'string' && typeof v.index === 'number';
         }
 
-        // Last resort: React Navigation exposes the root state on a context provider's
+        // React Navigation exposes the root state on a context provider's
         // value, not on a hook's memoizedState. With createStaticNavigation the container
         // fiber is anonymous (no displayName) and nothing nav-shaped ever reaches
         // memoizedState, so every strategy above misses and the tool reports "no React
@@ -822,7 +804,14 @@ export async function getScreenState(
         // Measured across three apps: this provider is present in all of them (depth 20-40),
         // while the memoizedState shape exists only under dynamic config / expo-router.
         // That makes it the one location covering static config, dynamic config and
-        // expo-router alike. Kept last so the cheaper strategies still win when they work.
+        // expo-router alike.
+        //
+        // It must also run BEFORE the shape scan below. The first nav-shaped hook state
+        // in the tree can be a navigator's own copy that lacks its children's state: on
+        // the test app (drawer > tabs > stacks) the scan stopped at depth 40 with no
+        // state under StateTab, so after navigate to the nested Zustand screen the
+        // summary named StateTab (benchmark S10). getRootState() is the container's
+        // full tree, and its provider sat two levels deeper, so the order costs nothing.
         if (!navState) {
             function findNavStateByProviderValue(fiber, depth) {
                 if (!fiber || depth > 400) return null;
@@ -840,6 +829,25 @@ export async function getScreenState(
                 return findNavStateByProviderValue(fiber.sibling, depth + 1);
             }
             navState = findNavStateByProviderValue(roots[0].current, 0);
+        }
+
+        // Fallback: scan all fibers for memoizedState with navigation shape
+        // (catches anonymous BaseNavigationContainer when displayName/name is null)
+        if (!navState) {
+            function findNavStateByShape(fiber, depth) {
+                if (!fiber || depth > 400) return null;
+                var s = fiber.memoizedState;
+                var checked = 0;
+                while (s && checked < 20) {
+                    if (isNavState(s.memoizedState)) return s.memoizedState;
+                    s = s.next;
+                    checked++;
+                }
+                var result = findNavStateByShape(fiber.child, depth + 1);
+                if (result) return result;
+                return findNavStateByShape(fiber.sibling, depth + 1);
+            }
+            navState = findNavStateByShape(roots[0].current, 0);
         }
 
         if (navState && navState.routes) {
