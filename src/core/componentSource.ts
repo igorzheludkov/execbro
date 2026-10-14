@@ -146,13 +146,16 @@ export function buildDebugStackHarvestExpression(
                 return null;
             }
 
+            // Same bounds as inspectAtPoint (inspector.ts). At 500 hosts / depth 250
+            // a mid-size app lost 45% of its hosts there, and the hit-test ran on the
+            // survivors; here that named the source of some other element.
             var hostFibers = [];
             function walkFibers(fiber, depth) {
                 var cur = fiber;
                 while (cur) {
-                    if (hostFibers.length >= 500) return;
+                    if (hostFibers.length >= 20000) return;
                     if (typeof cur.type === 'string' && getMeasurable(cur)) hostFibers.push(cur);
-                    if (cur.child && depth < 250) walkFibers(cur.child, depth + 1);
+                    if (cur.child && depth < 2000) walkFibers(cur.child, depth + 1);
                     cur = cur.sibling;
                 }
             }
