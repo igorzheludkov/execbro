@@ -216,8 +216,9 @@ export async function getDefaultAndroidDevice(): Promise<string | null> {
 }
 
 /**
- * Locate the `emulator` binary. Returns the command string to invoke it
- * (either bare "emulator" if it's on PATH, or a quoted absolute path).
+ * Locate the `emulator` binary. Returns the command to pass to `execFile`
+ * (either bare "emulator" if it's on PATH, or an absolute path, unquoted:
+ * `execFile` runs no shell, so quotes would become part of the filename).
  * Returns null when the binary cannot be located. Mirrors `isAdbAvailable`'s
  * PATH → ANDROID_HOME → common-install-paths discovery order.
  */
@@ -238,7 +239,7 @@ async function findEmulatorBinary(): Promise<string | null> {
     for (const candidate of candidates) {
         try {
             await execFileAsync(candidate, ["-help"], { timeout: 3000 });
-            return `"${candidate}"`;
+            return candidate;
         } catch {
             // try next
         }
