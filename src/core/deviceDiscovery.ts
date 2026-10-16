@@ -103,6 +103,18 @@ async function discoverAndroid(): Promise<ListAllDevicesResult["android"]> {
         })
     );
 
+    // A running emulator must not depend on the `emulator` binary being found:
+    // that lookup misses whenever the SDK is off PATH and outside the few paths
+    // we probe, and the resolver then rejects a serial adb can see (issue #20).
+    // adb is the source of truth for what is running; the binary only adds
+    // stopped AVDs.
+    const matched = new Set(emulators.map((e) => e.serial));
+    for (const d of rawDevices) {
+        if (/^emulator-\d+$/.test(d.id) && !matched.has(d.id)) {
+            emulators.push({ name: d.model ?? d.id, serial: d.id, state: "running" });
+        }
+    }
+
     return { available: true, emulators, physical };
 }
 

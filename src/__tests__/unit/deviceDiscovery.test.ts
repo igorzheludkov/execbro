@@ -84,7 +84,24 @@ describe("listAllDevices", () => {
         expect(result.android.physical).toEqual([
             { model: "Pixel_7", serial: "R58M12345", state: "device" }
         ]);
-        expect(result.android.emulators).toEqual([]);
+        expect(result.android.emulators).toEqual([
+            { name: "emulator-5554", serial: "emulator-5554", state: "running" }
+        ]);
+    });
+
+    it("lists a running emulator from adb when the emulator binary finds no AVDs (issue #20)", async () => {
+        listIOSSimulatorsMock.mockResolvedValue({ success: true, simulators: [] });
+        listAndroidDevicesMock.mockResolvedValue({
+            success: true,
+            devices: [{ id: "emulator-5554", status: "device", model: "sdk_gphone64_arm64" }]
+        });
+        getAndroidEmulatorAvdsMock.mockResolvedValue([]);
+
+        const result = await listAllDevices();
+        expect(result.android.emulators).toEqual([
+            { name: "sdk_gphone64_arm64", serial: "emulator-5554", state: "running" }
+        ]);
+        expect(result.summary.booted).toBe(1);
     });
 
     it("reports ios.available=false when listIOSSimulators fails", async () => {

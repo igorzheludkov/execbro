@@ -53,6 +53,20 @@ describe("getAndroidEmulatorAvds", () => {
         const avds = await getAndroidEmulatorAvds();
         expect(avds).toEqual([]);
     });
+
+    it("runs the fallback emulator path unquoted when the binary is not on PATH (issue #20)", async () => {
+        execAsyncMock.mockImplementation(async (file, args) => {
+            if (file === "adb") return { stdout: "Android Debug Bridge", stderr: "" };
+            if (file === "emulator") throw new Error("ENOENT");
+            // execFile runs no shell: a quoted path is a filename that does not exist
+            if (file.startsWith('"') || !file.endsWith("/emulator/emulator")) throw new Error("ENOENT");
+            if (args[0] === "-help") return { stdout: "Android Emulator usage", stderr: "" };
+            return { stdout: "Pixel_7_API_34\n", stderr: "" };
+        });
+
+        const avds = await getAndroidEmulatorAvds();
+        expect(avds).toEqual(["Pixel_7_API_34"]);
+    });
 });
 
 describe("getAdbIdForAvd", () => {
