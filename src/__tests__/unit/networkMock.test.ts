@@ -1,4 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
+import vm from "node:vm";
 import { buildMockPushScript } from "../../core/networkInterceptor.js";
 import { runWithMocks } from "../helpers/mock-harness.js";
 
@@ -185,6 +186,58 @@ describe("injected interceptor — mock matching", () => {
     });
 });
 
+describe("injected interceptor — GraphQL operation matching", () => {
+    const rules = [{ id: "m1", url: "/graphql", operation: "GetLicenseInfo", mode: "replace", status: 500 }];
+
+    function post(t: ReturnType<typeof runWithMocks>, body: string, url = "https://api.example.com/graphql") {
+        const xhr = t.newXhr();
+        xhr.open("POST", url);
+        xhr.send(body);
+        t.flush();
+        return xhr;
+    }
+
+    it("matches operationName in the body and lets other operations through", () => {
+        const t = runWithMocks(rules);
+        expect(post(t, JSON.stringify({ operationName: "GetLicenseInfo", query: "query GetLicenseInfo { a }" })).status).toBe(500);
+        expect(post(t, JSON.stringify({ operationName: "GetUser", query: "query GetUser { a }" })).sendCalled).toBe(1);
+    });
+
+    it("falls back to the name in the query document", () => {
+        const t = runWithMocks(rules);
+        expect(post(t, JSON.stringify({ query: "query GetLicenseInfo($id: ID) { a }" })).status).toBe(500);
+    });
+
+    it("is exact, so a longer name sharing the prefix does not match", () => {
+        const t = runWithMocks(rules);
+        expect(post(t, JSON.stringify({ operationName: "GetLicenseInfoV2" })).sendCalled).toBe(1);
+    });
+
+    it("matches operationName in a GET url", () => {
+        const t = runWithMocks(rules);
+        const xhr = t.newXhr();
+        xhr.open("GET", "https://api.example.com/graphql?operationName=GetLicenseInfo&variables=%7B%7D");
+        xhr.send();
+        t.flush();
+        expect(xhr.status).toBe(500);
+    });
+
+    it("never matches a batched array body", () => {
+        const t = runWithMocks(rules);
+        expect(post(t, JSON.stringify([{ operationName: "GetLicenseInfo" }, { operationName: "GetUser" }])).sendCalled).toBe(1);
+    });
+
+    it("still requires the url to match", () => {
+        const t = runWithMocks(rules);
+        expect(post(t, JSON.stringify({ operationName: "GetLicenseInfo" }), "https://api.example.com/other").sendCalled).toBe(1);
+    });
+
+    it("with no url, matches the operation on any endpoint", () => {
+        const t = runWithMocks([{ id: "m1", url: "", operation: "GetLicenseInfo", mode: "replace", status: 500 }]);
+        expect(post(t, JSON.stringify({ operationName: "GetLicenseInfo" }), "https://other.example.com/gql").status).toBe(500);
+    });
+});
+
 describe("buildMockPushScript", () => {
     it("replaces the app's rule list wholesale", () => {
         const script = buildMockPushScript('[{"id":"m1"}]');
@@ -206,5 +259,26 @@ describe("buildMockPushScript", () => {
         live.send();
         t.flush();
         expect(live.status).toBe(404);
+    });
+});
+
+describe("operation rules and an older interceptor", () => {
+    it("the push script holds operation rules back when the app lacks the capability", () => {
+        const ctx: Record<string, unknown> = {};
+        vm.createContext(ctx);
+        vm.runInContext(buildMockPushScript(JSON.stringify([
+            { id: "m1", url: "/graphql", operation: "GetUser", mode: "replace" },
+            { id: "m2", url: "/orders", mode: "replace" },
+        ])), ctx);
+        expect((ctx.__RN_NET_MOCKS__ as Array<{ id: string }>).map((r) => r.id)).toEqual(["m2"]);
+    });
+
+    it("the current interceptor advertises the capability, so nothing is held back", () => {
+        const t = runWithMocks([{ id: "m1", url: "/graphql", operation: "GetUser", mode: "replace", status: 500 }]);
+        const xhr = t.newXhr();
+        xhr.open("POST", "https://api.example.com/graphql");
+        xhr.send(JSON.stringify({ operationName: "GetUser" }));
+        t.flush();
+        expect(xhr.status).toBe(500);
     });
 });
