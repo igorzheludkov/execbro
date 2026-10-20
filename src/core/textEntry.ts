@@ -114,7 +114,12 @@ const RESOLVE_SETTLE_MS = 500;
 export type TextEntryDeps = {
     runOp: (op: InputOp, query?: InputQuery, device?: string) => Promise<InputResult>;
     typeHid: (text: string) => Promise<{ success: boolean; error?: string }>;
-    raise: () => Promise<RaiseResult>;
+    /**
+     * Raises the software keyboard after the write. Absent unless the caller
+     * asked for it: on iOS it activates Simulator, which steals the host's
+     * window focus, so whatever the developer is typing lands in the simulator.
+     */
+    raise?: () => Promise<RaiseResult>;
     /**
      * Reads the platform accessibility tree. Uncontrolled fields mirror nothing
      * into props, so this is the only way to verify a write into one.
@@ -507,7 +512,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
 
     // Could not read the field at all — say so instead of guessing either way.
     if (landed === undefined) {
-        const keyboard = await deps.raise();
+        const keyboard = await deps.raise?.();
         return {
             success: true,
             ...(kbNote ? { note: kbNote } : {}),
@@ -573,7 +578,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     }
 
     if (appendedOntoUnknown && landed !== desired) {
-        const keyboard = await deps.raise();
+        const keyboard = await deps.raise?.();
         return {
             success: true,
             ...(kbNote ? { note: kbNote } : {}),
@@ -588,7 +593,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // exact comparison above is deliberately strict, but reporting this as a
     // failure sent callers retrying a write that had already landed.
     if (landed !== undefined && landed !== desired && isFieldTransform(desired, landed)) {
-        const keyboard = await deps.raise();
+        const keyboard = await deps.raise?.();
         return {
             success: true,
             ...(kbNote ? { note: kbNote } : {}),
@@ -605,7 +610,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
         // A read that failed only on the retry is still "unconfirmed", not a
         // mismatch — we have no evidence about what the field holds.
         if (landed === undefined) {
-            const keyboard = await deps.raise();
+            const keyboard = await deps.raise?.();
             return {
                 success: true, ...(kbNote ? { note: kbNote } : {}), path: first.path, verified: false, retried, keyboard,
                 error: "the rewrite could not be read back, so the result is unconfirmed"
@@ -631,7 +636,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     }
 
     // Last, and never fatal.
-    const keyboard = await deps.raise();
+    const keyboard = await deps.raise?.();
     return {
         success: true,
         ...(kbNote ? { note: kbNote } : {}),

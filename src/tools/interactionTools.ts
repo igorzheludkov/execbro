@@ -1184,7 +1184,8 @@ export function registerInteractionTools(server: McpServer): void {
                 "VERIFICATION: the write is read back and compared EXACTLY. A mismatch retries once, then fails with `sent` vs `landed`.\n" +
                 "AMBIGUITY: several matching inputs -> the tool refuses and returns a numbered candidate list; pick one with `index`.\n" +
                 "NATIVE SCREENS: with no React fiber tree at all (system dialog, native onboarding, non-RN app) this falls back automatically to typing into whatever the OS reports as focused — tap it first. native:true forces that path, and ignores testID/component/textMatch: it cannot target, only type into what already has focus." +
-                "\nLIMITATIONS: fields with no onChangeText fall back to the platform driver, which is US-keyboard only — non-ASCII fails there. The native path shares that limit.\n" +
+                "\nLIMITATIONS: fields with no onChangeText fall back to the platform driver, which is US-keyboard only — non-ASCII fails there. The native path shares that limit." +
+                "\nKEYBOARD: the on-screen keyboard is left as the field left it. A simulator with a hardware keyboard connected keeps it hidden, so pass showKeyboard:true before checking layout with the keyboard up.\n" +
                 "GOOD: input_text({ testID: \"new-topic-title\", text: \"Q3 budget\", replace: true })\n" +
                 "GOOD: input_text({ text: \"1234\", native: true }) — a system PIN prompt, no RN screen behind it.\n" +
                 "BAD: input_text({ text: \"...\" }) with nothing focused — pass a target instead.\n",
@@ -1219,10 +1220,16 @@ export function registerInteractionTools(server: McpServer): void {
                     .optional()
                     .describe(
                         "Skip React targeting and type directly into whichever field the OS reports as focused, via the platform accessibility tree. For system dialogs and non-RN screens. Ignores testID/component/textMatch/index. Auto-applied when no fiber tree is reachable at all, even without this flag."
+                    ),
+                showKeyboard: z
+                    .boolean()
+                    .optional()
+                    .describe(
+                        "Raise the software keyboard after writing, for layout checks that need it on screen. Default false. On iOS this brings the Simulator window to the front, taking keyboard focus from whatever the developer is typing in, so leave it off for plain form filling such as logging in."
                     )
             }
         },
-        async ({ text, testID, component, textMatch, index, replace, device, native }) => {
+        async ({ text, testID, component, textMatch, index, replace, device, native, showKeyboard }) => {
             // Chromium: DOM targeting plus Input.insertText. native:true skips it, since that asks for the OS layer (a system dialog).
             const chromeApp = native === true ? null : chromiumAppFor("input_text", device);
             if (chromeApp) {
@@ -1255,7 +1262,10 @@ export function registerInteractionTools(server: McpServer): void {
                     runOp: (op, query, dev) => runInputOp(op, query, dev),
                     typeHid: async (t) =>
                         platform === "ios" ? await iosInputText(t, iosUdid) : await androidInputText(t, androidSerial),
-                    raise: () => raiseKeyboard(platform, platform === "ios" ? iosUdid : androidSerial),
+                    // Opt-in: the iOS raise activates Simulator, and the developer's own keystrokes follow the focus into it.
+                    raise: showKeyboard === true
+                        ? () => raiseKeyboard(platform, platform === "ios" ? iosUdid : androidSerial)
+                        : undefined,
                     readNativeFields: () =>
                         readNativeFields(platform, platform === "ios" ? iosUdid : androidSerial)
                 }
