@@ -108,6 +108,14 @@ network_mock({action:"add", url:"/me", mode:"tamper", remove:["data.email"]})
 network_mock({action:"add", url:"/me", mode:"tamper", set:{"data.plan":"expired"}})
 ```
 
+**Mock one GraphQL operation** — every operation shares the URL, so name it with `operation` (matched exactly against `operationName` in the body, the name in the query, or `operationName` in a GET URL; batched bodies never match):
+
+```
+network_mock({action:"add", url:"/graphql", operation:"GetLicenseInfo", status:500})
+```
+
+If `add` answers NOT ACTIVE YET, the app still runs an interceptor from an older execbro: `reload_app` once.
+
 **Test a retry** — `times: 1` fires once and then passes through, so the first
 attempt fails and the second succeeds:
 

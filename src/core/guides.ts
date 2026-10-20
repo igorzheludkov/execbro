@@ -278,6 +278,8 @@ dismiss_keyboard acts on whatever has focus; input_text focuses its own target u
 
 Multi-device sessions: pass device="<rn-device-name>" (substring match) to disambiguate when replace:true is used. Single-device sessions can omit.
 
+The on-screen keyboard is left as the field left it. A simulator with a hardware keyboard connected keeps it hidden, so pass showKeyboard:true when a layout check needs it up. It is off by default because the iOS raise brings the Simulator window to the front and takes the developer's keyboard focus.
+
 ### Reading the result — the field transforms text, and that is not a failure
 input_text reads the field back and compares. Several differences are the FIELD doing its job, and are reported as verified rather than as a mismatch:
 - autoCapitalize (RN defaults to "sentences", so "abc" lands as "Abc"), autocorrect respacing, and a formatted/decorated value.
