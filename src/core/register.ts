@@ -15,7 +15,7 @@ import { chromiumGate } from "./chromiumCapabilities.js";
 import { recordToolCall } from "./screenStaleness.js";
 import { EnvironmentError, UserInputError, type FailureKind } from "./errors.js";
 import { estimateImageTokens } from "./toolHelpers.js";
-import { redactSecrets, redactionEnabled } from "./redact.js";
+import { containsCredential, redactSecrets, redactionEnabled, REDACTION_OFF_NOTE } from "./redact.js";
 import { connectedApps, shouldShowFeedbackHint, markFeedbackHintShown, pushLogBox } from "./index.js";
 import { ensureLicense, getUsageInfo } from "./license.js";
 import { freezeSessionVerdict, isToolBlocked, usageWarningLine } from "../pro/usageGate.js";
@@ -175,6 +175,11 @@ export function registerToolWithTelemetry(
                         item.text = redactSecrets(item.text);
                     }
                 }
+            } else if (Array.isArray(result?.content)
+                && result.content.some((item: any) => item.type === "text" && typeof item.text === "string" && containsCredential(item.text))) {
+                // One line per result, not per header: the human chose this,
+                // the agent just needs to know before it quotes a token.
+                result.content.push({ type: "text", text: REDACTION_OFF_NOTE });
             }
             // Check if result indicates an error
             if (result?.isError) {

@@ -172,6 +172,26 @@ export function redactionEnabled(): boolean {
 }
 
 /**
+ * With redaction off everything behaves as designed and nothing says so, while
+ * every tool description promises `[secret:<handle>]`. A full token in the
+ * output then reads as a redaction bug, and an empty vault as "the app made no
+ * authenticated requests" (seen 2026-10-20). This line closes that gap.
+ */
+export const REDACTION_OFF_NOTE =
+    "Note: redaction is off (EXECBRO_REDACT=off in the MCP server config), so credentials are shown in full and not captured into the vault. Remove the variable and restart the server to turn it back on.";
+
+/**
+ * Would redactSecrets have rewritten anything? Side-effect free: it never
+ * touches the vault, which redactSecrets does even with `catalog: false`.
+ * `search` ignores the `g` flag and lastIndex, so the shared regexes are safe.
+ */
+export function containsCredential(text: string): boolean {
+    if ([JWT, PROVIDER_KEY, AUTH_SCHEME, QUERY_PARAM, LOOSE_FIELD].some((re) => text.search(re) !== -1)) return true;
+    for (const m of text.matchAll(JSON_FIELD)) if (m[2] && !PLACEHOLDER.test(m[2])) return true;
+    return false;
+}
+
+/**
  * `origin` is the host the text came from, when the call site knows one. The
  * generic chokepoint does not; the network body renderer does, and passing it
  * is what lets a token first seen in a response body be named after the host
