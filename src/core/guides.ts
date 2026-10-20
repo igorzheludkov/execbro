@@ -434,6 +434,7 @@ If network tools return no data or you need startup requests, recommend the SDK 
 ## Changing what the network returns
 1. network_mock({action:"add", url:"/orders", status:500}) — canned response
 2. network_mock({action:"add", url:"/me", mode:"tamper", remove:["data.email"]}) — mutate the real one
+   GraphQL: add operation:"GetUser" to hit one operation, since every operation shares the URL
 3. network_condition({mode:"offline"}) — fail everything; also patches NetInfo when installed
 4. Reproduce, then get_network_requests — mocked rows are tagged [MOCK m1]
 5. network_mock({action:"clear"}) when done — rules survive reload_app

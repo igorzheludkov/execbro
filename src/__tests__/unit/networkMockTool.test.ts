@@ -79,6 +79,15 @@ describe("formatRuleList", () => {
         expect(formatRuleList("iPhone")).toContain("network_condition");
     });
 
+    it("shows a GraphQL operation next to the url", () => {
+        addRule("iPhone", { url: "/graphql", operation: "GetUser", mode: "replace" });
+        expect(formatRuleList("iPhone")).toContain("ANY /graphql op:GetUser");
+    });
+
+    it("rejects an operation that is not a GraphQL name", () => {
+        expect(() => addRule("iPhone", { url: "/graphql", operation: "query GetUser", mode: "replace" })).toThrow(/GraphQL operation name/);
+    });
+
     it("marks a rule whose times budget is exhausted", () => {
         const r = addRule("iPhone", { url: "/retry", mode: "replace", times: 1 });
         r.hits = 1;

@@ -371,6 +371,7 @@
             "method",
             "mode",
             "networkError",
+            "operation",
             "remove",
             "set",
             "status",

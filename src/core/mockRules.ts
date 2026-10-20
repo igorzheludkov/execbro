@@ -13,6 +13,8 @@ export interface MockRule {
     id: string;
     url: string;
     method?: string;
+    /** GraphQL operation name, matched exactly against the request body (or `operationName` in a GET URL). */
+    operation?: string;
     mode: "replace" | "tamper";
     times?: number;
     delayMs?: number;
@@ -196,8 +198,16 @@ export function validateUrlPattern(pattern: string): void {
     }
 }
 
+const GRAPHQL_NAME = /^[_A-Za-z][_0-9A-Za-z]*$/;
+
 export function addRule(device: string, input: MockRuleInput): MockRule {
     validateUrlPattern(input.url);
+    if (input.operation !== undefined && !GRAPHQL_NAME.test(input.operation)) {
+        throw new UserInputError(
+            `operation "${input.operation}" is not a GraphQL operation name. Pass the bare name, e.g. "GetUser", as get_network_requests shows it.`,
+            "mock_operation_invalid"
+        );
+    }
     const rule: MockRule = { ...input, id: `m${nextId++}`, hits: 0 };
     const list = rulesByDevice.get(device) ?? [];
     list.push(rule);
@@ -276,6 +286,12 @@ export function serializeRules(device: string): string {
     return JSON.stringify(wire);
 }
 
+/** "POST /graphql op:GetUser", shared by the add confirmation and the list. */
+export function describeRuleMatch(r: Pick<MockRule, "method" | "url" | "operation">): string {
+    const op = r.operation ? ` op:${r.operation}` : "";
+    return `${r.method ?? "ANY"} ${r.url || "<any url>"}${op}`;
+}
+
 /**
  * Renders the rule list for `network_mock({action:"list"})`.
  *
@@ -291,7 +307,7 @@ export function formatRuleList(device: string): string {
         const status = r.status ? ` ${r.status}` : "";
         const times = r.times ? ` (times:${r.times}${r.hits >= r.times ? ", spent" : ""})` : "";
         const owner = r.source === "condition" ? "  [owned by network_condition]" : "";
-        return `[${r.id}] ${r.method ?? "ANY"} ${r.url || "<any url>"} -> ${r.mode}${status}${times}  hits=${r.hits}${owner}`;
+        return `[${r.id}] ${describeRuleMatch(r)} -> ${r.mode}${status}${times}  hits=${r.hits}${owner}`;
     });
 
     return (

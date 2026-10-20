@@ -47,6 +47,14 @@ function setup(rules: unknown[], nativeFetch = true, realBody = '{"user":{"email
 }
 
 describe("injected interceptor — native fetch mocking (chromium)", () => {
+    it("matches a GraphQL operation in init.body", async () => {
+        const h = setup([{ id: "m1", url: "/graphql", operation: "GetUser", mode: "replace", status: 500 }]);
+        const hit = await h.fetch("/graphql", { method: "POST", body: JSON.stringify({ operationName: "GetUser" }) });
+        expect(hit.status).toBe(500);
+        await h.fetch("/graphql", { method: "POST", body: JSON.stringify({ operationName: "GetOrders" }) });
+        expect(h.realCalls).toHaveLength(1);
+    });
+
     it("replace: synthesizes the response and never calls the real fetch", async () => {
         const h = setup([{ id: "m1", url: "/orders", mode: "replace", status: 500, body: '{"error":"boom"}', headers: { "content-type": "application/json" } }]);
         const res = await h.fetch("/orders?page=1");
