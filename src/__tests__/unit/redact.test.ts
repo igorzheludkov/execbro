@@ -1,5 +1,5 @@
-import { redactSecrets } from "../../core/redact.js";
-import { resetVaultForTests, vaultAdd } from "../../core/vault.js";
+import { containsCredential, redactSecrets } from "../../core/redact.js";
+import { resetVaultForTests, vaultAdd, vaultEntries } from "../../core/vault.js";
 
 const JWT =
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
@@ -126,5 +126,26 @@ describe("a value that already carries a handle", () => {
         );
         expect(out).not.toContain("OTHERSECRETVALUE1234567890");
         expect(out).toContain("[redacted secret");
+    });
+});
+
+describe("containsCredential", () => {
+    it("flags what redactSecrets would rewrite", () => {
+        expect(containsCredential("Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123")).toBe(true);
+        expect(containsCredential("Cookie: session=abc123def456")).toBe(true);
+        expect(containsCredential("X-API-Key: k_live_12345678")).toBe(true);
+        expect(containsCredential('{"token":"abcd1234"}')).toBe(true);
+    });
+
+    it("ignores ordinary output and placeholders", () => {
+        expect(containsCredential("GET https://api.example.com/v1/items 200")).toBe(false);
+        expect(containsCredential('{"token":"null"}')).toBe(false);
+        expect(containsCredential("X-Request-Id: 0f8fad5b-d9cb-469f-a165-70867728950e")).toBe(false);
+    });
+
+    it("never adds to the vault", () => {
+        const before = vaultEntries().length;
+        containsCredential("Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXZhbHVl");
+        expect(vaultEntries().length).toBe(before);
     });
 });

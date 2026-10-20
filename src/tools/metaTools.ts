@@ -10,6 +10,7 @@ import { refreezeSessionVerdict } from "../pro/usageGate.js";
 import { getServerVersion, TELEMETRY_JSONL_PATH } from "../core/telemetry.js";
 import { getTargetPlatform } from "../core/state.js";
 import { vaultEntries, vaultCatalogLine, vaultSlotHandles } from "../core/vault.js";
+import { redactionEnabled, REDACTION_OFF_NOTE } from "../core/redact.js";
 import { formatIssueBody, buildGitHubUrl } from "../core/feedback.js";
 
 export interface MetaToolOptions {
@@ -217,6 +218,11 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
         },
         async () => {
             const entries = vaultEntries();
+            if (entries.length === 0 && !redactionEnabled()) {
+                // Otherwise the reply below sends the user looking for
+                // missing authenticated requests instead of at their config.
+                return { content: [{ type: "text" as const, text: REDACTION_OFF_NOTE }] };
+            }
             if (entries.length === 0) {
                 return {
                     content: [{

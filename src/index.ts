@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createServer as createHttpServer, type ServerResponse } from "node:http";
 
 import { DECISION_TREE, UNTRUSTED_DATA_RULE } from "./core/guides.js";
+import { redactionEnabled, REDACTION_OFF_NOTE } from "./core/redact.js";
 import { identifyIfDevMode, shutdownPostHog } from "./core/posthog.js";
 import { getInstallationId, isDevMode, initTelemetry } from "./core/telemetry.js";
 import {
@@ -59,7 +60,10 @@ export const SERVER_INSTRUCTIONS: string = [
     "",
     DECISION_TREE,
     "",
-    "Call get_usage_guide with no arguments for the same decision tree plus a summary of every guide."
+    "Call get_usage_guide with no arguments for the same decision tree plus a summary of every guide.",
+    // Said once at connect, so the agent can warn the user before a token
+    // lands in the transcript rather than after.
+    ...(redactionEnabled() ? [] : ["", REDACTION_OFF_NOTE])
 ].join("\n");
 
 const server = new McpServer(
