@@ -154,6 +154,7 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 
 **Type text** — `mcp__execbro__input_text`, cross-platform:
 - Give it a `testID` and it focuses the field itself, types, then reads the value back and compares it, so a silent miss is reported rather than assumed
+- `showKeyboard:true` raises the software keyboard after writing, for layout checks with it up. Off by default: on iOS it brings Simulator to the front and takes the developer's keyboard focus
 - `replace:true` clears a pre-filled field first (Bridgeless/Fabric). It APPENDs by default, which is the usual cause of `https://demo.example.comhttps://app.example.com`
 - `mcp__execbro__dismiss_keyboard` blurs the focused input when the keyboard covers what you need next. Nothing focused with the keyboard already down is a SUCCESS — do not go hunting for a field to blur. Nothing focused with the keyboard up means a native field owns it (system dialog, WebView, non-RN screen): use `android_key_event({key:"BACK"})` or tap outside the field on iOS
 - A `testID` on a WRAPPER around the input resolves, provided exactly one mounted input is under it — the custom `<Input testID="x">` that keeps the id on its container is the ordinary RN shape. A wrapper around several fields is refused rather than guessed between. When NO input on the screen carries a testID, the error says that instead of echoing your id back: target by placeholder/label (`textMatch=`) or by `index`
