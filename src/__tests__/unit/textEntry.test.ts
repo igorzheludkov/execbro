@@ -195,6 +195,14 @@ describe("enterText", () => {
         expect(raiseOrder).toBeGreaterThan(lastOp);
     });
 
+    it("leaves the keyboard alone when no raise is supplied", async () => {
+        // The iOS raise activates Simulator and takes the developer's keyboard focus, so it is opt-in.
+        const d = deps([found(), found({ value: "hi" }), found({ value: "hi" })], { raise: undefined });
+        const r = await enterText({ text: "hi" }, d);
+        expect(r).toMatchObject({ success: true, verified: true });
+        expect(r.keyboard).toBeUndefined();
+    });
+
     it("reports verified:false for an uncontrolled field with no accessibility read-back", async () => {
         // Without readNativeFields there is no way to see what landed, so the
         // write must be reported as unconfirmed rather than as a success.
