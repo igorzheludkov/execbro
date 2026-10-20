@@ -126,6 +126,31 @@ describe("mirrorOnce", () => {
         expect(getNetworkBuffer("dev").size).toBe(2);
     });
 
+    it("counts a restart CDP already bumped for only once", async () => {
+        executeInApp.mockResolvedValue(payload([netEntry("n1")], [], "run-1"));
+        await mirrorOnce("dev");
+        bumpEpoch("dev"); // executionContextsCleared on reload_app
+        executeInApp.mockResolvedValue(payload([netEntry("n1")], [], "run-2"));
+        await mirrorOnce("dev");
+        expect(getEpoch("dev")).toBe(2);
+    });
+
+    it("pairs an SDK entry with the mocked interceptor row for the same call, once", async () => {
+        const ts = Date.now();
+        const body = '{"operationName":"GetLicenseInfo"}';
+        getNetworkBuffer("dev").set("js-1", {
+            requestId: "js-1", timestamp: new Date(ts), method: "POST", url: "https://api.test/graphql",
+            headers: {}, postData: body, completed: true, epoch: 1, capturedBy: "interceptor", mocked: true, mockId: "m1",
+        });
+        const sdk = (id: string, b: string) => ({ ...netEntry(id), timestamp: ts + 5, method: "POST", url: "https://api.test/graphql", requestBody: b });
+        executeInApp.mockResolvedValue(payload([sdk("s1", body), sdk("s2", body), sdk("s3", '{"operationName":"GetUser"}')], []));
+        const result = await mirrorOnce("dev");
+        expect(result.network).toBe(2);
+        expect(getNetworkBuffer("dev").getAll().map((r) => r.requestId).sort()).toEqual(["js-1", "s2", "s3"]);
+        // A later poll does not resurrect the absorbed copy.
+        expect((await mirrorOnce("dev")).network).toBe(0);
+    });
+
     it("does not bump while the runtime nonce is stable", async () => {
         executeInApp.mockResolvedValue(payload([netEntry("n1")], [], "run-1"));
         await mirrorOnce("dev");
