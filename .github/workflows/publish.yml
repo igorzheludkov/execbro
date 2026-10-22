@@ -32,7 +32,9 @@ jobs:
         env:
           BUILD_TOKEN: ${{ secrets.BUILD_TOKEN }}
 
-      - run: npm publish --provenance
+      # Each publish skips a version that is already live, so a job that failed
+      # part-way (e.g. a Sigstore 502 on a mirror) can be re-run as is.
+      - run: npm view "$(npm pkg get name | tr -d '"')@$(npm pkg get version | tr -d '"')" version 2>/dev/null | grep -q . || npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -42,7 +44,7 @@ jobs:
           npm pkg set description="React Native AI devtools: MCP server giving AI agents eyes and hands in your running app (logs, network, state inspection, tap, screenshot). Published as ExecBro."
           npm pkg set bin.react-native-ai-devtools=./build/index.js
           npm pkg delete bin.execbro
-          npm publish --provenance
+          npm view "$(npm pkg get name | tr -d '"')@$(npm pkg get version | tr -d '"')" version 2>/dev/null | grep -q . || npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -52,6 +54,6 @@ jobs:
           # description change so each legacy listing leads with its own searchable name.
           npm pkg set name=react-native-ai-debugger
           npm pkg set description="React Native AI debugger: MCP server giving AI agents eyes and hands in your running app (logs, network, state inspection, tap, screenshot). Published as ExecBro."
-          npm publish --provenance
+          npm view "$(npm pkg get name | tr -d '"')@$(npm pkg get version | tr -d '"')" version 2>/dev/null | grep -q . || npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
