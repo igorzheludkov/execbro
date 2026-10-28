@@ -12,6 +12,7 @@ import { getTargetPlatform } from "../core/state.js";
 import { vaultEntries, vaultCatalogLine, vaultSlotHandles } from "../core/vault.js";
 import { redactionEnabled, REDACTION_OFF_NOTE } from "../core/redact.js";
 import { formatIssueBody, buildGitHubUrl } from "../core/feedback.js";
+import { recordAction } from "../core/actionLog.js";
 
 export interface MetaToolOptions {
     devMode: boolean;
@@ -327,7 +328,21 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
                             isError: true,
                         };
                     }
-                    return await entry.handler(args || {});
+                    // The registry holds the raw handler, so the chokepoint never
+                    // sees this call; record the action here instead.
+                    const startedAt = Date.now();
+                    try {
+                        const result = await entry.handler(args || {});
+                        recordAction({
+                            tool, args, startedAt, endedAt: Date.now(), ok: !result?.isError,
+                            error: result?.isError ? (result._errorMessage ?? result.content?.[0]?.text) : undefined,
+                            meaningful: result?._meaningful,
+                        });
+                        return result;
+                    } catch (error) {
+                        recordAction({ tool, args, startedAt, endedAt: Date.now(), ok: false, error: error instanceof Error ? error.message : String(error) });
+                        throw error;
+                    }
                 }
 
                 return {

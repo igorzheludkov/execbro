@@ -13,6 +13,7 @@ import { resolveConnectedAppByDevice, peekTargetApp, dialogGateFor } from "./con
 import { nativeGate } from "./nativeCapabilities.js";
 import { chromiumGate } from "./chromiumCapabilities.js";
 import { recordToolCall } from "./screenStaleness.js";
+import { recordAction } from "./actionLog.js";
 import { EnvironmentError, UserInputError, type FailureKind } from "./errors.js";
 import { estimateImageTokens } from "./toolHelpers.js";
 import { containsCredential, redactSecrets, redactionEnabled, REDACTION_OFF_NOTE } from "./redact.js";
@@ -315,6 +316,9 @@ export function registerToolWithTelemetry(
             // PREVIOUS tool — which is what screenStaleness needs to tell
             // "the agent moved the screen" from "someone else did".
             recordToolCall(toolName);
+            // After redaction above, so a failure reason carries no credential.
+            // Synchronous and self-guarded: the timeline must never cost a call.
+            recordAction({ tool: toolName, args, startedAt: startTime, endedAt: Date.now(), ok: success, error: errorMessage, meaningful });
             const targetPlatform = resolvedPlatform ?? invocationPlatform(toolName, args);
             trackToolInvocation(toolName, success, duration, errorMessage, errorContext, inputTokens, outputTokens, targetPlatform, emptyResult, meaningful, changeRate, tapStrategy, iosDriver, responsePreview, emptyReason, artifactKey, ocrClosestMatch, fiberPressableCount, accessibilityMatchCount, appRoute, errorOrigin, failureKind);
             // Classify this invocation's platform kind so PostHog breakdowns can split RN vs Native.
