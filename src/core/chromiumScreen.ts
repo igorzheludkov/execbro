@@ -15,6 +15,7 @@ import { evaluateJson } from "./cdpCommand.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 import { pxPerCss, chromiumViewport, collectDomTargets, type ChromiumViewport } from "./chromium.js";
 import type { ScreenState, ScreenStateOverlay, ScreenStatePressable } from "./screenState.js";
+import { routeNameOf } from "./chromiumNavigation.js";
 
 export interface CssRect { x: number; y: number; w: number; h: number }
 
@@ -305,15 +306,11 @@ export function buildScreenCollectJs(): string {
 }
 
 function routeOf(url: string): ScreenState["route"] {
-    try {
-        const u = new URL(url);
-        // A data: URL's "path" is the whole document.
-        const name = u.protocol === "data:" ? "(data: URL)" : u.pathname + u.hash;
-        const params = [...u.searchParams.keys()].length > 0 ? Object.fromEntries(u.searchParams) : null;
-        return { name, params, stack: [name] };
-    } catch {
-        return null;
-    }
+    const name = routeNameOf(url);
+    if (name === null) return null;
+    const u = new URL(url);
+    const params = [...u.searchParams.keys()].length > 0 ? Object.fromEntries(u.searchParams) : null;
+    return { name, params, stack: [name] };
 }
 
 export function rawToScreenState(raw: RawScreen): ScreenState {

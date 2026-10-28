@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import type { FailureKind } from "./errors.js";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
+import { recordChromiumNavigation } from "./chromiumNavigation.js";
 import { connectedApps, isSupersededSocket, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
@@ -854,6 +855,17 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
     }
 
     const method = message.method as string;
+
+    // Route changes on chromium (Page.enable is only sent there). A child
+    // frame's load is not the page moving. ponytail: navigatedWithinDocument
+    // is accepted from any frame; an iframe doing pushState would show as a
+    // route change. Filter on frameId === device.id if that ever happens.
+    if (method === "Page.frameNavigated" || method === "Page.navigatedWithinDocument") {
+        const p = message.params as { frame?: { url?: string; parentId?: string }; url?: string };
+        const url = method === "Page.frameNavigated" ? (p.frame?.parentId ? undefined : p.frame?.url) : p.url;
+        if (url) recordChromiumNavigation(deviceName, url, getEpoch(deviceName), Date.now());
+        return;
+    }
 
     // JavaScript dialogs on chromium. The page is paused while one is open; the
     // tracker lets the gate and the input races report it instead of timing out.
