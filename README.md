@@ -140,6 +140,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `scan_metro`                            | **Start here** — scan for Metro servers and auto-connect                                 |
 | `get_logs` / `search_logs`              | Capture and search console logs with filtering and summaries                             |
 | `get_network_requests`                  | Monitor HTTP requests with method/status filtering                                       |
+| `get_timeline`                          | Actions, route changes, requests, logs and restarts in one time-ordered list              |
 | `get_screen_state`                      | **Orientation snapshot** — active route, overlays, and every element with a tap-ready `(x, y)` |
 | `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
 | `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |

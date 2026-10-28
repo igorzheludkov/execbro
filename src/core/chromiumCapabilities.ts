@@ -17,7 +17,7 @@ export const CHROMIUM_TOOLS: Set<string> = new Set([
     "get_license_status", "activate_license", "delete_account",
     "send_feedback", "reset_telemetry", "get_images", "electron_launch_app",
     // Logs
-    "get_logs", "search_logs", "clear_logs", "get_log_details",
+    "get_logs", "search_logs", "clear_logs", "get_log_details", "get_timeline",
     // Network: capture, replay and mocking (the injected layer intercepts native fetch there too)
     "get_network_requests", "search_network", "get_request_details", "clear_network", "network_replay",
     "network_mock", "network_condition",

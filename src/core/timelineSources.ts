@@ -92,6 +92,10 @@ export async function collectTimeline(opts: CollectOptions, deps: SourceDeps = r
         unavailable.add(s);
         notes.push(`${s}: unavailable (${why})`);
     };
+    // Nothing has ever connected: in-app sources have no device to read from.
+    if (devices.length === 0) {
+        for (const s of ["routes", "refresh"] as const) if (want(s)) fail(s, "no app has connected yet");
+    }
 
     if (want("actions")) {
         for (const a of getActions()) {
