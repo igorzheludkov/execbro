@@ -102,6 +102,7 @@ describe("collectTimeline in-app sources", () => {
         expect(Math.abs(route.at - (NOW - 1000))).toBeLessThan(200);
         expect(r.events.find((e) => e.kind === "refresh")?.text).toBe("↻ edit applied: Cart.tsx");
         expect(r.notes.join("\n")).toMatch(/clock/i);
+        expect(r.notes.join("\n")).toMatch(/Network and log rows .* not corrected/);
     });
 
     it("skips the clock probe on the iOS simulator", async () => {
@@ -135,6 +136,15 @@ describe("timelineDevices", () => {
         getLogBuffer("iPhone"); connect("Pixel", "android");
         expect(timelineDevices().sort()).toEqual(["Pixel", "iPhone"]);
         expect(timelineDevices("pix")).toEqual(["Pixel"]);
-        expect(timelineDevices("nothing")).toEqual(["nothing"]);
+    });
+
+    it("prefers an exact name over a longer one that contains it", () => {
+        getLogBuffer("iPhone 17 Pro Max"); getLogBuffer("iPhone 17 Pro");
+        expect(timelineDevices("iPhone 17 Pro")).toEqual(["iPhone 17 Pro"]);
+    });
+
+    it("refuses a device it cannot find instead of answering with an empty window", () => {
+        getLogBuffer("iPhone");
+        expect(() => timelineDevices("emulator-5554")).toThrow(/emulator-5554/);
     });
 });

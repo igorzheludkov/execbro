@@ -100,6 +100,18 @@ describe("lastAction and deviceMatches", () => {
         expect(lastAction("nothing")).toBeNull();
     });
 
+    it("does not let an execute_in_app read move the default window off the tap", () => {
+        recordAction({ ...base, tool: "tap", args: { testID: "add-to-cart" } });
+        recordAction({ ...base, startedAt: 2000, tool: "execute_in_app", args: { expression: "store.getState().cart" } });
+        expect(lastAction()?.summary).toBe("testID=add-to-cart");
+        expect(getActions().map((a) => a.tool)).toEqual(["tap", "execute_in_app"]);
+    });
+
+    it("anchors on execute_in_app when nothing else was done", () => {
+        recordAction({ ...base, tool: "execute_in_app", args: { expression: "1" } });
+        expect(lastAction()?.tool).toBe("execute_in_app");
+    });
+
     it("treats an action without a device as belonging to any device", () => {
         expect(deviceMatches(null, "iPhone 17 Pro")).toBe(true);
         expect(deviceMatches("iphone", "iPhone 17 Pro")).toBe(true);

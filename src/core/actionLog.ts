@@ -156,11 +156,19 @@ export function deviceMatches(entryDevice: string | null, key: string): boolean 
     return a.includes(b) || b.includes(a);
 }
 
+/**
+ * The action get_timeline's default window starts at. execute_in_app is logged
+ * but never anchors while another action exists: agents mostly use it to read
+ * state, and tap -> read -> get_timeline must still show what the tap caused.
+ */
 export function lastAction(device?: string): ActionEntry | null {
+    let fallback: ActionEntry | null = null;
     for (let i = entries.length - 1; i >= 0; i--) {
-        if (!device || deviceMatches(entries[i].device, device)) return entries[i];
+        if (device && !deviceMatches(entries[i].device, device)) continue;
+        if (entries[i].tool !== "execute_in_app") return entries[i];
+        fallback ??= entries[i];
     }
-    return null;
+    return fallback;
 }
 
 export function actionLabel(a: ActionEntry): string {

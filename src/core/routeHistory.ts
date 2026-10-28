@@ -10,6 +10,7 @@
  */
 
 import { executeInApp } from "./jsExecute.js";
+import type { ExecuteFn } from "./fastRefreshTools.js";
 import { buildNavHandlesSource } from "./navigation.js";
 import { getEpoch } from "./state.js";
 
@@ -156,12 +157,12 @@ export function buildRouteHistoryReadSource(): string {
  * Install the listener. Non-fatal by contract: any failure leaves the reader on
  * the sampled path, so callers can fire this without guarding.
  */
-export async function installRouteHistory(device?: string): Promise<RouteHistoryMode> {
+export async function installRouteHistory(device?: string, execute: ExecuteFn = executeInApp): Promise<RouteHistoryMode> {
     try {
         const expr = `(function(){ ${buildNavHandlesSource()}
     return JSON.stringify(${buildRouteHistoryInstallSource(routeHistorySize())});
 })()`;
-        const res = await executeInApp(expr, false, { originatingToolName: "route_history" }, device);
+        const res = await execute(expr, false, { originatingToolName: "route_history" }, device);
         if (!res.success || typeof res.result !== "string") return "sampled";
         const parsed = JSON.parse(res.result) as { mode?: string };
         return parsed.mode === "listener" ? "listener" : "sampled";
@@ -175,12 +176,12 @@ export async function installRouteHistory(device?: string): Promise<RouteHistory
  * sampled. Self-healing: a missing buffer (first call, or a reload) is
  * installed before reading.
  */
-export async function readRouteHistory(device?: string): Promise<RouteHistoryResult> {
+export async function readRouteHistory(device?: string, execute: ExecuteFn = executeInApp): Promise<RouteHistoryResult> {
     const deviceKey = device ?? "default";
     const epoch = getEpoch(deviceKey);
 
     try {
-        const read = await executeInApp(
+        const read = await execute(
             `JSON.stringify(${buildRouteHistoryReadSource()})`,
             false,
             { originatingToolName: "route_history" },
@@ -195,9 +196,9 @@ export async function readRouteHistory(device?: string): Promise<RouteHistoryRes
         // No buffer means a fresh runtime (first read, or a reload took it with
         // it). Install and read once more before giving up on the listener.
         if (!payload) {
-            const mode = await installRouteHistory(device);
+            const mode = await installRouteHistory(device, execute);
             if (mode === "listener") {
-                const again = await executeInApp(
+                const again = await execute(
                     `JSON.stringify(${buildRouteHistoryReadSource()})`,
                     false,
                     { originatingToolName: "route_history" },
