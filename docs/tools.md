@@ -24,6 +24,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `get_logs`              | Retrieve console logs (filtering, truncation, summary)                                                                       |
 | `search_logs`           | Search logs for specific text (truncation)                                                                                   |
 | `clear_logs`            | Clear the log buffer                                                                                                         |
+| `get_timeline`          | Your own actions, route changes, network requests, console logs, app restarts and Fast Refresh edits in one time-ordered list. Defaults to the window since your last action, so `tap(...)` then `get_timeline()` shows what the tap caused. `since` / `until` take `"-5m"` or epoch ms; `sources` narrows it |
 
 ## Network Tracking
 
