@@ -28,7 +28,7 @@ function bufferedDeviceName(device: string, keys: Iterable<string>): string | un
  * buffered device name before giving up, and rethrow the original, richer
  * error when there is no buffered data either.
  */
-function resolveBufferKey(device: string, bufferKeys: Iterable<string>): string {
+export function resolveBufferKey(device: string, bufferKeys: Iterable<string>): string {
     try {
         const app = getConnectedAppByDevice(device);
         if (app) {

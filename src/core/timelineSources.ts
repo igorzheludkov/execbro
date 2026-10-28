@@ -4,10 +4,11 @@
  * a device. A source that fails is named, never fatal.
  */
 
-import { logBuffers, networkBuffers, connectedApps, epochStarts } from "./state.js";
+import { logBuffers, networkBuffers, connectedApps, epochStarts, matchDeviceName } from "./state.js";
+import { resolveBufferKey } from "./toolHelpers.js";
 import { getActions, deviceMatches } from "./actionLog.js";
 import { readRouteHistory, sampledVisits } from "./routeHistory.js";
-import { getRefreshStatus } from "./fastRefreshTools.js";
+import { getRefreshStatus, type ExecuteFn } from "./fastRefreshTools.js";
 import { executeInApp } from "./jsExecute.js";
 import { chromiumNavigations } from "./chromiumNavigation.js";
 import type { ConnectedApp } from "./types.js";
@@ -24,20 +25,30 @@ export interface SourceDeps {
     probeDeviceNow(device: string): Promise<number>;
 }
 
-const realDeps: SourceDeps = {
-    readRoutes: async (device) => (await readRouteHistory(device)).visits,
-    readRefresh: async (device) => {
-        const r = await getRefreshStatus({ device });
-        if (!r.success) throw new Error(r.error ?? "refresh read failed");
-        return r.recentUpdates ?? [];
-    },
-    probeDeviceNow: async (device) => {
-        const r = await executeInApp("Date.now()", false, { originatingToolName: "get_timeline", maxRetries: 0, timeoutMs: 3000 }, device);
-        const n = Number(r.result);
-        if (!r.success || !Number.isFinite(n)) throw new Error(r.error ?? "clock probe failed");
-        return n;
-    },
-};
+// A read tool must not stall on a wedged JS thread or reconnect over another
+// debugger (a displaced connection is only taken back by a deliberate call).
+const BOUNDED_READ = { originatingToolName: "get_timeline", maxRetries: 0, timeoutMs: 3000, autoReconnect: false };
+
+export function makeSourceDeps(execute: ExecuteFn = executeInApp): SourceDeps {
+    const run: ExecuteFn = (expression, awaitPromise, options, device) =>
+        execute(expression, awaitPromise, { ...options, ...BOUNDED_READ }, device);
+    return {
+        readRoutes: async (device) => (await readRouteHistory(device, run)).visits,
+        readRefresh: async (device) => {
+            const r = await getRefreshStatus({ device }, run);
+            if (!r.success) throw new Error(r.error ?? "refresh read failed");
+            return r.recentUpdates ?? [];
+        },
+        probeDeviceNow: async (device) => {
+            const r = await run("Date.now()", false, {}, device);
+            const n = Number(r.result);
+            if (!r.success || !Number.isFinite(n)) throw new Error(r.error ?? "clock probe failed");
+            return n;
+        },
+    };
+}
+
+const realDeps = makeSourceDeps();
 
 export interface CollectOptions {
     device?: string;
@@ -61,9 +72,10 @@ function knownDevices(): string[] {
 export function timelineDevices(device?: string): string[] {
     const names = knownDevices();
     if (!device) return names;
-    const needle = device.toLowerCase();
-    const hit = names.find((n) => n.toLowerCase().includes(needle));
-    return [hit ?? device];
+    // Same resolution as get_logs: exact name first, then a connected app by
+    // UDID / serial / page url, and a UserInputError when nothing matches, so a
+    // typo cannot read as "nothing happened".
+    return [resolveBufferKey(device, names)];
 }
 
 function appFor(deviceName: string): ConnectedApp | undefined {
@@ -102,7 +114,7 @@ export async function collectTimeline(opts: CollectOptions, deps: SourceDeps = r
             if (!inWindow(a.startedAt)) continue;
             if (opts.device && !deviceMatches(a.device, devices[0])) continue;
             const tag = a.device
-                ? devices.find((d) => deviceMatches(a.device, d)) ?? a.device
+                ? matchDeviceName(a.device, devices) ?? devices.find((d) => deviceMatches(a.device, d)) ?? a.device
                 : devices.length === 1 ? devices[0] : "default";
             events.push(actionEvent(a, tag));
         }
@@ -168,7 +180,10 @@ export async function collectTimeline(opts: CollectOptions, deps: SourceDeps = r
                 const t1 = Date.now();
                 offset = deviceNow - (t0 + t1) / 2;
                 if (Math.abs(offset) > CLOCK_NOTE_THRESHOLD_MS) {
-                    notes.push(`routes and refresh (${device}): device clock differs by ${Math.round(offset)}ms; positions are corrected by that estimate.`);
+                    // ponytail: SDK/interceptor rows are not shifted; correct them at
+                    // capture (the mirror poller already estimates an offset) if skew
+                    // above 250ms turns out to be common.
+                    notes.push(`routes and refresh (${device}): device clock differs by ${Math.round(offset)}ms; positions are corrected by that estimate. Network and log rows captured in-app (SDK or interceptor) also carry the device clock and are not corrected, so they may sit up to that far off.`);
                 }
             } catch (e) {
                 notes.push(`routes and refresh (${device}): clock probe failed (${message(e)}); positions use the device clock as is.`);
