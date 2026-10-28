@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@jest/globals";
-import { settle, type CommitEntry } from "../../core/commitRecorder.js";
+import vm from "node:vm";
+import { buildCommitReadSource, parseCommitRead, readCommits, settle, type CommitEntry } from "../../core/commitRecorder.js";
 
 const at = (...times: number[]): CommitEntry[] => times.map((t) => ({ at: t, duration: 1, slowest: null, slowestMs: null }));
 
@@ -54,5 +55,74 @@ describe("settle", () => {
         const r = settle(at(100, 200, 450, 1100), 0, { now: 5000, gapMs: 1000 });
         expect(r.commits).toBe(4);
         expect(r.settledAt).toBe(1100);
+    });
+});
+
+const GPL_PATH = "node_modules/react-native/Libraries/Utilities/GlobalPerformanceLogger.js";
+
+function readContext(globals: Record<string, unknown>): vm.Context {
+    const ctx = vm.createContext({ nativePerformanceNow: () => 1_000, ...globals });
+    vm.runInContext("Date.now = function () { return 10000; };", ctx);
+    return ctx;
+}
+
+const runRead = (ctx: vm.Context) => parseCommitRead(JSON.parse(vm.runInContext(`JSON.stringify(${buildCommitReadSource()})`, ctx)));
+
+function registry(points: Record<string, number>) {
+    const r = (id: number) => (id === 7 ? { default: { getPoints: () => points } } : undefined);
+    r.getModules = () => new Map([[7, { verboseName: GPL_PATH }]]);
+    return r;
+}
+
+describe("read", () => {
+    it("converts every timestamp with one offset", () => {
+        const ctx = readContext({
+            __BUNDLE_START_TIME__: 100,
+            __REACT_DEVTOOLS_GLOBAL_HOOK__: { __eb_commitsWrapped: true },
+            __eb_commits: [{ t: 400, duration: 5, slowest: "A", slowestMs: 2 }],
+            __eb_commits_dropped: 0,
+            __r: registry({ initializeCore_end: 185 }),
+        });
+        const r = runRead(ctx);
+        expect(r.installed).toBe(true);
+        expect(r.bundleStartAt).toBe(9100);
+        expect(r.initializeCoreEndAt).toBe(9185);
+        expect(r.commits[0]).toEqual({ at: 9400, duration: 5, slowest: "A", slowestMs: 2 });
+    });
+
+    it("reports not installed without a ring", () => {
+        expect(runRead(readContext({})).installed).toBe(false);
+    });
+
+    it("restores a leftover trap after the bundle started", () => {
+        const ctx = readContext({ __BUNDLE_START_TIME__: 100 });
+        vm.runInContext("var sentinel = function () {}; globalThis.__eb_dp_orig = sentinel;", ctx);
+        runRead(ctx);
+        expect(vm.runInContext("Object.defineProperty === sentinel", ctx)).toBe(true);
+        expect(ctx.__eb_dp_orig).toBeUndefined();
+    });
+
+    it("keeps the trap while the bundle has not started", () => {
+        const ctx = readContext({});
+        vm.runInContext("globalThis.__eb_dp_orig = function () {};", ctx);
+        runRead(ctx);
+        expect(typeof ctx.__eb_dp_orig).toBe("function");
+    });
+
+    it("nulls the anchors when unavailable", () => {
+        const r = runRead(readContext({}));
+        expect(r.bundleStartAt).toBeNull();
+        expect(r.initializeCoreEndAt).toBeNull();
+    });
+
+    it("readCommits falls back on a failed execute", async () => {
+        const r = await readCommits(undefined, async () => ({ success: false, error: "x" }));
+        expect(r).toEqual({ installed: false, commits: [], bundleStartAt: null, initializeCoreEndAt: null, dropped: 0 });
+    });
+
+    it("parseCommitRead drops malformed entries", () => {
+        const r = parseCommitRead({ installed: true, commits: [{ at: "x" }, { at: 5, duration: null, slowest: null, slowestMs: null }] });
+        expect(r.commits).toEqual([{ at: 5, duration: null, slowest: null, slowestMs: null }]);
+        expect(r.dropped).toBe(0);
     });
 });
