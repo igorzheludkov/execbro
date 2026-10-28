@@ -74,20 +74,34 @@ export const COMMIT_RECORDER_JS = `(function () {
         };
     }
 
+    // Restores defineProperty only if it is still our trap: a polyfill that
+    // replaced it after us keeps its own.
+    function untrap() {
+        if (!g.__eb_dp_orig) return;
+        if (Object.defineProperty === g.__eb_dp_trap) Object.defineProperty = g.__eb_dp_orig;
+        delete g.__eb_dp_orig;
+        delete g.__eb_dp_trap;
+    }
+
+    // The hook can also arrive by plain assignment, or before its
+    // onCommitFiberRoot exists. Re-injecting (the read does, once the bundle
+    // has started) then wraps it and takes the trap down.
     if (g.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+        untrap();
         wrap(g.__REACT_DEVTOOLS_GLOBAL_HOOK__);
     } else if (!g.__eb_dp_orig) {
         var dp = Object.defineProperty;
-        g.__eb_dp_orig = dp;
-        Object.defineProperty = function (target, key) {
+        var trap = function (target, key) {
             var result = dp.apply(this, arguments);
             if (target === g && key === '__REACT_DEVTOOLS_GLOBAL_HOOK__') {
-                Object.defineProperty = dp;
-                delete g.__eb_dp_orig;
+                untrap();
                 try { wrap(g.__REACT_DEVTOOLS_GLOBAL_HOOK__); } catch (e) {}
             }
             return result;
         };
+        g.__eb_dp_orig = dp;
+        g.__eb_dp_trap = trap;
+        Object.defineProperty = trap;
     }
     return true;
 })()`;

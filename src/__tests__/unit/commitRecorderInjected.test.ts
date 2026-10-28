@@ -109,6 +109,27 @@ describe("COMMIT_RECORDER_JS", () => {
         expect(commits(ctx).length).toBe(1);
     });
 
+    it("removes a leftover trap when injected again with the hook present", () => {
+        const ctx = makeContext();
+        const original = vm.runInContext("Object.defineProperty", ctx);
+        evalRecorder(ctx);
+        vm.runInContext("globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__ = __hook;", ctx);
+        evalRecorder(ctx);
+        expect(vm.runInContext("Object.defineProperty", ctx)).toBe(original);
+        expect(ctx.__eb_dp_orig).toBeUndefined();
+        commit(ctx, rootOf(null));
+        expect(commits(ctx).length).toBe(1);
+    });
+
+    it("leaves a defineProperty that someone replaced after the trap alone", () => {
+        const ctx = makeContext();
+        evalRecorder(ctx);
+        vm.runInContext("var theirs = function () {}; Object.defineProperty = theirs; globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__ = __hook;", ctx);
+        evalRecorder(ctx);
+        expect(vm.runInContext("Object.defineProperty === theirs", ctx)).toBe(true);
+        expect(ctx.__eb_dp_orig).toBeUndefined();
+    });
+
     it("does not swallow the original's throw and records nothing", () => {
         const ctx = makeContext();
         vm.runInContext(`__hook.onCommitFiberRoot = function () { throw new Error('boom'); };`, ctx);
