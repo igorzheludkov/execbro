@@ -12,6 +12,15 @@ export const networkBuffers = new Map<string, NetworkBuffer>();
 // Per-device app-run counter. Bumped when a new JS runtime is detected.
 const _sessionEpochs = new Map<string, number>();
 
+// When each app run began, so a timeline can place the restart. Capped: a
+// device that restarts all day should not grow this without bound.
+const EPOCH_STARTS_CAP = 50;
+const _epochStarts = new Map<string, Array<{ epoch: number; at: number }>>();
+
+export function epochStarts(deviceName: string): Array<{ epoch: number; at: number }> {
+    return _epochStarts.get(deviceName) ?? [];
+}
+
 export function getEpoch(deviceName: string): number {
     return _sessionEpochs.get(deviceName) ?? 1;
 }
@@ -19,6 +28,10 @@ export function getEpoch(deviceName: string): number {
 export function bumpEpoch(deviceName: string): number {
     const next = getEpoch(deviceName) + 1;
     _sessionEpochs.set(deviceName, next);
+    const starts = _epochStarts.get(deviceName) ?? [];
+    starts.push({ epoch: next, at: Date.now() });
+    if (starts.length > EPOCH_STARTS_CAP) starts.shift();
+    _epochStarts.set(deviceName, starts);
     // A new JS runtime wipes every in-app promise slot, so any handle we
     // handed out for this device can never resolve. Dropping them here — the
     // one place every restart path funnels through — keeps us from offering a
@@ -41,6 +54,7 @@ export function bumpEpoch(deviceName: string): number {
 /** Test-only: clear all epoch state. */
 export function resetEpochs(): void {
     _sessionEpochs.clear();
+    _epochStarts.clear();
 }
 
 /**
