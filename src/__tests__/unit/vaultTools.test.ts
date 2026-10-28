@@ -2,9 +2,28 @@
 // (no license check, no transport, no HTTP listener, no CDP sockets).
 process.env.RN_AI_DEVTOOLS_TEST_MODE = "1";
 
-import { describe, it, expect, beforeEach } from "@jest/globals";
-import { toolRegistry } from "../../index.js";
-import { vaultAdd, resetVaultForTests } from "../../core/vault.js";
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+
+// The registry holds the license/telemetry wrapper, and its first call
+// validates the license over the network and writes the real license cache.
+// The whole export surface, since a missing name fails module linking.
+jest.unstable_mockModule("../../core/license.js", () => ({
+    ensureLicense: jest.fn(async () => ({ tier: "free" })),
+    getUsageInfo: jest.fn(() => null),
+    getPricingInfo: jest.fn(() => null),
+    getDashboardUrl: jest.fn(() => ""),
+    GRACE_WINDOW_MS: 0,
+    computeOfflineUsage: jest.fn(),
+    formatPlanPrice: jest.fn(),
+    getLicenseStatus: jest.fn(),
+    incrementLocalUsage: jest.fn(),
+    refreshLicense: jest.fn(),
+    requestLinkToken: jest.fn(),
+    resetLicense: jest.fn(),
+}));
+
+const { toolRegistry } = await import("../../index.js");
+const { vaultAdd, resetVaultForTests } = await import("../../core/vault.js");
 
 describe("Phase 2 tool surface", () => {
     beforeEach(resetVaultForTests);
