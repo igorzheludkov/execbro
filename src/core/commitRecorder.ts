@@ -9,6 +9,10 @@
  * mounted the screen, and that commit is usually the expensive one.
  */
 
+import { executeInApp } from "./jsExecute.js";
+import type { ExecuteFn } from "./fastRefreshTools.js";
+import { buildRequireSource } from "./moduleRegistry.js";
+
 export interface CommitEntry {
     /** Device Date.now() ms. */
     at: number;
@@ -54,4 +58,95 @@ export function settle(
         }
     }
     return { commits: burst.length, totalMs, slowest, settledAt: stillRendering ? null : lastAt };
+}
+
+export interface CommitRead {
+    installed: boolean;
+    commits: CommitEntry[];
+    bundleStartAt: number | null;
+    initializeCoreEndAt: number | null;
+    /** Commits evicted from the ring. */
+    dropped: number;
+}
+
+const EMPTY_READ: CommitRead = { installed: false, commits: [], bundleStartAt: null, initializeCoreEndAt: null, dropped: 0 };
+
+/**
+ * One evaluate: the ring, the startup anchors, and the offset that moves them
+ * from the in-app performance clock to Date.now(). Also undoes a trap left
+ * behind by a bundle that never defined the DevTools hook (release build, no
+ * React), so it cannot outlive the bundle's start. ES5 only.
+ */
+export function buildCommitReadSource(): string {
+    return `(function () {
+    var g = globalThis;
+    var clock = typeof g.nativePerformanceNow === 'function'
+        ? g.nativePerformanceNow
+        : function () { return g.performance.now(); };
+    var offset = Date.now() - clock();
+    var started = typeof g.__BUNDLE_START_TIME__ === 'number';
+    var hook = g.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+    if (started && !hook && g.__eb_dp_orig) {
+        Object.defineProperty = g.__eb_dp_orig;
+        delete g.__eb_dp_orig;
+    }
+    // GlobalPerformanceLogger is per runtime, so its point is cached on the
+    // runtime instead of re-indexing the module registry on every read.
+    if (started && typeof g.__eb_icEnd !== 'number') {
+        try {
+            ${buildRequireSource()}
+            var m = __eb_require('Libraries/Utilities/GlobalPerformanceLogger.js');
+            var logger = m && !m.__eb_error ? (m.default || m) : null;
+            var end = logger && typeof logger.getPoints === 'function' ? logger.getPoints().initializeCore_end : null;
+            if (typeof end === 'number') g.__eb_icEnd = end;
+        } catch (e) {}
+    }
+    var ring = Array.isArray(g.__eb_commits) ? g.__eb_commits : null;
+    var commits = [];
+    if (ring) {
+        for (var i = 0; i < ring.length; i++) {
+            var c = ring[i];
+            commits.push({ at: c.t + offset, duration: c.duration, slowest: c.slowest, slowestMs: c.slowestMs });
+        }
+    }
+    return {
+        installed: !!(ring && hook && hook.__eb_commitsWrapped),
+        commits: commits,
+        bundleStartAt: started ? g.__BUNDLE_START_TIME__ + offset : null,
+        initializeCoreEndAt: typeof g.__eb_icEnd === 'number' ? g.__eb_icEnd + offset : null,
+        dropped: typeof g.__eb_commits_dropped === 'number' ? g.__eb_commits_dropped : 0
+    };
+})()`;
+}
+
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+export function parseCommitRead(raw: unknown): CommitRead {
+    if (!raw || typeof raw !== "object") return { ...EMPTY_READ, commits: [] };
+    const r = raw as Record<string, unknown>;
+    const commits: CommitEntry[] = [];
+    for (const c of Array.isArray(r.commits) ? r.commits : []) {
+        const at = num((c as Record<string, unknown>)?.at);
+        if (at === null) continue;
+        const e = c as Record<string, unknown>;
+        commits.push({ at, duration: num(e.duration), slowest: str(e.slowest), slowestMs: num(e.slowestMs) });
+    }
+    return {
+        installed: r.installed === true,
+        commits,
+        bundleStartAt: num(r.bundleStartAt),
+        initializeCoreEndAt: num(r.initializeCoreEndAt),
+        dropped: num(r.dropped) ?? 0,
+    };
+}
+
+export async function readCommits(device?: string, execute: ExecuteFn = executeInApp): Promise<CommitRead> {
+    try {
+        const read = await execute(`JSON.stringify(${buildCommitReadSource()})`, false, { originatingToolName: "commit_recorder" }, device);
+        if (!read.success || typeof read.result !== "string") return { ...EMPTY_READ, commits: [] };
+        return parseCommitRead(JSON.parse(read.result));
+    } catch {
+        return { ...EMPTY_READ, commits: [] };
+    }
 }
