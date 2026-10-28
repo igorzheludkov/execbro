@@ -96,11 +96,32 @@ describe("read", () => {
     });
 
     it("restores a leftover trap after the bundle started", () => {
-        const ctx = readContext({ __BUNDLE_START_TIME__: 100 });
-        vm.runInContext("var sentinel = function () {}; globalThis.__eb_dp_orig = sentinel;", ctx);
+        const ctx = readContext({});
+        const original = vm.runInContext("Object.defineProperty", ctx);
+        vm.runInContext(COMMIT_RECORDER_JS, ctx);
+        vm.runInContext("globalThis.__BUNDLE_START_TIME__ = 100;", ctx);
         runRead(ctx);
-        expect(vm.runInContext("Object.defineProperty === sentinel", ctx)).toBe(true);
+        expect(vm.runInContext("Object.defineProperty", ctx)).toBe(original);
         expect(ctx.__eb_dp_orig).toBeUndefined();
+    });
+
+    it("wraps a hook that arrived without defineProperty and removes the trap", () => {
+        const ctx = readContext({});
+        const original = vm.runInContext("Object.defineProperty", ctx);
+        vm.runInContext(COMMIT_RECORDER_JS, ctx);
+        vm.runInContext("globalThis.__BUNDLE_START_TIME__ = 100; var calls = 0; globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { onCommitFiberRoot: function () { calls++; } };", ctx);
+        expect(runRead(ctx).installed).toBe(true);
+        expect(vm.runInContext("Object.defineProperty", ctx)).toBe(original);
+        ctx.__REACT_DEVTOOLS_GLOBAL_HOOK__.onCommitFiberRoot(1, { current: { actualDuration: 3, child: null } });
+        expect(ctx.calls).toBe(1);
+        expect(runRead(ctx).commits).toHaveLength(1);
+    });
+
+    it("wraps a hook whose onCommitFiberRoot appeared after the define", () => {
+        const ctx = readContext({});
+        vm.runInContext(COMMIT_RECORDER_JS, ctx);
+        vm.runInContext("var hook = {}; Object.defineProperty(globalThis, '__REACT_DEVTOOLS_GLOBAL_HOOK__', { get: function () { return hook; } }); hook.onCommitFiberRoot = function () {}; globalThis.__BUNDLE_START_TIME__ = 100;", ctx);
+        expect(runRead(ctx).installed).toBe(true);
     });
 
     it("keeps the trap while the bundle has not started", () => {

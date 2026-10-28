@@ -75,9 +75,9 @@ const EMPTY_READ: CommitRead = { installed: false, commits: [], bundleStartAt: n
 
 /**
  * One evaluate: the ring, the startup anchors, and the offset that moves them
- * from the in-app performance clock to Date.now(). Also undoes a trap left
- * behind by a bundle that never defined the DevTools hook (release build, no
- * React), so it cannot outlive the bundle's start. ES5 only.
+ * from the in-app performance clock to Date.now(). Also finishes the install
+ * the trap may have missed, and takes the trap down, so it cannot outlive the
+ * bundle's start. ES5 only.
  */
 export function buildCommitReadSource(): string {
     return `(function () {
@@ -87,11 +87,17 @@ export function buildCommitReadSource(): string {
         : function () { return g.performance.now(); };
     var offset = Date.now() - clock();
     var started = typeof g.__BUNDLE_START_TIME__ === 'number';
-    var hook = g.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    if (started && !hook && g.__eb_dp_orig) {
-        Object.defineProperty = g.__eb_dp_orig;
+    // Once the bundle has started the trap has done its job. With a hook,
+    // re-run the recorder (idempotent) to wrap it if the trap missed it; without
+    // one (release build, no React) just take the trap down.
+    if (started && g.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
+        ${COMMIT_RECORDER_JS};
+    } else if (started && g.__eb_dp_orig) {
+        if (Object.defineProperty === g.__eb_dp_trap) Object.defineProperty = g.__eb_dp_orig;
         delete g.__eb_dp_orig;
+        delete g.__eb_dp_trap;
     }
+    var hook = g.__REACT_DEVTOOLS_GLOBAL_HOOK__;
     // GlobalPerformanceLogger is per runtime, so its point is cached on the
     // runtime instead of re-indexing the module registry on every read.
     if (started && typeof g.__eb_icEnd !== 'number') {
