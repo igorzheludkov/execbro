@@ -4,6 +4,7 @@ import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkReques
 import { recordChromiumNavigation } from "./chromiumNavigation.js";
 import { connectedApps, isSupersededSocket, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
+import { injectCommitRecorder } from "./commitRecorder.js";
 import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
 import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
@@ -1111,6 +1112,7 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             // Re-inject network interceptor and re-check CDP Network support
             const ctxApp = connectedApps.get(appKey);
             if (ctxApp?.ws?.readyState === WebSocket.OPEN) {
+                if (ctxApp.platform !== "chromium") injectCommitRecorder(ctxApp.ws);
                 injectNetworkInterceptor(ctxApp.ws, ctxApp.platform === "chromium");
                 // The fresh context starts with __RN_NET_DISABLED__ undefined,
                 // so the just-injected interceptor would emit alongside the SDK
@@ -1444,6 +1446,9 @@ export async function connectToDevice(
                 ws.send(JSON.stringify({ id: getNextMessageId(), method: "Page.enable" }));
             }
 
+            // React commits, for render and startup timing. Before the
+            // interceptor so a fresh context gets the earliest possible install.
+            if (!isChromiumTarget(device)) injectCommitRecorder(ws);
             // Inject JS network interceptor (immediate capture, may fail if context not ready)
             injectNetworkInterceptor(ws, isChromiumTarget(device));
             // Rules for this device may already exist — from a previous session
