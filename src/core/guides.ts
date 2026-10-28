@@ -347,6 +347,7 @@ rather than run against nothing — the note says when this happened.
 ## Key Tools
 - get_logs: retrieve logs with filtering (level, maxLogs, summary, verbose, startFromText, epoch)
 - search_logs: text search across all captured logs
+- get_timeline: logs, network, your own actions, route changes and restarts in one time-ordered list. Call it right after an action to see what it caused
 - clear_logs: reset the log buffer
 
 ## App Restarts (epochs)
@@ -491,6 +492,7 @@ resolves to nothing.
 ## Key Tools
 - get_network_requests: list requests with filters (urlPattern, method, status, summary)
 - search_network: search by URL pattern
+- get_timeline: requests interleaved with logs, actions and route changes, starting at your last action
 - get_request_details: one request's headers, body, timing. Shape first, then query="dotted.path" to pull a field in full. With SDK installed, includes full request/response bodies.
 - clear_network: reset the request buffer
 - network_mock: replace or tamper with responses (add / list / remove / clear)

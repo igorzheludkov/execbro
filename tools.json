@@ -1,6 +1,6 @@
 {
     "generatedFrom": "toolRegistry",
-    "count": 67,
+    "count": 68,
     "tools": [
         "activate_license",
         "android_key_event",
@@ -33,6 +33,7 @@
         "get_request_details",
         "get_screen_layout",
         "get_screen_state",
+        "get_timeline",
         "get_usage_guide",
         "handle_dialog",
         "http_request",
@@ -246,6 +247,13 @@
             "fullText",
             "includeHistory",
             "pressablesOnly"
+        ],
+        "get_timeline": [
+            "device",
+            "limit",
+            "since",
+            "sources",
+            "until"
         ],
         "get_usage_guide": [
             "topic"
