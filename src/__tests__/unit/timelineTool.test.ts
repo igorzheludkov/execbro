@@ -2,7 +2,12 @@ process.env.EXECBRO_TEST_MODE = "1";
 
 import { describe, it, expect, beforeEach } from "@jest/globals";
 
-const { toolRegistry } = await import("../../index.js");
+// Registered against a stub server: importing index.js would put the
+// chokepoint wrapper in the registry, whose first call validates the license
+// over the network.
+const { toolRegistry } = await import("../../core/register.js");
+const { registerTimelineTools } = await import("../../tools/timelineTools.js");
+registerTimelineTools({ registerTool: () => undefined } as never);
 const { recordAction, resetActionLog } = await import("../../core/actionLog.js");
 const { logBuffers, networkBuffers, connectedApps, getLogBuffer, resetEpochs } = await import("../../core/state.js");
 const { CHROMIUM_TOOLS } = await import("../../core/chromiumCapabilities.js");
