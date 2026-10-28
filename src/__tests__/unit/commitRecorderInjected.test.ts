@@ -130,6 +130,34 @@ describe("COMMIT_RECORDER_JS", () => {
         expect(ctx.__eb_dp_orig).toBeUndefined();
     });
 
+    it("timestamps the commit before the original handler runs", () => {
+        const ctx = makeContext();
+        vm.runInContext(`var __origAt; __hook.onCommitFiberRoot = function () { __origAt = nativePerformanceNow(); };`, ctx);
+        installHookNow(ctx);
+        evalRecorder(ctx);
+        commit(ctx, rootOf(null));
+        expect(commits(ctx)[0].t).toBeLessThan(ctx.__origAt);
+    });
+
+    it("uses nativePerformanceNow even when it appears after injection", () => {
+        const ctx = vm.createContext({ performance: { now: () => 5 } });
+        vm.runInContext(`var __hook = { onCommitFiberRoot: function () {} };`, ctx);
+        evalRecorder(ctx);
+        ctx.nativePerformanceNow = () => 777;
+        vm.runInContext(INSTALL_HOOK, ctx);
+        commit(ctx, rootOf(null));
+        expect(commits(ctx)[0].t).toBe(777);
+    });
+
+    it("sets no trap when the bundle has started without a hook", () => {
+        const ctx = makeContext();
+        const original = vm.runInContext("Object.defineProperty", ctx);
+        vm.runInContext("globalThis.__BUNDLE_START_TIME__ = 100;", ctx);
+        evalRecorder(ctx);
+        expect(vm.runInContext("Object.defineProperty", ctx)).toBe(original);
+        expect(ctx.__eb_dp_orig).toBeUndefined();
+    });
+
     it("does not swallow the original's throw and records nothing", () => {
         const ctx = makeContext();
         vm.runInContext(`__hook.onCommitFiberRoot = function () { throw new Error('boom'); };`, ctx);

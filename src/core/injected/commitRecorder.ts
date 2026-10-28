@@ -21,9 +21,10 @@
  */
 export const COMMIT_RECORDER_JS = `(function () {
     var g = globalThis;
-    var now = typeof g.nativePerformanceNow === 'function'
-        ? g.nativePerformanceNow
-        : function () { return g.performance.now(); };
+    // Resolved per call: the read converts with whichever clock exists then.
+    function now() {
+        return typeof g.nativePerformanceNow === 'function' ? g.nativePerformanceNow() : g.performance.now();
+    }
     if (!Array.isArray(g.__eb_commits)) g.__eb_commits = [];
     if (typeof g.__eb_commits_dropped !== 'number') g.__eb_commits_dropped = 0;
 
@@ -54,12 +55,12 @@ export const COMMIT_RECORDER_JS = `(function () {
         return best ? { name: best, ms: bestMs } : null;
     }
 
-    function record(root) {
+    function record(root, t) {
         var current = root && root.current;
         var duration = current && typeof current.actualDuration === 'number' ? current.actualDuration : null;
         var slowest = duration === null ? null : slowestOf(current.child);
         var ring = g.__eb_commits;
-        ring.push({ t: now(), duration: duration, slowest: slowest ? slowest.name : null, slowestMs: slowest ? slowest.ms : null });
+        ring.push({ t: t, duration: duration, slowest: slowest ? slowest.name : null, slowestMs: slowest ? slowest.ms : null });
         while (ring.length > 500) { ring.shift(); g.__eb_commits_dropped++; }
     }
 
@@ -68,8 +69,11 @@ export const COMMIT_RECORDER_JS = `(function () {
         hook.__eb_commitsWrapped = true;
         var original = hook.onCommitFiberRoot;
         hook.onCommitFiberRoot = function (id, root) {
+            // Timestamped first: with the DevTools frontend attached the
+            // original does real work, which would skew the commit late.
+            var t = now();
             var result = original.apply(this, arguments);
-            try { record(root); } catch (e) {}
+            try { record(root, t); } catch (e) {}
             return result;
         };
     }
@@ -89,7 +93,9 @@ export const COMMIT_RECORDER_JS = `(function () {
     if (g.__REACT_DEVTOOLS_GLOBAL_HOOK__) {
         untrap();
         wrap(g.__REACT_DEVTOOLS_GLOBAL_HOOK__);
-    } else if (!g.__eb_dp_orig) {
+    } else if (!g.__eb_dp_orig && typeof g.__BUNDLE_START_TIME__ !== 'number') {
+        // Only before the bundle: once it has run without a hook (release
+        // build, attach to a running app) no hook is coming.
         var dp = Object.defineProperty;
         var trap = function (target, key) {
             var result = dp.apply(this, arguments);
