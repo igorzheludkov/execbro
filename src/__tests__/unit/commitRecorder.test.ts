@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 import vm from "node:vm";
-import { buildCommitReadSource, parseCommitRead, readCommits, settle, type CommitEntry } from "../../core/commitRecorder.js";
+import { buildCommitReadSource, injectCommitRecorder, parseCommitRead, readCommits, settle, type CommitEntry } from "../../core/commitRecorder.js";
+import { COMMIT_RECORDER_JS } from "../../core/injected/commitRecorder.js";
 
 const at = (...times: number[]): CommitEntry[] => times.map((t) => ({ at: t, duration: 1, slowest: null, slowestMs: null }));
 
@@ -124,5 +125,17 @@ describe("read", () => {
         const r = parseCommitRead({ installed: true, commits: [{ at: "x" }, { at: 5, duration: null, slowest: null, slowestMs: null }] });
         expect(r.commits).toEqual([{ at: 5, duration: null, slowest: null, slowestMs: null }]);
         expect(r.dropped).toBe(0);
+    });
+});
+
+describe("injectCommitRecorder", () => {
+    it("sends one silent evaluate of the recorder", () => {
+        const sent: string[] = [];
+        injectCommitRecorder({ send: (data: string) => sent.push(data) });
+        expect(sent).toHaveLength(1);
+        const msg = JSON.parse(sent[0]);
+        expect(msg.method).toBe("Runtime.evaluate");
+        expect(msg.params.expression).toBe(COMMIT_RECORDER_JS);
+        expect(msg.params.silent).toBe(true);
     });
 });

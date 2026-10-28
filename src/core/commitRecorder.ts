@@ -12,6 +12,8 @@
 import { executeInApp } from "./jsExecute.js";
 import type { ExecuteFn } from "./fastRefreshTools.js";
 import { buildRequireSource } from "./moduleRegistry.js";
+import { getNextMessageId } from "./state.js";
+import { COMMIT_RECORDER_JS } from "./injected/commitRecorder.js";
 
 export interface CommitEntry {
     /** Device Date.now() ms. */
@@ -149,4 +151,13 @@ export async function readCommits(device?: string, execute: ExecuteFn = executeI
     } catch {
         return { ...EMPTY_READ, commits: [] };
     }
+}
+
+/**
+ * Sent on every new JS context (it lands before the bundle) and on connect (for
+ * an app that was already running). Fire-and-forget like the network
+ * interceptor: the read reports whether it took.
+ */
+export function injectCommitRecorder(ws: { send(data: string): void }): void {
+    ws.send(JSON.stringify({ id: getNextMessageId(), method: "Runtime.evaluate", params: { expression: COMMIT_RECORDER_JS, silent: true } }));
 }
