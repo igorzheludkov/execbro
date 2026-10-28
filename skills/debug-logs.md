@@ -74,10 +74,12 @@ When you need fresh logs after a specific action:
 - `mcp__execbro__get_logs`
 - `mcp__execbro__search_logs`
 - `mcp__execbro__clear_logs`
+- `mcp__execbro__get_timeline`
 
 ## Notes
 
 - Requires the ExecBro MCP server to be running and connected to the app
+- To see what one action caused (logs, requests and route changes together), call `get_timeline()` right after it instead of reading each buffer separately
 - Use `summary=true` first to avoid token overload from large log volumes
 - For large objects in logs, use `verbose=true` with low `maxLogs` to see full content
 - Use `device` param to target a specific device when multiple are connected (e.g., `device="iPhone"`). Omitting merges logs from all devices
