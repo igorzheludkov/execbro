@@ -63,6 +63,7 @@ export function resolveWindow(opts: { since?: string | number; until?: string | 
     const since = opts.since ?? "last_action";
     if (since === "last_action") {
         if (opts.lastAction) {
+            if (opts.lastAction.startedAt > end) throw new UserInputError(`until (${clockLabel(end)}) is before the last action (${clockLabel(opts.lastAction.startedAt)}). Pass since as well.`);
             return { start: opts.lastAction.startedAt, end, label: `▶ ${actionLabel(opts.lastAction)}`, fallback: false };
         }
         return { start: end - FALLBACK_WINDOW_MS, end, label: "-60s", fallback: true };

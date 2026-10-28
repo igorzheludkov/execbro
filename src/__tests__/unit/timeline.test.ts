@@ -18,6 +18,10 @@ function req(over: Partial<NetworkRequest>): NetworkRequest {
 }
 
 describe("resolveWindow", () => {
+    it("rejects an until earlier than the last action instead of an empty window", () => {
+        expect(() => resolveWindow({ until: NOW - 5000, now: NOW, lastAction: tapAction })).toThrow(/before the last action/);
+    });
+
     it("defaults to the last action", () => {
         const w = resolveWindow({ now: NOW, lastAction: tapAction });
         expect(w).toEqual({ start: NOW - 3400, end: NOW, label: "▶ tap testID=add-to-cart", fallback: false });

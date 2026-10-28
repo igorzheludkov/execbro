@@ -5,6 +5,8 @@
  * this log outlives the call that carried it.
  */
 
+import { redactSecrets, redactionEnabled } from "./redact.js";
+
 export interface ActionEntry {
     tool: string;
     device: string | null;
@@ -43,8 +45,10 @@ function num(v: unknown): number | undefined {
     return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
+// Redacted before cutting: the output chokepoint redacts again, but a token cut
+// in half no longer matches its pattern there.
 function cut(s: string, max: number): string {
-    const one = s.replace(/\s+/g, " ").trim();
+    const one = (redactionEnabled() ? redactSecrets(s) : s).replace(/\s+/g, " ").trim();
     return one.length > max ? `${one.slice(0, max)}…` : one;
 }
 

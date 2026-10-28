@@ -33,4 +33,9 @@ describe("handleCDPMessage navigation events", () => {
         handleCDPMessage({ method: "Page.navigatedWithinDocument", params: { frameId: "T1", url: "http://x/home#/cart" } }, device as never);
         expect(chromiumNavigations("App").map((n) => n.route)).toEqual(["/home", "/home#/cart"]);
     });
+
+    it("ignores an iframe's in-document route change", () => {
+        handleCDPMessage({ method: "Page.navigatedWithinDocument", params: { frameId: "F2", url: "http://ads/iframe#/step2" } }, device as never);
+        expect(chromiumNavigations("App")).toEqual([]);
+    });
 });

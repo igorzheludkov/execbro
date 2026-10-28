@@ -48,6 +48,12 @@ describe("recordAction", () => {
 });
 
 describe("summarizeArgs", () => {
+    it("redacts a credential before cutting, so a split token cannot slip past", () => {
+        const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlc2lnbmF0dXJl";
+        const s = summarizeArgs("execute_in_app", { expression: `fetch(u, {headers: {a: "${jwt}"}})` });
+        expect(s).not.toContain("eyJhbGciOiJIUzI1NiJ9");
+    });
+
     it("never includes the text typed by input_text", () => {
         const s = summarizeArgs("input_text", { testID: "password", text: "hunter2-secret" });
         expect(s).toBe("testID=password 14 chars");

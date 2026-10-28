@@ -857,12 +857,10 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
     const method = message.method as string;
 
     // Route changes on chromium (Page.enable is only sent there). A child
-    // frame's load is not the page moving. ponytail: navigatedWithinDocument
-    // is accepted from any frame; an iframe doing pushState would show as a
-    // route change. Filter on frameId === device.id if that ever happens.
+    // frame's change is not the page moving; the main frame's id is the target id.
     if (method === "Page.frameNavigated" || method === "Page.navigatedWithinDocument") {
-        const p = message.params as { frame?: { url?: string; parentId?: string }; url?: string };
-        const url = method === "Page.frameNavigated" ? (p.frame?.parentId ? undefined : p.frame?.url) : p.url;
+        const p = message.params as { frame?: { url?: string; parentId?: string }; url?: string; frameId?: string };
+        const url = method === "Page.frameNavigated" ? (p.frame?.parentId ? undefined : p.frame?.url) : (p.frameId === device.id ? p.url : undefined);
         if (url) recordChromiumNavigation(deviceName, url, getEpoch(deviceName), Date.now());
         return;
     }
