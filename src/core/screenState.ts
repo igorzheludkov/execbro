@@ -8,6 +8,7 @@ import { TRANSFORM_COMPOSE_JS } from "./injected/transformCompose.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 import { SECURE_VALUE_JS } from "./injected/secureValue.js";
+import { SCROLL_CLIP_JS } from "./injected/scrollClip.js";
 import type { KeyboardState } from "./keyboardMetrics.js";
 
 // ============================================================================
@@ -628,6 +629,7 @@ export async function getScreenState(
     ${VISIBILITY_HELPERS_JS}
     ${SHEET_HELPERS_JS}
     ${SECURE_VALUE_JS}
+    ${SCROLL_CLIP_JS}
 
     function getMeasurable(fiber) {
         var sn = fiber.stateNode;
@@ -1757,6 +1759,38 @@ export async function getScreenState(
         } catch(e) {}
     }
 
+    // Scroll containers. Each element is clipped by its scroll ancestors, so a row
+    // scrolled under a tab bar, or a chip cut by a horizontal row, is not handed out
+    // as a tappable coordinate. Same resolve-from-the-fiber shape as the sheets above.
+    var clipFibers = [];
+    function clipIndexesFor(fiber) {
+        var anc = scrollAncestorsOf(fiber), out = [];
+        for (var ai = 0; ai < anc.length; ai++) {
+            var ci = clipFibers.indexOf(anc[ai]);
+            if (ci === -1) { clipFibers.push(anc[ai]); ci = clipFibers.length - 1; }
+            out.push(ci);
+        }
+        return out;
+    }
+    function clipIndexesOf(list) {
+        var out = [];
+        for (var li = 0; li < list.length; li++) out.push(clipIndexesFor(list[li]));
+        return out;
+    }
+    globalThis.__screenStateClipIdx = clipIndexesOf(hostFibers);
+    globalThis.__screenStateTextClipIdx = clipIndexesOf(textFibers);
+    globalThis.__screenStateImageClipIdx = clipIndexesOf(imageFibers);
+    globalThis.__screenStateClipMeasurements = new Array(clipFibers.length).fill(null);
+    for (var cfi = 0; cfi < clipFibers.length; cfi++) {
+        try {
+            (function(idx) {
+                getMeasurable(clipFibers[idx]).measureInWindow(function(fx, fy, fw, fh) {
+                    globalThis.__screenStateClipMeasurements[idx] = { x: fx, y: fy, width: fw, height: fh };
+                });
+            })(cfi);
+        } catch(e) {}
+    }
+
     globalThis.__screenStateFibers = hostFibers;
     globalThis.__screenStateMeta = fiberMeta;
     globalThis.__screenStateMeasurements = new Array(hostFibers.length).fill(null);
@@ -1848,6 +1882,15 @@ export async function getScreenState(
 ${OVERLAY_ADOPTION_JS}
 (function() {
     ${SHEET_HELPERS_JS}
+    ${SCROLL_CLIP_JS}
+    var clipMeasurements = globalThis.__screenStateClipMeasurements || [];
+    var clipIdx = globalThis.__screenStateClipIdx || [];
+    var textClipIdx = globalThis.__screenStateTextClipIdx || [];
+    var imageClipIdx = globalThis.__screenStateImageClipIdx || [];
+    globalThis.__screenStateClipMeasurements = null;
+    globalThis.__screenStateClipIdx = null;
+    globalThis.__screenStateTextClipIdx = null;
+    globalThis.__screenStateImageClipIdx = null;
     var hostFibers = globalThis.__screenStateFibers;
     var meta = globalThis.__screenStateMeta;
     var measurements = globalThis.__screenStateMeasurements;
@@ -1899,7 +1942,10 @@ ${OVERLAY_ADOPTION_JS}
     var rootM = (rootIdx != null && rootIdx >= 0) ? measurements[rootIdx] : null;
     if (rootM && rootM.width > 0 && rootM.height > 0) {
         viewportW = rootM.width;
-        viewportH = rootM.height + (rootM.y > 0 ? rootM.y : 0);
+        // The root's own bottom edge. On Android the window starts below the status bar,
+        // so the root measures at a NEGATIVE y and its bottom is y + height; dropping the
+        // negative y put the edge 54pt too low on a Pixel 9 (scrollClip.ts).
+        viewportH = viewportBottom(rootM);
     }
 
     // Sheet correction. UIKit presents a modal screen inset from the top of the
@@ -2036,6 +2082,22 @@ ${OVERLAY_ADOPTION_JS}
         return unreliable || !offViewport(m);
     }
 
+    /**
+     * The on-screen part of an element, or null. Clipped by its scroll containers (shifted
+     * by the same sheet correction as the element), so the centre handed out is one a tap
+     * can reach. A pre-transform frame is not clipped: it is not where the element is.
+     */
+    function visiblePart(m, unreliable, clipList, dy) {
+        if (!keepElement(m, unreliable)) return null;
+        if (unreliable || !clipList || clipList.length === 0) return m;
+        var clips = [];
+        for (var cli = 0; cli < clipList.length; cli++) {
+            var cm = clipMeasurements[clipList[cli]];
+            clips.push(cm ? shiftRect(cm, dy) : null);
+        }
+        return clipToScrollers(m, clips);
+    }
+
     // Build pressable list
     var droppedByGeometry = 0;
     var droppedIds = [];
@@ -2045,8 +2107,9 @@ ${OVERLAY_ADOPTION_JS}
         var m0 = measurements[i];
         if (!m0) { unmeasuredCount++; continue; }
         var tr = withTransform(shiftRect(m0, shiftFor(sheetIdx, i)), meta[i].transform);
-        var m = tr.m;
-        if (!keepElement(m, tr.unreliable)) {
+        var vis = visiblePart(tr.m, tr.unreliable, clipIdx[i], shiftFor(sheetIdx, i));
+        var m = vis || tr.m;
+        if (!vis) {
             // Dropped for geometry: zero-sized, or measured outside the viewport. Both are
             // usually right, and both were silent — which is why a sheet whose content
             // measures at zero size looked exactly like a sheet with no buttons in it.
@@ -2096,8 +2159,8 @@ ${OVERLAY_ADOPTION_JS}
         var tc = textContents[tmi];
         if (!tm0 || !tc) continue;
         var ttr = withTransform(shiftRect(tm0, shiftFor(textSheetIdx, tmi)), textTransforms[tmi]);
-        var tm = ttr.m;
-        if (!keepElement(tm, ttr.unreliable)) continue;
+        var tm = visiblePart(ttr.m, ttr.unreliable, textClipIdx[tmi], shiftFor(textSheetIdx, tmi));
+        if (!tm) continue;
         textBoxes.push({ text: tc, x: tm.x, y: tm.y, width: tm.width, height: tm.height, cx: tm.x + tm.width / 2, cy: tm.y + tm.height / 2 });
     }
     for (var ni = 0; ni < allPressables.length; ni++) {
@@ -2236,8 +2299,8 @@ ${OVERLAY_ADOPTION_JS}
         var tmA = textMeasurements[ti];
         if (!tmA) { unmeasuredCount++; continue; }
         var tTr = withTransform(shiftRect(tmA, shiftFor(textSheetIdx, ti)), textTransforms[ti]);
-        var tm2 = tTr.m;
-        if (!keepElement(tm2, tTr.unreliable)) continue;
+        var tm2 = visiblePart(tTr.m, tTr.unreliable, textClipIdx[ti], shiftFor(textSheetIdx, ti));
+        if (!tm2) continue;
         pushClassified({ text: textContents[ti],
             transformNote: tTr.note,
             center: { x: Math.round(tm2.x + tm2.width/2), y: Math.round(tm2.y + tm2.height/2) },
@@ -2247,8 +2310,8 @@ ${OVERLAY_ADOPTION_JS}
         var imA = imageMeasurements[ii];
         if (!imA) { unmeasuredCount++; continue; }
         var iTr = withTransform(shiftRect(imA, shiftFor(imageSheetIdx, ii)), imageMeta[ii].transform);
-        var im = iTr.m;
-        if (!keepElement(im, iTr.unreliable)) continue;
+        var im = visiblePart(iTr.m, iTr.unreliable, imageClipIdx[ii], shiftFor(imageSheetIdx, ii));
+        if (!im) continue;
         pushClassified({ src: imageMeta[ii].src, alt: imageMeta[ii].alt,
             transformNote: iTr.note,
             center: { x: Math.round(im.x + im.width/2), y: Math.round(im.y + im.height/2) },
