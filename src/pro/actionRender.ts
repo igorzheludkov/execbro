@@ -7,6 +7,7 @@
 
 import type { ActionOutcome } from "../core/actionOutcome.js";
 import type { TapResult, TapVerification } from "./tap.js";
+import type { ScrollProbe } from "../core/swipeDiagnosis.js";
 
 const MAX_REGIONS = 5;
 const NATIVE_CLASS = /^(android\.|XCUIElementType|RCT)/;
@@ -63,5 +64,41 @@ export function renderTapResponse(
     if (r.verification) out.verification = compactVerification(r.verification);
     for (const k of KEPT) if (r[k] !== undefined) out[k] = r[k];
     if (opts.showDeviceNote && r.deviceNote) out.deviceNote = r.deviceNote;
+    return out;
+}
+
+/** The scroll container's offset across a swipe, from the probes before and after it. */
+export function formatScroll(before: ScrollProbe, after: ScrollProbe): string | undefined {
+    if (!before.found || !after.found || before.offset === undefined || after.offset === undefined) return undefined;
+    const name = after.component || before.component || "scroll view";
+    const axis = after.horizontal ? "x" : "y";
+    const of = after.maxOffset !== undefined ? ` of ${Math.round(after.maxOffset)}` : "";
+    return `${name} ${axis} ${Math.round(before.offset)} → ${Math.round(after.offset)}${of}`;
+}
+
+export function renderSwipeResponse(
+    body: {
+        verification?: TapVerification;
+        outcome: ActionOutcome | null;
+        warning?: string;
+        foregroundLost?: string;
+        staleBundle?: string;
+        deviceNote?: string;
+        platform: string;
+        from: unknown;
+        to: unknown;
+        driverMessage?: string;
+    },
+    opts: { verbose: boolean; showDeviceNote: boolean }
+): Record<string, unknown> {
+    const out: Record<string, unknown> = { success: true };
+    if (opts.verbose) Object.assign(out, { platform: body.platform, from: body.from, to: body.to });
+    if (body.foregroundLost) out.foregroundLost = body.foregroundLost;
+    if (body.staleBundle) out.staleBundle = body.staleBundle;
+    if (opts.verbose && body.driverMessage) out.driverMessage = body.driverMessage;
+    if (body.outcome && Object.keys(body.outcome).length > 0) out.outcome = body.outcome;
+    if (body.verification) out.verification = opts.verbose ? body.verification : compactVerification(body.verification);
+    if (body.warning) out.warning = body.warning;
+    if (opts.showDeviceNote && body.deviceNote) out.deviceNote = body.deviceNote;
     return out;
 }

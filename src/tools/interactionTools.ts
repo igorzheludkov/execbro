@@ -33,7 +33,7 @@ import { probeScrollAt, explainNoOpSwipe } from "../core/swipeDiagnosis.js";
 import { bundleStaleWarning } from "../core/metroIdentity.js";
 import { beginActionOutcome, finishActionOutcome } from "../core/actionOutcomeCollect.js";
 import { changedSinceLastShown } from "../core/sessionOnce.js";
-import { renderTapResponse } from "../pro/actionRender.js";
+import { renderTapResponse, renderSwipeResponse, formatScroll } from "../pro/actionRender.js";
 import {
     captureScreenshot,
     verifyAndCapture,
@@ -403,9 +403,14 @@ export function registerInteractionTools(server: McpServer): void {
                         "fling-then-snap-back) even when the final state is unchanged. Frames are stored in the image buffer; " +
                         "use get_images(groupId=verification.burstGroupId) to retrieve them."
                     ),
+                verbose: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe("Return the full diagnostic response: gesture coordinates, driver message, raw pixel statistics. Default false."),
             }
         },
-        async ({ direction, distance, startX, startY, endX, endY, durationMs, delta, device, verify, screenshot, burst }) => {
+        async ({ direction, distance, startX, startY, endX, endY, durationMs, delta, device, verify, screenshot, burst, verbose }) => {
             // Chromium: a direction is a mouse wheel, four coordinates a left-button drag.
             const chromeApp = chromiumAppFor("swipe", device);
             if (chromeApp) {
@@ -439,6 +444,10 @@ export function registerInteractionTools(server: McpServer): void {
                     isError: true,
                 };
             }
+
+            // Route, changed text, requests and console errors during the swipe need a
+            // reading from before the gesture.
+            const outcomeHandle = await beginActionOutcome(device);
 
             // Capture before-screenshot only if we'll need it (verify or burst).
             const wantBefore = shouldVerify || shouldBurst;
@@ -535,6 +544,13 @@ export function registerInteractionTools(server: McpServer): void {
                 ? { width: beforeCapture.width, height: beforeCapture.height }
                 : undefined;
 
+            // Scroll offset before the gesture, so the outcome can say how far it moved. The
+            // same metrics get_screen_state uses, so the probe hit-tests in the caller's space.
+            const probeMetrics = outcomeHandle.connected
+                ? await resolveScreenSpaceMetrics({ platform: resolvedPlatform, udid: resolvedUdid, deviceId: resolved.target.androidSerial })
+                : undefined;
+            const probeBefore = outcomeHandle.connected ? await probeScrollAt(startX!, startY!, device, probeMetrics) : null;
+
             // Baseline for the foreground-loss check below, sampled while the app is still
             // whatever it is about to stop being.
             const foregroundBefore =
@@ -604,20 +620,18 @@ export function registerInteractionTools(server: McpServer): void {
                     : null
             );
 
-            // Only pay for the scroll probe when the swipe did nothing — that is the only
-            // time the answer is needed, and it costs two JS round-trips.
+            const probeAfter = outcomeHandle.connected ? await probeScrollAt(startX!, startY!, device, probeMetrics) : null;
             const didNothing =
                 !!verification && !verification.skipped && verification.meaningful === false;
             let warning: string | undefined;
             if (didNothing) {
-                // Same metrics get_screen_state uses, so the probe hit-tests in the space
-                // the caller's coordinates are actually in.
-                const metrics = await resolveScreenSpaceMetrics({
+                // The after-probe already looked when the app is connected; without a
+                // connection the probe says it could not look rather than guessing.
+                const probe = probeAfter ?? await probeScrollAt(startX!, startY!, device, await resolveScreenSpaceMetrics({
                     platform: resolvedPlatform,
                     udid: resolvedUdid,
                     deviceId: resolved.target.androidSerial,
-                });
-                const probe = await probeScrollAt(startX!, startY!, device, metrics);
+                }));
                 warning = `Swipe executed but nothing moved: ${explainNoOpSwipe(
                     probe,
                     { x: startX!, y: startY! },
@@ -625,23 +639,29 @@ export function registerInteractionTools(server: McpServer): void {
                 )}`;
             }
 
-            const responseBody: Record<string, unknown> = {
-                success: true,
-                platform: resolvedPlatform,
-                from: { x: startX, y: startY },
-                to: { x: endX, y: endY },
-                ...(foregroundWarning && { foregroundLost: foregroundWarning }),
+            const outcome = await finishActionOutcome(outcomeHandle, {
+                visualSettleRan: !!verification && !verification.skipped,
+            });
+            const scroll = probeBefore && probeAfter ? formatScroll(probeBefore, probeAfter) : undefined;
+            if (scroll) outcome.scroll = scroll;
+            const responseBody = renderSwipeResponse({
+                verification,
+                outcome,
+                warning,
+                foregroundLost: foregroundWarning ?? undefined,
                 // Carried on the tools you are actually calling. get_refresh_status can
                 // answer this too, but only if you already suspect it — and the whole
                 // problem is that nothing else gives you a reason to.
-                ...(bundleStaleWarning(resolved.target.deviceName) && {
-                    staleBundle: bundleStaleWarning(resolved.target.deviceName),
-                }),
-                driverMessage: driverResult.result,
-                ...(verification && { verification }),
-                ...(warning && { warning }),
+                staleBundle: bundleStaleWarning(resolved.target.deviceName) ?? undefined,
                 deviceNote: resolved.note,
-            };
+                platform: resolvedPlatform,
+                from: { x: startX, y: startY },
+                to: { x: endX, y: endY },
+                driverMessage: driverResult.result,
+            }, {
+                verbose: verbose === true,
+                showDeviceNote: !!resolved.note && changedSinceLastShown("deviceNote", resolved.note),
+            });
 
             const content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [
                 { type: "text" as const, text: JSON.stringify(responseBody, null, 2) },

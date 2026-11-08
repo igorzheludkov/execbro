@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { renderTapResponse, compactVerification } from "../../pro/actionRender.js";
+import { renderTapResponse, compactVerification, formatScroll, renderSwipeResponse } from "../../pro/actionRender.js";
 import type { TapResult } from "../../pro/tap.js";
 
 // The accessibility tap on Submit measured on the Pixel 9 emulator: about 1,250
@@ -79,5 +79,53 @@ describe("compactVerification", () => {
     it("caps regions at 5", () => {
         const regions = Array.from({ length: 7 }, (_, i) => ({ x: 0, y: i * 100, width: 10, height: 10, changedPixels: 1 }));
         expect((compactVerification({ meaningful: true, regions, explanation: "" }).regions as string[]).length).toBe(5);
+    });
+});
+
+describe("formatScroll", () => {
+    it("reports the scroll container's offset before and after", () => {
+        expect(formatScroll(
+            { found: true, offset: 0, maxOffset: 1240, component: "ScrollView" },
+            { found: true, offset: 660, maxOffset: 1240, component: "ScrollView" }
+        )).toBe("ScrollView y 0 → 660 of 1240");
+    });
+
+    it("uses x for a horizontal container and a generic name when unnamed", () => {
+        expect(formatScroll({ found: true, horizontal: true, offset: 10.4, maxOffset: 300 }, { found: true, horizontal: true, offset: 200, maxOffset: 300 }))
+            .toBe("scroll view x 10 → 200 of 300");
+    });
+
+    it("is undefined when either probe could not look", () => {
+        expect(formatScroll({ found: false, unavailable: true }, { found: true, offset: 1 })).toBeUndefined();
+        expect(formatScroll({ found: true, offset: 1 }, { found: false })).toBeUndefined();
+    });
+});
+
+describe("renderSwipeResponse", () => {
+    const body = {
+        verification: { meaningful: true, changeRate: 0.13, changedPixels: 231354, totalPixels: 1677753, regions: [{ x: 32, y: 341, width: 816, height: 784, changedPixels: 1 }], explanation: "Swipe caused ..." },
+        outcome: { scroll: "ScrollView y 0 → 660 of 1240" },
+        platform: "android", from: { x: 446, y: 1330 }, to: { x: 446, y: 670 },
+        driverMessage: "Swiped from (541, 1612) to (541, 812) in 300ms",
+        deviceNote: "defaulted to ...",
+    };
+
+    it("slim swipe keeps outcome and verdict only", () => {
+        expect(renderSwipeResponse(body, { verbose: false, showDeviceNote: false })).toEqual({
+            success: true,
+            outcome: { scroll: "ScrollView y 0 → 660 of 1240" },
+            verification: { meaningful: true, regions: ["(440,733) 816x784"] },
+        });
+    });
+
+    it("verbose adds geometry, driver message and the full verification", () => {
+        expect(renderSwipeResponse(body, { verbose: true, showDeviceNote: false })).toMatchObject({
+            platform: "android", from: body.from, to: body.to, driverMessage: body.driverMessage, verification: { changeRate: 0.13 },
+        });
+    });
+
+    it("keeps warnings", () => {
+        expect(renderSwipeResponse({ ...body, warning: "Swipe executed but nothing moved: already at end" }, { verbose: false, showDeviceNote: false }).warning)
+            .toBe("Swipe executed but nothing moved: already at end");
     });
 });
