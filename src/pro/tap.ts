@@ -2145,6 +2145,9 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                     beforeScaleFactor: nativeScreenshotMeta?.scaleFactor,
                     markerPx: nativeMarker
                 }));
+                // Same rule as the other paths: the frame is returned only when asked for,
+                // or when nothing changed and it is the evidence.
+                if (!nativeShouldScreenshot && verification?.meaningful !== false) screenshot = undefined;
             }
             const nativeSuccess = formatTapSuccess({
                 method: "native-coordinate",
