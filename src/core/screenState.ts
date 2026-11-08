@@ -605,9 +605,12 @@ export function formatPressabilityAudit(counts: PressabilityAuditCounts): string
 }
 
 export async function getScreenState(
-    options: { device?: string } = {}
+    options: { device?: string; bounded?: boolean } = {}
 ): Promise<ExecutionResult & { screenState?: ScreenState }> {
-    const { device } = options;
+    const { device, bounded } = options;
+    // A read made around an action (tap/swipe outcome) must not stall on a wedged JS
+    // thread or take a displaced connection back: same limits as get_timeline's reads.
+    const limits = bounded ? { timeoutMs: 3000, maxRetries: 0, autoReconnect: false } : {};
 
     const dispatchExpression = `
 (function() {
@@ -1858,7 +1861,7 @@ export async function getScreenState(
 })()
     `;
 
-    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000, originatingToolName: "get_screen_state" }, device);
+    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000, originatingToolName: "get_screen_state", ...limits }, device);
     if (!dispatchResult.success) return dispatchResult;
 
     let dispatchedNodes = 0;
@@ -2381,7 +2384,7 @@ ${OVERLAY_ADOPTION_JS}
 })()
     `;
 
-    const resolveResult = await executeInApp(resolveExpression, false, { timeoutMs: 15000, originatingToolName: "get_screen_state" }, device);
+    const resolveResult = await executeInApp(resolveExpression, false, { timeoutMs: 15000, originatingToolName: "get_screen_state", ...limits }, device);
 
     if (!resolveResult.success) return resolveResult;
 
