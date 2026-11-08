@@ -6,6 +6,7 @@ import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
+import { SECURE_VALUE_JS } from "./injected/secureValue.js";
 
 // ============================================================================
 // Coordinate-Based Element Inspection (via DevTools Inspector API)
@@ -21,6 +22,7 @@ export async function isInspectorActive(device?: string): Promise<boolean> {
             if (!hook) return false;
 
             ${FIBER_ROOTS_JS}
+            ${SECURE_VALUE_JS}
             const roots = __eb_fiberRoots(false);
             if (roots.length === 0) return false;
 
@@ -86,6 +88,7 @@ export async function inspectAtPoint(
         new Promise(function(resolve) {
             var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             ${FIBER_ROOTS_JS}
+            ${SECURE_VALUE_JS}
             var roots = __eb_fiberRoots(false);
             if (roots.length === 0) return resolve({ error: __eb_noRootsReason() });
 
@@ -453,6 +456,8 @@ export async function inspectAtPoint(
                         } catch(e) {
                             props[key] = '[Object]';
                         }
+                    } else if (key === 'value' || key === 'defaultValue') {
+                        props[key] = maskSecureValue(named.fiber.memoizedProps, val);
                     } else {
                         props[key] = val;
                     }

@@ -4,6 +4,7 @@ import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC } from "./injectedFilters.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
+import { SECURE_VALUE_JS } from "./injected/secureValue.js";
 
 // ============================================================================
 // Pressable Elements & onPress invocation
@@ -184,6 +185,7 @@ export async function pressElement(options: {
 
             ${VISIBILITY_HELPERS_JS}
             ${SHEET_HELPERS_JS}
+            ${SECURE_VALUE_JS}
 
             // When a fiber holds a string/number child via memoizedProps.children, return it
             // without recursing — Text > RCTText > NativeText all carry the same string,
@@ -336,8 +338,8 @@ export async function pressElement(options: {
                     if (isPressable) {
                         text = extractText(fiber, 0);
                     } else {
-                        var val = typeof props.value === 'string' ? props.value : '';
-                        var defVal = typeof props.defaultValue === 'string' ? props.defaultValue : '';
+                        var val = typeof props.value === 'string' ? maskSecureValue(props, props.value) : '';
+                        var defVal = typeof props.defaultValue === 'string' ? maskSecureValue(props, props.defaultValue) : '';
                         var ph = typeof props.placeholder === 'string' ? props.placeholder : '';
                         text = extractText(fiber, 0) || val || defVal || ph;
                     }
@@ -417,7 +419,7 @@ export async function pressElement(options: {
                             var nIsInput = !nIsPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
                             if (nIsPressable || nIsInput) {
-                                var text = nIsPressable ? extractText(fiber, 0) : (extractText(fiber, 0) || (typeof props.value === 'string' ? props.value : '') || (typeof props.defaultValue === 'string' ? props.defaultValue : '') || (typeof props.placeholder === 'string' ? props.placeholder : ''));
+                                var text = nIsPressable ? extractText(fiber, 0) : (extractText(fiber, 0) || (typeof props.value === 'string' ? maskSecureValue(props, props.value) : '') || (typeof props.defaultValue === 'string' ? maskSecureValue(props, props.defaultValue) : '') || (typeof props.placeholder === 'string' ? props.placeholder : ''));
                                 var host = findFirstHost(fiber, 0, nIsInput);
                                 if (host) {
                                     hostFibers.push(host);
@@ -444,7 +446,7 @@ export async function pressElement(options: {
                                     var pIsPressable = isPressableProps(pp) || isSwitchFiber(parent, pp);
                                     var pIsInput = !pIsPressable && pp && (typeof pp.onChangeText === 'function' || typeof pp.onFocus === 'function');
                                     if (pIsPressable || pIsInput) {
-                                        var pText = pIsPressable ? extractText(parent, 0) : (extractText(parent, 0) || (typeof pp.value === 'string' ? pp.value : '') || (typeof pp.defaultValue === 'string' ? pp.defaultValue : '') || (typeof pp.placeholder === 'string' ? pp.placeholder : ''));
+                                        var pText = pIsPressable ? extractText(parent, 0) : (extractText(parent, 0) || (typeof pp.value === 'string' ? maskSecureValue(pp, pp.value) : '') || (typeof pp.defaultValue === 'string' ? maskSecureValue(pp, pp.defaultValue) : '') || (typeof pp.placeholder === 'string' ? pp.placeholder : ''));
                                         var host = findFirstHost(parent, 0, pIsInput);
                                         if (host) {
                                             hostFibers.push(host);
@@ -473,7 +475,7 @@ export async function pressElement(options: {
                                     var desc = findDescendantPressable(fiber, 0);
                                     if (desc) {
                                         var dp = desc.fiber.memoizedProps;
-                                        var dText = desc.isPressable ? extractText(desc.fiber, 0) : (extractText(desc.fiber, 0) || (typeof dp.value === 'string' ? dp.value : '') || (typeof dp.defaultValue === 'string' ? dp.defaultValue : '') || (typeof dp.placeholder === 'string' ? dp.placeholder : ''));
+                                        var dText = desc.isPressable ? extractText(desc.fiber, 0) : (extractText(desc.fiber, 0) || (typeof dp.value === 'string' ? maskSecureValue(dp, dp.value) : '') || (typeof dp.defaultValue === 'string' ? maskSecureValue(dp, dp.defaultValue) : '') || (typeof dp.placeholder === 'string' ? dp.placeholder : ''));
                                         var dhost = findFirstHost(desc.fiber, 0, desc.isInput);
                                         if (dhost) {
                                             hostFibers.push(dhost);

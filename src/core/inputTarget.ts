@@ -48,6 +48,7 @@ export type InputCandidate = {
 
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
+import { SECURE_VALUE_JS } from "./injected/secureValue.js";
 
 export type InputOp =
     | { kind: "find" }
@@ -148,6 +149,7 @@ function prelude(query: InputQuery | undefined): string {
     return `
   var hook = global.__REACT_DEVTOOLS_GLOBAL_HOOK__;
   ${FIBER_ROOTS_JS}
+  ${SECURE_VALUE_JS}
   var allRoots = __eb_fiberRoots(true);
   if (allRoots.length === 0) return hook ? { found: false, reason: "no fiber roots" } : { found: false, reason: "no devtools hook" };
 
@@ -343,7 +345,7 @@ function prelude(query: InputQuery | undefined): string {
       component: __eb_componentOf(hostFiber),
       label: __eb_labelOf(hostFiber),
       placeholder: op.placeholder != null ? String(op.placeholder) : null,
-      value: op.value != null ? String(op.value) : null,
+      value: op.value != null ? maskSecureValue(op, String(op.value)) : null,
       testID: __eb_testIDOf(hostFiber)
     };
   }

@@ -3,6 +3,7 @@ import { executeInApp, delay } from "./jsExecute.js";
 import { formatSummaryCompact } from "./screenLayout.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
+import { SECURE_VALUE_JS } from "./injected/secureValue.js";
 
 // ============================================================================
 // Component Search (findComponents, inspectComponent)
@@ -82,6 +83,7 @@ export async function inspectComponent(
         (function() {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             ${FIBER_ROOTS_JS}
+            ${SECURE_VALUE_JS}
             const roots = __eb_fiberRoots(false);
             if (roots.length === 0) return { error: __eb_noRootsReason() };
 
@@ -273,7 +275,9 @@ export async function inspectComponent(
                 for (const key of Object.keys(fiber.memoizedProps)) {
                     if (key === 'children') continue;
                     try {
-                        props[key] = serializeValue(fiber.memoizedProps[key]);
+                        props[key] = (key === 'value' || key === 'defaultValue')
+                            ? maskSecureValue(fiber.memoizedProps, fiber.memoizedProps[key])
+                            : serializeValue(fiber.memoizedProps[key]);
                     } catch {
                         props[key] = '[Animated Value]';
                     }
@@ -490,6 +494,7 @@ export async function findComponents(
         (function() {
             const hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
             ${FIBER_ROOTS_JS}
+            ${SECURE_VALUE_JS}
             const roots = __eb_fiberRoots(false);
             if (roots.length === 0) return { error: __eb_noRootsReason() };
 

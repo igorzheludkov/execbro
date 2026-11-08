@@ -7,6 +7,7 @@ import { OVERLAY_ADOPTION_JS } from "./injected/overlayAdoption.js";
 import { TRANSFORM_COMPOSE_JS } from "./injected/transformCompose.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
+import { SECURE_VALUE_JS } from "./injected/secureValue.js";
 import type { KeyboardState } from "./keyboardMetrics.js";
 
 // ============================================================================
@@ -626,6 +627,7 @@ export async function getScreenState(
 
     ${VISIBILITY_HELPERS_JS}
     ${SHEET_HELPERS_JS}
+    ${SECURE_VALUE_JS}
 
     function getMeasurable(fiber) {
         var sn = fiber.stateNode;
@@ -1463,8 +1465,8 @@ export async function getScreenState(
             if (hostsI.length > 0) {
                 var pI = fiber.memoizedProps || {};
                 var textI = collectText(fiber, 0);
-                var valueI = (typeof pI.value === 'string' && pI.value.length > 0) ? pI.value
-                           : (typeof pI.defaultValue === 'string' && pI.defaultValue.length > 0) ? pI.defaultValue
+                var valueI = (typeof pI.value === 'string' && pI.value.length > 0) ? maskSecureValue(pI, pI.value)
+                           : (typeof pI.defaultValue === 'string' && pI.defaultValue.length > 0) ? maskSecureValue(pI, pI.defaultValue)
                            : null;
                 var placeholderI = (typeof pI.placeholder === 'string' && pI.placeholder.length > 0) ? pI.placeholder : null;
                 var testIDI = pI.testID || pI.nativeID || null;
