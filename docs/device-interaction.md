@@ -31,6 +31,8 @@ tap with text="Menu" strategy="ocr"
 
 On failure, the response includes an actionable `suggestion` telling the agent exactly what to try next.
 
+**Outcome:** every successful `tap` and `swipe` returns `outcome`: the route before and after, the text that changed on screen, the requests made during the action with their status (waiting up to 3s for requests it started), new console errors and warnings, and for `swipe` the scroll offset. Read it before taking a screenshot; it usually answers "did it work". It is merged by time, so it says what happened during the action, not what caused it. `verbose=true` returns the raw pixel statistics and converted coordinates the compact response leaves out.
+
 **Screenshot & verification:** By default, `tap` captures and returns a post-tap screenshot (`screenshot=true`). For coordinate, accessibility, and OCR strategies, it also runs a before/after screenshot diff to verify the tap had a meaningful visual effect (`verify=true` by default for these strategies, `false` for fiber). Set `screenshot=false` to skip screenshots entirely for fastest execution, or `verify=false` to skip the diff check.
 
 ## Platform-Specific Tools

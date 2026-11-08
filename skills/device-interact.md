@@ -118,6 +118,8 @@ tap(text="Submit", screenshot=false)       # skip post-tap screenshot for faster
 tap(x=300, y=600, verify=true)             # before/after diff to confirm tap had visual effect
 tap(text="Login", verify=false)            # skip verification (default for fiber strategy)
 ```
+Read `outcome` first: route before and after, text that changed (`"Taps: 0" → "Taps: 1"`, `+ "Invalid email or password"`), requests made during the tap with status, new console errors. It usually answers "did it work" without a screenshot. `verbose=true` returns the raw pixel statistics.
+
 `screenshot` (default: true) controls whether a post-tap screenshot is returned. `verify` (default: true for coordinate/accessibility/ocr, false for fiber) runs a before/after screenshot diff to detect if the tap caused a meaningful visual change.
 
 **Deeply wrapped components — increase traversal depth:**
@@ -139,7 +141,7 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 **Swipe/scroll** — `mcp__execbro__swipe`, cross-platform:
 - `swipe(direction="up")` scrolls to reveal content below; `"down"`/`"left"`/`"right"` also work, and a bare `swipe()` defaults to `"up"`
 - `distance` is in screenshot pixels (default 33% of the axis); pass all four of `startX`/`startY`/`endX`/`endY` for a coordinate-precise gesture, which takes precedence over `direction`
-- Read `verification.meaningful`. When false, `warning` names which no-op it was — already at top, already at end, not scrollable, wrong axis, no scroll view under the start point, or (with no RN connection) that it could not inspect the screen
+- Read `outcome.scroll` (`ScrollView y 0 → 473 of 758`) for how far it moved, and `verification.meaningful`. When false, `warning` names which no-op it was — already at top, already at end, not scrollable, wrong axis, no scroll view under the start point, or (with no RN connection) that it could not inspect the screen
 - `burst:true` catches overscroll/bounce that settles before the after-frame; `verify:false, screenshot:false` is the fastest path
 - It drives the device through adb/simctl, so it works on non-RN screens too — only the no-op diagnosis needs a React Native connection
 
