@@ -36,7 +36,7 @@ export interface TimelineWindow {
 export const FALLBACK_WINDOW_MS = 60_000;
 
 const KIND_ORDER: Record<EventKind, number> = { restart: 0, action: 1, route: 2, perf: 3, request: 4, log: 5, refresh: 6 };
-const TIER = { restart: 0, action: 1, route: 2, perf: 2, refresh: 3, errorLog: 4, failedRequest: 5, warnLog: 6, request: 7, log: 8 };
+export const TIER = { restart: 0, action: 1, route: 2, perf: 2, refresh: 3, errorLog: 4, failedRequest: 5, warnLog: 6, request: 7, log: 8 };
 const RELATIVE = /^-(\d+(?:\.\d+)?)(ms|s|m|h)$/;
 const UNIT_MS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
 const FORMATS = 'epoch ms, a relative time like "-30s", "-5m" or "-1h"';
