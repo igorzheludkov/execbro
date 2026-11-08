@@ -204,11 +204,18 @@ Use tap — it tries multiple strategies automatically and returns a post-tap sc
 tap returns a screenshot after every action (screenshot=true by default) — no need to call screenshot after tapping.
 For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visual change (verify=true by default). Set screenshot=false for fastest execution.
 
-When meaningful:true, verification.regions gives bounding boxes (screenshot pixels, same space as
-tap/inspect_at_point) of where the screen actually changed, and the explanation text names their
-centres. A pixel diff still cannot say WHAT changed, but the region tells you WHERE to look —
-inspect_at_point on a region's centre is the natural next call instead of eyeballing the whole
-screenshot.
+Every successful tap and swipe also returns outcome: what happened in the app while it ran.
+outcome.route is the route before and after ("Login → ProductList" or "unchanged (Login)"),
+outcome.text the text that changed on screen ("Taps: 0" → "Taps: 1", + "Invalid email or password"),
+outcome.network the requests made meanwhile with their status, outcome.console new errors and
+warnings, and for swipe outcome.scroll the scroll offset ("ScrollView y 0 → 473 of 758"). The tool
+waits up to 3s for requests the action started; any still running are listed as pending, and
+get_timeline() shows the rest. Read the outcome before taking a screenshot: it usually answers
+"did it work". It is merged by time, so it says what happened during the action, not what caused it.
+
+verification.meaningful says whether the screen visibly changed, and verification.regions gives the
+centres and sizes of the changed areas (screenshot pixels, same space as tap/inspect_at_point).
+verbose:true returns the raw pixel statistics, converted coordinates and query echo.
 
 ### When verification says meaningful:false but you think the tap landed
 Retry with burst=true. It captures 4 rapid screenshots after the tap, catching press animations
