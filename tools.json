@@ -246,7 +246,8 @@
             "fullParams",
             "fullText",
             "includeHistory",
-            "pressablesOnly"
+            "pressablesOnly",
+            "showPruned"
         ],
         "get_timeline": [
             "device",
@@ -477,6 +478,7 @@
             "screenshot",
             "startX",
             "startY",
+            "verbose",
             "verify"
         ],
         "tap": [
@@ -491,6 +493,7 @@
             "strategy",
             "testID",
             "text",
+            "verbose",
             "verify",
             "x",
             "y"
