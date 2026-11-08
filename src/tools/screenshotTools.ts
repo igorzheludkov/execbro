@@ -30,6 +30,29 @@ import { chromiumAppFor } from "../core/connection.js";
 import { chromiumScreenState } from "../core/chromiumScreen.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { chromiumCapture } from "../core/chromium.js";
+import { isNearUniform, BLANK_RETRY_MS } from "../core/blankFrame.js";
+
+const BLANK_FRAME_NOTE = "\nℹ️ The captured frame is blank (the app may not have painted yet). The element list below comes from the React tree, not from this image.";
+
+/**
+ * A capture that lands before the app's first paint is a flat frame, while the
+ * element list beside it comes from the React tree and is full. Retry once; if the
+ * frame is still blank, say so instead of presenting the two as agreeing.
+ */
+async function retryBlankCapture<T extends { success: boolean; data?: Buffer }>(
+    first: T,
+    appConnected: boolean,
+    capture: () => Promise<T>
+): Promise<{ result: T; blankNote: string }> {
+    if (!appConnected || !first.success || !first.data || !(await isNearUniform(first.data))) {
+        return { result: first, blankNote: "" };
+    }
+    await new Promise((r) => setTimeout(r, BLANK_RETRY_MS));
+    const retry = await capture();
+    const result = retry.success && retry.data ? retry : first;
+    const stillBlank = !!result.data && (await isNearUniform(result.data));
+    return { result, blankNote: stillBlank ? BLANK_FRAME_NOTE : "" };
+}
 
 /**
  * Screenshot a USB-attached iPhone/iPad.
@@ -119,7 +142,7 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
         ? getScreenState({ device: earlyTargetApp.deviceInfo.deviceName }).catch(() => null)
         : Promise.resolve(null);
 
-    const result = await capturePromise;
+    const { result, blankNote } = await retryBlankCapture(await capturePromise, !!earlyTargetApp, () => iosScreenshot(outputPath, targetUdid ?? undefined));
     
     if (!result.success) {
         return {
@@ -265,6 +288,7 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
         } else {
             infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
         }
+        infoText += blankNote;
         if (resolved.udid) {
             recordScreenMetrics(resolved.udid, {
                 rawWidth: pixelWidth,
@@ -391,7 +415,7 @@ async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, dev
         ? getScreenState({ device: androidTargetApp.deviceInfo.deviceName }).catch(() => null)
         : Promise.resolve(null);
 
-    const result = await capturePromise;
+    const { result, blankNote } = await retryBlankCapture(await capturePromise, !!androidTargetApp, () => androidScreenshot(outputPath, resolved.serial));
     
     if (!result.success) {
         return {
@@ -434,6 +458,7 @@ async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, dev
         let infoText = result.scaleFactor && result.scaleFactor > 1
             ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${androidDeliveredW}x${androidDeliveredH} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`
             : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
+        infoText += blankNote;
 
         if (resolved.serial) {
             // Android device scale/points (dp) require the density fetched
