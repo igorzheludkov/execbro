@@ -104,6 +104,9 @@ export function notableLines(request: NetworkRequest, others: NetworkRequest[]):
         for (const [k, types] of here) {
             if (types.size !== 1) continue;
             const mine = [...types][0];
+            // Scalars only: a container key (JSON:API `data`) is legitimately an object on
+            // a detail endpoint and an array on a list.
+            if (mine === "object" || mine === "array") continue;
             const theirs = elsewhere.get(k);
             if (!theirs || theirs.size !== 1) continue;
             const [other, count] = [...theirs][0];

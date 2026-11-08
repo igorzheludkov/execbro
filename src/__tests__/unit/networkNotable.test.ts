@@ -27,6 +27,12 @@ describe("notableLines", () => {
         expect(notableLines(order, others)).toEqual([]);
     });
 
+    it("does not compare containers: data is an object on a detail GET and an array on a list", () => {
+        // JSON:API shape; flagging it would put a Notable line on every detail request.
+        const detail = req("d", "http://localhost:8092/products/1", undefined, '{"data":{"id":1}}');
+        expect(notableLines(detail, [req("l", "http://localhost:8092/products", undefined, '{"data":[{"id":1}]}')])).toEqual([]);
+    });
+
     it("ignores null on either side", () => {
         const order = req("o", "http://localhost:8092/carts", '{"price":null}');
         expect(notableLines(order, [req("a", "http://localhost:8092/p", undefined, '{"price":9.99}')])).toEqual([]);
