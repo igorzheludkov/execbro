@@ -89,8 +89,20 @@ export function withScroll(outcome: ActionOutcome, before: ScrollProbe | null, a
     const scroll = formatScroll(before, after);
     if (!scroll) return outcome;
     const moved = before.offset !== after.offset;
+    // A negative offset is an overscroll or a pull-to-refresh holding the content down:
+    // the content may really have changed, so the diff stays.
+    const refreshing = Math.min(before.offset ?? 0, after.offset ?? 0) < 0;
+    return moved && !refreshing ? { ...summarizeScrolledText(outcome), scroll } : { ...outcome, scroll };
+}
+
+/**
+ * Not listing rows a list mounted and unmounted, but saying so: a silently missing diff
+ * reads as "nothing changed", and a page counter or a footer may be among them.
+ */
+function summarizeScrolledText(outcome: ActionOutcome): ActionOutcome {
     const { text, ...rest } = outcome;
-    return moved ? { ...rest, scroll } : { ...outcome, scroll };
+    if (!text || text.length === 0) return rest;
+    return { ...rest, text: [`${text.length} text line(s) changed while the list scrolled (not listed): get_screen_state reads the screen`] };
 }
 
 export function renderSwipeResponse(
@@ -136,8 +148,18 @@ export function attachOutcome<R extends { content: ToolContent[]; isError?: bool
         return response;
     }
     const scrolled = body.scrolled as { dx?: number; dy?: number } | undefined;
-    const { text, ...rest } = outcome;
-    const o = scrolled && (scrolled.dx || scrolled.dy) ? rest : outcome;
+    const o = scrolled && (scrolled.dx || scrolled.dy) ? summarizeScrolledText(outcome) : outcome;
     if (Object.keys(o).length > 0) body.outcome = o;
     return { ...response, content: [{ ...first, text: JSON.stringify(body, null, 2) }, ...response.content.slice(1)] };
+}
+
+/** A chromium swipe that opened a JavaScript dialog: the page is paused, so no outcome can be read. */
+export function isDialogResponse(response: { content: ToolContent[] }): boolean {
+    const first = response.content[0];
+    if (!first || first.type !== "text" || !first.text) return false;
+    try {
+        return !!JSON.parse(first.text).dialog;
+    } catch {
+        return false;
+    }
 }

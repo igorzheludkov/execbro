@@ -33,7 +33,7 @@ import { probeScrollAt, explainNoOpSwipe } from "../core/swipeDiagnosis.js";
 import { bundleStaleWarning } from "../core/metroIdentity.js";
 import { beginActionOutcome, finishActionOutcome } from "../core/actionOutcomeCollect.js";
 import { changedSinceLastShown } from "../core/sessionOnce.js";
-import { renderTapResponse, renderSwipeResponse, withScroll, attachOutcome } from "../pro/actionRender.js";
+import { renderTapResponse, renderSwipeResponse, withScroll, attachOutcome, isDialogResponse } from "../pro/actionRender.js";
 import {
     captureScreenshot,
     verifyAndCapture,
@@ -416,7 +416,8 @@ export function registerInteractionTools(server: McpServer): void {
             if (chromeApp) {
                 const chromeHandle = await beginActionOutcome(device);
                 const chromeResult = await chromiumSwipe(chromeApp, { direction, distance, startX, startY, endX, endY, durationMs, delta, burst, verify, screenshot });
-                if (chromeResult.isError) return chromeResult;
+                // An error, or a dialog that paused the page: nothing to read, no wait.
+                if (chromeResult.isError || isDialogResponse(chromeResult)) return chromeResult;
                 return attachOutcome(chromeResult, await finishActionOutcome(chromeHandle, { visualSettleRan: verify !== false }));
             }
             const resolved = await resolveDeviceTarget(device);

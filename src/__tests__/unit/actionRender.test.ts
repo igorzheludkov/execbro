@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { renderTapResponse, compactVerification, formatScroll, renderSwipeResponse, withScroll, attachOutcome } from "../../pro/actionRender.js";
+import { renderTapResponse, compactVerification, formatScroll, renderSwipeResponse, withScroll, attachOutcome, isDialogResponse } from "../../pro/actionRender.js";
 import type { TapResult } from "../../pro/tap.js";
 
 // The accessibility tap on Submit measured on the Pixel 9 emulator: about 1,250
@@ -142,9 +142,18 @@ describe("renderSwipeResponse", () => {
 });
 
 describe("withScroll", () => {
-    it("drops the text diff when the list scrolled: rows mounting and unmounting are not changes", () => {
+    it("replaces the text diff with one line when the list scrolled: rows mounting and unmounting are not changes", () => {
         const o = withScroll({ route: "unchanged (Feed)", text: ['+ "Row 41"', '- "Row 1"'] }, { found: true, offset: 0, maxOffset: 900 }, { found: true, offset: 473, maxOffset: 900 });
-        expect(o).toEqual({ route: "unchanged (Feed)", scroll: "scroll view y 0 → 473 of 900" });
+        expect(o).toEqual({
+            route: "unchanged (Feed)",
+            scroll: "scroll view y 0 → 473 of 900",
+            text: ["2 text line(s) changed while the list scrolled (not listed): get_screen_state reads the screen"],
+        });
+    });
+
+    it("keeps the text diff on an overscroll or pull-to-refresh: the content may really have changed", () => {
+        const o = withScroll({ text: ['+ "Updated just now"'] }, { found: true, offset: 0 }, { found: true, offset: -60 });
+        expect(o.text).toEqual(['+ "Updated just now"']);
     });
 
     it("keeps the text diff when nothing scrolled (a swipe that dismissed a sheet, flipped a pager)", () => {
@@ -167,9 +176,17 @@ describe("attachOutcome (chromium swipe)", () => {
         expect(r.content[1]).toEqual({ type: "image", data: "x", mimeType: "image/jpeg" });
     });
 
-    it("drops the text diff when the page scrolled", () => {
+    it("replaces the text diff with one line when the page scrolled", () => {
         const r = attachOutcome(response({ success: true, scrolled: { dx: 0, dy: 400 } }), { text: ['+ "Row 41"'], route: "unchanged (/feed)" });
-        expect(JSON.parse(r.content[0].text!).outcome).toEqual({ route: "unchanged (/feed)" });
+        expect(JSON.parse(r.content[0].text!).outcome).toEqual({
+            route: "unchanged (/feed)",
+            text: ["1 text line(s) changed while the list scrolled (not listed): get_screen_state reads the screen"],
+        });
+    });
+
+    it("recognises a swipe that opened a dialog: the page is paused, there is nothing to read", () => {
+        expect(isDialogResponse(response({ success: true, dialog: { type: "alert", message: "hi" } }))).toBe(true);
+        expect(isDialogResponse(response({ success: true }))).toBe(false);
     });
 
     it("leaves an error response untouched", () => {
