@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { clipToScrollers, viewportBottom, SCROLL_CLIP_JS } from "../../core/injected/scrollClip.js";
+import { clipToScrollers, clipUnlessMoved, viewportBottom, SCROLL_CLIP_JS } from "../../core/injected/scrollClip.js";
 
 // Measured on device (Pixel 9 emulator, Tap Targets at scroll top), window points:
 // root RCTView (0,-54 411x923); vertical RCTScrollView (0,104 411x668), which ends
@@ -43,5 +43,20 @@ describe("clipToScrollers", () => {
     it("injected source behaves the same", () => {
         const fn = new Function(`${SCROLL_CLIP_JS}; return clipToScrollers;`)();
         expect(fn({ x: 20, y: 818, width: 371, height: 48 }, [VERTICAL])).toBeNull();
+    });
+});
+
+describe("clipUnlessMoved", () => {
+    it("does not clip an element a transform moved: its scroller's rect does not include that transform", () => {
+        // A pager on translateX: -index*width with a ScrollView per page. measureInWindow
+        // reports the page's list off screen, the composed element frame is on screen.
+        const raw = { x: 431, y: 300, width: 100, height: 48 };
+        const moved = { x: 20, y: 300, width: 100, height: 48 };
+        expect(clipUnlessMoved(moved, raw, [{ x: 411, y: 104, width: 411, height: 668 }])).toEqual(moved);
+    });
+
+    it("clips an element no transform moved", () => {
+        const m = { x: 20, y: 818, width: 371, height: 48 };
+        expect(clipUnlessMoved(m, { ...m }, [VERTICAL])).toBeNull();
     });
 });

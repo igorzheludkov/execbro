@@ -41,12 +41,24 @@ export function clipToScrollers(m: Rect, clips: Array<Rect | null | undefined>):
     return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
 }
 
+/**
+ * Clip only an element no transform moved. The element's frame has its ancestors'
+ * transforms composed in; a scroller's measureInWindow rect does not, so clipping a
+ * moved element (a pager on translateX, a static-translated sheet) against it drops
+ * something that is on screen. Such an element keeps its frame, as before clipping.
+ */
+export function clipUnlessMoved(m: Rect, raw: Rect, clips: Array<Rect | null | undefined>): Rect | null {
+    if (m.x !== raw.x || m.y !== raw.y) return m;
+    return clipToScrollers(m, clips);
+}
+
 /** Host component names of a scroll container on iOS and Android. */
 export const SCROLL_HOSTS = ["RCTScrollView", "AndroidHorizontalScrollView"];
 
 export const SCROLL_CLIP_JS = [
     `var clipToScrollers = ${clipToScrollers.toString()};`,
     `var viewportBottom = ${viewportBottom.toString()};`,
+    `var clipUnlessMoved = ${clipUnlessMoved.toString()};`,
     `var SCROLL_HOSTS = ${JSON.stringify(SCROLL_HOSTS)};`,
     // Up to 4 scroll ancestors, nearest first: nested lists clip by every container.
     `function scrollAncestorsOf(fiber) {
