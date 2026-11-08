@@ -61,6 +61,20 @@ describe("buildOutcome", () => {
         expect(o.text).toEqual(["new screen (route changed): get_screen_state reads it"]);
     });
 
+    it("unknown route but most of the screen replaced: one line, not a diff", () => {
+        // No NavigationContainer ref (route reads null), or a same-name push to a new id.
+        const before = snapshotFromLines(null, ["Shop", "Shoes", "Hats", "Socks", "Checkout"]);
+        const after = snapshotFromLines(null, ["Product", "Shoes", "Size 42", "Add to cart", "Reviews", "Similar"]);
+        const o = buildOutcome({ ...none, before, after });
+        expect(o.route).toBeUndefined();
+        expect(o.text).toEqual(["most of the screen changed (4 of 5 lines): get_screen_state reads it"]);
+    });
+
+    it("a small screen changing one line still gets the diff", () => {
+        const o = buildOutcome({ ...none, before: snapshotFromLines("A", ["Taps: 0"]), after: snapshotFromLines("A", ["Taps: 1"]) });
+        expect(o.text).toEqual(['"Taps: 0" → "Taps: 1"']);
+    });
+
     it("unchanged route and no text change omit text", () => {
         const s = snap("TapTargets", [["Taps: 0", 1, 1]]);
         const o = buildOutcome({ ...none, before: s, after: s });

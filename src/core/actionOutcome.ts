@@ -124,6 +124,22 @@ export function diffSnapshots(before: OutcomeSnapshot, after: OutcomeSnapshot, c
     return out.length > cap ? [...out.slice(0, cap), `+${out.length - cap} more, get_screen_state for all`] : out;
 }
 
+const REPLACED_MIN_LINES = 4;
+const REPLACED_SHARE = 0.5;
+
+/** How many of the before lines are gone afterwards (multiset, by text). */
+function replacedCount(before: OutcomeSnapshot, after: OutcomeSnapshot): number {
+    const left = new Map<string, number>();
+    for (const i of after.items) left.set(i.text, (left.get(i.text) ?? 0) + 1);
+    let gone = 0;
+    for (const i of before.items) {
+        const n = left.get(i.text) ?? 0;
+        if (n > 0) left.set(i.text, n - 1);
+        else gone++;
+    }
+    return gone;
+}
+
 export function buildOutcome(input: {
     before: OutcomeSnapshot | null;
     after: OutcomeSnapshot | null;
@@ -140,8 +156,13 @@ export function buildOutcome(input: {
         if (before.route || after.route) {
             o.route = routeChanged ? `${before.route ?? "?"} → ${after.route ?? "?"}` : `unchanged (${after.route})`;
         }
+        const replaced = replacedCount(before, after);
         if (routeChanged) {
             o.text = [NEW_SCREEN];
+        } else if (before.items.length >= REPLACED_MIN_LINES && replaced / before.items.length > REPLACED_SHARE) {
+            // A navigation the route cannot see (no NavigationContainer ref, a same-name
+            // push to a new id) would otherwise dump the new screen as a 10-line diff.
+            o.text = [`most of the screen changed (${replaced} of ${before.items.length} lines): get_screen_state reads it`];
         } else {
             const diff = diffSnapshots(before, after);
             if (diff.length) o.text = diff;
