@@ -36,6 +36,8 @@ export const TEXT_DIFF_CAP = 10;
 const TEXT_MAX = 80;
 /** Two texts this close vertically are the same line changing, not one leaving and one arriving. */
 const PAIR_DY = 16;
+/** A shared prefix this long is the same line changing, wherever it moved. */
+const STRONG_PREFIX = 3;
 const NEW_SCREEN = "new screen (route changed): get_screen_state reads it";
 
 function clip(s: string): string {
@@ -65,8 +67,8 @@ export function snapshotFromScreenState(ss: ScreenState): OutcomeSnapshot {
     return { route: ss.route?.name ?? null, items };
 }
 
-/** Tree-ordered lines (textSnapshot.ts): position is the line's index, spaced so neighbours pair. */
-export const ORDER_STEP = 10;
+/** Tree-ordered lines (textSnapshot.ts): position is the line's index, spaced so a line pairs across up to three inserted above it. */
+export const ORDER_STEP = 5;
 
 export function snapshotFromLines(route: string | null, lines: string[]): OutcomeSnapshot {
     return { route, items: lines.map((text, i) => ({ text: clip(text), x: 0, y: i * ORDER_STEP })) };
@@ -93,29 +95,40 @@ export function diffSnapshots(before: OutcomeSnapshot, after: OutcomeSnapshot, c
 
     const lines: Array<{ y: number; line: string }> = [];
     const free = new Set(added);
-    // Among nearby candidates, the one sharing the longest prefix is the same line
-    // changing ("Taps: 0" → "Taps: 1"), not a neighbour that just appeared; distance
-    // breaks ties.
+    // Pairing, strongest evidence first. (1) A shared prefix of 3+ characters pairs at
+    // any distance, nearest first: rows removed above can move a line far ("Subtotal:
+    // $19.99" → "Subtotal: $0.00" after a cart emptied). (2) A shorter shared prefix pairs
+    // only nearby. (3) A line still unpaired pairs with one in exactly its slot, if both
+    // are real text ("qa.buyer@shop.dev" → "Not signed in"); a stepper's "+" taking the
+    // slot of "Subtotal: $0.00" is not the same line changing.
     const prefix = (a: string, b: string) => {
         let n = 0;
         while (n < a.length && n < b.length && a[n] === b[n]) n++;
         return n;
     };
+    const pairs = new Map<SnapshotItem, SnapshotItem>();
+    const pass = (eligible: (r: SnapshotItem, a: SnapshotItem, p: number, dy: number) => boolean) => {
+        for (const r of removed) {
+            if (pairs.has(r)) continue;
+            let best: SnapshotItem | null = null;
+            let bestP = -1;
+            let bestDy = Infinity;
+            for (const a of free) {
+                const dy = Math.abs(a.y - r.y);
+                const p = prefix(r.text, a.text);
+                if (!eligible(r, a, p, dy)) continue;
+                if (dy < bestDy || (dy === bestDy && p > bestP)) { best = a; bestP = p; bestDy = dy; }
+            }
+            if (best) { free.delete(best); pairs.set(r, best); }
+        }
+    };
+    pass((_r, _a, p) => p >= STRONG_PREFIX);
+    pass((_r, _a, p, dy) => p > 0 && dy <= PAIR_DY);
+    pass((r, a, _p, dy) => dy === 0 && r.text.length >= STRONG_PREFIX && a.text.length >= STRONG_PREFIX);
     for (const r of removed) {
-        let best: SnapshotItem | null = null;
-        for (const a of free) {
-            const dy = Math.abs(a.y - r.y);
-            if (dy > PAIR_DY) continue;
-            if (!best) { best = a; continue; }
-            const pa = prefix(r.text, a.text), pb = prefix(r.text, best.text);
-            if (pa > pb || (pa === pb && dy < Math.abs(best.y - r.y))) best = a;
-        }
-        if (best) {
-            free.delete(best);
-            lines.push({ y: best.y, line: `"${r.text}" → "${best.text}"` });
-        } else {
-            lines.push({ y: r.y, line: `- "${r.text}"` });
-        }
+        const a = pairs.get(r);
+        if (a) lines.push({ y: a.y, line: `"${r.text}" → "${a.text}"` });
+        else lines.push({ y: r.y, line: `- "${r.text}"` });
     }
     for (const a of free) lines.push({ y: a.y, line: `+ "${a.text}"` });
     lines.sort((a, b) => a.y - b.y);

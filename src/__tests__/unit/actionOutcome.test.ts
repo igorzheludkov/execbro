@@ -115,6 +115,42 @@ describe("snapshotFromLines", () => {
     });
 });
 
+describe("diff pairing on tree order", () => {
+    it("pairs a changed line across two lines inserted above it", () => {
+        const before = snapshotFromLines("A", ["Title", "Taps: 0", "Footer"]);
+        const after = snapshotFromLines("A", ["Title", "Error one", "Error two", "Taps: 1", "Footer"]);
+        expect(diffSnapshots(before, after)).toEqual(['+ "Error one"', '+ "Error two"', '"Taps: 0" → "Taps: 1"']);
+    });
+
+    it("does not pair unrelated neighbours: a cart emptying reads as removals and additions", () => {
+        // Seen on device after Place order: "1" → "Subtotal: $0.00" was a mispairing.
+        const before = snapshotFromLines("Checkout", ["Mascara", "1", "Subtotal: $9.99"]);
+        const after = snapshotFromLines("Checkout", ["Your cart is empty", "Subtotal: $0.00"]);
+        const lines = diffSnapshots(before, after);
+        expect(lines).toContain('"Subtotal: $9.99" → "Subtotal: $0.00"');
+        expect(lines).not.toContain('"1" → "Subtotal: $0.00"');
+    });
+
+    it("pairs lines that moved far when rows above them were removed (Place order on device)", () => {
+        const before = snapshotFromLines("Checkout", ["Eyeshadow Palette with Mirror", "$19.99", "−", "1", "+", "Promo code: (empty)", "Apply", "Free shipping", "Subtotal: $19.99", "Total: $19.99", "Order #1003 placed", "Place order"]);
+        const after = snapshotFromLines("Checkout", ["Your cart is empty", "Promo code: (empty)", "Apply", "Free shipping", "Subtotal: $0.00", "Total: $0.00", "Order #1004 placed", "Place order"]);
+        const lines = diffSnapshots(before, after);
+        expect(lines).toEqual(expect.arrayContaining([
+            '"Subtotal: $19.99" → "Subtotal: $0.00"',
+            '"Total: $19.99" → "Total: $0.00"',
+            '"Order #1003 placed" → "Order #1004 placed"',
+            '- "+"',
+        ]));
+        expect(lines.some((l) => l.startsWith('"+" →'))).toBe(false);
+    });
+
+    it("still pairs a line that changed in place with nothing in common", () => {
+        // Account screen after Sign out: the same slot now says something else.
+        const lines = diffSnapshots(snapshotFromLines("Account", ["Email", "qa.buyer@shop.dev"]), snapshotFromLines("Account", ["Email", "Not signed in"]));
+        expect(lines).toEqual(['"qa.buyer@shop.dev" → "Not signed in"']);
+    });
+});
+
 describe("snapshotFromScreenState", () => {
     it("takes texts, labels, masked input values and switch values, with the route", () => {
         const at = (x: number, y: number) => ({ center: { x, y }, bounds: { x, y, width: 1, height: 1 } });
