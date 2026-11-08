@@ -17,6 +17,7 @@ import { describe, it, expect, jest } from "@jest/globals";
  */
 
 const execCalls: unknown[][] = [];
+const delays: number[] = [];
 let execBehaviour: () => never | Promise<unknown> = async () => ({ success: false });
 
 jest.unstable_mockModule("../../core/jsExecute.js", () => ({
@@ -24,7 +25,9 @@ jest.unstable_mockModule("../../core/jsExecute.js", () => ({
         execCalls.push(args);
         return execBehaviour();
     },
-    delay: async () => {}
+    delay: async (ms: number) => {
+        delays.push(ms);
+    }
 }));
 
 const { probeScrollAt, explainNoOpSwipe } = await import("../../core/swipeDiagnosis.js");
@@ -72,5 +75,32 @@ describe("probeScrollAt without a React Native connection", () => {
 
         expect(probe.found).toBe(false);
         expect(probe.unavailable).toBeUndefined();
+    });
+});
+
+describe("probeScrollAt timing", () => {
+    it("reads as soon as the measurements are in, not after a fixed 250ms", async () => {
+        // The probe now runs before and after every connected swipe; a fixed wait made
+        // a swipe ~1.1s slower than before (3.3s vs 2.2s median, measured on device).
+        execCalls.length = 0;
+        delays.length = 0;
+        const found = JSON.stringify({ found: true, horizontal: false, offset: 473, maxOffset: 758, component: "ScrollView" });
+        let resolves = 0;
+        execBehaviour = async () => {
+            const expr = String(execCalls[execCalls.length - 1][0]);
+            if (expr.includes("dispatched")) return { success: true, result: JSON.stringify({ dispatched: 1 }) };
+            resolves++;
+            return { success: true, result: resolves === 1 ? JSON.stringify({ notReady: true }) : found };
+        };
+        const probe = await probeScrollAt(446, 1330, "emulator-5554");
+        expect(probe).toMatchObject({ found: true, offset: 473 });
+        expect(delays.reduce((a, b) => a + b, 0)).toBeLessThan(250);
+    });
+
+    it("reads with bounded options: no retry, no reconnect", async () => {
+        execCalls.length = 0;
+        execBehaviour = async () => ({ success: true, result: JSON.stringify({ found: false }) });
+        await probeScrollAt(446, 1330, "emulator-5554");
+        expect(execCalls[0][2]).toMatchObject({ maxRetries: 0, autoReconnect: false });
     });
 });

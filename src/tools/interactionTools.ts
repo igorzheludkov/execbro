@@ -620,7 +620,11 @@ export function registerInteractionTools(server: McpServer): void {
                     : null
             );
 
-            const probeAfter = outcomeHandle.connected ? await probeScrollAt(startX!, startY!, device, probeMetrics) : null;
+            // Independent reads of the settled screen: the scroll offset and the outcome.
+            const [probeAfter, outcome] = await Promise.all([
+                outcomeHandle.connected ? probeScrollAt(startX!, startY!, device, probeMetrics) : Promise.resolve(null),
+                finishActionOutcome(outcomeHandle, { visualSettleRan: !!verification && !verification.skipped }),
+            ]);
             const didNothing =
                 !!verification && !verification.skipped && verification.meaningful === false;
             let warning: string | undefined;
@@ -639,9 +643,6 @@ export function registerInteractionTools(server: McpServer): void {
                 )}`;
             }
 
-            const outcome = await finishActionOutcome(outcomeHandle, {
-                visualSettleRan: !!verification && !verification.skipped,
-            });
             const scroll = probeBefore && probeAfter ? formatScroll(probeBefore, probeAfter) : undefined;
             if (scroll) outcome.scroll = scroll;
             const responseBody = renderSwipeResponse({

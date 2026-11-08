@@ -33,11 +33,16 @@ export interface ScrollProbe {
  */
 async function probeExec(expression: string, device?: string) {
     try {
-        return await executeInApp(expression, false, { timeoutMs: 8000, originatingToolName: "swipe" }, device);
+        // Bounded: the probe runs around every connected swipe now, so a wedged JS thread
+        // must cost one short timeout, not 8s plus retries and a reconnect.
+        return await executeInApp(expression, false, { timeoutMs: 3000, maxRetries: 0, autoReconnect: false, originatingToolName: "swipe" }, device);
     } catch {
         return null;
     }
 }
+
+const PROBE_POLL_MS = 40;
+const PROBE_MAX_WAIT_MS = 250;
 
 /**
  * Read the scroll surface under a point.
@@ -174,15 +179,19 @@ export async function probeScrollAt(
     if (!dispatched) return { found: false, unavailable: true };
     if (!dispatched.success) return { found: false, unavailable: true };
 
-    await delay(250);
-
-    const resolve = `
+    const resolve = (final: boolean) => `
 (function() {
     ${SCREEN_SPACE_HELPER_JS}
     ${SHEET_HELPERS_JS}
     var SCREEN_SPACE = ${JSON.stringify(screenSpace ?? { platform: "ios", topInset: 0 })};
     var probes = globalThis.__swipeProbe || [];
     var viewport = globalThis.__swipeProbeViewport;
+    // Not every measureInWindow callback is back yet: ask again rather than read half.
+    if (!${final}) {
+        for (var r = 0; r < probes.length; r++) {
+            if (!probes[r].layout || !probes[r].content) return JSON.stringify({ notReady: true });
+        }
+    }
     globalThis.__swipeProbe = null;
     globalThis.__swipeProbeViewport = null;
 
@@ -220,12 +229,20 @@ export async function probeScrollAt(
     });
 })()`;
 
-    const resolved = await probeExec(resolve, device);
-    if (!resolved || !resolved.success || !resolved.result) return { found: false, unavailable: true };
-    try {
-        return JSON.parse(resolved.result) as ScrollProbe;
-    } catch {
-        return { found: false };
+    // Poll instead of a fixed wait: callbacks are usually back within a frame or two, and
+    // the probe runs twice per connected swipe.
+    for (let waited = 0; ;) {
+        await delay(PROBE_POLL_MS);
+        waited += PROBE_POLL_MS;
+        const resolved = await probeExec(resolve(waited >= PROBE_MAX_WAIT_MS), device);
+        if (!resolved || !resolved.success || !resolved.result) return { found: false, unavailable: true };
+        let parsed: ScrollProbe & { notReady?: boolean };
+        try {
+            parsed = JSON.parse(resolved.result);
+        } catch {
+            return { found: false };
+        }
+        if (!parsed.notReady) return parsed;
     }
 }
 
