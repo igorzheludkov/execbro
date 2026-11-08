@@ -209,6 +209,8 @@ export interface FormatRequestDetailsOptions {
     query?: string;
     /** Which side to render. Defaults to the queried side when `query` is given, "both" otherwise. */
     include?: "request" | "response" | "both";
+    /** Findings from networkNotable.ts, one "Notable:" line each after the header block. */
+    notable?: string[];
 }
 
 /**
@@ -301,7 +303,7 @@ export function formatRequestDetails(
     request: NetworkRequest,
     options: FormatRequestDetailsOptions = {}
 ): string {
-    const { maxBodyLength = DEFAULT_BODY_BUDGET, verbose = false, query, include } = options;
+    const { maxBodyLength = DEFAULT_BODY_BUDGET, verbose = false, query, include, notable = [] } = options;
     const lines: string[] = [];
 
     lines.push(`=== ${request.method} ${request.url} ===`);
@@ -337,6 +339,8 @@ export function formatRequestDetails(
     if (request.mockWarning) {
         lines.push(`Mock warning: ${request.mockWarning}`);
     }
+
+    for (const n of notable) lines.push(`Notable: ${n}`);
 
     // Post data. The query targets the response body when there is one — that
     // is where the bulk lives — and falls back to the request body otherwise,

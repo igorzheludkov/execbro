@@ -1,3 +1,4 @@
+import { notableLines } from "../core/networkNotable.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
@@ -390,7 +391,10 @@ export function registerNetworkTools(server: McpServer): void {
                 content: [
                     {
                         type: "text",
-                        text: formatRequestDetails(request, { maxBodyLength, verbose, query, include }) + activeMockBanner()
+                        text: formatRequestDetails(request, {
+                            maxBodyLength, verbose, query, include,
+                            notable: notableLines(request, resolveNetworkBuffer(device).getAll({})),
+                        }) + activeMockBanner()
                     }
                 ]
             };
