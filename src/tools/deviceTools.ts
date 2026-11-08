@@ -10,6 +10,8 @@ import {
     iosTerminateApp,
     iosBootSimulator,
     iosOpenUrl,
+    getDefaultAndroidDevice,
+    getActiveOrBootedSimulatorUdid,
 } from "../core/index.js";
 import { platformUniqueBanner } from "../core/toolHelpers.js";
 import { listAllDevices } from "../core/deviceDiscovery.js";
@@ -20,7 +22,7 @@ import { basename } from "path";
 import { homedir } from "os";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import { listPhysicalIosDevices } from "../core/iosPhysical.js";
-import { recordDevice } from "../core/projectMemory.js";
+import { recordDevice, listDevices } from "../core/projectMemory.js";
 
 /**
  * A launch is the agent naming the device it works on, so it becomes the default
@@ -29,7 +31,10 @@ import { recordDevice } from "../core/projectMemory.js";
  */
 export function rememberLaunchedDevice(platform: "ios" | "android", identifier: string, appId: string): void {
     try {
-        recordDevice({ identifier, name: identifier, platform, appId });
+        // Keep a human name already remembered for this device (the AVD or simulator
+        // name); the serial is only the fallback.
+        const name = listDevices().find((d) => d.identifier === identifier)?.name ?? identifier;
+        recordDevice({ identifier, name, platform, appId });
     } catch {
         // Memory is a convenience; the launch already happened.
     }
@@ -221,8 +226,11 @@ export function registerDeviceTools(server: McpServer): void {
         async ({ packageName, activityName, deviceId }) => {
             const r = await resolveAndroidDeviceId(deviceId);
             if (!r.ok) return r.response;
-            const result = await androidLaunchApp(packageName, activityName, r.serial);
-            if (result.success && r.serial) rememberLaunchedDevice("android", r.serial, packageName);
+            // Resolve the device the launch will use: with no deviceId adb picks it, and an
+            // unrecorded launch left the default target on whatever device was used before.
+            const serial = r.serial ?? (await getDefaultAndroidDevice()) ?? undefined;
+            const result = await androidLaunchApp(packageName, activityName, serial);
+            if (result.success && serial) rememberLaunchedDevice("android", serial, packageName);
     
             return {
                 content: [
@@ -286,8 +294,9 @@ export function registerDeviceTools(server: McpServer): void {
         async ({ bundleId, udid }) => {
             const r = await resolveIosUdid(udid);
             if (!r.ok) return r.response;
-            const result = await iosLaunchApp(bundleId, r.udid);
-            if (result.success && r.udid) rememberLaunchedDevice("ios", r.udid, bundleId);
+            const launchUdid = r.udid ?? (await getActiveOrBootedSimulatorUdid()) ?? undefined;
+            const result = await iosLaunchApp(bundleId, launchUdid);
+            if (result.success && launchUdid) rememberLaunchedDevice("ios", launchUdid, bundleId);
     
             return {
                 content: [

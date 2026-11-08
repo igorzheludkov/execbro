@@ -7,11 +7,12 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
  */
 
 const recordDevice = jest.fn<(input: unknown) => void>();
+let remembered: Array<{ identifier: string; name: string }> = [];
 
 jest.unstable_mockModule("../../core/projectMemory.js", () => ({
     recordDevice,
     recordScreenMetrics: jest.fn(),
-    listDevices: () => [],
+    listDevices: () => remembered,
     mergeDeviceLists: (a: unknown[]) => a,
 }));
 
@@ -30,6 +31,14 @@ describe("rememberLaunchedDevice", () => {
             platform: "android",
             appId: "com.rndebuggertestapp",
         });
+    });
+
+    it("keeps the name project memory already has instead of overwriting it with the serial", () => {
+        // Otherwise the next default-device note reads "emulator-5554 (emulator-5554)".
+        remembered = [{ identifier: "emulator-5554", name: "Pixel_9_-_16kb" }];
+        rememberLaunchedDevice("android", "emulator-5554", "com.rndebuggertestapp");
+        expect(recordDevice).toHaveBeenCalledWith(expect.objectContaining({ identifier: "emulator-5554", name: "Pixel_9_-_16kb" }));
+        remembered = [];
     });
 
     it("never throws when recording fails", () => {
