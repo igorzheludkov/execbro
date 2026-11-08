@@ -188,13 +188,23 @@ export function formatTextEntry(
     return `  (${center.x}, ${center.y}) 📝 "${body}" frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})${formatTransformTag(t)}`;
 }
 
+/**
+ * An inline image's base64 says nothing an agent can use; its type does. No size: the
+ * app-side collector has already cut the src, so any size would be invented. Other
+ * sources print as they are (and are truncated by the caller).
+ */
+export function compactImageSrc(src: string): string {
+    const m = /^data:([^;,]+)[;,]/.exec(src);
+    return m ? `data:${m[1]} (inline)` : src;
+}
+
 /** One merged-list line for an image node — coordinates match pressable lines. */
 export function formatImageEntry(
     img: ScreenStateImage,
     convert: ItemCoordConverter = identityCoords
 ): string {
     const { center, frame } = convert(img);
-    const src = img.src ? ` src="${truncate(img.src, IMAGE_SRC_DISPLAY_MAX)}"` : "";
+    const src = img.src ? ` src="${truncate(compactImageSrc(img.src), IMAGE_SRC_DISPLAY_MAX)}"` : "";
     const alt = img.alt ? ` alt="${img.alt}"` : "";
     return `  (${center.x}, ${center.y}) 🖼 Image ${frame.width}x${frame.height}${src}${alt} frame:(${frame.x},${frame.y} ${frame.width}x${frame.height})${formatTransformTag(img)}`;
 }
@@ -560,7 +570,10 @@ export interface PressabilityAuditCounts {
  * Returns null when nothing was dropped — the common case, and silence is the correct
  * output for it.
  */
-export function formatPressabilityAudit(counts: PressabilityAuditCounts): string | null {
+/** Pruned-as-hidden targets are named automatically only up to this many. */
+const PRUNED_NAMES_MAX = 5;
+
+export function formatPressabilityAudit(counts: PressabilityAuditCounts, opts: { showPruned?: boolean } = {}): string | null {
     const total = counts.markerTotal ?? 0;
     const hidden = counts.markerHiddenCount ?? 0;
     const unmeasurable = counts.markerUnmeasurableCount ?? 0;
@@ -598,14 +611,22 @@ export function formatPressabilityAudit(counts: PressabilityAuditCounts): string
             `not laid out yet (sheet content mid-animation), so it may appear on a second call — re-read before concluding it is absent.${detail}`
         );
     }
+    // Pruning by inactive routes is the healthy case and usually large (21 of 31 on a
+    // login screen behind a tab bar); every name on every call was context with nothing
+    // in it. A count, with the names one parameter away.
+    if (hidden > PRUNED_NAMES_MAX && !opts.showPruned) {
+        return `${hidden} of ${total} press target(s) pruned as hidden (inactive routes stay mounted, normally correct). get_screen_state({ showPruned: true }) names them.`;
+    }
+    const all = opts.showPruned ? (counts.markerSkipped ?? []).map((s) => `${s.id} (${s.why})`) : samples;
+    const named = all.length > 0 ? ` Skipped: ${all.join("; ")}.` : "";
     return (
         `${hidden} of ${total} press target(s) React Native reports were pruned as hidden and are not listed below. This is normally correct — ` +
-        `inactive navigator routes stay mounted — but if something you expected is missing, this names the rule that dropped it.${detail}`
+        `inactive navigator routes stay mounted — but if something you expected is missing, this names the rule that dropped it.${named}`
     );
 }
 
 export async function getScreenState(
-    options: { device?: string } = {}
+    options: { device?: string; showPruned?: boolean } = {}
 ): Promise<ExecutionResult & { screenState?: ScreenState }> {
     const { device } = options;
 
@@ -2422,7 +2443,7 @@ ${OVERLAY_ADOPTION_JS}
             `This is a timing miss, not an empty screen — call get_screen_state again, or take a screenshot, before concluding anything is absent.`
         );
     }
-    const markerNote = formatPressabilityAudit(counts);
+    const markerNote = formatPressabilityAudit(counts, { showPruned: options.showPruned });
     if (markerNote) completenessNotes.push(markerNote);
     if ((counts.transformedCount ?? 0) > 0) {
         completenessNotes.push(

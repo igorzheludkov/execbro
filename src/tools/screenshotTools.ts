@@ -31,6 +31,7 @@ import { chromiumScreenState } from "../core/chromiumScreen.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
 import { chromiumCapture } from "../core/chromium.js";
 import { isNearUniform, BLANK_RETRY_MS } from "../core/blankFrame.js";
+import { changedSinceLastShown } from "../core/sessionOnce.js";
 
 const BLANK_FRAME_NOTE = "\nℹ️ The captured frame is blank (the app may not have painted yet). The element list below comes from the React tree, not from this image.";
 
@@ -307,19 +308,24 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
         if (targetUdid) {
             infoText += `\n📸 Captured from: ${targetDeviceName ? `${targetDeviceName} ` : ""}(${targetUdid})`;
         }
-        infoText += `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)`;
-        infoText += `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly`;
-        infoText += `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
+        // Fixed advice: once per device per session, and again if it changes.
+        const iosAdvice = `\n📱 iOS screen: ${pointWidth}x${pointHeight} points (${scaleFactor}x scale)` +
+            `\n📐 tap() handles pixel-to-point conversion automatically — pass pixel coords from this image directly` +
+            `\n⚠️ Status bar + safe area: ${safeAreaTop} points (${safeAreaOffsetPixels} pixels) from top`;
+        if (changedSinceLastShown(`shot-preamble:${targetUdid ?? "ios"}`, iosAdvice)) infoText += iosAdvice;
+        const showNextSteps = changedSinceLastShown("shot-next-steps", "1");
         if (pressablesText) {
             infoText += pressablesIsScreenState
                 ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
                 : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
             infoText += `\n${pressablesText}`;
-            infoText += `\n\n💡 Next steps:`;
-            infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
-            infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
-            infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
-            infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
+            if (showNextSteps) {
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
+                infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
+                infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
+            }
         } else {
             if (!targetApp && connectedApps.size > 0) {
                 infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to simulator ${resolvedUdid}.`;
@@ -327,10 +333,12 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
             } else if (connectedApps.size === 0) {
                 infoText += `\n\nℹ️ No React Native app is connected, so there is no pressable list. If the app was just launched it may still be loading its bundle: ensure_connection({ waitMs: 60000 }) returns once it attaches.`;
             }
-            infoText += `\n\n💡 Next steps:`;
-            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
-            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
-            infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
+            if (showNextSteps) {
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+                infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
+            }
         }
     
         // Check for LogBox overlay — only on the matching RN app; skip otherwise
@@ -544,26 +552,27 @@ async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, dev
 
         // No flat-pressables fallback here either — see the iOS branch for why.
 
-        infoText += `\n📱 Android uses PIXELS for all coordinates`;
-    
-        if (result.scaleFactor && result.scaleFactor > 1) {
-            infoText += `\n📐 tap() handles coordinate conversion automatically — pass pixel coords from this image directly`;
-        } else {
-            infoText += `\n📐 Screenshot coords = tap coords (no conversion needed)`;
-        }
-    
-        infoText += `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this`;
-        infoText += `\n📊 Display density: ${densityDpi}dpi`;
+        // Fixed advice: once per device per session, and again if it changes.
+        const androidAdvice = `\n📱 Android uses PIXELS for all coordinates` +
+            (result.scaleFactor && result.scaleFactor > 1
+                ? `\n📐 tap() handles coordinate conversion automatically — pass pixel coords from this image directly`
+                : `\n📐 Screenshot coords = tap coords (no conversion needed)`) +
+            `\n⚠️ Status bar: ${statusBarPixels}px (${statusBarDp}dp) from top - app content starts below this` +
+            `\n📊 Display density: ${densityDpi}dpi`;
+        if (changedSinceLastShown(`shot-preamble:${resolved.serial ?? "android"}`, androidAdvice)) infoText += androidAdvice;
+        const showNextSteps = changedSinceLastShown("shot-next-steps", "1");
         if (pressablesText) {
             infoText += pressablesIsScreenState
                 ? `\n\n🧭 Screen state (route + tappable elements, coordinates in screenshot pixels):\n`
                 : `\n\n🎯 Pressable elements (ready-to-tap, coordinates in screenshot pixels):`;
             infoText += `\n${pressablesText}`;
-            infoText += `\n\n💡 Next steps:`;
-            infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
-            infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
-            infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
-            infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
+            if (showNextSteps) {
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — when text is exact and unique`;
+                infoText += `\n  • tap(testID="id") or tap(component="Name") — when you know the identifier`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — use coordinates from the pressable elements list above (reliable for icons and ambiguous elements)`;
+                infoText += `\n  • get_screen_layout — full component tree when you need more than pressables`;
+            }
         } else {
             if (!targetApp && connectedApps.size > 0) {
                 infoText += `\n\nℹ️ Pressable enrichment skipped: no RN app is connected to device ${deviceId ?? "(default)"}.`;
@@ -571,10 +580,12 @@ async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, dev
             } else if (connectedApps.size === 0) {
                 infoText += `\n\nℹ️ No React Native app is connected, so there is no pressable list. If the app was just launched it may still be loading its bundle: ensure_connection({ waitMs: 60000 }) returns once it attaches.`;
             }
-            infoText += `\n\n💡 Next steps:`;
-            infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
-            infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
-            infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
+            if (showNextSteps) {
+                infoText += `\n\n💡 Next steps:`;
+                infoText += `\n  • tap(text="Button Label") — tap element by visible text`;
+                infoText += `\n  • tap(x=<px>, y=<px>) — tap at coordinates from this screenshot`;
+                infoText += `\n  • get_screen_layout — get full UI tree with real on-screen positions`;
+            }
         }
     
         // Check for LogBox overlay — only on the matching RN app; skip otherwise

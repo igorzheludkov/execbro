@@ -54,8 +54,25 @@ describe("formatPressabilityAudit", () => {
         // Inactive navigator routes stay mounted, so this is the healthy case and must
         // not be phrased as a fault — it is a lookup aid for a missing element.
         expect(note).toContain("normally correct");
-        expect(note).toContain("Screen");
         expect(note).not.toContain("NOT listed");
+    });
+
+    it("prints a count only when many were pruned, and names them on request", () => {
+        // The Login screen on the test app: 21 of 31 pruned, and every name used to print.
+        const skipped = Array.from({ length: 6 }, (_, i) => ({ id: `screen-nav-${i}`, why: "pruned as hidden by Screen" }));
+        const counts = { markerTotal: 31, markerHiddenCount: 21, markerUnmeasurableCount: 0, markerSkipped: skipped };
+        const short = formatPressabilityAudit(counts)!;
+        expect(short).toBe("21 of 31 press target(s) pruned as hidden (inactive routes stay mounted, normally correct). get_screen_state({ showPruned: true }) names them.");
+        const full = formatPressabilityAudit(counts, { showPruned: true })!;
+        for (const s of skipped) expect(full).toContain(s.id);
+    });
+
+    it("still names a handful of pruned targets without being asked", () => {
+        const note = formatPressabilityAudit({
+            markerTotal: 28, markerHiddenCount: 1, markerUnmeasurableCount: 0,
+            markerSkipped: [{ id: "Close drawer", why: "pruned as hidden by View" }],
+        })!;
+        expect(note).toContain("Close drawer");
     });
 
     it("names the pruning rule so an unexpected pruner is identifiable", () => {

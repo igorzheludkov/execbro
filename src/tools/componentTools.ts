@@ -297,10 +297,11 @@ export function registerComponentTools(server: McpServer): void {
                 pressablesOnly: z.boolean().optional().describe("Return only route + overlays + pressables (the lean orientation snapshot), omitting on-screen text and images. Default false. Pressables include Switch/checkbox elements (onValueChange), each rendered with its current value as [switch:ON] / [switch:OFF] — tap those by testID or component instead of guessing an x from a screenshot."),
                 fullText: z.boolean().optional().describe("Emit each text node's full string instead of the 80-char truncation. Default false."),
                 fullParams: z.boolean().optional().describe("Emit the route params' values. Default false — only the param key names are listed, because the full blob is usually hundreds of characters of ids and image URLs. On chromium (Electron / Chrome) the route is the page URL, its query string the params, and elements come from the DOM."),
-                includeHistory: z.boolean().optional().describe("Append the route trail — which screens the app has been on, most recent first, with dwell time and the route each was entered from. Recorded from connection time; an app restart shows an epoch divider. If no navigation listener could be attached the trail reports itself as sampled, meaning transitions between calls may be missing. Default false. Not recorded on chromium targets.")
+                includeHistory: z.boolean().optional().describe("Append the route trail — which screens the app has been on, most recent first, with dwell time and the route each was entered from. Recorded from connection time; an app restart shows an epoch divider. If no navigation listener could be attached the trail reports itself as sampled, meaning transitions between calls may be missing. Default false. Not recorded on chromium targets."),
+                showPruned: z.boolean().optional().describe("Name every press target pruned as hidden (inactive navigator routes, hidden screens). Default false: past 5 only the count prints.")
             }
         },
-        async ({ device, pressablesOnly, fullText, fullParams, includeHistory }) => {
+        async ({ device, pressablesOnly, fullText, fullParams, includeHistory, showPruned }) => {
             const chromeApp = chromiumAppFor("get_screen_state", device);
             if (chromeApp) {
                 return await chromiumText(async () => {
@@ -321,7 +322,7 @@ export function registerComponentTools(server: McpServer): void {
             // no reason to queue behind the fiber walk. It degrades to
             // { visible: false, error } on failure, so it cannot fail this call.
             const [result, keyboard] = await Promise.all([
-                getScreenState({ device }),
+                getScreenState({ device, showPruned }),
                 readKeyboardState(device)
             ]);
 
