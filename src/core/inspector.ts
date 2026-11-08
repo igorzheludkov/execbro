@@ -457,7 +457,7 @@ export async function inspectAtPoint(
                             props[key] = '[Object]';
                         }
                     } else if (key === 'value' || key === 'defaultValue') {
-                        props[key] = maskSecureValue(named.fiber.memoizedProps, val);
+                        props[key] = maskSecureValue(named.fiber.memoizedProps, val, named.fiber);
                     } else {
                         props[key] = val;
                     }

@@ -345,7 +345,7 @@ function prelude(query: InputQuery | undefined): string {
       component: __eb_componentOf(hostFiber),
       label: __eb_labelOf(hostFiber),
       placeholder: op.placeholder != null ? String(op.placeholder) : null,
-      value: op.value != null ? maskSecureValue(op, String(op.value)) : null,
+      value: op.value != null ? maskSecureValue(op, String(op.value), hostFiber) : null,
       testID: __eb_testIDOf(hostFiber)
     };
   }

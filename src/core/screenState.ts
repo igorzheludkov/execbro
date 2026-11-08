@@ -1488,8 +1488,8 @@ export async function getScreenState(
             if (hostsI.length > 0) {
                 var pI = fiber.memoizedProps || {};
                 var textI = collectText(fiber, 0);
-                var valueI = (typeof pI.value === 'string' && pI.value.length > 0) ? maskSecureValue(pI, pI.value)
-                           : (typeof pI.defaultValue === 'string' && pI.defaultValue.length > 0) ? maskSecureValue(pI, pI.defaultValue)
+                var valueI = (typeof pI.value === 'string' && pI.value.length > 0) ? maskSecureValue(pI, pI.value, fiber)
+                           : (typeof pI.defaultValue === 'string' && pI.defaultValue.length > 0) ? maskSecureValue(pI, pI.defaultValue, fiber)
                            : null;
                 var placeholderI = (typeof pI.placeholder === 'string' && pI.placeholder.length > 0) ? pI.placeholder : null;
                 var testIDI = pI.testID || pI.nativeID || null;
@@ -2108,7 +2108,7 @@ ${OVERLAY_ADOPTION_JS}
      * by the same sheet correction as the element), so the centre handed out is one a tap
      * can reach. A pre-transform frame is not clipped: it is not where the element is.
      */
-    function visiblePart(m, unreliable, clipList, dy) {
+    function visiblePart(m, unreliable, clipList, dy, raw) {
         if (!keepElement(m, unreliable)) return null;
         if (unreliable || !clipList || clipList.length === 0) return m;
         var clips = [];
@@ -2116,7 +2116,7 @@ ${OVERLAY_ADOPTION_JS}
             var cm = clipMeasurements[clipList[cli]];
             clips.push(cm ? shiftRect(cm, dy) : null);
         }
-        return clipToScrollers(m, clips);
+        return clipUnlessMoved(m, raw || m, clips);
     }
 
     // Build pressable list
@@ -2127,8 +2127,9 @@ ${OVERLAY_ADOPTION_JS}
         if (i === rootIdx) continue;
         var m0 = measurements[i];
         if (!m0) { unmeasuredCount++; continue; }
-        var tr = withTransform(shiftRect(m0, shiftFor(sheetIdx, i)), meta[i].transform);
-        var vis = visiblePart(tr.m, tr.unreliable, clipIdx[i], shiftFor(sheetIdx, i));
+        var raw0 = shiftRect(m0, shiftFor(sheetIdx, i));
+        var tr = withTransform(raw0, meta[i].transform);
+        var vis = visiblePart(tr.m, tr.unreliable, clipIdx[i], shiftFor(sheetIdx, i), raw0);
         var m = vis || tr.m;
         if (!vis) {
             // Dropped for geometry: zero-sized, or measured outside the viewport. Both are
@@ -2179,8 +2180,9 @@ ${OVERLAY_ADOPTION_JS}
         var tm0 = textMeasurements[tmi];
         var tc = textContents[tmi];
         if (!tm0 || !tc) continue;
-        var ttr = withTransform(shiftRect(tm0, shiftFor(textSheetIdx, tmi)), textTransforms[tmi]);
-        var tm = visiblePart(ttr.m, ttr.unreliable, textClipIdx[tmi], shiftFor(textSheetIdx, tmi));
+        var traw = shiftRect(tm0, shiftFor(textSheetIdx, tmi));
+        var ttr = withTransform(traw, textTransforms[tmi]);
+        var tm = visiblePart(ttr.m, ttr.unreliable, textClipIdx[tmi], shiftFor(textSheetIdx, tmi), traw);
         if (!tm) continue;
         textBoxes.push({ text: tc, x: tm.x, y: tm.y, width: tm.width, height: tm.height, cx: tm.x + tm.width / 2, cy: tm.y + tm.height / 2 });
     }
@@ -2319,8 +2321,9 @@ ${OVERLAY_ADOPTION_JS}
     for (var ti = 0; ti < textContents.length; ti++) {
         var tmA = textMeasurements[ti];
         if (!tmA) { unmeasuredCount++; continue; }
-        var tTr = withTransform(shiftRect(tmA, shiftFor(textSheetIdx, ti)), textTransforms[ti]);
-        var tm2 = visiblePart(tTr.m, tTr.unreliable, textClipIdx[ti], shiftFor(textSheetIdx, ti));
+        var tRaw = shiftRect(tmA, shiftFor(textSheetIdx, ti));
+        var tTr = withTransform(tRaw, textTransforms[ti]);
+        var tm2 = visiblePart(tTr.m, tTr.unreliable, textClipIdx[ti], shiftFor(textSheetIdx, ti), tRaw);
         if (!tm2) continue;
         pushClassified({ text: textContents[ti],
             transformNote: tTr.note,
@@ -2330,8 +2333,9 @@ ${OVERLAY_ADOPTION_JS}
     for (var ii = 0; ii < imageMeta.length; ii++) {
         var imA = imageMeasurements[ii];
         if (!imA) { unmeasuredCount++; continue; }
-        var iTr = withTransform(shiftRect(imA, shiftFor(imageSheetIdx, ii)), imageMeta[ii].transform);
-        var im = visiblePart(iTr.m, iTr.unreliable, imageClipIdx[ii], shiftFor(imageSheetIdx, ii));
+        var iRaw = shiftRect(imA, shiftFor(imageSheetIdx, ii));
+        var iTr = withTransform(iRaw, imageMeta[ii].transform);
+        var im = visiblePart(iTr.m, iTr.unreliable, imageClipIdx[ii], shiftFor(imageSheetIdx, ii), iRaw);
         if (!im) continue;
         pushClassified({ src: imageMeta[ii].src, alt: imageMeta[ii].alt,
             transformNote: iTr.note,

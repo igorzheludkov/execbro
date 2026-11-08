@@ -17,6 +17,19 @@ describe("maskSecureValue", () => {
         expect(maskSecureValue({ secureTextEntry: true }, null)).toBe(null);
     });
 
+    it("masks a wrapper whose secure TextInput sits below it", () => {
+        // <PasswordInput value onChangeText /> rendering <TextInput secureTextEntry={!shown} />:
+        // the wrapper carries the value but not the flag.
+        const inner = { memoizedProps: { secureTextEntry: true }, child: null, sibling: null };
+        const wrapper = { memoizedProps: { value: "hunter22" }, child: { memoizedProps: {}, child: inner, sibling: null }, sibling: null };
+        expect(maskSecureValue(wrapper.memoizedProps, "hunter22", wrapper)).toBe("[masked, 8 chars]");
+    });
+
+    it("does not mask when nothing in the subtree is secure", () => {
+        const plain = { memoizedProps: { value: "a" }, child: { memoizedProps: { secureTextEntry: false }, child: null, sibling: null }, sibling: null };
+        expect(maskSecureValue(plain.memoizedProps, "a", plain)).toBe("a");
+    });
+
     it("injected source defines the same function", () => {
         const fn = new Function(`${SECURE_VALUE_JS}; return maskSecureValue;`)();
         expect(fn({ secureTextEntry: true }, "abc")).toBe("[masked, 3 chars]");

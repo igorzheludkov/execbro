@@ -276,7 +276,7 @@ export async function inspectComponent(
                     if (key === 'children') continue;
                     try {
                         props[key] = (key === 'value' || key === 'defaultValue')
-                            ? maskSecureValue(fiber.memoizedProps, fiber.memoizedProps[key])
+                            ? maskSecureValue(fiber.memoizedProps, fiber.memoizedProps[key], fiber)
                             : serializeValue(fiber.memoizedProps[key]);
                     } catch {
                         props[key] = '[Animated Value]';

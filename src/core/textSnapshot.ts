@@ -15,7 +15,7 @@ import { snapshotFromLines, type OutcomeSnapshot } from "./actionOutcome.js";
 /* eslint-disable no-var */
 declare var isLogBoxSubtree: (name: string | null) => boolean;
 declare var isHiddenNavigationScene: (name: string | null, props: unknown) => boolean;
-declare var maskSecureValue: (props: unknown, value: unknown) => unknown;
+declare var maskSecureValue: (props: unknown, value: unknown, fiber?: unknown) => unknown;
 
 /**
  * Self-contained: injected with toString(), and relies only on the helpers in
@@ -47,8 +47,8 @@ export function walkTextSnapshot(root: any): string[] {
         if (isLogBoxSubtree(name) || isHiddenNavigationScene(name, p)) return;
         if (typeof p.onChangeText === "function") {
             var label = p.placeholder || p.accessibilityLabel || p.testID || "input";
-            var v = typeof p.value === "string" && p.value.length > 0 ? maskSecureValue(p, p.value)
-                : typeof p.defaultValue === "string" && p.defaultValue.length > 0 ? maskSecureValue(p, p.defaultValue)
+            var v = typeof p.value === "string" && p.value.length > 0 ? maskSecureValue(p, p.value, f)
+                : typeof p.defaultValue === "string" && p.defaultValue.length > 0 ? maskSecureValue(p, p.defaultValue, f)
                 : null;
             out.push(label + ": " + (v === null ? "(empty)" : v));
             return;

@@ -42,6 +42,11 @@ describe("walkTextSnapshot", () => {
         expect(walk(root)).toEqual(["Password: [masked, 8 chars]", "email: (empty)"]);
     });
 
+    it("masks a password wrapper whose secure input is a child", () => {
+        const root = tree(["RCTView", {}, [function PasswordInput() {}, { onChangeText: () => {}, placeholder: "Password", value: "hunter22" }, [TextInput, { secureTextEntry: true }]]]);
+        expect(walk(root)).toEqual(["Password: [masked, 8 chars]"]);
+    });
+
     it("reads switch values", () => {
         const root = tree(["RCTView", {}, [Switch, { value: true, accessibilityLabel: "Notifications", onValueChange: () => {} }]]);
         expect(walk(root)).toEqual(["[switch:ON] Notifications"]);

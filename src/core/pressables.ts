@@ -338,8 +338,8 @@ export async function pressElement(options: {
                     if (isPressable) {
                         text = extractText(fiber, 0);
                     } else {
-                        var val = typeof props.value === 'string' ? maskSecureValue(props, props.value) : '';
-                        var defVal = typeof props.defaultValue === 'string' ? maskSecureValue(props, props.defaultValue) : '';
+                        var val = typeof props.value === 'string' ? maskSecureValue(props, props.value, fiber) : '';
+                        var defVal = typeof props.defaultValue === 'string' ? maskSecureValue(props, props.defaultValue, fiber) : '';
                         var ph = typeof props.placeholder === 'string' ? props.placeholder : '';
                         text = extractText(fiber, 0) || val || defVal || ph;
                     }
@@ -419,7 +419,7 @@ export async function pressElement(options: {
                             var nIsInput = !nIsPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
 
                             if (nIsPressable || nIsInput) {
-                                var text = nIsPressable ? extractText(fiber, 0) : (extractText(fiber, 0) || (typeof props.value === 'string' ? maskSecureValue(props, props.value) : '') || (typeof props.defaultValue === 'string' ? maskSecureValue(props, props.defaultValue) : '') || (typeof props.placeholder === 'string' ? props.placeholder : ''));
+                                var text = nIsPressable ? extractText(fiber, 0) : (extractText(fiber, 0) || (typeof props.value === 'string' ? maskSecureValue(props, props.value, fiber) : '') || (typeof props.defaultValue === 'string' ? maskSecureValue(props, props.defaultValue, fiber) : '') || (typeof props.placeholder === 'string' ? props.placeholder : ''));
                                 var host = findFirstHost(fiber, 0, nIsInput);
                                 if (host) {
                                     hostFibers.push(host);
@@ -446,7 +446,7 @@ export async function pressElement(options: {
                                     var pIsPressable = isPressableProps(pp) || isSwitchFiber(parent, pp);
                                     var pIsInput = !pIsPressable && pp && (typeof pp.onChangeText === 'function' || typeof pp.onFocus === 'function');
                                     if (pIsPressable || pIsInput) {
-                                        var pText = pIsPressable ? extractText(parent, 0) : (extractText(parent, 0) || (typeof pp.value === 'string' ? maskSecureValue(pp, pp.value) : '') || (typeof pp.defaultValue === 'string' ? maskSecureValue(pp, pp.defaultValue) : '') || (typeof pp.placeholder === 'string' ? pp.placeholder : ''));
+                                        var pText = pIsPressable ? extractText(parent, 0) : (extractText(parent, 0) || (typeof pp.value === 'string' ? maskSecureValue(pp, pp.value, parent) : '') || (typeof pp.defaultValue === 'string' ? maskSecureValue(pp, pp.defaultValue, parent) : '') || (typeof pp.placeholder === 'string' ? pp.placeholder : ''));
                                         var host = findFirstHost(parent, 0, pIsInput);
                                         if (host) {
                                             hostFibers.push(host);
@@ -475,7 +475,7 @@ export async function pressElement(options: {
                                     var desc = findDescendantPressable(fiber, 0);
                                     if (desc) {
                                         var dp = desc.fiber.memoizedProps;
-                                        var dText = desc.isPressable ? extractText(desc.fiber, 0) : (extractText(desc.fiber, 0) || (typeof dp.value === 'string' ? maskSecureValue(dp, dp.value) : '') || (typeof dp.defaultValue === 'string' ? maskSecureValue(dp, dp.defaultValue) : '') || (typeof dp.placeholder === 'string' ? dp.placeholder : ''));
+                                        var dText = desc.isPressable ? extractText(desc.fiber, 0) : (extractText(desc.fiber, 0) || (typeof dp.value === 'string' ? maskSecureValue(dp, dp.value, desc.fiber) : '') || (typeof dp.defaultValue === 'string' ? maskSecureValue(dp, dp.defaultValue, desc.fiber) : '') || (typeof dp.placeholder === 'string' ? dp.placeholder : ''));
                                         var dhost = findFirstHost(desc.fiber, 0, desc.isInput);
                                         if (dhost) {
                                             hostFibers.push(dhost);
