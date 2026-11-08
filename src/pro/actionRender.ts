@@ -39,7 +39,9 @@ function describeTarget(r: TapResult): string {
         : q.x !== undefined && q.y !== undefined ? `(${q.x}, ${q.y})`
         : "";
     if (r.text && r.text !== q.text) target += ` → "${r.text}"`;
-    if (r.component && !NATIVE_CLASS.test(r.component) && r.component !== q.component) target += ` <${r.component}>`;
+    // Only a strategy that walked React knows a component; accessibility reports an AX role or native class.
+    const reactComponent = r.method !== "accessibility" && r.component && !NATIVE_CLASS.test(r.component);
+    if (reactComponent && r.component !== q.component) target += ` <${r.component}>`;
     return target.trim();
 }
 

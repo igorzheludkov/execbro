@@ -53,6 +53,12 @@ describe("renderTapResponse", () => {
         expect(renderTapResponse(r, null, { verbose: false, showDeviceNote: false }).target).toBe('text="subm" → "Submit" <SubmitButton>');
     });
 
+    it("does not present an accessibility role as a component", () => {
+        // iOS accessibility taps report the AX role (GenericElement, Button) in `component`.
+        const r: TapResult = { ...accessibilityTap, component: "GenericElement", text: "Submit" };
+        expect(renderTapResponse(r, null, { verbose: false, showDeviceNote: false }).target).toBe('testID="submit-btn" → "Submit"');
+    });
+
     it("keeps the failure fields an agent acts on", () => {
         const r: TapResult = {
             success: false, method: "ocr", query: { text: "Buy" }, error: "No element found matching text=\"Buy\"",
