@@ -549,6 +549,9 @@ export interface PressabilityAuditCounts {
     droppedIds?: Array<{ id: string; why: string }>;
 }
 
+/** Pruned-as-hidden targets are named automatically only up to this many. */
+const PRUNED_NAMES_MAX = 5;
+
 /**
  * React Native mounts a `PressabilityDebugView` inside every press target it owns —
  * `Pressable`, every `Touchable*`, and gesture-handler's `Pressable`. It renders nothing
@@ -570,9 +573,6 @@ export interface PressabilityAuditCounts {
  * Returns null when nothing was dropped — the common case, and silence is the correct
  * output for it.
  */
-/** Pruned-as-hidden targets are named automatically only up to this many. */
-const PRUNED_NAMES_MAX = 5;
-
 export function formatPressabilityAudit(counts: PressabilityAuditCounts, opts: { showPruned?: boolean } = {}): string | null {
     const total = counts.markerTotal ?? 0;
     const hidden = counts.markerHiddenCount ?? 0;

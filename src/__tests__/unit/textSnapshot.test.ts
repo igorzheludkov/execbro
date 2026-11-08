@@ -25,6 +25,13 @@ const Screen = function Screen() {};
 const TextInput = function TextInput() {};
 const Switch = function Switch() {};
 
+describe("buildTextSnapshotExpression", () => {
+    it("is one parseable script (nav sources, helpers and walker together)", async () => {
+        const { buildTextSnapshotExpression } = await import("../../core/textSnapshot.js");
+        expect(() => new Function(buildTextSnapshotExpression())).not.toThrow();
+    });
+});
+
 describe("walkTextSnapshot", () => {
     it("joins a Text's raw pieces into one line, the way it reads on screen", () => {
         // <Text>Taps: {count}</Text> renders two HostText fibers under the RCTText host.
