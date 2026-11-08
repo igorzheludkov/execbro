@@ -20,6 +20,20 @@ import { basename } from "path";
 import { homedir } from "os";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import { listPhysicalIosDevices } from "../core/iosPhysical.js";
+import { recordDevice } from "../core/projectMemory.js";
+
+/**
+ * A launch is the agent naming the device it works on, so it becomes the default
+ * target. Without this, a bare screenshot() right after android_launch_app picked
+ * whichever device project memory saw last (a booted iOS simulator's home screen).
+ */
+export function rememberLaunchedDevice(platform: "ios" | "android", identifier: string, appId: string): void {
+    try {
+        recordDevice({ identifier, name: identifier, platform, appId });
+    } catch {
+        // Memory is a convenience; the launch already happened.
+    }
+}
 
 export function registerDeviceTools(server: McpServer): void {
     // Tool: start an Electron project with its CDP port open (chromium target)
@@ -208,6 +222,7 @@ export function registerDeviceTools(server: McpServer): void {
             const r = await resolveAndroidDeviceId(deviceId);
             if (!r.ok) return r.response;
             const result = await androidLaunchApp(packageName, activityName, r.serial);
+            if (result.success && r.serial) rememberLaunchedDevice("android", r.serial, packageName);
     
             return {
                 content: [
@@ -272,6 +287,7 @@ export function registerDeviceTools(server: McpServer): void {
             const r = await resolveIosUdid(udid);
             if (!r.ok) return r.response;
             const result = await iosLaunchApp(bundleId, r.udid);
+            if (result.success && r.udid) rememberLaunchedDevice("ios", r.udid, bundleId);
     
             return {
                 content: [
