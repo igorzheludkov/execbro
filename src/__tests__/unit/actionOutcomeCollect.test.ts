@@ -79,6 +79,13 @@ describe("action outcome collection", () => {
         expect(o.text).toEqual(['+ "Bad password"']);
     });
 
+    it("no app and no buffer for the device: says nothing was captured, not that a read failed", async () => {
+        // After a server restart with the app disconnected there is no buffer to read.
+        const { d } = deps({ resolveApp: async () => null, collect: async () => { throw new Error('No device matches "emulator-5554"'); } });
+        const o = await finishActionOutcome(await beginActionOutcome("emulator-5554", d), { visualSettleRan: true }, d);
+        expect(o.unavailable).toEqual(["route", "text: no React Native connection", "network and logs: nothing captured for this device"]);
+    });
+
     it("grace applies only without a visual settle", async () => {
         const a = deps();
         await finishActionOutcome(await beginActionOutcome(undefined, a.d), { visualSettleRan: false }, a.d);

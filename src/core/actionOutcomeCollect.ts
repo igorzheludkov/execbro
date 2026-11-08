@@ -132,7 +132,9 @@ export async function finishActionOutcome(
     try {
         events = (await deps.collect(h.deviceName, h.startedAt - CLOCK_PAD_MS, deps.now())).events;
     } catch {
-        unavailable.push("network and logs: read failed");
+        // Disconnected with no buffer for the device (e.g. after a server restart) is
+        // an absence, not a failure.
+        unavailable.push(h.connected ? "network and logs: read failed" : "network and logs: nothing captured for this device");
     }
 
     return buildOutcome({ before: h.before, after, events, pending: idle.pending, capped: idle.capped, unavailable });
