@@ -65,6 +65,13 @@ export function snapshotFromScreenState(ss: ScreenState): OutcomeSnapshot {
     return { route: ss.route?.name ?? null, items };
 }
 
+/** Tree-ordered lines (textSnapshot.ts): position is the line's index, spaced so neighbours pair. */
+export const ORDER_STEP = 10;
+
+export function snapshotFromLines(route: string | null, lines: string[]): OutcomeSnapshot {
+    return { route, items: lines.map((text, i) => ({ text: clip(text), x: 0, y: i * ORDER_STEP })) };
+}
+
 export function diffSnapshots(before: OutcomeSnapshot, after: OutcomeSnapshot, cap: number = TEXT_DIFF_CAP): string[] {
     // Multiset difference by text: what only one side has.
     const counts = new Map<string, number>();
@@ -86,11 +93,22 @@ export function diffSnapshots(before: OutcomeSnapshot, after: OutcomeSnapshot, c
 
     const lines: Array<{ y: number; line: string }> = [];
     const free = new Set(added);
+    // Among nearby candidates, the one sharing the longest prefix is the same line
+    // changing ("Taps: 0" → "Taps: 1"), not a neighbour that just appeared; distance
+    // breaks ties.
+    const prefix = (a: string, b: string) => {
+        let n = 0;
+        while (n < a.length && n < b.length && a[n] === b[n]) n++;
+        return n;
+    };
     for (const r of removed) {
         let best: SnapshotItem | null = null;
         for (const a of free) {
             const dy = Math.abs(a.y - r.y);
-            if (dy <= PAIR_DY && (!best || dy < Math.abs(best.y - r.y))) best = a;
+            if (dy > PAIR_DY) continue;
+            if (!best) { best = a; continue; }
+            const pa = prefix(r.text, a.text), pb = prefix(r.text, best.text);
+            if (pa > pb || (pa === pb && dy < Math.abs(best.y - r.y))) best = a;
         }
         if (best) {
             free.delete(best);

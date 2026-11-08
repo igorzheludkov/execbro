@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { diffSnapshots, buildOutcome, snapshotFromScreenState, TEXT_DIFF_CAP, type OutcomeSnapshot } from "../../core/actionOutcome.js";
+import { diffSnapshots, buildOutcome, snapshotFromScreenState, snapshotFromLines, TEXT_DIFF_CAP, type OutcomeSnapshot } from "../../core/actionOutcome.js";
 import { requestEvent, logEvent, restartEvent } from "../../core/timeline.js";
 import type { ScreenState } from "../../core/screenState.js";
 import type { LogEntry, NetworkRequest } from "../../core/types.js";
@@ -89,6 +89,15 @@ describe("buildOutcome", () => {
         expect(o.pending).toBe("2 request(s) still in flight after 3s: get_timeline() shows the rest");
         expect(o.unavailable).toEqual(["route", "text: no React Native connection"]);
         expect(buildOutcome({ ...none, before: null, after: null, pending: 0, capped: true }).pending).toBeUndefined();
+    });
+});
+
+describe("snapshotFromLines", () => {
+    it("pairs a changed line even when a new line appears above it", () => {
+        // Tree order stands in for position: an inserted error shifts later lines by one.
+        const before = snapshotFromLines("Login", ["Sign in to the Shop", "Taps: 0", "Sign in"]);
+        const after = snapshotFromLines("Login", ["Sign in to the Shop", "Bad password", "Taps: 1", "Sign in"]);
+        expect(diffSnapshots(before, after)).toEqual(['+ "Bad password"', '"Taps: 0" → "Taps: 1"']);
     });
 });
 

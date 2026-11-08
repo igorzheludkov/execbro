@@ -12,7 +12,7 @@ import { refreshMirror } from "./sdkMirrorPoller.js";
 import { resolveDeviceTarget } from "./deviceResolver.js";
 import { chromiumAppFor, getConnectedAppByDevice, resolveConnectedAppByDevice } from "./connection.js";
 import { chromiumScreenState } from "./chromiumScreen.js";
-import { getScreenState } from "./screenState.js";
+import { readTextSnapshot } from "./textSnapshot.js";
 import { networkBuffers } from "./state.js";
 import { delay } from "./jsExecute.js";
 
@@ -54,9 +54,7 @@ async function defaultReadSnapshot(deviceName: string, chromium: boolean): Promi
         const app = getConnectedAppByDevice(deviceName);
         return app ? snapshotFromScreenState(await chromiumScreenState(app)) : null;
     }
-    const r = await getScreenState({ device: deviceName, bounded: true });
-    if (!r.screenState) throw new Error(r.error ?? "no screen state");
-    return snapshotFromScreenState(r.screenState);
+    return readTextSnapshot(deviceName);
 }
 
 export const defaultOutcomeDeps: OutcomeDeps = {

@@ -31,6 +31,9 @@ import { resolveDeliveredScaleFactor, resolveScreenSpaceMetrics } from "../core/
 import { androidForegroundPackage, foregroundLossWarning } from "../core/androidForeground.js";
 import { probeScrollAt, explainNoOpSwipe } from "../core/swipeDiagnosis.js";
 import { bundleStaleWarning } from "../core/metroIdentity.js";
+import { beginActionOutcome, finishActionOutcome } from "../core/actionOutcomeCollect.js";
+import { changedSinceLastShown } from "../core/sessionOnce.js";
+import { renderTapResponse } from "../pro/actionRender.js";
 import {
     captureScreenshot,
     verifyAndCapture,
@@ -155,7 +158,7 @@ export function registerInteractionTools(server: McpServer): void {
                     .optional()
                     .default(true)
                     .describe(
-                        "Return post-tap image bytes in the response. Default true. Set to false to drop the PNG bytes — verification still runs (set verify=false to skip that too). Combine with verify=true to get the meaningful/changeRate signal without paying the ~1MB-per-tap bandwidth cost."
+                        "Return post-tap image bytes in the response. Default true. Set to false to drop the PNG bytes — verification still runs (set verify=false to skip that too). Combine with verify=true to get the verification.meaningful signal without paying the ~1MB-per-tap bandwidth cost."
                     ),
                 verify: z
                     .boolean()
@@ -187,9 +190,17 @@ export function registerInteractionTools(server: McpServer): void {
                         "Results are stored in the image buffer (use get_images to inspect individual frames). " +
                         "Default: false."
                     ),
+                verbose: z
+                    .boolean()
+                    .optional()
+                    .default(false)
+                    .describe("Return the full diagnostic response: raw pixel statistics, converted coordinates, query echo. Default false."),
             },
         },
         async (args: any) => {
+            // The outcome (route, changed text, requests, console errors during the tap)
+            // needs a reading from before the gesture.
+            const outcomeHandle = await beginActionOutcome(args.device);
             const result: TapResult = await tap({
                 text: args.text,
                 testID: args.testID,
@@ -207,15 +218,17 @@ export function registerInteractionTools(server: McpServer): void {
                 duration: args.duration,
             });
     
-            const { screenshot: screenshotData, ...resultWithoutScreenshot } = result;
+            const screenshotData = result.screenshot;
+            // No gesture was delivered on a miss, so there is nothing to report on.
+            const outcome = result.success
+                ? await finishActionOutcome(outcomeHandle, {
+                    visualSettleRan: !!result.verification && !result.verification.skipped,
+                })
+                : null;
+            const showDeviceNote = !!result.deviceNote && changedSinceLastShown("deviceNote", result.deviceNote);
+            const body = renderTapResponse(result, outcome, { verbose: args.verbose === true, showDeviceNote });
             const tapStaleWarning = bundleStaleWarning(args.device);
-            const text = JSON.stringify(
-                tapStaleWarning
-                    ? { ...resultWithoutScreenshot, staleBundle: tapStaleWarning }
-                    : resultWithoutScreenshot,
-                null,
-                2
-            );
+            const text = JSON.stringify(tapStaleWarning ? { ...body, staleBundle: tapStaleWarning } : body, null, 2);
             // Pack predicate + strategy mode + attempted strategies into errorContext for telemetry.
             // Always include the predicate so unmeaningful outcomes (no isError, no _errorMessage) still
             // carry triage context — otherwise blob8 ends up blank and the dashboard shows empty rows.
