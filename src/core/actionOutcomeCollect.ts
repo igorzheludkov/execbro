@@ -6,7 +6,7 @@
  */
 
 import { buildOutcome, snapshotFromScreenState, type ActionOutcome, type OutcomeSnapshot } from "./actionOutcome.js";
-import { waitForNetworkIdle, IDLE_CAP_MS, IDLE_GRACE_MS, type IdleDeps } from "./networkIdle.js";
+import { waitForNetworkIdle, withDeadline, IDLE_CAP_MS, IDLE_GRACE_MS, type IdleDeps } from "./networkIdle.js";
 import { collectTimeline, type CollectResult } from "./timelineSources.js";
 import { refreshMirror } from "./sdkMirrorPoller.js";
 import { resolveDeviceTarget } from "./deviceResolver.js";
@@ -18,6 +18,7 @@ import { delay } from "./jsExecute.js";
 
 /** In-app rows carry the device clock; this much slack keeps them inside the window. */
 const CLOCK_PAD_MS = 250;
+const REFRESH_DEADLINE_MS = 500;
 
 export interface OutcomeDeps {
     resolveApp(device?: string): Promise<{ deviceName: string; chromium: boolean } | null>;
@@ -65,7 +66,9 @@ export const defaultOutcomeDeps: OutcomeDeps = {
     idleFor: (deviceName) => ({
         now: () => Date.now(),
         sleep: delay,
-        refresh: () => refreshMirror(deviceName),
+        // mirrorOnce has its own 5s timeout; on a wedged JS thread that would outlast the
+        // whole idle cap, so each refresh gets a short deadline and the poll moves on.
+        refresh: async () => { await withDeadline(refreshMirror(deviceName), REFRESH_DEADLINE_MS); },
         requests: () => {
             if (deviceName) return networkBuffers.get(deviceName)?.getAll({}) ?? [];
             return [...networkBuffers.values()].flatMap((b) => b.getAll({}));
@@ -113,7 +116,10 @@ export async function finishActionOutcome(
     let idle = { pending: 0, capped: false };
     try {
         idle = await waitForNetworkIdle(
-            { since: h.startedAt - CLOCK_PAD_MS, capAt: h.startedAt + IDLE_CAP_MS, graceMs: opts.visualSettleRan ? 0 : IDLE_GRACE_MS },
+            // The cap bounds the EXTRA wait, so it counts from here: resolving, gesturing
+            // and settling already took seconds on a real tap, and a cap counted from
+            // before the tap had expired by the first poll.
+            { since: h.startedAt - CLOCK_PAD_MS, capAt: deps.now() + IDLE_CAP_MS, graceMs: opts.visualSettleRan ? 0 : IDLE_GRACE_MS },
             deps.idleFor(h.deviceName)
         );
     } catch {
@@ -124,7 +130,9 @@ export async function finishActionOutcome(
     if (!h.connected) {
         unavailable.push("route", "text: no React Native connection");
     } else {
-        after = await trySnapshot(h, deps);
+        // A failed before-read (wedged JS thread, dropped socket) means the after-read
+        // would wait out the same timeout for a diff that has nothing to compare against.
+        if (h.before) after = await trySnapshot(h, deps);
         if (!h.before || !after) unavailable.push("text: snapshot read failed");
     }
 

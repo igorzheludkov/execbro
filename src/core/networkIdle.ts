@@ -46,3 +46,17 @@ export async function waitForNetworkIdle(
         await deps.sleep(IDLE_POLL_MS);
     }
 }
+
+/** The value of `p`, or undefined once `ms` has passed without it. The timer never holds the process. */
+export async function withDeadline<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), ms);
+        timer.unref?.();
+    });
+    try {
+        return await Promise.race([p, deadline]);
+    } finally {
+        clearTimeout(timer);
+    }
+}

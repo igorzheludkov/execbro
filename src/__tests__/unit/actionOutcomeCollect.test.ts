@@ -62,6 +62,14 @@ describe("action outcome collection", () => {
         expect(o.route).toBeUndefined();
     });
 
+    it("does not read the after-snapshot when the before-snapshot already failed", async () => {
+        // A wedged JS thread costs one 3s timeout, not two.
+        let reads = 0;
+        const { d } = deps({ readSnapshot: async () => { reads++; throw new Error("timeout"); } });
+        await finishActionOutcome(await beginActionOutcome(undefined, d), { visualSettleRan: true }, d);
+        expect(reads).toBe(1);
+    });
+
     it("no app: route and text unavailable, buffers still read", async () => {
         const { d, calls } = deps({ resolveApp: async () => null });
         const h = await beginActionOutcome("emulator-5554", d);
@@ -84,6 +92,27 @@ describe("action outcome collection", () => {
         const { d } = deps({ resolveApp: async () => null, collect: async () => { throw new Error('No device matches "emulator-5554"'); } });
         const o = await finishActionOutcome(await beginActionOutcome("emulator-5554", d), { visualSettleRan: true }, d);
         expect(o.unavailable).toEqual(["route", "text: no React Native connection", "network and logs: nothing captured for this device"]);
+    });
+
+    it("the 3s cap counts from the end of the gesture, not from before the tap began", async () => {
+        // A real tap spends ~4s resolving, gesturing and settling before finish runs. A
+        // request it started that answers 500ms later must still be waited for.
+        let now = 1000;
+        const inflight = { requestId: "r", timestamp: new Date(1500), method: "POST", url: "http://x/auth", headers: {}, epoch: 1, completed: false } as NetworkRequest;
+        const { d } = deps({
+            now: () => now,
+            idleFor: () => ({
+                now: () => now,
+                sleep: async (ms) => { now += ms; },
+                refresh: async () => {},
+                requests: () => [{ ...inflight, completed: now >= 5500 }],
+            }),
+        });
+        const h = await beginActionOutcome(undefined, d);
+        now = 5000; // the tap's own work
+        const o = await finishActionOutcome(h, { visualSettleRan: true }, d);
+        expect(o.pending).toBeUndefined();
+        expect(now).toBeGreaterThanOrEqual(5500);
     });
 
     it("grace applies only without a visual settle", async () => {

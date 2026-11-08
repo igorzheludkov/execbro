@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { waitForNetworkIdle, IDLE_QUIET_MS, type IdleDeps } from "../../core/networkIdle.js";
+import { waitForNetworkIdle, withDeadline, IDLE_QUIET_MS, type IdleDeps } from "../../core/networkIdle.js";
 import type { NetworkRequest } from "../../core/types.js";
 
 /**
@@ -65,5 +65,19 @@ describe("waitForNetworkIdle", () => {
         expect(await waitForNetworkIdle(opts, f.deps)).toEqual({ pending: 1, capped: true });
         expect(f.now()).toBeGreaterThanOrEqual(3000);
         expect(f.now()).toBeLessThan(3200);
+    });
+});
+
+describe("withDeadline", () => {
+    it("gives up on a call that does not answer in time", async () => {
+        // The SDK mirror refresh has its own 5s timeout; on a wedged JS thread it must not
+        // hold the idle wait past its cap.
+        const t0 = Date.now();
+        expect(await withDeadline(new Promise(() => {}), 20)).toBeUndefined();
+        expect(Date.now() - t0).toBeLessThan(500);
+    });
+
+    it("returns the value of a call that answers in time", async () => {
+        expect(await withDeadline(Promise.resolve(7), 1000)).toBe(7);
     });
 });
