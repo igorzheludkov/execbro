@@ -134,14 +134,36 @@ describe("diff pairing on tree order", () => {
     it("pairs lines that moved far when rows above them were removed (Place order on device)", () => {
         const before = snapshotFromLines("Checkout", ["Eyeshadow Palette with Mirror", "$19.99", "−", "1", "+", "Promo code: (empty)", "Apply", "Free shipping", "Subtotal: $19.99", "Total: $19.99", "Order #1003 placed", "Place order"]);
         const after = snapshotFromLines("Checkout", ["Your cart is empty", "Promo code: (empty)", "Apply", "Free shipping", "Subtotal: $0.00", "Total: $0.00", "Order #1004 placed", "Place order"]);
-        const lines = diffSnapshots(before, after);
-        expect(lines).toEqual(expect.arrayContaining([
+        expect(diffSnapshots(before, after)).toEqual([
+            '"Eyeshadow Palette with Mirror" → "Your cart is empty"',
+            '- "$19.99"',
+            '- "−"',
+            '- "1"',
+            '- "+"',
             '"Subtotal: $19.99" → "Subtotal: $0.00"',
             '"Total: $19.99" → "Total: $0.00"',
             '"Order #1003 placed" → "Order #1004 placed"',
-            '- "+"',
-        ]));
-        expect(lines.some((l) => l.startsWith('"+" →'))).toBe(false);
+        ]);
+    });
+
+    it("pairs by the best match, not the nearest: a new hint next to the counter", () => {
+        const lines = diffSnapshots(snapshotFromLines("A", ["Taps: 0", "Reset"]), snapshotFromLines("A", ["Tap again", "Taps: 1", "Reset"]));
+        expect(lines).toEqual(['+ "Tap again"', '"Taps: 0" → "Taps: 1"']);
+    });
+
+    it("does not swap partners between two similar lines", () => {
+        const lines = diffSnapshots(
+            snapshotFromLines("A", ["Status: idle", "Status code: 200"]),
+            snapshotFromLines("A", ["Status: done", "Status code: 500"])
+        );
+        expect(lines).toEqual(['"Status: idle" → "Status: done"', '"Status code: 200" → "Status code: 500"']);
+    });
+
+    it("a deleted row in a family of similar rows is a removal, not a rename", () => {
+        const rows = (n: number[]) => n.map((i) => `Row ${i}`);
+        const before = snapshotFromLines("List", rows([1, 2, 3, 4, 5, 6, 7, 8]));
+        const after = snapshotFromLines("List", rows([1, 2, 4, 5, 6, 7, 8, 41]));
+        expect(diffSnapshots(before, after)).toEqual(['- "Row 3"', '+ "Row 41"']);
     });
 
     it("still pairs a line that changed in place with nothing in common", () => {

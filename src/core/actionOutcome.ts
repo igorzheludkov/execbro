@@ -95,9 +95,9 @@ export function diffSnapshots(before: OutcomeSnapshot, after: OutcomeSnapshot, c
 
     const lines: Array<{ y: number; line: string }> = [];
     const free = new Set(added);
-    // Pairing, strongest evidence first. (1) A shared prefix of 3+ characters pairs at
-    // any distance, nearest first: rows removed above can move a line far ("Subtotal:
-    // $19.99" → "Subtotal: $0.00" after a cart emptied). (2) A shorter shared prefix pairs
+    // Pairing, strongest evidence first. (1) A shared prefix of 3+ characters pairs even
+    // far away: rows removed above can move a line ("Subtotal: $19.99" → "Subtotal:
+    // $0.00" after a cart emptied). (2) A shorter shared prefix pairs
     // only nearby. (3) A line still unpaired pairs with one in exactly its slot, if both
     // are real text ("qa.buyer@shop.dev" → "Not signed in"); a stepper's "+" taking the
     // slot of "Subtotal: $0.00" is not the same line changing.
@@ -122,7 +122,30 @@ export function diffSnapshots(before: OutcomeSnapshot, after: OutcomeSnapshot, c
             if (best) { free.delete(best); pairs.set(r, best); }
         }
     };
-    pass((_r, _a, p) => p >= STRONG_PREFIX);
+    // Pass 1, globally: every pair sharing a strong prefix, best match first (longest
+    // prefix, then nearest), so a new "Tap again" beside "Taps: 0" cannot take the
+    // partner "Taps: 1" deserves, and two similar lines cannot swap. A far pair is
+    // allowed only when no other line on the after side starts with that prefix: in a
+    // family of rows ("Row 1".."Row 41") deleting "Row 3" is a removal, not a rename.
+    const strong: Array<{ r: SnapshotItem; a: SnapshotItem; p: number; dy: number }> = [];
+    for (const r of removed) {
+        for (const a of free) {
+            const p = prefix(r.text, a.text);
+            if (p < STRONG_PREFIX) continue;
+            const dy = Math.abs(a.y - r.y);
+            if (dy > PAIR_DY) {
+                const pre = r.text.slice(0, p);
+                if (after.items.some((x) => x !== a && x.text.startsWith(pre))) continue;
+            }
+            strong.push({ r, a, p, dy });
+        }
+    }
+    strong.sort((x, y) => y.p - x.p || x.dy - y.dy);
+    for (const c of strong) {
+        if (pairs.has(c.r) || !free.has(c.a)) continue;
+        free.delete(c.a);
+        pairs.set(c.r, c.a);
+    }
     pass((_r, _a, p, dy) => p > 0 && dy <= PAIR_DY);
     pass((r, a, _p, dy) => dy === 0 && r.text.length >= STRONG_PREFIX && a.text.length >= STRONG_PREFIX);
     for (const r of removed) {
