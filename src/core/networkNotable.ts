@@ -110,7 +110,8 @@ export function notableLines(request: NetworkRequest, others: NetworkRequest[]):
             const theirs = elsewhere.get(k);
             if (!theirs || theirs.size !== 1) continue;
             const [other, count] = [...theirs][0];
-            if (other !== mine) lines.push(`"${k}" is a ${mine} here, a ${other} in ${count} other bodies on ${host}.`);
+            const an = (t: JsonType) => (t === "object" || t === "array" ? `an ${t}` : `a ${t}`);
+            if (other !== mine) lines.push(`"${k}" is ${an(mine)} here, ${an(other)} in ${count} other bodies on ${host}.`);
         }
     }
 

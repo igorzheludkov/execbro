@@ -33,6 +33,12 @@ describe("notableLines", () => {
         expect(notableLines(detail, [req("l", "http://localhost:8092/products", undefined, '{"data":[{"id":1}]}')])).toEqual([]);
     });
 
+    it("uses the right article for the other side's type", () => {
+        const sent = req("o", "http://localhost:8092/carts", '{"meta":5}');
+        expect(notableLines(sent, [req("a", "http://localhost:8092/p", undefined, '{"meta":{"page":1}}')]))
+            .toEqual(['"meta" is a number here, an object in 1 other bodies on localhost:8092.']);
+    });
+
     it("ignores null on either side", () => {
         const order = req("o", "http://localhost:8092/carts", '{"price":null}');
         expect(notableLines(order, [req("a", "http://localhost:8092/p", undefined, '{"price":9.99}')])).toEqual([]);
@@ -54,5 +60,11 @@ describe("formatRequestDetails with notable lines", () => {
         const out = formatRequestDetails(req("o", "http://localhost:8092/carts", '{"price":"9.99"}'), { notable: ['"price" is a string here, a number in 2 other bodies on localhost:8092.'] });
         expect(out).toContain('Notable: "price" is a string here');
         expect(out.indexOf("Notable:")).toBeLessThan(out.indexOf("--- Request Body ---"));
+    });
+
+    it("leaves them out of a narrowing query, which asks for one subtree only", async () => {
+        const { formatRequestDetails } = await import("../../core/network.js");
+        const out = formatRequestDetails(req("o", "http://localhost:8092/carts", '{"price":"9.99"}'), { query: "price", notable: ["x"] });
+        expect(out).not.toContain("Notable:");
     });
 });

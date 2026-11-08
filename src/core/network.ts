@@ -340,7 +340,8 @@ export function formatRequestDetails(
         lines.push(`Mock warning: ${request.mockWarning}`);
     }
 
-    for (const n of notable) lines.push(`Notable: ${n}`);
+    // A narrowing query asks for one subtree; findings about the whole exchange are noise there.
+    if (!query) for (const n of notable) lines.push(`Notable: ${n}`);
 
     // Post data. The query targets the response body when there is one — that
     // is where the bulk lives — and falls back to the request body otherwise,
