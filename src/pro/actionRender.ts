@@ -62,6 +62,7 @@ export function renderTapResponse(
     if (r.method) out.method = r.method;
     const target = describeTarget(r);
     if (target) out.target = target;
+    if (r.tappedAt) out.tappedAt = r.tappedAt;
     if (outcome && Object.keys(outcome).length > 0) out.outcome = outcome;
     if (r.verification) out.verification = compactVerification(r.verification);
     for (const k of KEPT) if (r[k] !== undefined) out[k] = r[k];
@@ -76,6 +77,20 @@ export function formatScroll(before: ScrollProbe, after: ScrollProbe): string | 
     const axis = after.horizontal ? "x" : "y";
     const of = after.maxOffset !== undefined ? ` of ${Math.round(after.maxOffset)}` : "";
     return `${name} ${axis} ${Math.round(before.offset)} → ${Math.round(after.offset)}${of}`;
+}
+
+/**
+ * The swipe's outcome with the scroll line. When the list actually scrolled, the text
+ * diff is rows a virtualized list mounted and unmounted, not changes, so it is dropped;
+ * the scroll line says what happened.
+ */
+export function withScroll(outcome: ActionOutcome, before: ScrollProbe | null, after: ScrollProbe | null): ActionOutcome {
+    if (!before || !after) return outcome;
+    const scroll = formatScroll(before, after);
+    if (!scroll) return outcome;
+    const moved = before.offset !== after.offset;
+    const { text, ...rest } = outcome;
+    return moved ? { ...rest, scroll } : { ...outcome, scroll };
 }
 
 export function renderSwipeResponse(
@@ -103,4 +118,26 @@ export function renderSwipeResponse(
     if (body.warning) out.warning = body.warning;
     if (opts.showDeviceNote && body.deviceNote) out.deviceNote = body.deviceNote;
     return out;
+}
+
+type ToolContent = { type: string; text?: string; data?: string; mimeType?: string };
+
+/**
+ * Puts the outcome into a tool response whose first content item is a JSON body (the
+ * chromium swipe). A page that scrolled drops the text diff, as withScroll does on mobile.
+ */
+export function attachOutcome<R extends { content: ToolContent[]; isError?: boolean }>(response: R, outcome: ActionOutcome): R {
+    const first = response.content[0];
+    if (response.isError || !first || first.type !== "text" || !first.text) return response;
+    let body: Record<string, unknown>;
+    try {
+        body = JSON.parse(first.text);
+    } catch {
+        return response;
+    }
+    const scrolled = body.scrolled as { dx?: number; dy?: number } | undefined;
+    const { text, ...rest } = outcome;
+    const o = scrolled && (scrolled.dx || scrolled.dy) ? rest : outcome;
+    if (Object.keys(o).length > 0) body.outcome = o;
+    return { ...response, content: [{ ...first, text: JSON.stringify(body, null, 2) }, ...response.content.slice(1)] };
 }

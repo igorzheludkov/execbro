@@ -33,7 +33,7 @@ import { probeScrollAt, explainNoOpSwipe } from "../core/swipeDiagnosis.js";
 import { bundleStaleWarning } from "../core/metroIdentity.js";
 import { beginActionOutcome, finishActionOutcome } from "../core/actionOutcomeCollect.js";
 import { changedSinceLastShown } from "../core/sessionOnce.js";
-import { renderTapResponse, renderSwipeResponse, formatScroll } from "../pro/actionRender.js";
+import { renderTapResponse, renderSwipeResponse, withScroll, attachOutcome } from "../pro/actionRender.js";
 import {
     captureScreenshot,
     verifyAndCapture,
@@ -414,7 +414,10 @@ export function registerInteractionTools(server: McpServer): void {
             // Chromium: a direction is a mouse wheel, four coordinates a left-button drag.
             const chromeApp = chromiumAppFor("swipe", device);
             if (chromeApp) {
-                return chromiumSwipe(chromeApp, { direction, distance, startX, startY, endX, endY, durationMs, delta, burst, verify, screenshot });
+                const chromeHandle = await beginActionOutcome(device);
+                const chromeResult = await chromiumSwipe(chromeApp, { direction, distance, startX, startY, endX, endY, durationMs, delta, burst, verify, screenshot });
+                if (chromeResult.isError) return chromeResult;
+                return attachOutcome(chromeResult, await finishActionOutcome(chromeHandle, { visualSettleRan: verify !== false }));
             }
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
@@ -643,11 +646,10 @@ export function registerInteractionTools(server: McpServer): void {
                 )}`;
             }
 
-            const scroll = probeBefore && probeAfter ? formatScroll(probeBefore, probeAfter) : undefined;
-            if (scroll) outcome.scroll = scroll;
+            const swipeOutcome = withScroll(outcome, probeBefore, probeAfter);
             const responseBody = renderSwipeResponse({
                 verification,
-                outcome,
+                outcome: swipeOutcome,
                 warning,
                 foregroundLost: foregroundWarning ?? undefined,
                 // Carried on the tools you are actually calling. get_refresh_status can

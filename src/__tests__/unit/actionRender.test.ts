@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { renderTapResponse, compactVerification, formatScroll, renderSwipeResponse } from "../../pro/actionRender.js";
+import { renderTapResponse, compactVerification, formatScroll, renderSwipeResponse, withScroll, attachOutcome } from "../../pro/actionRender.js";
 import type { TapResult } from "../../pro/tap.js";
 
 // The accessibility tap on Submit measured on the Pixel 9 emulator: about 1,250
@@ -34,6 +34,11 @@ describe("renderTapResponse", () => {
             outcome: { route: "unchanged (TapTargets)", text: ['"Taps: 0" → "Taps: 1"'] },
             verification: { meaningful: true, regions: ["(216,797) 176x48"] },
         });
+    });
+
+    it("keeps where the tap landed, the input inspect_at_point takes", () => {
+        const out = renderTapResponse({ ...accessibilityTap, tappedAt: { x: 143, y: 907 } }, null, { verbose: false, showDeviceNote: false });
+        expect(out.tappedAt).toEqual({ x: 143, y: 907 });
     });
 
     it("verbose restores everything", () => {
@@ -133,5 +138,42 @@ describe("renderSwipeResponse", () => {
     it("keeps warnings", () => {
         expect(renderSwipeResponse({ ...body, warning: "Swipe executed but nothing moved: already at end" }, { verbose: false, showDeviceNote: false }).warning)
             .toBe("Swipe executed but nothing moved: already at end");
+    });
+});
+
+describe("withScroll", () => {
+    it("drops the text diff when the list scrolled: rows mounting and unmounting are not changes", () => {
+        const o = withScroll({ route: "unchanged (Feed)", text: ['+ "Row 41"', '- "Row 1"'] }, { found: true, offset: 0, maxOffset: 900 }, { found: true, offset: 473, maxOffset: 900 });
+        expect(o).toEqual({ route: "unchanged (Feed)", scroll: "scroll view y 0 → 473 of 900" });
+    });
+
+    it("keeps the text diff when nothing scrolled (a swipe that dismissed a sheet, flipped a pager)", () => {
+        const o = withScroll({ text: ['- "Sheet title"'] }, { found: true, offset: 0 }, { found: true, offset: 0 });
+        expect(o.text).toEqual(['- "Sheet title"']);
+    });
+
+    it("leaves the outcome alone when the probes could not look", () => {
+        const o = withScroll({ text: ["x"] }, null, null);
+        expect(o).toEqual({ text: ["x"] });
+    });
+});
+
+describe("attachOutcome (chromium swipe)", () => {
+    const response = (body: Record<string, unknown>) => ({ content: [{ type: "text" as const, text: JSON.stringify(body) }, { type: "image" as const, data: "x", mimeType: "image/jpeg" }], isError: false });
+
+    it("adds the outcome to the JSON body and keeps the image", () => {
+        const r = attachOutcome(response({ success: true, scrolled: { dx: 0, dy: 0 } }), { route: "unchanged (/inbox)", console: ["✖ error boom"] });
+        expect(JSON.parse(r.content[0].text!)).toEqual({ success: true, scrolled: { dx: 0, dy: 0 }, outcome: { route: "unchanged (/inbox)", console: ["✖ error boom"] } });
+        expect(r.content[1]).toEqual({ type: "image", data: "x", mimeType: "image/jpeg" });
+    });
+
+    it("drops the text diff when the page scrolled", () => {
+        const r = attachOutcome(response({ success: true, scrolled: { dx: 0, dy: 400 } }), { text: ['+ "Row 41"'], route: "unchanged (/feed)" });
+        expect(JSON.parse(r.content[0].text!).outcome).toEqual({ route: "unchanged (/feed)" });
+    });
+
+    it("leaves an error response untouched", () => {
+        const err = { content: [{ type: "text" as const, text: "Error: no window" }], isError: true };
+        expect(attachOutcome(err, { route: "x" })).toBe(err);
     });
 });
