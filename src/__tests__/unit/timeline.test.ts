@@ -77,6 +77,14 @@ describe("event builders", () => {
         expect(requestEvent(req({ status: 200 }), "d", true).text).toContain("api.shop.com/cart");
     });
 
+    it("shows the start of a failed response body, so a 4xx reason needs no get_request_details call", () => {
+        const body = '{"error":"Validation failed","details":[{"field":"items","message":"Required"}]}';
+        expect(requestEvent(req({ status: 422, method: "POST", responseBody: body }), "d", false).text)
+            .toBe(`⇄ POST /cart 422 ${body}  [42]`);
+        expect(requestEvent(req({ status: 500, responseBody: "x".repeat(400) }), "d", false).text.length).toBeLessThan(160);
+        expect(requestEvent(req({ status: 200, responseBody: body }), "d", false).text).not.toContain("Validation");
+    });
+
     it("renders routes, restarts and refreshes", () => {
         expect(routeEvent({ route: "Cart", from: "ProductDetails", at: NOW }, "d").text).toBe("➜ route Cart (from ProductDetails)");
         expect(routeEvent({ route: "Cart", from: null, at: NOW }, "d").text).toBe("➜ route Cart");

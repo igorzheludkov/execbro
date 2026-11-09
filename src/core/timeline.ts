@@ -119,10 +119,11 @@ export function requestEvent(r: NetworkRequest, device: string, showHost: boolea
     const outcome = r.error ? `failed: ${oneLine(r.error, 60)}`
         : r.status === undefined ? (r.completed ? "no status" : "pending")
         : `${r.status}${duration}`;
+    const reason = failed && r.responseBody ? ` ${oneLine(r.responseBody, 100)}` : "";
     return {
         at: r.timestamp.getTime(), kind: "request", source: "network", device,
         tier: failed ? TIER.failedRequest : TIER.request,
-        text: `⇄ ${r.mocked ? "[MOCK] " : ""}${r.method} ${displayUrl(r.url, showHost)} ${outcome}  [${r.requestId}]`,
+        text: `⇄ ${r.mocked ? "[MOCK] " : ""}${r.method} ${displayUrl(r.url, showHost)} ${outcome}${reason}  [${r.requestId}]`,
         ids: { request: r.requestId },
     };
 }
