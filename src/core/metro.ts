@@ -305,16 +305,22 @@ export function selectConnectTargets(
 }
 
 /**
- * The target to reattach to after a drop. RN keeps its old fallback to the main
- * device, since a reloaded runtime gets a new id. A Chromium target that has gone
- * (tab or window closed) is gone: falling back would attach to, and inject the
- * network interceptor into, some other page nobody chose.
+ * The target to reattach to after a drop. A reloaded RN runtime gets a new id, so
+ * RN falls back to the main runtime of the same device and app, found by Metro's
+ * `logicalDeviceId`, which survives the reload. Falling back to the port's main
+ * device instead reattached to whichever device listed first when a simulator and
+ * an emulator shared one Metro. Only a Metro too old to list `logicalDeviceId`
+ * keeps that port-wide fallback. A Chromium target that has gone (tab or window
+ * closed) is gone: falling back would attach to, and inject the network
+ * interceptor into, some other page nobody chose.
  */
 export function pickReconnectTarget(devices: DeviceInfo[], previous: DeviceInfo): DeviceInfo | null {
     const same = devices.find((d) => d.id === previous.id);
     if (same) return same;
     if (isChromiumTarget(previous)) return null;
-    return selectMainDevice(devices);
+    const logicalDeviceId = previous.reactNative?.logicalDeviceId;
+    if (!logicalDeviceId) return selectMainDevice(devices);
+    return selectMainDevice(devices.filter((d) => d.reactNative?.logicalDeviceId === logicalDeviceId && d.appId === previous.appId));
 }
 
 export function filterBridgelessDevices(devices: DeviceInfo[]): DeviceInfo[] {

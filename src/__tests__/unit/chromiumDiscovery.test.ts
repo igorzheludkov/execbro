@@ -299,6 +299,20 @@ describe("pickReconnectTarget", () => {
         const oldRn = target({ id: "old", type: "node", title: "Hermes React Native", deviceName: "Pixel" });
         expect(pickReconnectTarget([RN_TARGETS[1]], oldRn)?.id).toBe("he");
     });
+
+    it("reattaches to the same device after a reload, not the port's first device", () => {
+        const rn = (id: string, logicalDeviceId: string, appId = "com.app") =>
+            target({ id, type: "node", appId, description: "React Native Bridgeless", reactNative: { logicalDeviceId } });
+        const oldAndroid = rn("android-1", "android");
+        const listed = [rn("ios-2", "ios"), rn("other-app", "android", "com.other"), rn("android-2", "android")];
+        expect(pickReconnectTarget(listed, oldAndroid)?.id).toBe("android-2");
+    });
+
+    it("waits rather than switching device when its device is not listed yet", () => {
+        const oldAndroid = target({ id: "android-1", type: "node", appId: "com.app", reactNative: { logicalDeviceId: "android" } });
+        const ios = target({ id: "ios-2", type: "node", appId: "com.app", description: "React Native Bridgeless", reactNative: { logicalDeviceId: "ios" } });
+        expect(pickReconnectTarget([ios], oldAndroid)).toBeNull();
+    });
 });
 
 describe("isChromiumListing / keepChromiumPages (a port is Chromium by what it lists)", () => {

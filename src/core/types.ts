@@ -43,6 +43,8 @@ export interface DeviceInfo {
     deviceName: string;
     // Chromium /json only: the page URL. Metro targets do not carry it.
     url?: string;
+    // Metro /json only: stays the same across reloads, while `id` changes.
+    reactNative?: { logicalDeviceId?: string };
 }
 
 // Connected app info
