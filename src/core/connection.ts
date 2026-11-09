@@ -247,69 +247,108 @@ const CDP_QUIET_WINDOW_MS = PING_INTERVAL_MS * 2;
 const PROBE_TIMEOUT_MS = 1500;
 const RECONNECT_SETTLE_MS = 500;
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1", "0.0.0.0"]);
+
+export function isLoopbackHost(hostname: string): boolean {
+    return LOOPBACK_HOSTS.has(hostname.toLowerCase());
+}
+
 /**
- * Creates a WebSocket connection with Origin header fallback.
- * RN 0.85+ Metro requires the Origin header, but Expo SDK 55 Bridgeless
- * rejects connections that include one. The rejection can manifest as:
- *   - Connection refused before open (error/close before open event)
+ * Origins to try on the inspector/hot WebSocket, in order; `undefined` means "send no Origin".
+ *
+ * Metro advertises `ws://localhost:<port>`, so the obvious Origin is `http://localhost:<port>`. Expo CLI
+ * (verified SDK 52 to 58) terminates that right after open (1006): its `isMatchingOrigin` expects the exact
+ * `serverBaseUrl` host, `127.0.0.1`. Bare RN dev-middleware (0.85, 0.88) accepts localhost and 127.0.0.1 alike,
+ * so `127.0.0.1` is the one loopback Origin every version takes. It goes first for a loopback host;
+ * the URL-derived Origin and finally no Origin stay as fallbacks for anything this was not verified against.
+ * No Origin is last because RN 0.88 answers it with a 401 that hides the real cause (issue #21).
+ */
+export function originCandidates(url: string): Array<string | undefined> {
+    const { hostname, port } = new URL(url);
+    const derived = `http://${hostname}:${port}`;
+    if (!isLoopbackHost(hostname)) return [derived, undefined];
+    const loopback = `http://127.0.0.1:${port}`;
+    return derived === loopback ? [loopback, undefined] : [loopback, derived, undefined];
+}
+
+/**
+ * Creates a WebSocket connection, trying each of `originCandidates` in turn.
+ * Metro versions disagree about the Origin header (RN 0.85+ requires one; Expo CLI wants the 127.0.0.1 host;
+ * Expo SDK 55 and older also accept none; RN 0.88 refuses none). A rejection can manifest as:
+ *   - HTTP 401 before open (error event, "Unexpected server response")
  *   - Immediate close after open (open fires, then close with code 1006)
- * Tries with Origin first, falls back to without on quick failure.
+ * A rejected attempt falls through to the next candidate. If every attempt fails, the error names all of them,
+ * because only the last one used to reach the user and for a local Metro that was the misleading 401.
  */
 export function createWebSocketWithOriginFallback(url: string, timeoutMs = 5000): Promise<WebSocket> {
     const STABILIZE_MS = 500; // Wait after open to detect immediate close
+    const candidates = originCandidates(url);
 
     return new Promise((resolve, reject) => {
-        const wsUrl = new URL(url);
-        const origin = `http://${wsUrl.hostname}:${wsUrl.port}`;
         let settled = false;
+        const failures: string[] = [];
 
-        const tryConnect = (withOrigin: boolean) => {
-            const options = withOrigin ? { headers: { Origin: origin } } : undefined;
+        const tryConnect = (index: number) => {
+            const origin = candidates[index];
+            const label = origin ? `Origin ${origin}` : "no Origin";
+            const options = origin ? { headers: { Origin: origin } } : undefined;
             const ws = new WebSocket(url, options);
             let opened = false;
+            let lastError: Error | undefined;
 
             ws.on("open", () => {
                 opened = true;
-                if (withOrigin) {
-                    // Wait briefly to detect immediate close (Expo SDK 55 pattern)
-                    setTimeout(() => {
-                        if (settled) return;
-                        if (ws.readyState === WebSocket.OPEN) {
-                            settled = true;
-                            console.error("[execbro] WebSocket connected with Origin header");
-                            resolve(ws);
-                        }
-                        // If not OPEN, the close handler will trigger fallback
-                    }, STABILIZE_MS);
-                } else {
+                if (!origin) {
                     if (settled) return;
                     settled = true;
+                    clearTimeout(timer);
                     console.error("[execbro] WebSocket connected without Origin header");
                     resolve(ws);
+                    return;
                 }
+                // Wait briefly to detect an immediate close (Expo's origin check closes right after open)
+                setTimeout(() => {
+                    if (settled) return;
+                    if (ws.readyState === WebSocket.OPEN) {
+                        settled = true;
+                        clearTimeout(timer);
+                        console.error(`[execbro] WebSocket connected with ${label}`);
+                        resolve(ws);
+                    }
+                    // If not OPEN, the close handler will trigger the next candidate
+                }, STABILIZE_MS);
             });
 
             const handleFailure = (error?: Error) => {
                 if (settled) return;
                 ws.removeAllListeners();
+                ws.on("error", () => {}); // terminate() on a connecting socket emits one
                 ws.terminate();
-                if (withOrigin) {
-                    const reason = opened ? "immediately closed after open" : "rejected before open";
-                    console.error(`[execbro] Origin header connection ${reason}, retrying without...`);
-                    tryConnect(false);
+                const err = error ?? lastError;
+                failures.push(`${label}: ${err ? err.message : opened ? "closed immediately after open" : "closed before open"}`);
+                if (index + 1 < candidates.length) {
+                    console.error(`[execbro] ${failures[failures.length - 1]}, retrying...`);
+                    tryConnect(index + 1);
                 } else {
                     settled = true;
-                    reject(error || new Error("WebSocket connection failed"));
+                    clearTimeout(timer);
+                    // Last failure first, so describeConnectionFailure still finds a trailing 401/403.
+                    const last = err ? err.message : "WebSocket connection failed";
+                    const earlier = failures.slice(0, -1);
+                    reject(new Error(earlier.length ? `${last} (earlier attempts: ${earlier.join("; ")})` : last));
                 }
             };
 
-            ws.on("error", (err: Error) => handleFailure(err));
+            ws.on("error", (err: Error) => {
+                lastError = err;
+                handleFailure(err);
+            });
             ws.on("close", () => handleFailure());
         };
 
-        tryConnect(true);
+        tryConnect(0);
 
-        setTimeout(() => {
+        const timer = setTimeout(() => {
             if (!settled) {
                 settled = true;
                 reject(new Error("WebSocket connection timed out"));
@@ -323,9 +362,18 @@ export function createWebSocketWithOriginFallback(url: string, timeoutMs = 5000)
  *
  * Only HTTP 401/403 is rewritten; every other string passes through byte-for-byte. 7d production telemetry on 2026-08-22: ensure_connection sat at 79.6% success, and 20 of its failures across 15 distinct installs were all the same raw `ws` string, "Unexpected server response: 401" (com.remitly.internal, com.remitly.androidapp.internal, com.squadra.squadra). That is not a missing or dead Metro, which is what the agent assumes when it sees a bare connect failure: it is an authenticating proxy or tunnel in front of Metro rejecting the WebSocket upgrade. With the raw string passed through, 15 separate installs hit the same dead end in one week with nothing to try next.
  */
-export function describeConnectionFailure(errorMsg: string): string {
+export function describeConnectionFailure(errorMsg: string, url?: string): string {
     const status = /(?:Unexpected server response|HTTP)[:\s]+(401|403)\b/i.exec(errorMsg)?.[1];
     if (!status) return errorMsg;
+    let local = false;
+    try {
+        local = !!url && isLoopbackHost(new URL(url).hostname);
+    } catch {
+        // unparseable url: treat as remote
+    }
+    if (local) {
+        return `Metro on ${url} rejected the inspector WebSocket with HTTP ${status}. This Metro is local, so a proxy is unlikely: its Origin check refused every Origin execbro tried (the attempts are listed in the original error). Check that no other debugger or proxy owns the port, and report the attempts. Original error: ${errorMsg}`;
+    }
     return `Metro rejected the inspector WebSocket with HTTP ${status} (authentication required). Metro is behind an authenticating proxy or tunnel, typically a corporate HTTP proxy or an Expo tunnel that requires a login. Connect to Metro directly instead of through it (run Metro locally and target localhost:<port>, or use "adb reverse tcp:8081 tcp:8081" for Android), or exclude the Metro port from the proxy (check HTTP_PROXY / HTTPS_PROXY / NO_PROXY). Original error: ${errorMsg}`;
 }
 
@@ -1588,7 +1636,7 @@ export async function connectToDevice(
 
             const errorMsg = error instanceof Error ? error.message : String(error);
             if (!isReconnection) {
-                reject(`Failed to connect to ${device.title}: ${describeConnectionFailure(errorMsg)}`);
+                reject(`Failed to connect to ${device.title}: ${describeConnectionFailure(errorMsg, device.webSocketDebuggerUrl)}`);
             } else {
                 console.error(`[execbro] Reconnection error: ${errorMsg}`);
             }
