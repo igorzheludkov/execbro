@@ -374,6 +374,16 @@ async function resolveDeviceTargetInner(
             ...onlinePhys.map((p) => ({ name: p.model, platform: "android" as const, identifier: p.serial }))
         ];
 
+        // One RN app connected: that is the device being debugged, whatever else is booted.
+        const apps = nativeRegistry();
+        const appName = apps.length === 1 ? apps[0].app.deviceInfo.deviceName : undefined;
+        if (appName) {
+            const viaApp = await resolveDeviceTargetInner(appName, options);
+            if (viaApp.ok) {
+                return { ...viaApp, note: `defaulted to ${appName}, the device the connected app runs on; pass device= to override.` };
+            }
+        }
+
         try {
             const remembered = listDevices();
             for (const dev of remembered) {

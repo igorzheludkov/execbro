@@ -396,6 +396,25 @@ describe("resolveDeviceTarget", () => {
         }
     });
 
+    it("defaults to the device of the single connected RN app on no-hint ambiguity", async () => {
+        // Suite A benchmark: a Pixel emulator was running beside the iPhone the
+        // app was on, and the first no-device call of nearly every run failed.
+        listAllDevicesMock.mockResolvedValue({
+            ios: { available: true, simulators: [{ udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" }] },
+            android: { available: true, emulators: [{ serial: "emulator-5554", name: "Pixel", state: "running" }], physical: [] },
+            summary: { booted: 1, total: 2 },
+        });
+        getConnectedAppsMock.mockReturnValue([
+            { app: { platform: "ios", simulatorUdid: "AAAAAAAA-0000-0000-0000-000000000001", deviceInfo: { deviceName: "iPhone Air" } } },
+        ]);
+        const r = await resolveDeviceTarget();
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+            expect(r.target.iosUdid).toBe("AAAAAAAA-0000-0000-0000-000000000001");
+            expect(r.note).toContain("pass device=");
+        }
+    });
+
     it("still errors on no-hint ambiguity when no remembered device is connected", async () => {
         listAllDevicesMock.mockResolvedValue({
             ios: { available: true, simulators: [{ udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" }] },
