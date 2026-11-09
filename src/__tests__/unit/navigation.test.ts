@@ -300,6 +300,17 @@ describe("buildNavigateSource", () => {
         expect(calls).toHaveLength(0);
     });
 
+    it("lists the routes and points at unmounted navigators when nothing is close", () => {
+        // Suite A: "ProductList" lives in the Shop stack, which had not mounted
+        // after a reload; the agent spent a routeTable call to learn the names.
+        const calls: string[] = [];
+        const out = run(rnStub(calls), "navigate", "ProductList");
+        expect(out.ok).toBe(false);
+        expect(String(out.error)).toContain("Registered: Home, TarotNav");
+        expect(String(out.error)).toContain("not mounted");
+        expect(calls).toHaveLength(0);
+    });
+
     it("suggests the nearest route names instead of listing all of them", () => {
         const calls: string[] = [];
         const many = {

@@ -302,7 +302,8 @@ export function buildNavigateSource(
             var extra = table.all.length - suggestions.length;
             var hint = suggestions.length
                 ? 'Did you mean: ' + suggestions.join(', ') + (extra > 0 ? ' (' + extra + ' other routes registered)' : '')
-                : table.all.length + ' routes are registered.';
+                : 'Registered: ' + table.all.slice(0, 40).join(', ') + (table.all.length > 40 ? ' (+' + (table.all.length - 40) + ' more)' : '') + '.' +
+                  ' Screens of a navigator that has not mounted yet (a tab not visited since launch) are not listed: navigate to its parent route first.';
             return {
                 ok: false,
                 kind: nav.kind,
