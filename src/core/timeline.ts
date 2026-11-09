@@ -122,7 +122,7 @@ export function requestEvent(r: NetworkRequest, device: string, showHost: boolea
     return {
         at: r.timestamp.getTime(), kind: "request", source: "network", device,
         tier: failed ? TIER.failedRequest : TIER.request,
-        text: `⇄ ${r.mocked ? "[MOCK] " : ""}${r.method} ${displayUrl(r.url, showHost)} ${outcome}  [n${r.requestId}]`,
+        text: `⇄ ${r.mocked ? "[MOCK] " : ""}${r.method} ${displayUrl(r.url, showHost)} ${outcome}  [${r.requestId}]`,
         ids: { request: r.requestId },
     };
 }

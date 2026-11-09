@@ -68,7 +68,7 @@ describe("event builders", () => {
 
     it("renders request outcomes: status, failure, pending, mock", () => {
         expect(requestEvent(req({ status: 201, method: "POST", timing: { duration: 180 } }), "d", false).text)
-            .toBe("⇄ POST /cart 201 · 180ms  [n42]");
+            .toBe("⇄ POST /cart 201 · 180ms  [42]");
         const failed = requestEvent(req({ status: 500 }), "d", false);
         expect(failed.tier).toBe(5);
         expect(requestEvent(req({ completed: false, status: undefined }), "d", false).text).toContain(" pending ");
@@ -123,7 +123,7 @@ describe("sortEvents and trimEvents", () => {
         const { kept, dropped } = trimEvents(events, 4);
         expect(kept.map((e) => e.text)).toEqual([
             "▶ tap testID=add-to-cart → ok, screen changed",
-            "⇄ GET /cart 200  [n42]",
+            "⇄ GET /cart 200  [42]",
             '· log "l0"  [j0]',
             '✖ error "boom"  [j99]',
         ]);
@@ -159,7 +159,7 @@ describe("formatTimeline", () => {
         const lines = text.split("\n");
         expect(lines[0]).toBe("Timeline (iPhone) since ▶ tap testID=add-to-cart · 3.4s · 3 events");
         expect(lines[1]).toBe("+0ms    ▶ tap testID=add-to-cart → ok, screen changed");
-        expect(lines[2]).toBe("+120ms  ⇄ POST /cart 201 · 180ms  [n42]");
+        expect(lines[2]).toBe("+120ms  ⇄ POST /cart 201 · 180ms  [42]");
         expect(lines[3]).toBe('+905ms  ✖ error "Failed"  [j813]');
         expect(text).toContain('get_log_details({ id: "j813" })');
         expect(text).toContain('get_request_details({ requestId: "42" })');
