@@ -1082,3 +1082,36 @@ export function applyInterceptedEvent(
         networkBuffer.set(id, existing);
     }
 }
+
+// A twin recorded by CDP or the SDK starts within this window of the interceptor's row.
+const TWIN_WINDOW_MS = 2000;
+
+/**
+ * An interceptor event that arrived after CDP or the SDK took over capture.
+ * New requests stay suppressed, but a request already recorded before the
+ * handover must not be left "pending" forever: RN 0.85 never answers
+ * Network.enable, so CDP is detected on its first requestWillBeSent, and a
+ * request in flight at that moment has an interceptor row whose completion
+ * now arrives suppressed. If CDP or the SDK recorded the same request, the
+ * interceptor row is a duplicate and is dropped; otherwise it is completed.
+ */
+export function settleSuppressedEvent(jsonStr: string, networkBuffer: NetworkBuffer, deviceName: string): void {
+    let event: Record<string, unknown>;
+    try {
+        event = JSON.parse(jsonStr);
+    } catch {
+        return;
+    }
+    if (!event || (event.type !== "response" && event.type !== "error" && event.type !== "body") || !event.id) return;
+    const row = networkBuffer.get(String(event.id));
+    if (!row || row.capturedBy !== "interceptor" || row.mocked) return;
+    const at = row.timestamp.getTime();
+    const twin = networkBuffer
+        .getAll({})
+        .some((r) => r !== row && r.capturedBy !== "interceptor" && r.method === row.method && r.url === row.url && Math.abs(r.timestamp.getTime() - at) <= TWIN_WINDOW_MS);
+    if (twin) {
+        networkBuffer.removeWhere((r) => r === row);
+        return;
+    }
+    applyInterceptedEvent(jsonStr, networkBuffer, deviceName);
+}

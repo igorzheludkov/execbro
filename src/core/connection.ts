@@ -6,7 +6,7 @@ import { sendCdpCommand } from "./cdpCommand.js";
 import { connectedApps, isSupersededSocket, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectCommitRecorder } from "./commitRecorder.js";
-import { injectNetworkInterceptor, RESPONSE_BODY_CAP, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
+import { injectNetworkInterceptor, RESPONSE_BODY_CAP, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, settleSuppressedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
 import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
@@ -935,6 +935,9 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             // (verified live, RN 0.85 test app: hits=3, zero rows).
             if (!suppressed || isMockEvent(interceptorJson) || isMockedTrafficEvent(interceptorJson)) {
                 applyInterceptedEvent(interceptorJson, getNetworkBuffer(deviceName), deviceName);
+            } else {
+                // A completion for a row recorded before the handover: drop it as a duplicate or finish it.
+                settleSuppressedEvent(interceptorJson, getNetworkBuffer(deviceName), deviceName);
             }
             return;
         }
