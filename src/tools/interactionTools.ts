@@ -77,14 +77,15 @@ export function registerInteractionTools(server: McpServer): void {
             description:
                 "Tap a UI element. Automatically tries multiple strategies: fiber tree (React), accessibility tree (native), and OCR (visual)." +
                 primaryInteractionBanner() + "\n" +
-                "PURPOSE: Single unified tap entry point — resolves text/testID/component/coordinates into a real touch event on the correct device.\n" +
+                "PURPOSE: One tap entry point: resolves text/testID/component/coordinates into a real touch on the right device.\n" +
                 "WHEN TO USE: Any time you need to press a button, focus an input, open a menu, or verify a handler fires. Prefer testID, then text, then component, then (x,y) from a screenshot's pressables list.\n" +
                 "WORKFLOW: screenshot -> tap(testID=\"...\") | tap(text=\"...\") | tap(x, y) -> screenshot again to verify. Use burst=true when meaningful=false but visual feedback looks transient.\n" +
-                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. Pass `device` to target a specific simulator/emulator when multiple are available — call list_devices for the inventory.\n" +
+                "PRECONDITIONS: tap the action under test, not its setup: reach that state with execute_in_app (store.dispatch) or navigate.\n" +
+                "LIMITATIONS: iOS needs AXe (brew install cameroncooke/axe/axe) or IDB for accessibility/coordinate taps. Non-ASCII text skips fiber (Hermes); prefer testID. Several devices running: the one the connected app is on is the default; pass `device` for another.\n" +
                 "GOOD: tap({ testID: \"login-btn\" }); tap({ text: \"Submit\" }); tap({ x: 300, y: 600 }); tap({ x: 300, y: 600, native: true, device: \"emulator-5554\" })\n" +
                 "LONG PRESS: tap({ testID: \"row-3\", duration: 800 }) holds the touch.\n" +
                 "CHROMIUM: testID matches data-testid/id; clicks via CDP.\n" +
-                "BAD: tap({ text: \"\" }) or tap({ x: 0, y: 0 }) — missing a target. tap({ text: \"Submit\" }) without first screenshotting an ambiguous screen.\n" +
+                "BAD: tap({ text: \"\" }) or tap({ x: 0, y: 0 }), no target.\n" +
                 "SOURCE: need the file:line that renders an element? inspect_at_point(x, y).\n",
             inputSchema: {
                 text: z

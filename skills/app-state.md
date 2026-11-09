@@ -54,7 +54,7 @@ redux_dispatch({ action: [a, b, c], returnPath: 'settings' })   # array = in ord
 ```
 - The array form is what to use for a batch: restoring a settings slice to its defaults is one call, not one per field.
 - `mcp__execbro__redux_get_state({ path: 'cart' })` reads a slice back through the same store.
-- Falling back to `execute_in_app` still works when the app exposes its own helpers:
+- `execute_in_app` has the same store in scope as `store` / `state`, so `store.dispatch(...)` works with no global. It also works with the app's own helpers:
 ```javascript
 globalThis.__dispatch__(globalThis.__REDUX_ACTIONS__.locale.setLocale('en'))
 ```

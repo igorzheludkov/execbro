@@ -18,22 +18,22 @@ export function registerExecutionTools(server: McpServer): void {
         "execute_in_app",
         {
             description:
-                "Execute JavaScript code in the connected React Native app and return the result. Use this for inspecting app state, calling methods on exposed global objects, or running diagnostic code. Hermes compatible: 'global' is automatically polyfilled to 'globalThis', so both global.__REDUX_STORE__ and globalThis.__REDUX_STORE__ work.\n\n" +
-                "RECOMMENDED WORKFLOW: 1) list_debug_globals to discover available objects, 2) inspect_global to see properties/methods, 3) execute_in_app to call methods or read values.\n\n" +
+                "Execute JavaScript code in the connected React Native app and return the result. 'global' is polyfilled to 'globalThis'.\n\n" +
+                "IN SCOPE, no global needed: `store` / `state` (Redux store from <Provider>, or null), `router`, `apollo`, `require('<module>')` (Metro registry). Do not hunt globalThis for a store. Other objects: list_debug_globals.\n\n" +
+                "PRECONDITIONS: set up the state a check needs (full cart, signed-in user) with one store.dispatch or a deep link, then spend real taps on the user's action and its outcome.\n\n" +
                 "LIMITATIONS (Hermes engine):\n" +
-                "- NO require() or import — only pre-existing globals are available\n" +
-                "- Async: use `Promise.resolve(foo()).then(function(r){ return r; })` (resolved for you when awaitPromise:true). `async`/`await` syntax is engine-dependent — many Hermes builds reject it.\n" +
+                "- Async: use `Promise.resolve(foo()).then(function(r){ return r; })` (resolved for you when awaitPromise:true). `async`/`await` syntax is engine-dependent; many Hermes builds reject it.\n" +
                 "- Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. If that can't yield a value (`if`/`for`/declaration), write the IIFE yourself with an explicit `return`.\n" +
                 "- Non-ASCII in string literals (emoji, Arabic, CJK) is auto-escaped server-side. Write it as-is.\n\n" +
-                "GOOD examples: `__DEV__`, `__APOLLO_CLIENT__.cache.extract()`, `__EXPO_ROUTER__.navigate('/settings')`\n" +
-                "BAD examples: `await fetch(...)` (bare top-level await), `require('react-native')`\n" +
+                "GOOD examples: `state.shop.cart.length`, `store.dispatch({ type: 'shop/addToCart', payload: state.shop.products[0] })`, `__DEV__`\n" +
+                "BAD examples: `await fetch(...)` (bare top-level await)\n" +
                 "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n",
             inputSchema: {
                 expression: z
                     .string()
                     .optional()
                     .describe(
-                        "REQUIRED unless `collect` is used. JavaScript expression to execute. Must be valid Hermes syntax — no require(), no `await`/`async` (use `Promise.resolve(foo()).then(function(r){ return r; })`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. Use globals discovered via list_debug_globals — `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
+                        "REQUIRED unless `collect` is used. JavaScript expression to execute. Must be valid Hermes syntax: no `await`/`async` (use `Promise.resolve(foo()).then(function(r){ return r; })`), no unbalanced quotes. Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. `store`, `state`, `router` and `require` are in scope. `globalThis.__rn__` exposes I18nManager, Dimensions, PixelRatio, Platform, NativeModules, StyleSheet, AppRegistry when populated, but check it for null before dereferencing."
                     ),
                 collect: z
                     .string()

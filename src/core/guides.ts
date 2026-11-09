@@ -546,8 +546,9 @@ If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths
 - To reach an error branch, mock the response instead — redux_dispatch writes the post-failure state directly and skips the request builder, the error branch and the retry
 
 ## Common Patterns (no SDK)
-- Read Redux: execute_in_app("globalThis.__REDUX_STORE__.getState().sliceName")
-- Dispatch action: execute_in_app("globalThis.__dispatch__(globalThis.__REDUX_ACTIONS__.slice.action(args))")
+- \`store\`, \`state\`, \`router\` and \`require\` are bound in every execute_in_app evaluation; the store needs no global
+- Read Redux: execute_in_app("state.sliceName")
+- Dispatch action: execute_in_app("store.dispatch({ type: 'cart/add', payload: item })"). Use it to set up a precondition, then tap only the action under test
 - Current route: execute_in_app("globalThis.__getCurrentRoute__()")
 
 Note: do NOT navigate this way. A router call through execute_in_app reports success whenever

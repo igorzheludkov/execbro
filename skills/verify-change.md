@@ -38,7 +38,8 @@ A change that has not actually reached the device is the most common false pass.
 
 ### 3. Walk the flow
 
-- Drive it with `mcp__execbro__tap`, `mcp__execbro__input_text`, `mcp__execbro__swipe`
+- Set up the starting state through the app instead of the UI when that is cheap: `mcp__execbro__execute_in_app` with `store.dispatch(...)` (the Redux store is in scope), `mcp__execbro__navigate`, or a deep link
+- Drive the step under test with `mcp__execbro__tap`, `mcp__execbro__input_text`, `mcp__execbro__swipe`, as the user would
 - Screenshot each state you reach, not just the final one
 - After each step, `mcp__execbro__get_logs` and `mcp__execbro__get_bundle_errors`
 

@@ -33,6 +33,10 @@ Before interacting, understand the current screen:
 - Use `mcp__execbro__get_screen_layout` for an indented tree of visible components with positions, text, and identifiers
 - Use `mcp__execbro__find_components` to regex-search the fiber tree for a specific component by name
 
+### Set up preconditions cheaply
+
+Spend real taps and scrolls on the action the user would take and on checking its outcome, not on reaching the starting state. Build that state directly: `execute_in_app` has the app's Redux `store` in scope (`store.dispatch(...)`, no global needed), `navigate` jumps to a screen, `ios_open_url` opens a deep link. Filling a cart by tapping "Add to cart" nine times proves nothing the final scroll and tap on "Place order" does not.
+
 ### 3. Tap Elements
 
 **Use the unified `tap` tool for all tapping — it auto-detects the platform and tries multiple strategies automatically:**
