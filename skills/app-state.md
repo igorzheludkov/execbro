@@ -72,7 +72,7 @@ globalThis.__getCurrentRoute__()   // reading the current route this way is stil
 
 For ad-hoc debugging:
 - Use `mcp__execbro__execute_in_app` with any valid Hermes expression
-- Remember limitations: no `require()`, no `async/await`, no emoji in strings
+- Remember limitations: no `async/await`, no emoji in strings
 - Use `globalThis` instead of `global` for Hermes compatibility
 - Set `verbose=true` for full output when inspecting large objects
 - Set higher `maxResultLength` when default 2000 chars isn't enough
@@ -106,7 +106,7 @@ For ad-hoc debugging:
 ## Notes
 
 - Requires the ExecBro MCP server to be running and connected to the app
-- Hermes engine limitations: no `require()`, no `async/await`, no emoji/non-ASCII in string literals
+- Hermes engine limitations: no `async/await`, no emoji/non-ASCII in string literals
 - Use `inspect_global` before calling methods on unfamiliar objects to avoid errors
 - For large state objects, use `verbose=true` with caution - Redux stores can return 10KB+
 - Use `device` param on any tool to target a specific device when multiple are connected (e.g., `device="iPhone"`)

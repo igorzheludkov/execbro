@@ -560,7 +560,7 @@ Use the navigate tool, which verifies the route actually moved (see the "interac
 - A promise that outlives the budget is kept in the app and its handle returned: execute_in_app({collect:"<handle>", waitMs:30000}) blocks server-side until it settles instead of making you poll
 
 ## Hermes Limitations
-- NO require() or import — only pre-existing globals
+- require('<module>') works (Metro registry); import and top-level await do not
 - NO async/await — use simple expressions or .then() chains
 - NO emoji or non-ASCII in string literals
 - Use globalThis instead of global
