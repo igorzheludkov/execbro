@@ -316,7 +316,7 @@ export function registerNetworkTools(server: McpServer): void {
                 "SHAPE FIRST: a large JSON body returns as its structure — key paths kept, arrays and objects annotated with real sizes, leaves clipped. The first call already answers 'is there an errors array' and 'does this field exist'.\n" +
                 "QUERY: dot-path into the JSON body, returned in full. Supports a.b.c, [0], [-1], [*], [\"key.with.dots\"]. Targets the response body, or the request body when there is none. No match returns the shape plus what IS there — retry from that.\n" +
                 "SIDES: with a query, only the queried body is rendered (no headers, no other side) — include:\"response\"/\"request\"/\"both\" overrides. Credential headers are redacted to scheme + length; verbose:true prints them.\n" +
-                "LIMITATIONS: Bodies need the execbro-sdk; CDP-only targets have no response body. Non-JSON is clipped at maxBodyLength, not projected.\n" +
+                "LIMITATIONS: Binary response bodies are not captured. Non-JSON is clipped at maxBodyLength, not projected.\n" +
                 "GOOD: get_request_details({ requestId: \"42\", query: \"data.approvals.single.basicInfo\" }) | query: \"errors[*].message\"\n" +
                 "BAD: verbose:true to find one field — that is the 40KB dump this avoids. Or guessing requestIds.\n",
             inputSchema: {

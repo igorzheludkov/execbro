@@ -206,7 +206,7 @@ export interface NetworkRequest {
     capturedBy?: "cdp" | "interceptor";
     // Response payload. Populated by the SDK mirror and by the injected JS
     // interceptor's XHR layer (capped at 32 KB in-app before serialization).
-    // The CDP path does not capture response bodies.
+    // The CDP path fetches textual bodies with Network.getResponseBody on loadingFinished.
     responseBody?: string;
     // Set when a mock rule replaced or tampered with this response. Rendered on
     // the row so altered traffic is never mistaken for real traffic — an agent

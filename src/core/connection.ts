@@ -2,10 +2,11 @@ import WebSocket from "ws";
 import type { FailureKind } from "./errors.js";
 import { DeviceInfo, RemoteObject, ExceptionDetails, ConnectedApp, NetworkRequest, ConnectOptions, ReconnectionConfig, EnsureConnectionResult, ExecutionResult, ConnectionCheckResult } from "./types.js";
 import { recordChromiumNavigation } from "./chromiumNavigation.js";
+import { sendCdpCommand } from "./cdpCommand.js";
 import { connectedApps, isSupersededSocket, pendingExecutions, failPendingExecutionsForSocket, getNextMessageId, getEpoch, bumpEpoch, getLogBuffer, getNetworkBuffer, logBuffers, networkBuffers, setActiveSimulatorUdid, clearActiveSimulatorIfSource, updateLastCDPMessageTime, getLastCDPMessageTime, clearLastCDPMessageTime, clearAllCDPMessageTimes } from "./state.js";
 import { mapConsoleType, LogBuffer } from "./logs.js";
 import { injectCommitRecorder } from "./commitRecorder.js";
-import { injectNetworkInterceptor, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
+import { injectNetworkInterceptor, RESPONSE_BODY_CAP, sendNetworkEnable, isInterceptorEvent, applyInterceptedEvent, pushMockRules, isMockEvent, isMockedTrafficEvent } from "./networkInterceptor.js";
 import { serializeRules } from "./mockRules.js";
 import { findSimulatorByName } from "./ios.js";
 import { captureStack } from "./logStack.js";
@@ -736,6 +737,22 @@ async function resolveConsoleArgs(ws: WebSocket, args: CDPConsoleArg[]): Promise
 }
 
 // Handle CDP messages
+// The Network domain sends no body with its events; without this a CDP-only
+// target's 422 has no reason in get_request_details. Textual bodies only.
+function fetchCdpResponseBody(ws: WebSocket, entry: NetworkRequest): void {
+    const headers = entry.responseHeaders || {};
+    const ct = Object.keys(headers).find((k) => k.toLowerCase() === "content-type");
+    const mime = (entry.mimeType || (ct ? headers[ct] : "") || "").toLowerCase();
+    if (!/json|text|xml|javascript|x-www-form-urlencoded/.test(mime)) return;
+    sendCdpCommand<{ body?: string; base64Encoded?: boolean }>(ws, "Network.getResponseBody", { requestId: entry.requestId })
+        .then(({ body, base64Encoded }) => {
+            if (typeof body !== "string") return;
+            const text = base64Encoded ? Buffer.from(body, "base64").toString("utf8") : body;
+            entry.responseBody = text.length > RESPONSE_BODY_CAP ? text.slice(0, RESPONSE_BODY_CAP) : text;
+        })
+        .catch(() => {});
+}
+
 export function handleCDPMessage(message: Record<string, unknown>, device: DeviceInfo, ws?: WebSocket): void {
     // Track last CDP activity for connection liveness detection (per-device)
     const cdpAppKey = findAppKeyForDevice(device);
@@ -1080,6 +1097,7 @@ export function handleCDPMessage(message: Record<string, unknown>, device: Devic
             }
 
             getNetworkBuffer(deviceName).set(params.requestId, existing);
+            if (ws && existing.capturedBy === "cdp") fetchCdpResponseBody(ws, existing);
         }
     }
 
