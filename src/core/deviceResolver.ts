@@ -375,8 +375,26 @@ async function resolveDeviceTargetInner(
         ];
 
         // One RN app connected: that is the device being debugged, whatever else is booted.
+        // Count devices, not registry entries: one app can sit under two keys.
         const apps = nativeRegistry();
-        const appName = apps.length === 1 ? apps[0].app.deviceInfo.deviceName : undefined;
+        const appDevices = new Set(apps.map((e) => e.app.simulatorUdid ?? e.app.adbSerial ?? e.app.deviceInfo.deviceName));
+        const app = appDevices.size === 1 ? apps[0].app : undefined;
+        const appName = app?.deviceInfo.deviceName;
+        // The UDID or serial is already on the app: match it before trying names.
+        const byId = app && candidates.find((c) => c.identifier === (app.simulatorUdid ?? app.adbSerial));
+        if (byId) {
+            return {
+                ok: true,
+                note: `defaulted to ${byId.name}, the device the connected app runs on; pass device= to override.`,
+                target: {
+                    platform: byId.platform,
+                    iosUdid: byId.platform === "ios" ? byId.identifier : undefined,
+                    androidSerial: byId.platform === "android" ? byId.identifier : undefined,
+                    deviceName: appName || byId.name,
+                    source: "default",
+                },
+            };
+        }
         if (appName) {
             const viaApp = await resolveDeviceTargetInner(appName, options);
             if (viaApp.ok) {

@@ -415,6 +415,53 @@ describe("resolveDeviceTarget", () => {
         }
     });
 
+    it("defaults to the connected app's simulator when another simulator is booted (one app, two registry entries)", async () => {
+        // Suite C benchmark: iPhone Air ran the app, an iPad was also booted, and
+        // calls without device= failed with "Multiple devices available".
+        listAllDevicesMock.mockResolvedValue({
+            ios: {
+                available: true,
+                simulators: [
+                    { udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" },
+                    { udid: "AAAAAAAA-0000-0000-0000-000000000002", name: "iPad Air 11-inch (M3)", state: "booted" }
+                ]
+            },
+            android: { available: true, emulators: [], physical: [] },
+            summary: { booted: 2, total: 2 },
+        });
+        getConnectedAppsMock.mockReturnValue([
+            { key: "8090-dev-1", app: { platform: "ios", simulatorUdid: "AAAAAAAA-0000-0000-0000-000000000001", deviceInfo: { deviceName: "iPhone Air" } } },
+            { key: "8090-dev-2", app: { platform: "ios", simulatorUdid: "AAAAAAAA-0000-0000-0000-000000000001", deviceInfo: { deviceName: "iPhone Air" } } },
+        ]);
+        const r = await resolveDeviceTarget();
+        expect(r.ok).toBe(true);
+        if (r.ok) {
+            expect(r.target.iosUdid).toBe("AAAAAAAA-0000-0000-0000-000000000001");
+            expect(r.note).toContain("the device the connected app runs on");
+        }
+    });
+
+    it("still answers MULTIPLE_DEVICES_MATCH when two apps run on two booted simulators", async () => {
+        listAllDevicesMock.mockResolvedValue({
+            ios: {
+                available: true,
+                simulators: [
+                    { udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" },
+                    { udid: "AAAAAAAA-0000-0000-0000-000000000002", name: "iPad Air 11-inch (M3)", state: "booted" }
+                ]
+            },
+            android: { available: true, emulators: [], physical: [] },
+            summary: { booted: 2, total: 2 },
+        });
+        getConnectedAppsMock.mockReturnValue([
+            { app: { platform: "ios", simulatorUdid: "AAAAAAAA-0000-0000-0000-000000000001", deviceInfo: { deviceName: "iPhone Air" } } },
+            { app: { platform: "ios", simulatorUdid: "AAAAAAAA-0000-0000-0000-000000000002", deviceInfo: { deviceName: "iPad Air 11-inch (M3)" } } },
+        ]);
+        const r = await resolveDeviceTarget();
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.error.code).toBe("MULTIPLE_DEVICES_MATCH");
+    });
+
     it("still errors on no-hint ambiguity when no remembered device is connected", async () => {
         listAllDevicesMock.mockResolvedValue({
             ios: { available: true, simulators: [{ udid: "AAAAAAAA-0000-0000-0000-000000000001", name: "iPhone Air", state: "booted" }] },
