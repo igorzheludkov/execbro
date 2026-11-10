@@ -45,9 +45,9 @@ The whole change, exercised end to end on the device, plus the screens next to i
 ## Typical Workflow
 
 1. `/session-setup` — connect to the running app
-2. Investigate with `/debug-logs`, `/network-inspect`, `/app-state`, or `/component-inspect`
+2. Reproduce the bug on the device, then investigate with /debug-logs, /network-inspect, /app-state or /component-inspect. When the cause depends on stored or server data, read that data in the app before editing.
 3. Make code changes
-4. `/layout-check` — verify visually
+4. Re-run the user's steps in the state where the bug showed (/device-interact), and /layout-check for visual changes
 5. `/bundle-check` — only if changes aren't reflected or errors appear
 6. `/verify-change`: once the whole change is done, before handing it on
 
