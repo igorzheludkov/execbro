@@ -195,6 +195,11 @@ export async function inspectGlobal(objectName: string, device?: string): Promis
     return executeInApp(expression, false, { originatingToolName: "inspect_global" }, device);
 }
 
+// Appended to a reload that reconnected: a check in the reset app can pass without the fix.
+export const RELOAD_STATE_NOTE =
+    " The app restarted from its first screen with fresh in-memory state (navigation, Redux, toasts, timers); persisted storage is kept. " +
+    "To test a fix, first rebuild the state the bug needed and repeat the user's steps: a check in a reset app can pass without the fix.";
+
 // Metro's /json/list can lag a freshly launched app; how long to wait before
 // the single auto-connect retry inside reloadApp.
 const AUTO_CONNECT_RETRY_DELAY_MS = 1200;
@@ -424,6 +429,7 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
                     + (sdkWasPresent && !sdkReady
                         ? " (warning: in-app SDK did not re-initialize within 5s; network/console may briefly use the fallback buffer)"
                         : "")
+                    + RELOAD_STATE_NOTE
             };
         } else {
             return {
