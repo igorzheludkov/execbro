@@ -2,6 +2,7 @@ import { connectedApps } from "./state.js";
 import { getActiveOrBootedSimulatorUdid } from "./ios.js";
 import { getDefaultAndroidDevice } from "./android.js";
 import { pendingReconnectionKeys, getConnectionMetadata } from "./connectionState.js";
+import type { AutoConnectOutcome } from "./connection.js";
 
 export function hasMetro(): boolean {
     return connectedApps.size > 0;
@@ -15,6 +16,15 @@ const METRO_WAIT_POLL_MS = 100;
  * for the fourth would cost more than re-running the tool.
  */
 const METRO_WAIT_BUDGET_MS = 2000;
+
+let lastAutoConnect: AutoConnectOutcome | null = null;
+
+/** The outcome of the last gate auto-connect, cleared on read so it never leaks into a later hint. */
+export function takeLastAutoConnect(): AutoConnectOutcome | null {
+    const outcome = lastAutoConnect;
+    lastAutoConnect = null;
+    return outcome;
+}
 
 /** Device names, where known, for the reconnections currently in flight. */
 export function reconnectingDeviceNames(): string[] {
@@ -30,15 +40,22 @@ export function reconnectingDeviceNames(): string[] {
  *
  * A dropped socket empties `connectedApps` for the length of the gap, so a bare
  * `hasMetro()` check reports "no Metro" for an app that is running and about to
- * be back. It waits ONLY while a reconnection is pending: with nothing in
- * flight the app really is not running, and that answer should stay instant.
+ * be back. It waits ONLY while a reconnection is pending. With nothing in
+ * flight it runs one scan_metro style connect (8081 to 8090) instead, so a
+ * first call in a fresh session finds a running app without scan_metro.
  */
 export async function awaitMetro(options: {
     timeoutMs?: number;
     sleep?: (ms: number) => Promise<void>;
+    connect?: () => Promise<AutoConnectOutcome>;
 } = {}): Promise<boolean> {
     if (hasMetro()) return true;
-    if (pendingReconnectionKeys().length === 0) return false;
+    if (pendingReconnectionKeys().length === 0) {
+        // Dynamic import keeps connection.js out of this module's static graph.
+        const connect = options.connect ?? (async () => (await import("./connection.js")).autoConnectAllMetro());
+        lastAutoConnect = await connect();
+        return hasMetro();
+    }
 
     const budget = options.timeoutMs ?? METRO_WAIT_BUDGET_MS;
     const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -83,9 +100,11 @@ export type MetroMissingHintOptions = {
     devices?: NativeDeviceAvailability;
     /** Device names whose reconnection is still in flight. */
     reconnecting?: string[];
+    /** What the gate's own connect attempt found, when it ran one. */
+    autoConnect?: AutoConnectOutcome;
 };
 
-export function buildMetroMissingHint({ toolName, devices, reconnecting }: MetroMissingHintOptions): string {
+export function buildMetroMissingHint({ toolName, devices, reconnecting, autoConnect }: MetroMissingHintOptions): string {
     const fallbacks = NATIVE_FALLBACKS[toolName] ?? [];
     const lines: string[] = [];
     lines.push("[NO METRO] This tool reads data from the JS runtime, which requires an attached debugger.");
@@ -98,6 +117,11 @@ export function buildMetroMissingHint({ toolName, devices, reconnecting }: Metro
             `${reconnecting.join(", ")} dropped its debugger connection and is reconnecting — it did not come back within the wait budget. ` +
             `Retry this call in a moment; if it keeps failing, the app is crashing or reloading repeatedly (check get_connection_status).`
         );
+    } else if (autoConnect && autoConnect.ports.length === 0) {
+        lines.push("Scanned Metro ports 8081 to 8090: nothing is listening. If Metro runs on another port, call connect_metro({ port }). Otherwise start Metro and the app, then call scan_metro.");
+    } else if (autoConnect) {
+        const { ports, failures } = autoConnect;
+        lines.push(`Found Metro on port ${ports.join(", ")}, but no app attached: ${failures.join("; ")}. Right after a launch the bundle may still be loading: ensure_connection({ waitMs: 60000 }) waits for the app. Otherwise call scan_metro.`);
     } else if (devices?.any) {
         // "Attached", not "detected": adb/simctl seeing a device says nothing
         // about whether an app on it is debuggable, and the old wording read as
@@ -121,8 +145,9 @@ export function buildMetroMissingHint({ toolName, devices, reconnecting }: Metro
 // Convenience: return the hint only when Metro is truly absent. Returns "" otherwise
 // so callers can concatenate unconditionally.
 export async function metroMissingHintIfAbsent(toolName: string): Promise<string> {
+    const autoConnect = takeLastAutoConnect() ?? undefined;
     if (hasMetro()) return "";
     const reconnecting = reconnectingDeviceNames();
     const devices = await detectNativeDevices();
-    return "\n\n" + buildMetroMissingHint({ toolName, devices, reconnecting });
+    return "\n\n" + buildMetroMissingHint({ toolName, devices, reconnecting, autoConnect });
 }

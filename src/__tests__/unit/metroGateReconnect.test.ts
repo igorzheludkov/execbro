@@ -17,7 +17,7 @@ import type { ConnectedApp } from "../../core/types.js";
  */
 
 const { connectedApps } = await import("../../core/state.js");
-const { awaitMetro, buildMetroMissingHint } = await import("../../core/nativeOnlyHints.js");
+const { awaitMetro, buildMetroMissingHint, takeLastAutoConnect } = await import("../../core/nativeOnlyHints.js");
 const { saveReconnectionTimer, cancelReconnectionTimer } = await import("../../core/connectionState.js");
 
 function connectApp(key = "app-1"): void {
@@ -52,6 +52,7 @@ describe("awaitMetro", () => {
     beforeEach(() => {
         connectedApps.clear();
         cancelReconnectionTimer("app-1");
+        takeLastAutoConnect();
     });
 
     it("answers immediately when an app is connected", async () => {
@@ -67,8 +68,50 @@ describe("awaitMetro", () => {
 
         // Nothing connected, nothing in flight: the app really is not running,
         // and this is the common case. It must not pay for the rare one.
-        expect(await awaitMetro({ sleep })).toBe(false);
+        expect(await awaitMetro({ sleep, connect: async () => ({ ports: [], failures: [] }) })).toBe(false);
         expect(waits).toEqual([]);
+    });
+
+    it("auto-connects once when nothing is connected and nothing is reconnecting", async () => {
+        const { waits, sleep } = fakeSleep();
+        let calls = 0;
+        const connect = async () => {
+            calls++;
+            connectApp();
+            return { ports: [8090], failures: [] };
+        };
+        expect(await awaitMetro({ sleep, connect })).toBe(true);
+        expect(calls).toBe(1);
+        expect(waits).toEqual([]);
+    });
+
+    it("does not auto-connect while a reconnection is pending", async () => {
+        const timer = setTimeout(() => {}, 10_000);
+        saveReconnectionTimer("app-1", timer);
+        let calls = 0;
+        const { sleep } = fakeSleep();
+        await awaitMetro({
+            timeoutMs: 200,
+            sleep,
+            connect: async () => {
+                calls++;
+                return { ports: [], failures: [] };
+            }
+        });
+        expect(calls).toBe(0);
+        clearTimeout(timer);
+    });
+
+    it("returns false fast when the scan finds nothing", async () => {
+        const { waits, sleep } = fakeSleep();
+        expect(await awaitMetro({ sleep, connect: async () => ({ ports: [], failures: [] }) })).toBe(false);
+        expect(waits).toEqual([]);
+    });
+
+    it("hands the outcome to the next hint exactly once", async () => {
+        await awaitMetro({ connect: async () => ({ ports: [], failures: [] }) });
+        expect(takeLastAutoConnect()).toEqual({ ports: [], failures: [] });
+        expect(takeLastAutoConnect()).toBeNull();
     });
 
     it("waits for an in-flight reconnection and reports the recovery", async () => {
@@ -137,5 +180,28 @@ describe("the no-Metro hint", () => {
         });
 
         expect(hint).toMatch(/No running simulators or devices/i);
+    });
+
+    it("hint after a scan that found no Metro names connect_metro", () => {
+        const hint = buildMetroMissingHint({
+            toolName: "get_screen_state",
+            devices: { ios: true, android: false, any: true },
+            autoConnect: { ports: [], failures: [] }
+        });
+        expect(hint).toContain("Scanned Metro ports 8081 to 8090: nothing is listening.");
+        expect(hint).toContain("connect_metro({ port })");
+        expect(hint).not.toContain("Start your React Native app");
+    });
+
+    it("hint after Metro was found but no app attached names ensure_connection", () => {
+        const hint = buildMetroMissingHint({
+            toolName: "get_screen_state",
+            autoConnect: {
+                ports: [8090],
+                failures: ["Metro is running on port(s) 8090 but reports no debuggable targets"]
+            }
+        });
+        expect(hint).toContain("Found Metro on port 8090, but no app attached:");
+        expect(hint).toContain("ensure_connection({ waitMs: 60000 })");
     });
 });

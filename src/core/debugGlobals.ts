@@ -1,9 +1,8 @@
 import WebSocket from "ws";
 import type { ExecutionResult } from "./types.js";
-import type { DeviceInfo } from "./types.js";
 import { connectedApps, getNextMessageId } from "./state.js";
-import { resolveConnectedAppByDevice, describeDeviceResolution, failureKindForResolution, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
-import { fetchDevices, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
+import { resolveConnectedAppByDevice, describeDeviceResolution, failureKindForResolution, connectToDevice, autoConnectSweep } from "./connection.js";
+import { fetchDevices, scanMetroPorts } from "./metro.js";
 import { cancelReconnectionTimer } from "./connectionState.js";
 import { executeInApp, delay } from "./jsExecute.js";
 import { isSDKInstalled } from "./sdkBridge.js";
@@ -204,49 +203,6 @@ const AUTO_CONNECT_RETRY_DELAY_MS = 1200;
 // Note: Page.reload CDP method may work on Bridgeless targets (via HostAgent) — not yet tested
 // Uses fire-and-forget: sends the reload command without waiting for a response,
 // since the JS context is destroyed during reload and would always timeout.
-// One auto-connect sweep over every Metro port: mirrors scan_metro's flow
-// (clearReconnectionSuppression + filterDebuggableDevices + purge +
-// connectToDevice per device) — earlier attempts that used ensureConnection
-// here raced with WS close events on first connect and reported
-// "Connection succeeded but app is not available". scan_metro's pattern
-// is the empirically-stable path.
-//
-// Returns the per-device connect failures so the caller can report *why*
-// nothing attached instead of the opaque "could not connect to any device"
-// (which accounted for ~a third of reload_app failures with zero diagnostics).
-async function autoConnectSweep(ports: number[]): Promise<string[]> {
-    clearReconnectionSuppression();
-
-    const portDevices = new Map<number, DeviceInfo[]>();
-    for (const port of ports) {
-        const devices = await fetchDevices(port);
-        const debuggable = filterDebuggableDevices(devices);
-        if (debuggable.length > 0) {
-            portDevices.set(port, debuggable);
-        }
-    }
-
-    purgeStaleConnectionsForPorts(portDevices);
-
-    if (portDevices.size === 0) {
-        return [`Metro is running on port(s) ${ports.join(", ")} but reports no debuggable targets (is the app running and in the foreground?)`];
-    }
-
-    const failures: string[] = [];
-    for (const [port, devices] of portDevices) {
-        for (const dev of devices) {
-            try {
-                await connectToDevice(dev, port);
-            } catch (error) {
-                const reason = error instanceof Error ? error.message : String(error);
-                console.error(`[execbro] Auto-connect failed for ${dev.title} on port ${port}: ${reason}`);
-                failures.push(`${dev.deviceName || dev.title} (port ${port}): ${reason}`);
-            }
-        }
-    }
-    return failures;
-}
-
 export async function reloadApp(device?: string): Promise<ExecutionResult> {
     // Get current connection info before reload. Resolve non-throwing: a miss
     // is recoverable here (we auto-connect and re-resolve below), and the old
