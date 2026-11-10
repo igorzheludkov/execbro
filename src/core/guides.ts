@@ -329,6 +329,9 @@ router call through execute_in_app, which reports success whenever nothing throw
 Do not know the route names? navigate({routeTable:true}) with NO destination just lists them —
 call that first rather than guessing. A rejected destination also carries the registered routes
 in its error, so a wrong guess still tells you the right answers.
+A screen inside a navigator that has not mounted yet (a tab not visited since launch) is missing
+from the route table; navigate tries the likely parent routes with {screen: to} itself and says
+which one it went through, so pass the screen name directly.
 An app written as a plain <NavigationContainer> with no ref prop is still reachable: the router is
 resolved from a mounted screen's own navigation object, climbed to the root navigator. That route
 has no getRootState, so the route table comes back empty and destination validation is skipped
