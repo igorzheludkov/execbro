@@ -2,9 +2,9 @@
 
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-com.execbro%2Fexecbro-6E56CF)](https://registry.modelcontextprotocol.io/?q=com.execbro%2Fexecbro)
 
-**Give your AI assistant eyes and hands into your running React Native app.** Like Chrome DevTools — but for AI agents.
+**Catches what reading the code misses.** ExecBro connects your AI coding agent to your running React Native app, so it can check stored data, network traffic and the real screen before it edits, and try the fix on the device before it says it's done.
 
-Build, debug, and verify features end-to-end — without leaving the chat.
+On bugs where the code points to the wrong fix, Claude Sonnet 5.5 passed 14 of 18 runs with ExecBro and 9 of 18 without; Claude Opus 5.5 passed 18 of 18 with ExecBro and 16 of 18 without. Where the code alone explains the bug, both sides find it and ExecBro costs more. [See the benchmark](https://execbro.com/benchmark).
 
 ExecBro is the runtime bridge between your AI coding assistant and your running React Native app — exposing MCP tools to read logs and network, inspect component state, capture screenshots, tap the UI, and run JS. Zero config, no SDK or code changes required to start — and installing the [optional SDK](#install-the-sdk-recommended) is recommended for the most robust log and network capture.
 

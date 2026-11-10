@@ -130,7 +130,7 @@ export async function captureScreenshot(
         // neither means "whichever device adb/simctl picks", which on a
         // multi-device setup is a coin flip — and a before/after diff taken
         // from the wrong screen reports a confident false "no visual change".
-        const result = platform === "ios" ? await iosScreenshot(undefined, udid) : await androidScreenshot(undefined, deviceId);
+        const result = platform === "ios" ? await iosScreenshot(undefined, udid, false) : await androidScreenshot(undefined, deviceId);
         if (!result.success || !result.data) return null;
         return {
             buffer: result.data,

@@ -538,6 +538,10 @@ export async function getActiveOrBootedSimulatorUdid(): Promise<string | null> {
 export async function iosScreenshot(
   outputPath?: string,
   udid?: string,
+  // A standalone screenshot reads the orientation fresh. A tap's verification frames
+  // (about five per tap) reuse the 3s cache the tap aimed with: the fresh read takes
+  // ~350ms, longer than the capture itself.
+  freshOrientation = true,
 ): Promise<iOSResult> {
   try {
     const simctlAvailable = await isSimctlAvailable();
@@ -569,7 +573,7 @@ export async function iosScreenshot(
           timeout: SIMCTL_TIMEOUT,
         },
       ),
-      getUiRotation(targetUdid, true),
+      getUiRotation(targetUdid, freshOrientation),
     ]);
     // simctl captures the portrait framebuffer; turn it to the app's frame so
     // the image and every layout coordinate agree.

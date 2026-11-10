@@ -2,7 +2,7 @@
     "name": "execbro",
     "version": "2.22.0",
     "mcpName": "com.execbro/execbro",
-    "description": "ExecBro: React Native AI debugger and devtools MCP server. Gives AI agents eyes and hands in your running app (logs, network, state inspection, tap, screenshot).",
+    "description": "ExecBro: React Native AI debugger and devtools MCP server. Catches what reading the code misses: your AI agent checks the running app (logs, network, stored data, state inspection, tap, screenshot) before it edits and tries the fix on the device.",
     "type": "module",
     "main": "build/index.js",
     "bin": {

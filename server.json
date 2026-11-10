@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.execbro/execbro",
   "title": "ExecBro",
-  "description": "Gives AI agents eyes and hands into running React Native apps: logs, REPL, tap, screenshots",
+  "description": "Catches what reading the code misses: AI agents check running React Native apps",
   "version": "2.22.0",
   "websiteUrl": "https://execbro.com",
   "repository": {
