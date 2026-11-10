@@ -731,6 +731,7 @@ export const UNTRUSTED_DATA_RULE: string = [
 
 export const DECISION_TREE: string = [
     "Primary tools: scan_metro, get_logs / search_logs, screenshot, tap, get_screen_state, get_screen_layout.",
+    "Clients that load tool schemas on demand: load the tools a fix-and-verify session uses in one search, not one at a time: ensure_connection, get_screen_state, tap, input_text, swipe, screenshot, navigate, reload_app, execute_in_app, redux_get_state, get_logs, get_network_requests.",
     "Platform-specific ios_* / android_* tools (ios_button, android_key_event, ios_open_url, etc.) are FALLBACKS for non-React or native-only flows — prefer the cross-platform primary tools above whenever possible. input_text covers native-only text entry too, via native:true.",
     "Chromium/Electron targets (platform chromium) support logs, network capture and mocking, execute_in_app, globals, redux, component inspection, screen reading (get_screen_state, get_screen_layout, inspect_at_point, measure), screenshot, tap, input_text, swipe (wheel scroll, four-coordinate drag), press_key and handle_dialog (JavaScript alert / confirm / prompt); other tools refuse them with a message saying so. electron_launch_app starts an Electron project with the CDP port open.",
     "Native Android apps with execbro-sdk-android (runtime native) support list_debug_globals, inspect_global (registered state), run_app_command (registered commands), navigate (Jetpack Navigation) and the android_* tools; other tools refuse them with a message saying so.",

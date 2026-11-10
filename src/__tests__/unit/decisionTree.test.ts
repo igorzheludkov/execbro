@@ -17,3 +17,15 @@ describe("server instructions", () => {
         }
     });
 });
+
+// Benchmark traces: 64 ToolSearch calls in 32 runs. The first load batched a few tools;
+// later single-tool loads (reload_app 6, dismiss_keyboard 7) were each a round trip.
+const LOAD_LINE =
+    "Clients that load tool schemas on demand: load the tools a fix-and-verify session uses in one search, not one at a time: ensure_connection, get_screen_state, tap, input_text, swipe, screenshot, navigate, reload_app, execute_in_app, redux_get_state, get_logs, get_network_requests.";
+
+describe("server instructions, deferred tools", () => {
+    it("names the working set to load in one search", () => {
+        expect(DECISION_TREE).toContain(LOAD_LINE);
+        expect(LOAD_LINE).not.toMatch(/[—–]/);
+    });
+});
