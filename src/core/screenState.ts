@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "./types.js";
-import { executeInApp, delay } from "./jsExecute.js";
+import { executeInApp } from "./jsExecute.js";
+import { waitForMeasurements, buildPendingMeasurementExpression } from "./pressables.js";
 import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
@@ -624,6 +625,15 @@ export function formatPressabilityAudit(counts: PressabilityAuditCounts, opts: {
         `inactive navigator routes stay mounted — but if something you expected is missing, this names the rule that dropped it.${named}`
     );
 }
+
+const SCREEN_STATE_PENDING_EXPR = buildPendingMeasurementExpression([
+    "__screenStateMeasurements",
+    "__screenStateOverlayMeasurements",
+    "__screenStateTextMeasurements",
+    "__screenStateImageMeasurements",
+    "__screenStateClipMeasurements",
+    "__screenStateSheetMeasurements",
+]);
 
 export async function getScreenState(
     options: { device?: string; showPruned?: boolean } = {}
@@ -1889,15 +1899,23 @@ export async function getScreenState(
         if (typeof dp.count === "number") dispatchedNodes = dp.count;
     } catch { /* ignore */ }
 
-    // Scale the wait with the node count instead of a flat 300ms.
+    // Poll until every measureInWindow callback has landed, with a deadline that scales
+    // with the node count.
     //
-    // measureInWindow callbacks land asynchronously, and every one that has not fired by
-    // the time the resolve pass runs is a null slot — an element that silently does not
-    // appear in the output. 300ms was ample for a small screen and demonstrably not for a
-    // dense list, which is how whole blocks came and went between identical calls. Same
-    // budget shape inspect_at_point already uses.
+    // Every callback that has not fired by the time the resolve pass runs is a null slot,
+    // an element that silently does not appear in the output. 300ms was ample for a small
+    // screen and demonstrably not for a dense list. The budget used to be a flat sleep,
+    // 0.5 to 0.9s on every call and inside every tap's overlay guard, while the callbacks
+    // usually land within one frame.
     const measureBudgetMs = Math.min(3000, 400 + dispatchedNodes * 2);
-    await delay(measureBudgetMs);
+    await waitForMeasurements({
+        deadlineMs: measureBudgetMs,
+        evaluatePending: async () => {
+            const r = await executeInApp(SCREEN_STATE_PENDING_EXPR, false, { timeoutMs: 2000, maxRetries: 0, originatingToolName: "get_screen_state" }, device);
+            const n = r.success ? Number(r.result) : NaN;
+            return Number.isFinite(n) ? n : null;
+        },
+    });
 
     const resolveExpression = `
 ${OVERLAY_ADOPTION_JS}

@@ -35,22 +35,25 @@ export const MEASURE_POLL_DEADLINE_MS = 300;
  */
 export async function waitForMeasurements(args: {
     evaluatePending: () => Promise<number | null>;
+    /** Give up after this long; the last schedule step repeats until then. */
+    deadlineMs?: number;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
 }): Promise<{ pending: number | null; polls: number; waitedMs: number }> {
     const now = args.now ?? (() => Date.now());
     const sleep = args.sleep ?? delay;
+    const deadline = args.deadlineMs ?? MEASURE_POLL_DEADLINE_MS;
     const start = now();
     let pending: number | null = null;
     let polls = 0;
 
-    for (const step of MEASURE_POLL_SCHEDULE_MS) {
-        await sleep(step);
+    for (;;) {
+        await sleep(MEASURE_POLL_SCHEDULE_MS[Math.min(polls, MEASURE_POLL_SCHEDULE_MS.length - 1)]);
         pending = await args.evaluatePending();
         polls++;
         // null => the probe itself failed; 0 => everything measured.
         if (pending === null || pending === 0) break;
-        if (now() - start >= MEASURE_POLL_DEADLINE_MS) break;
+        if (now() - start >= deadline) break;
     }
 
     return { pending, polls, waitedMs: now() - start };

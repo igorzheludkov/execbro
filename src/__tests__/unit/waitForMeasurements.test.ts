@@ -83,3 +83,25 @@ describe("buildPendingMeasurementExpression", () => {
         expect(new Function("globalThis", `return ${expr};`)({})).toBe(0);
     });
 });
+
+describe("waitForMeasurements with a caller deadline", () => {
+    // get_screen_state used to sleep a flat 400ms + 2ms per node (532 to 878ms on the
+    // benchmark app) before reading measurements back, on every call and inside every
+    // tap's overlay guard. It now polls with that budget as the deadline.
+    it("returns as soon as everything is measured, far below the deadline", async () => {
+        const h = harness([3, 0]);
+        const result = await waitForMeasurements({ ...h.args, deadlineMs: 900 });
+
+        expect(result.pending).toBe(0);
+        expect(h.elapsed).toBeLessThan(150);
+    });
+
+    it("keeps polling past the default deadline up to the caller's", async () => {
+        const h = harness([1]); // permanently pending
+        const result = await waitForMeasurements({ ...h.args, deadlineMs: 900 });
+
+        expect(result.pending).toBe(1);
+        expect(h.elapsed).toBeGreaterThanOrEqual(900);
+        expect(h.elapsed).toBeLessThanOrEqual(900 + 200);
+    });
+});
