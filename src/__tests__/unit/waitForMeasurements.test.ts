@@ -4,7 +4,7 @@ import {
     buildPendingMeasurementExpression,
     MEASURE_POLL_SCHEDULE_MS,
     MEASURE_POLL_DEADLINE_MS,
-} from "../../core/pressables.js";
+} from "../../core/measureWait.js";
 
 function harness(pendingSequence: (number | null)[]) {
     let clock = 0;

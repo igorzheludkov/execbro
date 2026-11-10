@@ -1,6 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
-import { waitForMeasurements, buildPendingMeasurementExpression } from "./pressables.js";
+import { waitForMeasurements, buildPendingMeasurementExpression } from "./measureWait.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";

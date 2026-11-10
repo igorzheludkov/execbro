@@ -1222,9 +1222,8 @@ export function registerInteractionTools(server: McpServer): void {
                 "VERIFICATION: the write is read back and compared EXACTLY. A mismatch retries once, then fails with `sent` vs `landed`.\n" +
                 "AMBIGUITY: several matching inputs -> the tool refuses and returns a numbered candidate list; pick one with `index`.\n" +
                 "NATIVE SCREENS: with no React fiber tree at all (system dialog, native onboarding, non-RN app) this types into whatever the OS reports as focused — tap it first. native:true forces that path and ignores testID/component/textMatch: it cannot target." +
-                "\nLIMITATIONS: fields with no onChangeText fall back to the platform driver, which is US-keyboard only — non-ASCII fails there. The native path shares that limit. The keyboard stays as the field left it (showKeyboard:true raises it, dismissKeyboard:true closes it).\n" +
+                "\nLIMITATIONS: fields with no onChangeText fall back to the platform driver, which is US-keyboard only — non-ASCII fails there. The native path shares that limit. The keyboard stays as the field left it (showKeyboard:true raises it).\n" +
                 "GOOD: input_text({ testID: \"new-topic-title\", text: \"Q3 budget\", replace: true })\n" +
-                "GOOD: input_text({ testID: \"promo-input\", text: \"SAVE10\", dismissKeyboard: true }) then tap({ testID: \"promo-apply\" }).\n" +
                 "GOOD: input_text({ text: \"1234\", native: true }) — a system PIN prompt, no RN screen behind it.\n" +
                 "BAD: input_text({ text: \"...\" }) with nothing focused — pass a target instead.\n",
             inputSchema: {

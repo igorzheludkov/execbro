@@ -1,6 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp } from "./jsExecute.js";
-import { waitForMeasurements, buildPendingMeasurementExpression } from "./pressables.js";
+import { waitForMeasurements, buildPendingMeasurementExpression } from "./measureWait.js";
 import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
