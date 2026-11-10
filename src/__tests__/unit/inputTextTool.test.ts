@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@jest/globals";
-import { formatTextEntryResponse } from "../../tools/interactionTools.js";
+import { formatTextEntryResponse, dismissAfterEntry } from "../../tools/interactionTools.js";
 
 describe("formatTextEntryResponse", () => {
     it("reports the landed value and keyboard state on success", () => {
@@ -124,5 +124,34 @@ describe("formatTextEntryResponse", () => {
         });
         expect(r.content[0].text).toContain("inputs on screen");
         expect(r.content[0].text).not.toContain("Re-run with index");
+    });
+});
+
+// Benchmark traces: 27 of 31 dismiss_keyboard calls came straight after input_text, before
+// a tap on a button under the keyboard. input_text({ dismissKeyboard: true }) folds that
+// round trip into the write.
+describe("dismissAfterEntry", () => {
+    const ok = () => formatTextEntryResponse({ success: true, value: "SAVE10", path: "react", verified: true });
+
+    it("blurs the field after a successful write and says so", async () => {
+        let blurred = 0;
+        const r = await dismissAfterEntry(ok(), async () => { blurred++; return { success: true }; });
+        expect(blurred).toBe(1);
+        expect(r.isError).toBeFalsy();
+        expect(r.content[0].text).toContain("keyboard: dismissed");
+    });
+
+    it("keeps the write a success when the blur fails, and names why", async () => {
+        const r = await dismissAfterEntry(ok(), async () => ({ success: false, error: "a native field owns the keyboard" }));
+        expect(r.isError).toBeFalsy();
+        expect(r.content[0].text).toContain("keyboard: not dismissed (a native field owns the keyboard)");
+    });
+
+    it("does not touch the keyboard when the write failed", async () => {
+        let blurred = 0;
+        const failed = formatTextEntryResponse({ success: false, error: "no TextInput matched that target" });
+        const r = await dismissAfterEntry(failed, async () => { blurred++; return { success: true }; });
+        expect(blurred).toBe(0);
+        expect(r).toBe(failed);
     });
 });

@@ -275,6 +275,7 @@
         "input_text": [
             "component",
             "device",
+            "dismissKeyboard",
             "index",
             "native",
             "replace",

@@ -1222,8 +1222,9 @@ export function registerInteractionTools(server: McpServer): void {
                 "VERIFICATION: the write is read back and compared EXACTLY. A mismatch retries once, then fails with `sent` vs `landed`.\n" +
                 "AMBIGUITY: several matching inputs -> the tool refuses and returns a numbered candidate list; pick one with `index`.\n" +
                 "NATIVE SCREENS: with no React fiber tree at all (system dialog, native onboarding, non-RN app) this types into whatever the OS reports as focused — tap it first. native:true forces that path and ignores testID/component/textMatch: it cannot target." +
-                "\nLIMITATIONS: fields with no onChangeText fall back to the platform driver, which is US-keyboard only — non-ASCII fails there. The native path shares that limit. The keyboard stays as the field left it (showKeyboard:true raises it).\n" +
+                "\nLIMITATIONS: fields with no onChangeText fall back to the platform driver, which is US-keyboard only — non-ASCII fails there. The native path shares that limit. The keyboard stays as the field left it (showKeyboard:true raises it, dismissKeyboard:true closes it).\n" +
                 "GOOD: input_text({ testID: \"new-topic-title\", text: \"Q3 budget\", replace: true })\n" +
+                "GOOD: input_text({ testID: \"promo-input\", text: \"SAVE10\", dismissKeyboard: true }) then tap({ testID: \"promo-apply\" }).\n" +
                 "GOOD: input_text({ text: \"1234\", native: true }) — a system PIN prompt, no RN screen behind it.\n" +
                 "BAD: input_text({ text: \"...\" }) with nothing focused — pass a target instead.\n",
             inputSchema: {
@@ -1258,6 +1259,12 @@ export function registerInteractionTools(server: McpServer): void {
                     .describe(
                         "Skip React targeting and type directly into whichever field the OS reports as focused, via the platform accessibility tree. For system dialogs and non-RN screens. Ignores testID/component/textMatch/index. Auto-applied when no fiber tree is reachable at all, even without this flag."
                     ),
+                dismissKeyboard: z
+                    .boolean()
+                    .optional()
+                    .describe(
+                        "Blur the field after a verified write, closing the keyboard, so the next tap reaches a button the keyboard covered. Same as calling dismiss_keyboard next, without the extra call. Default false."
+                    ),
                 showKeyboard: z
                     .boolean()
                     .optional()
@@ -1266,7 +1273,7 @@ export function registerInteractionTools(server: McpServer): void {
                     )
             }
         },
-        async ({ text, testID, component, textMatch, index, replace, device, native, showKeyboard }) => {
+        async ({ text, testID, component, textMatch, index, replace, device, native, showKeyboard, dismissKeyboard: dismissAfter }) => {
             // Chromium: DOM targeting plus Input.insertText. native:true skips it, since that asks for the OS layer (a system dialog).
             const chromeApp = native === true ? null : chromiumAppFor("input_text", device);
             if (chromeApp) {
@@ -1328,8 +1335,9 @@ export function registerInteractionTools(server: McpServer): void {
                 };
             }
 
+            const formatted = formatTextEntryResponse(result);
             return await decorateTextEntryTelemetry(
-                formatTextEntryResponse(result),
+                dismissAfter === true ? await dismissAfterEntry(formatted, () => dismissKeyboard(device)) : formatted,
                 result,
                 { text, testID, component, textMatch, index, replace },
                 platform,
@@ -1453,6 +1461,17 @@ async function decorateTextEntryTelemetry(
  * an unverified write must never read as a plain success, and a failed
  * keyboard raise must never read as a failed write.
  */
+/** input_text({ dismissKeyboard: true }): blur the field once the write succeeded. */
+export async function dismissAfterEntry<T extends { content: Array<{ type: "text"; text: string }>; isError?: boolean }>(
+    resp: T,
+    dismiss: () => Promise<{ success: boolean; error?: string }>
+): Promise<T> {
+    if (resp.isError) return resp;
+    const r = await dismiss();
+    const line = r.success ? "  keyboard: dismissed" : `  keyboard: not dismissed (${r.error ?? "blur failed"})`;
+    return { ...resp, content: [{ ...resp.content[0], text: `${resp.content[0].text}\n${line}` }, ...resp.content.slice(1)] };
+}
+
 export function formatTextEntryResponse(r: TextEntryResult): {
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
