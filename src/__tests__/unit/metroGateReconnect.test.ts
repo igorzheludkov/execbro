@@ -108,6 +108,18 @@ describe("awaitMetro", () => {
         expect(waits).toEqual([]);
     });
 
+    it("drops an earlier outcome when a later call waits out a reconnection instead", async () => {
+        await awaitMetro({ connect: async () => ({ ports: [8090], failures: [] }) });
+        const timer = setTimeout(() => {}, 10_000);
+        saveReconnectionTimer("app-1", timer);
+        const { sleep } = fakeSleep();
+
+        await awaitMetro({ timeoutMs: 200, sleep });
+
+        expect(takeLastAutoConnect()).toBeNull();
+        clearTimeout(timer);
+    });
+
     it("hands the outcome to the next hint exactly once", async () => {
         await awaitMetro({ connect: async () => ({ ports: [], failures: [] }) });
         expect(takeLastAutoConnect()).toEqual({ ports: [], failures: [] });

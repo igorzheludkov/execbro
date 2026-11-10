@@ -49,6 +49,8 @@ export async function awaitMetro(options: {
     sleep?: (ms: number) => Promise<void>;
     connect?: () => Promise<AutoConnectOutcome>;
 } = {}): Promise<boolean> {
+    // An outcome belongs to this call only: never let an earlier one reach a later hint.
+    lastAutoConnect = null;
     if (hasMetro()) return true;
     if (pendingReconnectionKeys().length === 0) {
         // Dynamic import keeps connection.js out of this module's static graph.
