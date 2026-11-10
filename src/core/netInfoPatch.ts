@@ -42,7 +42,8 @@ ${buildRequireSource()}
     if (s && s.isConnected === state.isConnected) probeFired = true;
   });
 
-  var DEE = __eb_require('react-native/Libraries/EventEmitter/RCTDeviceEventEmitter.js');
+  var DEE = null;
+  try { DEE = __eb_require('react-native/Libraries/EventEmitter/RCTDeviceEventEmitter.js'); } catch (e) {}
   var emitter = DEE && (DEE.default || DEE);
   if (emitter && typeof emitter.emit === 'function') {
     try { emitter.emit('netInfo.networkStatusDidChange', state); } catch (e) {}

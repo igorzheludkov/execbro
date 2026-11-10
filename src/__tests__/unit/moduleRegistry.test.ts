@@ -49,24 +49,55 @@ describe("buildRequireSource", () => {
         expect(req("expo-router").entry).toBe(true);
     });
 
-    it("returns a descriptive error object when nothing matches", () => {
+    it("throws a descriptive error when nothing matches", () => {
         const fakeR = Object.assign(() => undefined, { getModules: () => new Map([[1, { verboseName: "a/b.js" }]]) });
         const run = new Function("globalThis", buildRequireSource() + "; return __eb_require;");
-        const req = run({ __r: fakeR }) as (name: string) => { __eb_error?: string };
-        const out = req("nope");
-        expect(out.__eb_error).toContain("no module");
+        const req = run({ __r: fakeR }) as (name: string) => unknown;
+        expect(() => req("nope")).toThrow(/no module/);
     });
 
-    it("reports when the registry itself is unavailable", () => {
+    it("throws when the registry itself is unavailable", () => {
         const run = new Function("globalThis", buildRequireSource() + "; return __eb_require;");
-        const req = run({}) as (name: string) => { __eb_error?: string };
-        expect(req("anything").__eb_error).toContain("Metro module registry");
+        const req = run({}) as (name: string) => unknown;
+        expect(() => req("anything")).toThrow(/Metro module registry/);
     });
 
-    it("reports separately when the registry exists but carries no names (minified bundle)", () => {
+    it("throws separately when the registry exists but carries no names (minified bundle)", () => {
         const fakeR = Object.assign(() => undefined, { getModules: () => new Map([[1, {}]]) });
         const run = new Function("globalThis", buildRequireSource() + "; return __eb_require;");
-        const req = run({ __r: fakeR }) as (name: string) => { __eb_error?: string };
-        expect(req("anything").__eb_error).toContain("minified");
+        const req = run({ __r: fakeR }) as (name: string) => unknown;
+        expect(() => req("anything")).toThrow(/minified/);
+    });
+
+    it("throws when the module fails to evaluate", () => {
+        const fakeR = Object.assign(() => { throw new Error("boom"); }, { getModules: () => new Map([[1, { verboseName: "src/a.ts" }]]) });
+        const run = new Function("globalThis", buildRequireSource() + "; return __eb_require;");
+        const req = run({ __r: fakeR }) as (name: string) => unknown;
+        expect(() => req("src/a")).toThrow(/failed to evaluate: boom/);
+    });
+
+    describe("app paths (Opus benchmark: require('./src/shop/authSlice') returned an error object)", () => {
+        const modules = new Map<number, { verboseName?: string }>([
+            [1, { verboseName: "node_modules/react-native/index.js" }],
+            [7, { verboseName: "src/shop/authSlice.ts" }],
+            [8, { verboseName: "src/shop/cart/index.ts" }]
+        ]);
+        const loaded: Record<number, unknown> = { 1: { rn: true }, 7: { signIn: "fn" }, 8: { cart: true } };
+        const fakeR = Object.assign((id: number) => loaded[id], { getModules: () => modules });
+        const req = new Function("globalThis", buildRequireSource() + "; return __eb_require;")({ __r: fakeR }) as (name: string) => Record<string, unknown>;
+
+        it("resolves a ./ relative path without extension", () => {
+            expect(req("./src/shop/authSlice").signIn).toBe("fn");
+            expect(req("src/shop/authSlice").signIn).toBe("fn");
+            expect(req("./src/shop/cart").cart).toBe(true);
+        });
+
+        it("throws a readable error on a miss", () => {
+            expect(() => req("./src/shop/nope")).toThrow(/no module matching "src\/shop\/nope"/);
+        });
+
+        it("names near misses", () => {
+            expect(() => req("./src/shop/authslice")).toThrow(/src\/shop\/authSlice\.ts/);
+        });
     });
 });

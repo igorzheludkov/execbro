@@ -34,31 +34,44 @@ var __eb_require = (function () {
         cache = entries;
         return cache;
     }
+    var EXT = /\\.(jsx?|tsx?)$/;
     return function (name) {
         var entries = index();
         if (!entries) {
-            return { __eb_error: 'Metro module registry is unavailable (globalThis.__r missing or has no getModules). Only pre-existing globals are reachable.' };
+            throw new Error('Metro module registry is unavailable (globalThis.__r missing or has no getModules). Only pre-existing globals are reachable.');
         }
         if (entries.length === 0) {
-            return { __eb_error: 'Metro module registry exposed no module names (verboseName absent, likely a minified bundle). Only pre-existing globals are reachable.' };
+            throw new Error('Metro module registry exposed no module names (verboseName absent, likely a minified bundle). Only pre-existing globals are reachable.');
         }
-        var needle = String(name);
+        // './src/a' and '../src/a' name the registry's 'src/a.ts' or 'src/a/index.ts'.
+        var needle = String(name).replace(/^(\\.\\.?\\/)+/, '');
+        var base = needle.replace(EXT, '');
+        var wanted = [needle];
+        var exts = ['.ts', '.tsx', '.js', '.jsx'];
+        for (var x = 0; x < exts.length; x++) wanted.push(base + exts[x], base + '/index' + exts[x]);
         var exact = [];
         var partial = [];
         for (var i = 0; i < entries.length; i++) {
             var n = entries[i].name;
-            if (n === needle) exact.push(entries[i]);
+            if (wanted.indexOf(n) !== -1) exact.push(entries[i]);
             else if (n.indexOf(needle) !== -1) partial.push(entries[i]);
         }
         var hits = exact.length ? exact : partial;
         if (hits.length === 0) {
-            return { __eb_error: 'require: no module matching "' + needle + '". Try a longer path fragment; ' + entries.length + ' modules are loaded.' };
+            var last = base.split('/').pop().toLowerCase();
+            var near = [];
+            for (var j = 0; j < entries.length && near.length < 5; j++) {
+                if (entries[j].name.replace(EXT, '').split('/').pop().toLowerCase() === last) near.push(entries[j].name);
+            }
+            throw new Error('require: no module matching "' + needle + '". ' +
+                (near.length ? 'Did you mean: ' + near.join(', ') + '? ' : 'Try a longer path fragment; ') +
+                entries.length + ' modules are loaded.');
         }
         hits.sort(function (a, b) { return a.name.length - b.name.length; });
         try {
             return globalThis.__r(hits[0].id);
         } catch (e) {
-            return { __eb_error: 'require: module "' + hits[0].name + '" failed to evaluate: ' + String(e && e.message ? e.message : e) };
+            throw new Error('require: module "' + hits[0].name + '" failed to evaluate: ' + String(e && e.message ? e.message : e));
         }
     };
 })();

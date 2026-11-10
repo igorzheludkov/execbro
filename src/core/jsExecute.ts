@@ -142,8 +142,8 @@ export function validateAndPreprocessExpression(expression: string): ExpressionV
     // NOTE: require() used to be rejected here. It now works — the injected
     // context defines `require` over Metro's module registry (see
     // appContext.ts / moduleRegistry.ts), which addressed the second-largest
-    // production failure class (236 events). Unresolvable names return an
-    // object carrying __eb_error rather than throwing.
+    // production failure class (236 events). Unresolvable names throw, so
+    // the reason reaches the caller as the evaluation error.
 
     // Check for multi-statement expressions. Runtime.evaluate compiles input as
     // a single expression — `console.log('x'); 1+1` raises `')' expected at end
