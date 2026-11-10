@@ -360,6 +360,27 @@ export function wrapMultiStatementInIife(src: string): string | null {
     return `(function(){ ${[...head, body].join("; ")}; })()`;
 }
 
+const BLOCK_STATEMENT_START = /^(?:if|for|while|try|switch|function)\b/;
+const BLOCK_CONTINUATION = /^(?:else|catch|finally)\b/;
+
+// The rest of `src` from `i`, past whitespace and comments.
+function skipSpaceAndComments(src: string, i: number): string {
+    for (;;) {
+        while (i < src.length && /\s/.test(src[i])) i++;
+        if (src.startsWith("//", i)) {
+            const nl = src.indexOf("\n", i);
+            if (nl === -1) return "";
+            i = nl + 1;
+        } else if (src.startsWith("/*", i)) {
+            const end = src.indexOf("*/", i + 2);
+            if (end === -1) return "";
+            i = end + 2;
+        } else {
+            return src.slice(i);
+        }
+    }
+}
+
 // Walk `src` tracking string/template/comment and bracket depth, splitting on
 // `;` at depth 0. Returns the trimmed top-level statements; a trailing `;` that
 // merely terminates the final statement produces no extra segment.
@@ -403,7 +424,18 @@ export function splitTopLevelStatements(src: string): string[] {
         if (ch === "(") parens++;
         else if (ch === ")") parens--;
         else if (ch === "{") braces++;
-        else if (ch === "}") braces--;
+        else if (ch === "}") {
+            braces--;
+            // A block statement (`if (...) {...}`) ends at its closing brace unless
+            // `else` / `catch` / `finally` continues it: `if (a) { x = 1; } x` is
+            // two statements, though no `;` separates them.
+            if (braces === 0 && parens === 0 && brackets === 0 &&
+                BLOCK_STATEMENT_START.test(src.slice(segmentStart, i).trim()) &&
+                !BLOCK_CONTINUATION.test(skipSpaceAndComments(src, i + 1))) {
+                push(i + 1);
+                segmentStart = i + 1;
+            }
+        }
         else if (ch === "[") brackets++;
         else if (ch === "]") brackets--;
         else if (ch === ";" && parens === 0 && braces === 0 && brackets === 0) {
