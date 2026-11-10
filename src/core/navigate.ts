@@ -20,6 +20,9 @@ import {
  */
 export const POLL_DELAYS_MS = [150, 350, 600, 900];
 
+/** Shorter poll per parent route tried for an unmounted screen: up to 8 are tried. */
+const PARENT_POLL_DELAYS_MS = [150, 350, 600];
+
 export interface NavigationOutcome {
     changed: boolean;
     indeterminate: boolean;
@@ -57,6 +60,8 @@ export interface NavigationResult {
     indeterminate: boolean;
     stack?: string[];
     routeTable?: string[];
+    /** The parent route navigated through, when `to` sat in a navigator that had not mounted. */
+    via?: string;
     /** Structured cause, forwarded to telemetry by the tool layer. */
     failureKind?: FailureKind;
     error?: string;
@@ -93,6 +98,45 @@ function readStateExpression(): string {
 })()`;
 }
 
+function performSource(action: string, to: string | null, params: Record<string, unknown> | undefined): string {
+    return `(function(){ ${preamble()}
+    return JSON.stringify(${buildNavigateSource(action, to, params ?? null)});
+})()`;
+}
+
+async function readCurrentRoute(device?: string): Promise<string | null> {
+    const read = await executeInApp(readStateExpression(), false, { originatingToolName: "navigate" }, device);
+    if (!read.success) return null;
+    try {
+        return (JSON.parse(String(read.result)) as { current: string | null }).current;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * `to` is not in the route table, but may sit in a navigator that has not
+ * mounted yet (a tab not visited since launch). Try each candidate parent with
+ * `{ screen: to }`, as an agent would by hand, and return the one that lands.
+ */
+async function navigateThroughParent(
+    to: string,
+    params: Record<string, unknown> | undefined,
+    parents: string[],
+    device?: string
+): Promise<string | null> {
+    const nested = params ? { screen: to, params } : { screen: to };
+    for (const parent of parents) {
+        const performed = await executeInApp(performSource("navigate", parent, nested), false, { originatingToolName: "navigate" }, device);
+        if (!performed.success) continue;
+        for (const delay of PARENT_POLL_DELAYS_MS) {
+            await new Promise((r) => setTimeout(r, delay));
+            if (await readCurrentRoute(device) === to) return parent;
+        }
+    }
+    return null;
+}
+
 export async function performNavigation(opts: PerformNavigationOptions): Promise<NavigationResult> {
     const { action, to = null, params, device, includeRouteTable } = opts;
 
@@ -118,11 +162,7 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
         }
     }
 
-    const perform = `(function(){ ${preamble()}
-    return JSON.stringify(${buildNavigateSource(action, to, params ?? null)});
-})()`;
-
-    const performed = await executeInApp(perform, false, { originatingToolName: "navigate" }, device);
+    const performed = await executeInApp(performSource(action, to, params), false, { originatingToolName: "navigate" }, device);
     if (!performed.success) {
         return {
             success: false, kind: null, action, to,
@@ -131,7 +171,7 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
         };
     }
 
-    let head: { ok: boolean; badArgs?: boolean; kind: string | null; error?: string; before?: string | null; beforeId?: string | null; routes?: string[] };
+    let head: { ok: boolean; badArgs?: boolean; kind: string | null; error?: string; before?: string | null; beforeId?: string | null; routes?: string[]; parents?: string[] };
     try {
         head = JSON.parse(String(performed.result));
     } catch {
@@ -143,6 +183,18 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
     }
 
     const before = head.before ?? null;
+    if (!head.ok && action === "navigate" && to && head.parents && head.parents.length > 0) {
+        const via = await navigateThroughParent(to, params, head.parents, device);
+        if (via) {
+            return {
+                success: true, kind: head.kind, action, to,
+                route: { before, after: to }, changed: true, indeterminate: false, via
+            };
+        }
+        // Put the app back where the agent left it before reporting the miss.
+        if (before) await executeInApp(performSource("navigate", before, undefined), false, { originatingToolName: "navigate" }, device);
+        head.error = `${head.error ?? "Navigation failed"} Tried: ${head.parents.join(", ")}${before ? ` (navigated back to ${before})` : ""}.`;
+    }
     if (!head.ok) {
         // Hand back the registered routes whenever the app knew them. Expo
         // Router destinations are paths and never appear in routeNames, so the

@@ -159,7 +159,7 @@ var __eb_nav = (function () {
 export function buildRouteTableSource(): string {
     return `
 function __eb_routeTable() {
-    var out = { levels: [], all: [], paths: {}, current: null, currentId: null };
+    var out = { levels: [], all: [], paths: {}, mounted: {}, current: null, currentId: null };
     var reader = __eb_nav && __eb_nav.stateReader;
     if (!reader || typeof reader.getRootState !== 'function') return out;
     var root;
@@ -178,7 +178,10 @@ function __eb_routeTable() {
         }
         if (st.routes) {
             for (var j = 0; j < st.routes.length; j++) {
-                if (st.routes[j] && st.routes[j].state) collect(st.routes[j].state, d + 1, chain.concat([st.routes[j].name]));
+                if (st.routes[j] && st.routes[j].state) {
+                    out.mounted[st.routes[j].name] = 1;
+                    collect(st.routes[j].state, d + 1, chain.concat([st.routes[j].name]));
+                }
             }
         }
     }
@@ -304,10 +307,22 @@ export function buildNavigateSource(
                 ? 'Did you mean: ' + suggestions.join(', ') + (extra > 0 ? ' (' + extra + ' other routes registered)' : '')
                 : 'Registered: ' + table.all.slice(0, 40).join(', ') + (table.all.length > 40 ? ' (+' + (table.all.length - 40) + ' more)' : '') + '.' +
                   ' Screens of a navigator that has not mounted yet (a tab not visited since launch) are not listed: navigate to its parent route first.';
+            // A navigator that has not mounted carries no nested state, so its
+            // screens are missing from the table. These routes may hold the destination:
+            // nearest name first, then table order.
+            var parents = [];
+            for (var q = 0; q < table.all.length; q++) {
+                var pn = table.all[q];
+                if (pn !== before && !table.mounted[pn]) parents.push({ name: pn, d: __eb_editDistance(String(to).toLowerCase(), pn.toLowerCase()), i: q });
+            }
+            parents.sort(function (x, y) { return x.d - y.d || x.i - y.i; });
+            var parentNames = [];
+            for (var r = 0; r < parents.length && r < 8; r++) parentNames.push(parents[r].name);
             return {
                 ok: false,
                 kind: nav.kind,
                 before: before,
+                parents: parentNames,
                 error: 'No route named "' + to + '" is registered. ' + hint +
                        ' (React Navigation takes route NAMES, not paths - a path here is silently ignored.)'
             };

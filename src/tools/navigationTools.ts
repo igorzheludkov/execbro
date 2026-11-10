@@ -61,6 +61,7 @@ export function registerNavigationTools(server: McpServer): void {
             }
 
             const lines = [JSON.stringify(result, null, 2)];
+            if (result.via) lines.push(`Navigated to "${to}" through "${result.via}" (its navigator had not mounted yet).`);
             // A bare routeTable request is a listing: nothing was asked to
             // move, so "the route did not change" reads as a failed navigation.
             const listedOnly = to === undefined && action !== "back" && action !== "reset";
