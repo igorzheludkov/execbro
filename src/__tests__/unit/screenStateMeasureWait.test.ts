@@ -24,6 +24,7 @@ jest.unstable_mockModule("../../core/jsExecute.js", () => ({
 }));
 
 const { getScreenState } = await import("../../core/screenState.js");
+const { getScreenLayout } = await import("../../core/screenLayout.js");
 
 describe("get_screen_state measurement wait", () => {
     it("reads back as soon as every measurement landed", async () => {
@@ -48,4 +49,17 @@ describe("get_screen_state measurement wait", () => {
         expect(Date.now() - t0).toBeGreaterThanOrEqual(800);
         expect(calls[calls.length - 1]).toBe("resolve");
     }, 10000);
+});
+
+describe("get_screen_layout measurement wait", () => {
+    it("reads back as soon as every measurement landed instead of a flat 300ms", async () => {
+        calls.length = 0;
+        pendingAnswers = [0];
+        const t0 = Date.now();
+
+        await getScreenLayout({});
+
+        expect(calls.slice(0, 2)).toEqual(["dispatch", "probe"]);
+        expect(Date.now() - t0).toBeLessThan(150);
+    });
 });

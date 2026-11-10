@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
+import { waitForMeasurements, buildPendingMeasurementExpression } from "./pressables.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
 import { SHEET_HELPERS_JS } from "./injected/sheetOffset.js";
@@ -304,6 +305,8 @@ function formatOffScreenLine(names: string[], position: string): string {
     return `[... ${total} components ${position}: ${shown}, ... +${total - CAP} more]`;
 }
 
+const LAYOUT_PENDING_EXPR = buildPendingMeasurementExpression(["__layoutMeasurements", "__layoutSheetMeasurements"]);
+
 export async function getScreenLayout(
     options: {
         extended?: boolean;
@@ -607,8 +610,14 @@ export async function getScreenLayout(
 
     if (dispatchError) return { success: false, error: dispatchError };
 
-    // Wait for measureInWindow callbacks
-    await delay(300);
+    // Wait for measureInWindow callbacks (polled; see waitForMeasurements)
+    await waitForMeasurements({
+        evaluatePending: async () => {
+            const r = await executeInApp(LAYOUT_PENDING_EXPR, false, { timeoutMs: 2000, maxRetries: 0, originatingToolName: "get_screen_layout" }, device);
+            const n = r.success ? Number(r.result) : NaN;
+            return Number.isFinite(n) ? n : null;
+        },
+    });
 
     // --- Step 2: read measurements, filter visible, build results ---
     const resolveExpression = `
