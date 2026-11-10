@@ -3,7 +3,7 @@
   "name": "com.execbro/execbro",
   "title": "ExecBro",
   "description": "Catches what reading the code misses: AI agents check running React Native apps",
-  "version": "2.22.0",
+  "version": "2.23.0",
   "websiteUrl": "https://execbro.com",
   "repository": {
     "url": "https://github.com/igorzheludkov/execbro",
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "execbro",
-      "version": "2.22.0",
+      "version": "2.23.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
