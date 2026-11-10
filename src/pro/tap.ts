@@ -846,6 +846,8 @@ interface StrategyResult {
     hasLongPress?: boolean;
     /** Fiber only: the Switch-like element's value BEFORE the tap. null when not a switch. */
     switchValue?: boolean | null;
+    /** Fiber only: the unfocused route whose hidden subtree holds the queried testID. */
+    prunedRoute?: string;
 }
 
 export interface EvidenceSink {
@@ -1039,6 +1041,7 @@ async function tryFiberAtDepth(
             if (parsed.matches) {
                 strategyResult.matches = parsed.matches;
             }
+            if (typeof parsed.prunedRoute === "string") strategyResult.prunedRoute = parsed.prunedRoute;
             return strategyResult;
         }
 
@@ -1575,6 +1578,8 @@ const MIN_STRATEGY_BUDGET_MS = 500;
 
 /** One React commit plus layout. Long enough for a just-navigated screen to paint. */
 const EMPTY_SCREEN_SETTLE_MS = 400;
+/** One wait before a testID miss is final: the screen may still be mid-transition. */
+export const TESTID_SETTLE_MS = 600;
 
 /**
  * True when both element strategies ran cleanly and between them saw *nothing* —
@@ -2408,6 +2413,35 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // through a different strategy — every downstream use (marker geometry,
     // reported method) must name the strategy that actually pressed.
     let emptyScreenReplayed = false;
+    let testIdSettled = false;
+    let prunedRoute: string | undefined;
+    const treeStrategies = filteredStrategies.filter((st) => st === "fiber" || st === "accessibility");
+    const treeMisses = new Set<string>();
+    // A tree strategy "found" the element: fiber reports it as measured coordinates, not success.
+    const treeFound = (st: string, r: StrategyResult) => r.success || (st === "fiber" && !!r.convertedTo && !!r.pressed);
+    // Re-run fiber then accessibility once, after a settle wait.
+    const replayTreeStrategies = async (): Promise<{ strat: "fiber" | "accessibility"; result: StrategyResult } | null> => {
+        for (const replayStrat of ["fiber", "accessibility"] as const) {
+            if (!filteredStrategies.includes(replayStrat)) continue;
+            const replayBudget = Math.min(maxStrategyMs(replayStrat, platform), remainingMs());
+            if (replayBudget < MIN_STRATEGY_BUDGET_MS) continue;
+            let replayResult: StrategyResult;
+            try {
+                replayResult = replayStrat === "fiber"
+                    ? await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence, deviceName, options.duration !== undefined), replayBudget, `fiber`)
+                    : await withCancelableTimeout(
+                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal, targetSerial, options.duration),
+                        replayBudget,
+                        `accessibility`
+                    );
+            } catch {
+                // A replay that times out or throws is no worse than not having replayed.
+                continue;
+            }
+            if (treeFound(replayStrat, replayResult)) return { strat: replayStrat, result: replayResult };
+        }
+        return null;
+    };
     for (let strat of filteredStrategies) {
         const remaining = remainingMs();
         if (remaining < MIN_STRATEGY_BUDGET_MS) {
@@ -2452,33 +2486,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
                         });
                         await new Promise((r) => setTimeout(r, EMPTY_SCREEN_SETTLE_MS));
 
-                        let replayed: StrategyResult | null = null;
-                        for (const replayStrat of ["fiber", "accessibility"] as const) {
-                            if (!filteredStrategies.includes(replayStrat)) continue;
-                            const replayBudget = Math.min(maxStrategyMs(replayStrat, platform), remainingMs());
-                            if (replayBudget < MIN_STRATEGY_BUDGET_MS) continue;
-                            let replayResult: StrategyResult;
-                            try {
-                                replayResult = replayStrat === "fiber"
-                                    ? await withTimeout(tryFiberStrategy(query, index, maxTraversalDepth, evidence, deviceName, options.duration !== undefined), replayBudget, `fiber`)
-                                    : await withCancelableTimeout(
-                                        (signal) => tryAccessibilityStrategy(query, index, platform, targetUdid, evidence, signal, targetSerial, options.duration),
-                                        replayBudget,
-                                        `accessibility`
-                                    );
-                            } catch {
-                                // A replay that times out or throws is no worse than not
-                                // having replayed — fall through to OCR as before.
-                                continue;
-                            }
-                            if (replayResult.success) {
-                                strat = replayStrat;
-                                replayed = replayResult;
-                                break;
-                            }
-                        }
+                        const replayed = await replayTreeStrategies();
                         if (replayed) {
-                            result = replayed;
+                            strat = replayed.strat;
+                            result = replayed.result;
                             break;
                         }
                     }
@@ -2526,6 +2537,30 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             const outcome: TapAttemptOutcome = STRATEGY_TIMEOUT_RE.test(reason) ? "timeout" : "error";
             attempted.push({ strategy: strat, reason, outcome });
             continue;
+        }
+
+        if (result.prunedRoute) prunedRoute = result.prunedRoute;
+        // A testID that every tree strategy missed may belong to a screen still
+        // mid-transition (right after navigate or a route-changing tap). Settle
+        // once and re-read before calling it missing.
+        const cleanMiss = !treeFound(strat, result) && !result.ambiguous && !result.matches &&
+            !STRATEGY_TIMEOUT_RE.test(result.reason || "") && (result.reason || "").indexOf("but none are visible") === -1;
+        if (query.testID && cleanMiss && (strat === "fiber" || strat === "accessibility")) {
+            treeMisses.add(strat);
+            if (!testIdSettled && treeMisses.size === treeStrategies.length) {
+                testIdSettled = true;
+                attempted.push({
+                    strategy: "settle",
+                    reason: `testID not found by ${treeStrategies.join(" or ")}. Waited ${TESTID_SETTLE_MS}ms for the screen to settle and re-read once.`,
+                    outcome: "not-found"
+                });
+                await new Promise((r) => setTimeout(r, TESTID_SETTLE_MS));
+                const replayed = await replayTreeStrategies();
+                if (replayed) {
+                    strat = replayed.strat;
+                    result = replayed.result;
+                }
+            }
         }
 
         if (result.success) {
@@ -2858,6 +2893,9 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     const fiberSawInvisible = attempted.some(a => a.strategy === "fiber" && a.outcome === "invisible");
     const allTimedOut = attempted.length > 0 && attempted.every(a => a.outcome === "timeout" || a.outcome === "skipped");
     let suggestion = buildSuggestion(query, strategies, platform);
+    if (prunedRoute && query.testID) {
+        suggestion = `testID "${query.testID}" exists on route "${prunedRoute}", which is not focused. navigate({ to: "${prunedRoute}" }) first. ` + suggestion;
+    }
     if (fiberSawInvisible) {
         suggestion = `Element exists in the React tree but is not on screen. Try scrolling it into view with swipe(), dismiss any overlay covering it, or wait for layout to settle. ` + suggestion;
     } else if (allTimedOut) {

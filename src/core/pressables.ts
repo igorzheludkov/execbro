@@ -321,6 +321,22 @@ export async function pressElement(options: {
 
             var hostFibers = [];
             var tapMeta = [];
+            // A testID inside a hidden scene: the route that holds it, so a miss can
+            // say "navigate there first" instead of looking like a typo.
+            var prunedRoute = null;
+            function routeHolding(fiber, routeName, d) {
+                if (!fiber || d > 400) return null;
+                var rp = fiber.memoizedProps;
+                if (rp && rp.route && typeof rp.route.name === 'string') routeName = rp.route.name;
+                if (rp && (rp.testID === searchTestID || rp.nativeID === searchTestID)) return routeName;
+                var rc = fiber.child;
+                while (rc) {
+                    var hit = routeHolding(rc, routeName, d + 1);
+                    if (hit) return hit;
+                    rc = rc.sibling;
+                }
+                return null;
+            }
 
             // Phase 1: Walk the entire tree, collect all pressable/input elements
             function walkFiber(fiber, depth, path) {
@@ -328,7 +344,10 @@ export async function pressElement(options: {
                 var name = getComponentName(fiber);
                 var props = fiber.memoizedProps;
 
-                if (isScreenHidden(name, props)) return;
+                if (isScreenHidden(name, props)) {
+                    if (searchTestID !== null && prunedRoute === null) prunedRoute = routeHolding(fiber, null, 0);
+                    return;
+                }
 
                 var isPressable = isPressableProps(props) || isSwitchFiber(fiber, props);
                 var isInput = !isPressable && props && (typeof props.onChangeText === 'function' || typeof props.onFocus === 'function');
@@ -646,6 +665,7 @@ export async function pressElement(options: {
             // Store host fibers and metadata globally for step 2, dispatch measureInWindow
             globalThis.__tapHostFibers = hostFibers;
             globalThis.__tapMeta = tapMeta;
+            globalThis.__tapPrunedRoute = prunedRoute;
             globalThis.__tapMeasurements = new Array(hostFibers.length).fill(null);
             globalThis.__tapSheetIdx = sheetIdxByHost;
             globalThis.__tapSheetMeasurements = new Array(sheetFibers.length).fill(null);
@@ -712,6 +732,8 @@ export async function pressElement(options: {
             var sheetMeasurements = globalThis.__tapSheetMeasurements || [];
             var viewportM = globalThis.__tapViewport;
             globalThis.__tapHostFibers = null;
+            var prunedRoute = globalThis.__tapPrunedRoute || null;
+            globalThis.__tapPrunedRoute = null;
             globalThis.__tapMeta = null;
             globalThis.__tapMeasurements = null;
             globalThis.__tapSheetIdx = null;
@@ -837,10 +859,12 @@ export async function pressElement(options: {
                         existsInTree: true
                     };
                 }
-                return {
+                var notFound = {
                     error: 'No pressable or focusable elements found matching: ' + criteria.join(', ') + '. The element is not present in the React tree on the current screen.',
                     existsInTree: false
                 };
+                if (prunedRoute) notFound.prunedRoute = prunedRoute;
+                return notFound;
             }
 
             if (targetIndex >= matches.length) {
