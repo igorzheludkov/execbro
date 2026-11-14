@@ -1,12 +1,33 @@
 // src/__tests__/unit/tap.test.ts
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
 import type { ConnectedApp } from "../../core/types.js";
-import {
-    type TapQuery,
-    type TapResult,
-    type TapStrategy,
-    type TapScreenshot,
-    type TapVerification,
+import type { TapQuery, TapResult, TapStrategy, TapScreenshot, TapVerification } from "../../pro/tap.js";
+
+// tap() falls back to a USB iPhone when the resolver cannot find a named
+// device. Without this mock a test passing an unknown `device` would run the
+// real pymobiledevice3 (resolveBinary finds ~/.local/bin on a dev machine),
+// and a hint matching an attached phone would capture it and tap it.
+jest.unstable_mockModule("../../core/iosPhysical.js", () => ({
+    PMD3_MISSING_ERROR: "",
+    DDI_HINT: "",
+    PMD3_HID_MIN_VERSION: "11.32.0",
+    IOS_HID_MIN_MAJOR: 27,
+    HID_SESSION_DEADLINE_MS: 15000,
+    PHYSICAL_CAPTURE_DEADLINE_MS: 10000,
+    listPhysicalIosDevices: async () => [],
+    resolvePhysicalIosDevice: async () => null,
+    capturePhysicalIosScreenshot: async () => ({ ok: false, error: "mocked" }),
+    physicalIosScreenshot: async () => ({ success: false, error: "mocked" }),
+    isPhysicalIosUdid: () => false,
+    withPhoneLock: <T>(_u: string, t: () => Promise<T>) => t(),
+    toHidPoint: () => ({ error: "mocked" }),
+    buildHidTapScript: () => "",
+    versionAtLeast: () => false,
+    resetPmd3VersionCache: () => undefined,
+    physicalIosTap: async () => ({ success: false, error: "mocked" }),
+}));
+
+const {
     buildQuery,
     getAvailableStrategies,
     hasProblematicUnicode,
@@ -16,7 +37,7 @@ import {
     buildVerificationExplanation,
     isTapTimeout,
     findOcrMatch,
-} from "../../pro/tap.js";
+} = await import("../../pro/tap.js");
 import type { OCRResult } from "../../core/ocr.js";
 
 describe("ConnectedApp type", () => {

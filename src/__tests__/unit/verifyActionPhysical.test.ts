@@ -32,6 +32,7 @@ jest.unstable_mockModule("../../core/iosPhysical.js", () => ({
     physicalIosTap: jest.fn(),
     resolvePhysicalIosDevice: jest.fn(),
     toHidPoint: jest.fn(),
+    IOS_HID_MIN_MAJOR: 27,
 }));
 
 const { captureScreenshot } = await import("../../pro/verifyAction.js");

@@ -1,5 +1,6 @@
 import type { ResolveResult } from "../core/deviceResolver.js";
 import {
+    IOS_HID_MIN_MAJOR,
     physicalIosScreenshot,
     physicalIosTap,
     resolvePhysicalIosDevice,
@@ -7,6 +8,7 @@ import {
     type PhysicalIosDevice,
 } from "../core/iosPhysical.js";
 import { isNearUniform } from "../core/blankFrame.js";
+import { connectedApps } from "../core/state.js";
 import { verifyAndCapture } from "./verifyAction.js";
 import {
     buildLongPressReport,
@@ -43,7 +45,14 @@ const PHYSICAL_UDID = /^[0-9A-F]{8}-[0-9A-F]{16}$|^[0-9a-f]{40}$/i;
 export async function outcomeHintFor(device?: string): Promise<string | undefined> {
     if (!device || !PHYSICAL_UDID.test(device)) return device;
     const phone = await resolvePhysicalIosDevice(device).catch(() => null);
-    return phone?.name ?? device;
+    if (!phone) return device;
+    // The outcome substring-matches names, and a phone is often just "iPhone":
+    // hand over the name only when an app with exactly that name runs off a
+    // simulator, or a simulator app's activity would be credited to the phone.
+    const onPhone = Array.from(connectedApps.values()).some(
+        (a) => a.platform === "ios" && !a.simulatorUdid && a.deviceInfo.deviceName === phone.name,
+    );
+    return onPhone ? phone.name : device;
 }
 
 /** A coordinate tap (or long press) on a USB iPhone running iOS 27+. */
@@ -51,6 +60,13 @@ export async function physicalTap(phone: PhysicalIosDevice, query: TapQuery, opt
     const fail = (reason: string, suggestion: string) =>
         ({ ...formatTapFailure({ query, error: reason, attempted: [{ strategy: "device-hid", reason }], suggestion, device: phone.name }), platform: "ios" });
 
+    // First, so an older phone is not sent through a capture or told to use x/y.
+    if (!(parseInt(phone.version, 10) >= IOS_HID_MIN_MAJOR)) {
+        return fail(
+            `tap on a physical iPhone needs iOS ${IOS_HID_MIN_MAJOR} or later; this device runs iOS ${phone.version}. Older iOS has no host touch injection. Use a simulator.`,
+            "Use a simulator, or update the phone to iOS 27.",
+        );
+    }
     if (query.x === undefined || query.y === undefined) {
         return fail(
             "A physical iPhone takes coordinate taps only. Call screenshot({ device }) and pass x/y from it; testID, text and component are not supported on a phone yet.",

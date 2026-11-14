@@ -72,7 +72,10 @@ export async function listPhysicalIosDevices(): Promise<PhysicalIosDevice[]> {
             version: r.ProductVersion ?? "?",
             productType: r.ProductType ?? "?",
         })).filter((d) => d.udid);
-        for (const d of devices) knownPhysicalUdids.add(d.udid);
+        for (const d of devices) {
+            knownPhysicalUdids.add(d.udid);
+            physicalIosVersions.set(d.udid, d.version);
+        }
         return devices;
     } catch {
         return [];
@@ -112,7 +115,14 @@ export async function capturePhysicalIosScreenshot(
     // back to the userspace tunnel (measured 3.4 s, and the one with upstream
     // hang reports). Shares the phone's queue so a capture never overlaps a tap.
     return withPhoneLock(udid, async () => {
-        const run = await runPmd3(bin!, ["developer", "dvt", "screenshot", "--native", outputPath], udid, PHYSICAL_CAPTURE_DEADLINE_MS);
+        // remotepairingd (behind --native) serves iOS 17+ only, and an explicit
+        // --native never falls back; iOS 15/16 (or an unknown version) keeps
+        // the plain usbmux capture spec §1 shipped with.
+        const major = parseInt(physicalIosVersions.get(udid) ?? "", 10);
+        const args = major >= 17
+            ? ["developer", "dvt", "screenshot", "--native", outputPath]
+            : ["developer", "dvt", "screenshot", "--udid", udid, outputPath];
+        const run = await runPmd3(bin!, args, udid, PHYSICAL_CAPTURE_DEADLINE_MS);
         if (run.ok) return { ok: true as const };
         if (run.missing) return { ok: false as const, error: PMD3_MISSING_ERROR };
         if (run.aborted) {
@@ -150,6 +160,7 @@ export async function physicalIosScreenshot(
 // ---------------------------------------------------------------------------
 
 const knownPhysicalUdids = new Set<string>();
+const physicalIosVersions = new Map<string, string>();
 
 /** True for any udid `listPhysicalIosDevices` has returned in this process. */
 export function isPhysicalIosUdid(udid: string): boolean {
@@ -265,7 +276,9 @@ async function pmd3Version(bin: string, udid: string): Promise<{ version: string
     const run = await runPmd3(bin, ["version"], udid, PMD3_SHORT_DEADLINE_MS);
     if (!run.ok) return run.missing ? { missing: true } : { unknown: run.stderr || run.message };
     const line = run.stdout.split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
-    pmd3VersionCache = line;
+    // Cached only once it passes: a refused version is re-read, so the
+    // `pipx upgrade` the refusal asks for takes effect without a restart.
+    if (versionAtLeast(line, PMD3_HID_MIN_VERSION)) pmd3VersionCache = line;
     return { version: line };
 }
 

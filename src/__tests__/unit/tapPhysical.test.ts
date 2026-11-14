@@ -9,8 +9,9 @@ import sharp from "sharp";
  */
 
 const PHONE_UDID = "00008030-001D69C00192802E";
-const USBMUX = JSON.stringify([
-    { DeviceName: "iPhone", Identifier: PHONE_UDID, ProductType: "iPhone12,1", ProductVersion: "27.2.1" },
+let phoneVersion = "27.2.1";
+const usbmux = () => JSON.stringify([
+    { DeviceName: "iPhone", Identifier: PHONE_UDID, ProductType: "iPhone12,1", ProductVersion: phoneVersion },
 ]);
 
 const width = 828;
@@ -30,7 +31,7 @@ const scripts: string[] = [];
 jest.unstable_mockModule("../../core/exec.js", () => ({
     execFileAsync: async (file: string, args: string[]) => {
         calls.push({ file, args });
-        if (args[0] === "usbmux") return { stdout: USBMUX, stderr: "" };
+        if (args[0] === "usbmux") return { stdout: usbmux(), stderr: "" };
         if (args[0] === "version") return { stdout: "11.32.0\n", stderr: "" };
         if (args.includes("screenshot")) {
             if (screenshotError) throw Object.assign(new Error("Command failed"), { stderr: screenshotError });
@@ -72,10 +73,13 @@ jest.unstable_mockModule("../../pro/verifyAction.js", () => ({
 const { tap } = await import("../../pro/tap.js");
 const { outcomeHintFor } = await import("../../pro/physicalTap.js");
 const { toHidPoint } = await import("../../core/iosPhysical.js");
+const { connectedApps } = await import("../../core/state.js");
 
 const usbmuxCalls = () => calls.filter((c) => c.args[0] === "usbmux").length;
 
 beforeEach(() => {
+    phoneVersion = "27.2.1";
+    connectedApps.clear();
     frame = PICTURE;
     screenshotError = null;
     calls.length = 0;
@@ -140,6 +144,14 @@ describe("tap on a physical iPhone", () => {
         expect(scripts).toHaveLength(0);
     });
 
+    it("refuses a phone below iOS 27 before capturing anything", async () => {
+        phoneVersion = "18.6.2";
+        const r = await tap({ testID: "login-btn", device: PHONE_UDID });
+        expect(r.success).toBe(false);
+        expect(r.error).toMatch(/iOS 27/);
+        expect(calls.some((c) => c.args.includes("screenshot"))).toBe(false);
+    });
+
     it("surfaces the capture's own error", async () => {
         screenshotError = "ERROR InvalidServiceError 17A400";
         const r = await tap({ x: 697, y: 817, device: PHONE_UDID });
@@ -149,9 +161,18 @@ describe("tap on a physical iPhone", () => {
     });
 });
 
+function app(id: string, deviceName: string, simulatorUdid?: string) {
+    connectedApps.set(id, { deviceInfo: { deviceName }, platform: "ios", ...(simulatorUdid && { simulatorUdid }) } as never);
+}
+
 describe("outcomeHintFor", () => {
-    it("maps a phone UDID to its name", async () => {
+    it("maps a phone UDID to the RN app running on that phone", async () => {
+        app("phone-app", "iPhone");
         await expect(outcomeHintFor(PHONE_UDID)).resolves.toBe("iPhone");
+    });
+    it("keeps the UDID when the only matching app is a simulator's, so its activity is not credited to the phone", async () => {
+        app("sim-app", "iPhone 17 Pro", "F93612A3-0042-4BDC-855F-8CAB1BDD76C6");
+        await expect(outcomeHintFor(PHONE_UDID)).resolves.toBe(PHONE_UDID);
     });
     it("leaves a simulator UUID and a plain name alone without asking pymobiledevice3", async () => {
         await expect(outcomeHintFor("F93612A3-0042-4BDC-855F-8CAB1BDD76C6")).resolves.toBe("F93612A3-0042-4BDC-855F-8CAB1BDD76C6");

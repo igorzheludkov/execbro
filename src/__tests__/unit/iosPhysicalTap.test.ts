@@ -24,6 +24,7 @@ const {
     versionAtLeast,
     physicalIosTap,
     capturePhysicalIosScreenshot,
+    listPhysicalIosDevices,
     resetPmd3VersionCache,
     PMD3_HID_MIN_VERSION,
     PMD3_MISSING_ERROR,
@@ -60,7 +61,7 @@ function sessionCalls() {
 }
 
 beforeEach(() => {
-    phone = { ...phone, udid: `00008030-TEST${++testIndex}` };
+    phone = { ...phone, udid: `00008030-TEST${++testIndex}`, version: "27.2.1" };
     resetPmd3VersionCache();
     execAsyncMock.mockReset();
     pmd3Version = "11.32.0";
@@ -69,6 +70,9 @@ beforeEach(() => {
     mounterList = async () => ({ stdout: "[]", stderr: "" });
     execAsyncMock.mockImplementation(async (_file, args, opts = {}) => {
         if (args[0] === "version") return { stdout: `${pmd3Version}\n`, stderr: "" };
+        if (args[0] === "usbmux") {
+            return { stdout: JSON.stringify([{ DeviceName: phone.name, Identifier: phone.udid, ProductType: phone.productType, ProductVersion: phone.version }]), stderr: "" };
+        }
         if (args.includes("session")) return session(args, opts);
         if (args.includes("screenshot")) return screenshot(args, opts);
         if (args[0] === "mounter") return mounterList(args, opts);
@@ -223,7 +227,23 @@ describe("physicalIosTap", () => {
         expect(events).toEqual(["tap:start", "tap:end", "shot:start", "shot:end"]);
     });
 
+    it("re-reads the version after a refusal, so an upgrade takes effect without a restart", async () => {
+        pmd3Version = "11.10.3";
+        expect((await physicalIosTap(phone, { x: 1, y: 2 })).success).toBe(false);
+        pmd3Version = "11.32.0";
+        await expect(physicalIosTap(phone, { x: 1, y: 2 })).resolves.toEqual({ success: true });
+    });
+
+    it("captures an iOS 15/16 phone over plain usbmux, not --native (remotepairingd is iOS 17+)", async () => {
+        phone = { ...phone, version: "15.8.8" };
+        await listPhysicalIosDevices();
+        await capturePhysicalIosScreenshot(phone.udid, "/tmp/x.png");
+        const [, args] = execAsyncMock.mock.calls.find(([, a]) => a.includes("screenshot"))!;
+        expect(args).toEqual(["developer", "dvt", "screenshot", "--udid", phone.udid, "/tmp/x.png"]);
+    });
+
     it("captures over --native with the udid in the env", async () => {
+        await listPhysicalIosDevices();
         await capturePhysicalIosScreenshot(phone.udid, "/tmp/x.png");
         const [, args, opts] = execAsyncMock.mock.calls.find(([, a]) => a.includes("screenshot"))!;
         expect(args).toEqual(["developer", "dvt", "screenshot", "--native", "/tmp/x.png"]);
