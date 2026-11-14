@@ -253,7 +253,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 - `inspect_at_point`: Layout + PROPS at coordinates. Pure JS hit test — no overlay flicker. Returns FRAME PER ANCESTOR (position/size in the shared screen space) plus full props (handlers as `[Function]`, refs, testID, custom props). Best for layout measurements, props inspection, or rapid/repeated calls.
 
 **Device Management:**
-- `list_devices`: Find available simulators, emulators, and physical devices in one call. Physical iPhones/iPads are listed in their own section, labelled screenshot-only — simctl cannot see them at all, so they need a separate usbmux probe
+- `list_devices`: Find available simulators, emulators, and physical devices in one call. Physical iPhones/iPads are listed in their own section, labelled screenshot plus x/y tap on iOS 27+ — simctl cannot see them at all, so they need a separate usbmux probe
 - `ios_boot_simulator`: Boot an iOS simulator by UDID
 - `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name
 - `electron_launch_app`: Start an Electron project from its source folder with the CDP port open and connect its windows as chromium targets. Zero-config: no `appendSwitch` line needed in the app

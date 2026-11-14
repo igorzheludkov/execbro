@@ -31,8 +31,8 @@ const guides: Guide[] = [
 
 ## If No App Running
 - list_devices — iOS simulators, Android emulators, and physical devices in one call. A USB-attached
-  iPhone/iPad appears under "iOS physical" and is screenshot-only: screenshot reaches it, every
-  interaction tool does not
+  iPhone/iPad appears under "iOS physical": screenshot reaches it, and on iOS 27+ so does tap by
+  x/y; every other interaction tool does not
 - ios_boot_simulator — boot an iOS simulator if needed
 - ios_launch_app / android_launch_app — launch the app
 - ios_terminate_app — kill an app that is in a bad state before relaunching
@@ -193,8 +193,8 @@ Pass the phone's UDID from list_devices as device (its name is often just "iPhon
 simulators first) and take coordinates from screenshot({ device }). testID/text/component, swipe,
 input_text and press_key do not reach a phone yet. Prerequisites: pymobiledevice3 11.32.0+,
 Developer Mode on, the phone unlocked (a sleeping screen is refused), and the Xcode 27 disk image
-mounted: an open Xcode 26 remounts its own image, so install Xcode 27 or quit Xcode first. Each tap
-takes about 3 s. While a tap runs the status bar may show a remote-control indicator. A tap that
+mounted: an open Xcode 26 remounts its own image, so install Xcode 27 or quit Xcode first. Portrait
+and landscape both work. Each tap takes about 6 s (about 9 s with verification). While a tap runs the status bar may show a remote-control indicator. A tap that
 times out may or may not have landed: screenshot before retrying. Below iOS 27 nothing taps a
 phone; do not report it as unresponsive when the gesture was never delivered.
 

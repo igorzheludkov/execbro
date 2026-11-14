@@ -155,8 +155,8 @@ export function registerDeviceTools(server: McpServer): void {
             }
 
             // Physical iPhones/iPads are invisible to simctl, so they need their
-            // own probe. Listed as capture-only on purpose: ios_screenshot reaches
-            // them, every interaction tool does not.
+            // own probe. screenshot reaches them, and tap by x/y on iOS 27+;
+            // every other interaction tool does not.
             const physicalIos = await listPhysicalIosDevices();
             if (physicalIos.length > 0) {
                 lines.push("\niOS physical (screenshot; tap by x/y on iOS 27+):");
