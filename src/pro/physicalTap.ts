@@ -7,7 +7,7 @@ import {
     toHidPoint,
     type PhysicalIosDevice,
 } from "../core/iosPhysical.js";
-import { isNearUniform } from "../core/blankFrame.js";
+import sharp from "sharp";
 import { connectedApps } from "../core/state.js";
 import { verifyAndCapture } from "./verifyAction.js";
 import {
@@ -44,15 +44,30 @@ const PHYSICAL_UDID = /^[0-9A-F]{8}-[0-9A-F]{16}$|^[0-9a-f]{40}$/i;
  */
 export async function outcomeHintFor(device?: string): Promise<string | undefined> {
     if (!device || !PHYSICAL_UDID.test(device)) return device;
+    // No RN app off a simulator means nothing to map to: skip the USB listing the tap is about to run anyway.
+    const offSimulator = Array.from(connectedApps.values()).filter((a) => a.platform === "ios" && !a.simulatorUdid);
+    if (offSimulator.length === 0) return device;
     const phone = await resolvePhysicalIosDevice(device).catch(() => null);
     if (!phone) return device;
     // The outcome substring-matches names, and a phone is often just "iPhone":
     // hand over the name only when an app with exactly that name runs off a
     // simulator, or a simulator app's activity would be credited to the phone.
-    const onPhone = Array.from(connectedApps.values()).some(
-        (a) => a.platform === "ios" && !a.simulatorUdid && a.deviceInfo.deviceName === phone.name,
-    );
+    const onPhone = offSimulator.some((a) => a.deviceInfo.deviceName === phone.name);
     return onPhone ? phone.name : device;
+}
+
+/**
+ * A sleeping phone captures solid black, status bar included (measured
+ * 2026-11-14). A lit screen always paints something somewhere, so a white page
+ * or a dark-mode screen with an empty middle is not mistaken for it.
+ */
+async function isScreenOff(png: Buffer): Promise<boolean> {
+    try {
+        const { channels } = await sharp(png).stats();
+        return channels.slice(0, 3).every((c) => c.stdev < 2 && c.mean < 16);
+    } catch {
+        return false;
+    }
 }
 
 /** A coordinate tap (or long press) on a USB iPhone running iOS 27+. */
@@ -82,7 +97,7 @@ export async function physicalTap(phone: PhysicalIosDevice, query: TapQuery, opt
     }
     // Measured 2026-11-14: a session on a sleeping phone exits 0, wakes it and
     // the touch lands on the lock screen, which would read as a success.
-    if (await isNearUniform(before.data)) {
+    if (await isScreenOff(before.data)) {
         return fail(
             "The phone's screen is off. A tap now wakes it and lands on the lock screen. Unlock the phone (no passcode: swipe up from the bottom edge) and retry.",
             "Unlock the phone, then retry the tap.",
@@ -90,7 +105,9 @@ export async function physicalTap(phone: PhysicalIosDevice, query: TapQuery, opt
     }
     const frame = { width: before.originalWidth || 0, height: before.originalHeight || 0, scaleFactor: before.scaleFactor || 1 };
     const hid = toHidPoint(query.x, query.y, frame);
-    if ("error" in hid) return fail(hid.error, "Take a screenshot and use coordinates from it.");
+    if ("error" in hid) {
+        return fail(hid.error, frame.width > frame.height ? "Rotate the phone to portrait, then retry." : "Take a screenshot and use coordinates from it.");
+    }
 
     const sent = await physicalIosTap(phone, hid, options.duration);
     if (!sent.success) return fail(sent.error, "Take a screenshot to see whether the touch landed before retrying.");

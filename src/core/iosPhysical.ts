@@ -7,9 +7,6 @@ import { createSerialQueue, type SerialQueue } from "./serialQueue.js";
 import { defaultScreenshotPath, finalizeScreenshotFile } from "./ios.js";
 import type { iOSResult } from "./ios.js";
 
-// pymobiledevice3 talks to the phone over usbmux; every call re-negotiates the
-// lockdown session, so these are slower than a simctl call, not comparable.
-const PMD3_TIMEOUT = 30000;
 
 export interface PhysicalIosDevice {
     udid: string;
@@ -39,6 +36,9 @@ export const IOS_HID_MIN_MAJOR = 27;
 export const HID_SESSION_DEADLINE_MS = 15000;
 export const PHYSICAL_CAPTURE_DEADLINE_MS = 10000;
 const PMD3_SHORT_DEADLINE_MS = 5000;
+const PMD3_LIST_DEADLINE_MS = 10000;
+/** After a kill, how long the process gets to close its pipes before the phone's queue moves on without it. */
+const KILL_GRACE_MS = 1000;
 
 // pipx installs into ~/.local/bin, which a GUI-launched MCP server often does
 // not have on PATH. Resolving once and caching keeps the fallback off the hot
@@ -63,9 +63,12 @@ function resolveBinary(): string | null {
 export async function listPhysicalIosDevices(): Promise<PhysicalIosDevice[]> {
     const bin = resolveBinary();
     if (!bin) return [];
+    // Every phone tap lists first, so a hung listing must not cost the 30 s
+    // general timeout, and needs the same SIGKILL escalation as the session.
+    const run = await runPmd3(bin, ["usbmux", "list"], undefined, PMD3_LIST_DEADLINE_MS);
+    if (!run.ok) return [];
     try {
-        const { stdout } = await execFileAsync(bin, ["usbmux", "list"], { timeout: PMD3_TIMEOUT });
-        const rows = JSON.parse(stdout) as Array<Record<string, string>>;
+        const rows = JSON.parse(run.stdout) as Array<Record<string, string>>;
         const devices = rows.map((r) => ({
             udid: r.Identifier ?? r.UniqueDeviceID ?? "",
             name: r.DeviceName ?? "iPhone",
@@ -90,8 +93,10 @@ export async function listPhysicalIosDevices(): Promise<PhysicalIosDevice[]> {
  * one kind of device does not silently mean something else for the other.
  */
 export async function resolvePhysicalIosDevice(hint: string): Promise<PhysicalIosDevice | null> {
+    const h = hint.trim().toLowerCase();
+    // A blank hint would substring-match any name with a space in it.
+    if (!h) return null;
     const devices = await listPhysicalIosDevices();
-    const h = hint.toLowerCase();
     return (
         devices.find((d) => d.udid.toLowerCase() === h) ??
         devices.find((d) => d.name.toLowerCase().includes(h)) ??
@@ -192,14 +197,26 @@ type Pmd3Run =
  * execFileAsync escalates SIGTERM to SIGKILL, and a RemoteXPC read blocked
  * in the kernel is the case SIGTERM may not end.
  */
-async function runPmd3(bin: string, args: string[], udid: string, deadlineMs: number): Promise<Pmd3Run> {
+async function runPmd3(bin: string, args: string[], udid: string | undefined, deadlineMs: number): Promise<Pmd3Run> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), deadlineMs);
+    // execFile settles only once stdout and stderr close, and a grandchild that
+    // inherited them keeps them open after the kill; this frees the phone's queue anyway.
+    const abandoned = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener(
+            "abort",
+            () => setTimeout(() => reject(new Error("killed, but its output pipes stayed open")), KILL_GRACE_MS),
+            { once: true },
+        );
+    });
     try {
-        const { stdout } = await execFileAsync(bin, args, {
-            signal: controller.signal,
-            env: { ...process.env, PYMOBILEDEVICE3_UDID: udid },
-        });
+        const { stdout } = await Promise.race([
+            execFileAsync(bin, args, {
+                signal: controller.signal,
+                env: udid ? { ...process.env, PYMOBILEDEVICE3_UDID: udid } : process.env,
+            }),
+            abandoned,
+        ]);
         return { ok: true, stdout };
     } catch (error) {
         return {
@@ -338,6 +355,16 @@ export async function physicalIosTap(
             }
             if (/Failed to start service/i.test(run.stderr)) {
                 const build = await mountedImageBuild(bin, device.udid);
+                // Image builds lead with the Xcode major (27B52); Xcode 26's is 17A400.
+                if (build && parseInt(build, 10) >= IOS_HID_MIN_MAJOR) {
+                    return {
+                        success: false as const,
+                        error:
+                            `The phone's touch service did not start, though the mounted developer disk image (build ${build}) carries it. ` +
+                            "Check that Developer Mode is on and the phone is unlocked, then unplug and replug it. " +
+                            `pymobiledevice3 said: ${run.stderr}`,
+                    };
+                }
                 return {
                     success: false as const,
                     error:

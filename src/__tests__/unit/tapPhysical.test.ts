@@ -21,6 +21,16 @@ const PICTURE = await sharp({ create: { width, height, channels: 3, background: 
     .composite([{ input: await sharp({ create: { width, height: height / 2, channels: 3, background: "#fff" } }).png().toBuffer(), top: 0, left: 0 }])
     .png()
     .toBuffer();
+// A lit screen with nothing in its middle: white page, and dark mode with only the status bar painted.
+const WHITE = await sharp({ create: { width, height, channels: 3, background: "#fff" } }).png().toBuffer();
+const DARK_WITH_BAR = await sharp({ create: { width, height, channels: 3, background: "#000" } })
+    .composite([{ input: await sharp({ create: { width, height: 90, channels: 3, background: "#fff" } }).png().toBuffer(), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+const LANDSCAPE = await sharp({ create: { width: height, height: width, channels: 3, background: "#000" } })
+    .composite([{ input: await sharp({ create: { width: height / 2, height: width, channels: 3, background: "#fff" } }).png().toBuffer(), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
 const BLANK = await sharp({ create: { width, height, channels: 3, background: "#000" } }).png().toBuffer();
 
 let frame = PICTURE;
@@ -144,6 +154,29 @@ describe("tap on a physical iPhone", () => {
         expect(scripts).toHaveLength(0);
     });
 
+    it("taps a lit screen whose middle is one flat colour", async () => {
+        for (const f of [WHITE, DARK_WITH_BAR]) {
+            frame = f;
+            const r = await tap({ x: 400, y: 800, device: PHONE_UDID });
+            expect(r.success).toBe(true);
+        }
+        expect(scripts).toHaveLength(2);
+    });
+
+    it("tells a landscape caller to rotate, not to take another screenshot", async () => {
+        frame = LANDSCAPE;
+        const r = await tap({ x: 400, y: 400, device: PHONE_UDID });
+        expect(r.success).toBe(false);
+        expect(r.suggestion).toMatch(/portrait/);
+        expect(scripts).toHaveLength(0);
+    });
+
+    it("keeps the resolver error for a blank device hint", async () => {
+        const r = await tap({ x: 697, y: 817, device: "  " });
+        expect(r.error).toBe("No simulator or emulator matches");
+        expect(usbmuxCalls()).toBe(0);
+    });
+
     it("refuses a phone below iOS 27 before capturing anything", async () => {
         phoneVersion = "18.6.2";
         const r = await tap({ testID: "login-btn", device: PHONE_UDID });
@@ -173,6 +206,11 @@ describe("outcomeHintFor", () => {
     it("keeps the UDID when the only matching app is a simulator's, so its activity is not credited to the phone", async () => {
         app("sim-app", "iPhone 17 Pro", "F93612A3-0042-4BDC-855F-8CAB1BDD76C6");
         await expect(outcomeHintFor(PHONE_UDID)).resolves.toBe(PHONE_UDID);
+    });
+    it("does not list USB devices when no app runs off a simulator (the tap lists them already)", async () => {
+        app("sim-app", "iPhone 17 Pro", "F93612A3-0042-4BDC-855F-8CAB1BDD76C6");
+        await expect(outcomeHintFor(PHONE_UDID)).resolves.toBe(PHONE_UDID);
+        expect(usbmuxCalls()).toBe(0);
     });
     it("leaves a simulator UUID and a plain name alone without asking pymobiledevice3", async () => {
         await expect(outcomeHintFor("F93612A3-0042-4BDC-855F-8CAB1BDD76C6")).resolves.toBe("F93612A3-0042-4BDC-855F-8CAB1BDD76C6");

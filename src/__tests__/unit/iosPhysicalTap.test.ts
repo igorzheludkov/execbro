@@ -25,6 +25,7 @@ const {
     physicalIosTap,
     capturePhysicalIosScreenshot,
     listPhysicalIosDevices,
+    resolvePhysicalIosDevice,
     resetPmd3VersionCache,
     PMD3_HID_MIN_VERSION,
     PMD3_MISSING_ERROR,
@@ -48,6 +49,7 @@ let pmd3Version = "11.32.0";
 let session: Handler = async () => ({ stdout: "", stderr: "" });
 let screenshot: Handler = async () => ({ stdout: "", stderr: "" });
 let mounterList: Handler = async () => ({ stdout: "[]", stderr: "" });
+let usbmux: Handler | null = null;
 
 function abortable(opts: ExecOpts, ms?: number): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
@@ -68,9 +70,11 @@ beforeEach(() => {
     session = async () => ({ stdout: "", stderr: "" });
     screenshot = async () => ({ stdout: "", stderr: "" });
     mounterList = async () => ({ stdout: "[]", stderr: "" });
+    usbmux = null;
     execAsyncMock.mockImplementation(async (_file, args, opts = {}) => {
         if (args[0] === "version") return { stdout: `${pmd3Version}\n`, stderr: "" };
         if (args[0] === "usbmux") {
+            if (usbmux) return usbmux(args, opts);
             return { stdout: JSON.stringify([{ DeviceName: phone.name, Identifier: phone.udid, ProductType: phone.productType, ProductVersion: phone.version }]), stderr: "" };
         }
         if (args.includes("session")) return session(args, opts);
@@ -171,6 +175,27 @@ describe("physicalIosTap", () => {
         expect(error).toMatch(/umount-personalized/);
     });
 
+    it("says what to check when the Xcode 27 image is already mounted", async () => {
+        session = async () => {
+            throw Object.assign(new Error("Command failed"), { stderr: "ERROR Failed to start service. Possible reasons are: ..." });
+        };
+        mounterList = async () => ({ stdout: '[{"PersonalizedImageVersionInfo": {"ProductBuildVersion": "27B52"}}]', stderr: "" });
+        const error = ((await physicalIosTap(phone, { x: 1, y: 2 })) as { error: string }).error;
+        expect(error).toMatch(/27B52/);
+        expect(error).not.toMatch(/umount-personalized/);
+        expect(error).toMatch(/Developer Mode/);
+        expect(error).toMatch(/Failed to start service/);
+    });
+
+    it("frees the phone when a killed session's pipes stay open (a grandchild holding them)", async () => {
+        useFakeTimers();
+        session = () => new Promise(() => undefined);
+        const pending = physicalIosTap(phone, { x: 1, y: 2 });
+        await untilSessions(1);
+        await jest.advanceTimersByTimeAsync(16000);
+        await expect(pending).resolves.toEqual({ success: false, error: expect.stringMatching(/did not answer within 15 s/) });
+    });
+
     it("kills a hung session at 15 s and says the touch may have landed", async () => {
         useFakeTimers();
         session = async (_a, opts) => abortable(opts);
@@ -262,5 +287,24 @@ describe("physicalIosTap", () => {
         await physicalIosTap(phone, { x: 1, y: 2 });
         expect(paths).toHaveLength(2);
         expect(paths.every((p) => !existsSync(p))).toBe(true);
+    });
+});
+
+describe("listPhysicalIosDevices", () => {
+    it("gives up on a hung usbmux listing after 10 s instead of 30", async () => {
+        useFakeTimers();
+        usbmux = async (_a, opts) => abortable(opts);
+        const pending = listPhysicalIosDevices();
+        await jest.advanceTimersByTimeAsync(11000);
+        await expect(pending).resolves.toEqual([]);
+    });
+});
+
+describe("resolvePhysicalIosDevice", () => {
+    it("matches nothing for a blank hint, without listing", async () => {
+        phone = { ...phone, name: "My iPhone" };
+        await expect(resolvePhysicalIosDevice(" ")).resolves.toBeNull();
+        await expect(resolvePhysicalIosDevice("")).resolves.toBeNull();
+        expect(execAsyncMock).not.toHaveBeenCalled();
     });
 });
