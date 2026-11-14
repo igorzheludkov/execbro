@@ -86,7 +86,7 @@ async function capturePhysicalDevice(
         ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${deliveredWidth}x${deliveredHeight} px (downscaled ${(1 / result.scaleFactor!).toFixed(3)}× to fit API limits).`
         : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
     infoText += `\n📸 Captured from: ${phys.name} — physical device, iOS ${phys.version} (${phys.udid})`;
-    infoText += `\n⚠️ Physical device: capture only. tap/swipe/input_text drive simulators via simctl and cannot reach this device — there is no OS-level touch injection here (see docs/devtools-core/specs/2026-09-09-ios-physical-device-interaction.md).`;
+    infoText += `\n👆 Physical device: tap({ x, y, device: "${phys.udid}" }) works on iOS 27+ with coordinates from this screenshot (needs the Xcode 27 disk image mounted). swipe and input_text do not reach a phone yet.`;
     infoText += `\nℹ️ No pressable enrichment: the accessibility probe and screen-state lookup are simulator-only.`;
 
     imageBuffer.add({
@@ -745,7 +745,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "WHEN TO USE: Visual verification, before/after comparison, or the starting point for tapping by coordinates.\n" +
                 "WORKFLOW: screenshot -> pick a pressable -> tap(text=...) if exact and unique, else tap(x, y) -> screenshot to verify.\n" +
                 "COORDINATES: image pixels are the coordinates tap(x, y) takes, on every platform. Never scale them yourself.\n" +
-                "PHYSICAL iOS: pass the UDID or name from list_devices. Capture only: no pressables, no tap/swipe/input_text.\n" +
+                "PHYSICAL iOS: pass the UDID from list_devices. No pressables; tap by x/y works on iOS 27+, swipe/input_text do not.\n" +
                 "LIMITATIONS: a hidden or minimised chromium window cannot be captured: the call fails at once and says so.\n" +
                 "GOOD: screenshot(); screenshot({ device: \"FluentTalk\" })\n" +
                 "BAD: a made-up device name or UDID, run list_devices first.\n" +

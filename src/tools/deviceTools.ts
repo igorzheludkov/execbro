@@ -159,7 +159,7 @@ export function registerDeviceTools(server: McpServer): void {
             // them, every interaction tool does not.
             const physicalIos = await listPhysicalIosDevices();
             if (physicalIos.length > 0) {
-                lines.push("\niOS physical (screenshot only — no tap/swipe/input_text):");
+                lines.push("\niOS physical (screenshot; tap by x/y on iOS 27+):");
                 for (const d of physicalIos) {
                     lines.push(`  ${d.name} — iOS ${d.version} (${d.productType}) — UDID: ${d.udid}`);
                 }

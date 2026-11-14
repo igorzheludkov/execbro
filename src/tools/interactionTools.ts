@@ -153,6 +153,7 @@ export function registerInteractionTools(server: McpServer): void {
                         "(b) an Android adb serial like 'emulator-5554', " +
                         "(c) the iOS simulator or Android emulator/device name (substring match), or " +
                         "(d) a connected RN app's deviceName (substring match against get_apps output). " +
+                        "(e) a USB iPhone's UDID from list_devices: iOS 27+, x/y taps only (needs pymobiledevice3 and the Xcode 27 disk image). " +
                         "Omit when exactly one device is available. Call list_devices to enumerate."
                     ),
                 screenshot: z
@@ -1102,7 +1103,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "Press a keyboard key or shortcut in the focused element: Enter, Escape, Tab, arrows, Backspace, or a combo like Shift+Tab / Meta+K.\n" +
                 "PURPOSE: Keys that are not text: submit with Enter, close a dialog with Escape, move focus with Tab, walk a list with arrows, delete with Backspace.\n" +
                 "WHEN TO USE: After input_text, or on any focused element. Pass testID or text to focus a target first; otherwise the key goes to whatever has focus. For typing text use input_text.\n" +
-                "PLATFORMS: chromium (Electron / Chrome) sends real key events through CDP and reports the focused element before and after. Android sends adb keyevents (no modifier combos). iOS simulator sends HID keys through AXe or IDB (combos need AXe); a physical iPhone is not supported.\n" +
+                "PLATFORMS: chromium (Electron / Chrome) sends real key events through CDP and reports the focused element before and after. Android sends adb keyevents (no modifier combos). iOS simulator sends HID keys through AXe or IDB (combos need AXe); keys are not built for a physical iPhone yet.\n" +
                 "WORKFLOW: input_text({ testID, text }) -> press_key({ key: \"Enter\" }).\n" +
                 "GOOD: press_key({ key: \"Backspace\", repeat: 3 })\n" +
                 "GOOD: press_key({ key: \"Meta+K\", device: \"FluentTalk\" })\n" +
@@ -1135,7 +1136,7 @@ export function registerInteractionTools(server: McpServer): void {
             const resolved = await resolveDeviceTarget(device);
             if (!resolved.ok) {
                 if (device && (await resolvePhysicalIosDevice(device).catch(() => null))) {
-                    return fail("press_key cannot drive a physical iPhone: iOS exposes no key injection below iOS 17, the same reason tap does not work there. Use a simulator.");
+                    return fail("press_key does not reach a physical iPhone yet (tap by x/y does, on iOS 27+). Use a simulator for keys.");
                 }
                 return fail(formatResolverError(resolved.error));
             }

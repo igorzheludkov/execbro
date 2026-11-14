@@ -169,7 +169,7 @@ size in a note when it applies.
 
 ## Key Tools
 - get_screen_state: route + overlays + every element, screenshot-free (start here)
-- screenshot: visual capture on any platform (iOS simulator, USB-attached iPhone/iPad, Android, chromium). A physical iPhone is capture only, no pressable list. ios_screenshot / android_screenshot are legacy per-platform aliases, use screenshot
+- screenshot: visual capture on any platform (iOS simulator, USB-attached iPhone/iPad, Android, chromium). A physical iPhone gets no pressable list; tap it by x/y on iOS 27+. ios_screenshot / android_screenshot are legacy per-platform aliases, use screenshot
 - tap: also returns a post-tap screenshot by default (no separate screenshot call needed after tapping)
 - inspect_at_point: frames per ancestor + props + source file:line (no overlay, fast)
 - measure: geometry for one named component
@@ -188,10 +188,15 @@ iOS interaction tools (tap, ios_button) require a UI driver:
 - Alternative: IDB — brew install idb-companion (set IOS_DRIVER=idb in MCP server env to use it)
 Without a UI driver installed, these tools will fail.
 
-Physical iOS devices: nothing on this page reaches one. Both drivers target the Simulator, and iOS
-exposes no touch injection to a host below iOS 17. screenshot is the only tool that reaches a
-USB-attached iPhone/iPad — do not retry a failed tap against one, and do not report a physical
-device as unresponsive when the gesture was never delivered.
+Physical iOS devices (USB): tap by x/y works on iOS 27+, through pymobiledevice3 (not AXe/IDB).
+Pass the phone's UDID from list_devices as device (its name is often just "iPhone", which matches
+simulators first) and take coordinates from screenshot({ device }). testID/text/component, swipe,
+input_text and press_key do not reach a phone yet. Prerequisites: pymobiledevice3 11.32.0+,
+Developer Mode on, the phone unlocked (a sleeping screen is refused), and the Xcode 27 disk image
+mounted: an open Xcode 26 remounts its own image, so install Xcode 27 or quit Xcode first. Each tap
+takes about 3 s. While a tap runs the status bar may show a remote-control indicator. A tap that
+times out may or may not have landed: screenshot before retrying. Below iOS 27 nothing taps a
+phone; do not report it as unresponsive when the gesture was never delivered.
 
 ## Tapping Elements
 Use tap — it tries multiple strategies automatically and returns a post-tap screenshot:

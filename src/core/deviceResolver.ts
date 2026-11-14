@@ -238,7 +238,7 @@ async function resolveDeviceTargetInner(
                 else if (inv) {
                     return err(
                         "DEVICE_NOT_FOUND",
-                        `"${m.deviceInfo.deviceName}" is a physical iOS device, not a simulator. screenshot captures it; tap, swipe and input_text cannot drive it (no touch injection below iOS 17).`
+                        `"${m.deviceInfo.deviceName}" is a physical iOS device, not a simulator. screenshot captures it, and tap by x/y reaches it on iOS 27+ (pass its UDID); swipe and input_text cannot drive it.`
                     );
                 }
             }
