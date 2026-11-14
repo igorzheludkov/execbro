@@ -1,5 +1,6 @@
 import { imageBuffer } from "../core/state.js";
 import { iosScreenshot } from "../core/ios.js";
+import { isPhysicalIosUdid, physicalIosScreenshot } from "../core/iosPhysical.js";
 import { androidScreenshot } from "../core/android.js";
 import { compareScreenshots, type ScreenshotDiffResult } from "./screenshot-diff.js";
 import {
@@ -130,7 +131,10 @@ export async function captureScreenshot(
         // neither means "whichever device adb/simctl picks", which on a
         // multi-device setup is a coin flip — and a before/after diff taken
         // from the wrong screen reports a confident false "no visual change".
-        const result = platform === "ios" ? await iosScreenshot(undefined, udid, false) : await androidScreenshot(undefined, deviceId);
+        // A USB iPhone is not in simctl's world: its frames come from pymobiledevice3.
+        const result = platform === "ios"
+            ? (udid && isPhysicalIosUdid(udid) ? await physicalIosScreenshot(udid) : await iosScreenshot(undefined, udid, false))
+            : await androidScreenshot(undefined, deviceId);
         if (!result.success || !result.data) return null;
         return {
             buffer: result.data,
