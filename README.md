@@ -43,7 +43,7 @@ Linking is only for the dashboard: it attaches your installs to your account so 
 
 - **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
 - **Android Devices** - Screenshots, app install/launch, package management (via ADB)
-- **Physical iPhone/iPad over USB** - Screenshots on iOS 15+, and coordinate taps and long press on iOS 27+ (portrait and landscape), via [pymobiledevice3](https://github.com/doronz88/pymobiledevice3). See [physical iOS setup](docs/setup.md#physical-ios-device)
+- **Physical iPhone/iPad over USB** - Screenshots on iOS 15+, and coordinate taps and long press on iOS 27+ (portrait and landscape), via [pymobiledevice3](https://github.com/doronz88/pymobiledevice3). See [physical iOS setup](docs/setup.md#physical-ios-device) and [what was tested](#physical-iphoneipad-what-works-and-what-was-tested)
 - **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts coordinates from screenshots and layout tools unchanged. Returns post-tap screenshot and verifies visual change by default
 - **Unified Swipe** - Single `swipe` tool that auto-routes to iOS or Android based on the connected device. Takes coordinates in the same screen space as the layout tools and screenshots — no conversion — and returns a `verification.meaningful` signal so agents detect end-of-list, non-scrollable surfaces, and missed coordinates — and on a screen with no React Native connection it says it could not inspect rather than guessing. Essential for scrolling virtualized lists (FlatList/SectionList) where off-screen items aren't in the fiber tree
 - **Real Multi-Touch Pinch** *(Android emulator only — iOS in progress)* - A `pinch` tool that sends two genuine kernel touch contacts through the Android emulator's multi-touch bridge, so it zooms maps, galleries, WebViews, and native views alike — it works below the app, not through React Native. Returns the same `verification.meaningful` signal as `swipe`, and refuses on unsupported targets instead of faking a result
@@ -253,6 +253,25 @@ See the [Telemetry & Data Collection guide](docs/telemetry.md) for the full fiel
 | RN 0.73 - 0.75 | Bridge (Old Arch)     | Hermes       | ✓ Fully supported (best network capture via CDP) |
 | RN 0.70 - 0.72 | Bridge (Old Arch)     | Hermes / JSC | ✓ Supported                                      |
 | RN < 0.70      | Bridge                | JSC          | Not tested                                       |
+
+## Physical iPhone/iPad: what works and what was tested
+
+Physical device support is new and has been checked on very few devices. This table says exactly what was run on real hardware and what was not.
+
+| Capability                                                     | iOS        | Status                                               |
+| -------------------------------------------------------------- | ---------- | ---------------------------------------------------- |
+| `screenshot`                                                   | 15 - 16    | ✓ Tested (iPhone 6s Plus, iOS 15.8.8)                |
+| `screenshot`                                                   | 17 - 26    | Expected to work, not tested                         |
+| `screenshot`                                                   | 27+        | ✓ Tested (iPhone 11, iOS 27.2.1)                     |
+| `tap` by x/y, portrait                                         | 27+        | ✓ Tested (iPhone 11, iOS 27.2.1; 200 taps in a row, all landed) |
+| `tap` with `duration` (long press)                             | 27+        | ✓ Tested (opened a context menu)                     |
+| `tap` by x/y, landscape (both directions)                      | 27+        | ✓ Tested                                             |
+| `tap` refuses when the screen is off                           | 27+        | ✓ Tested                                             |
+| Tap outcome (route, text changes, network) for an RN app on the phone | 27+  | Not tested (no RN app was running on the phone)      |
+| `tap` of any kind                                              | 26 and below | ✗ Not possible: the phone itself refuses remote touch below iOS 27 |
+| `tap` by testID / text / component, `swipe`, `input_text`, `press_key` | any | ✗ Not supported yet                                |
+
+Not tested at all yet: iPads, any iPhone other than the two above, a Mac with Xcode 27 installed (testing used Xcode 26, quit, with the Xcode 27 disk image downloaded by `pymobiledevice3 mounter auto-mount`), and a phone connected over Wi-Fi instead of USB. Test setup: macOS 26, pymobiledevice3 11.32.0 and 11.33. If it works or fails on your device, please tell us with `send_feedback` or a [GitHub issue](https://github.com/igorzheludkov/execbro/issues). Setup steps: [physical iOS setup](docs/setup.md#physical-ios-device).
 
 ## Pricing
 

@@ -226,6 +226,8 @@ A USB-attached iPhone or iPad. What works depends on its iOS version:
 
 Not on a phone yet: `swipe`, `input_text`, and `tap` by `testID`, `text` or `component`.
 
+Which devices and iOS versions this was actually run on, and what has not been tested yet: [what works and what was tested](../README.md#physical-iphoneipad-what-works-and-what-was-tested).
+
 ### 1. Install pymobiledevice3
 
 There is no Homebrew formula for it, and plain `pip install` is refused on current macOS (`externally-managed-environment`), so install it as an isolated CLI tool:
