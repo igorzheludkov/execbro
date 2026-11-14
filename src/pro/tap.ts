@@ -18,6 +18,7 @@ import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js
 import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice, chromiumAppFor } from "../core/connection.js";
 import { chromiumTap } from "./chromiumTap.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
+import { physicalTargetFor, physicalTap } from "./physicalTap.js";
 import { notifyDriverMissing } from "../core/logbox.js";
 import { captureFailureArtifact, type ArtifactOutcome, type CaptureSignals } from "../core/failureArtifact.js";
 import { diagnoseStaleness, recordScreen, type StalenessVerdict } from "../core/screenStaleness.js";
@@ -2057,6 +2058,9 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // Native mode: bypass React Native connection, tap directly via ADB/simctl
     if (options.native && hasCoordinates) {
         const nativeResolved = await resolveDeviceTarget(options.device);
+        // A USB iPhone is not in simctl's world; the resolver either fails or falls back to its RN app.
+        const nativePhone = await physicalTargetFor(nativeResolved, options.device);
+        if (nativePhone) return physicalTap(nativePhone, query, options);
         if (!nativeResolved.ok) {
             return {
                 success: false,
@@ -2180,6 +2184,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // "no platform → probe OS for devices" branch. Returns a structured error
     // when ambiguous; surface that to the caller so they can disambiguate.
     const resolved = await resolveDeviceTarget(options.device);
+    const phone = await physicalTargetFor(resolved, options.device);
+    if (phone) return physicalTap(phone, query, options);
     if (!resolved.ok) {
         return {
             success: false,

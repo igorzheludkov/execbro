@@ -49,6 +49,7 @@ import { answerDialog, pickDialogApp } from "../core/chromiumDialogAnswer.js";
 import { androidKeyFor } from "../core/android.js";
 import { hidKeyFor, iosKeyCombo, iosKeyEvent, iosKeySequence } from "../core/ios.js";
 import { resolvePhysicalIosDevice } from "../core/iosPhysical.js";
+import { outcomeHintFor } from "../pro/physicalTap.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
@@ -201,7 +202,8 @@ export function registerInteractionTools(server: McpServer): void {
         async (args: any) => {
             // The outcome (route, changed text, requests, console errors during the tap)
             // needs a reading from before the gesture.
-            const outcomeHandle = await beginActionOutcome(args.device);
+            // A phone's UDID is not a key the outcome can find its RN app by; its name is.
+            const outcomeHandle = await beginActionOutcome(await outcomeHintFor(args.device));
             const result: TapResult = await tap({
                 text: args.text,
                 testID: args.testID,
