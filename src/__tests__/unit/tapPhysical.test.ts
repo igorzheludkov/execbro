@@ -35,6 +35,7 @@ const BLANK = await sharp({ create: { width, height, channels: 3, background: "#
 
 let frame = PICTURE;
 let screenshotError: string | null = null;
+let orientation: string | null = "rot270";
 const calls: Array<{ file: string; args: string[] }> = [];
 const scripts: string[] = [];
 
@@ -47,6 +48,10 @@ jest.unstable_mockModule("../../core/exec.js", () => ({
             if (screenshotError) throw Object.assign(new Error("Command failed"), { stderr: screenshotError });
             await sharp(frame).toFile(args[args.length - 1]);
             return { stdout: "", stderr: "" };
+        }
+        if (args.includes("get-display-info")) {
+            if (!orientation) throw Object.assign(new Error("Command failed"), { stderr: "no answer" });
+            return { stdout: JSON.stringify({ displays: [{ external: false, currentOrientation: orientation }] }), stderr: "" };
         }
         if (args.includes("session")) {
             scripts.push(readFileSync(args[args.indexOf("--script") + 1], "utf8"));
@@ -92,6 +97,7 @@ beforeEach(() => {
     connectedApps.clear();
     frame = PICTURE;
     screenshotError = null;
+    orientation = "rot270";
     calls.length = 0;
     scripts.length = 0;
     resolved = { ok: false, error: { code: "DEVICE_NOT_FOUND", message: "No simulator or emulator matches" } };
@@ -163,8 +169,20 @@ describe("tap on a physical iPhone", () => {
         expect(scripts).toHaveLength(2);
     });
 
-    it("tells a landscape caller to rotate, not to take another screenshot", async () => {
+    it("taps a landscape screen through the phone's reported rotation", async () => {
         frame = LANDSCAPE;
+        const r = await tap({ x: 1457, y: 224, device: PHONE_UDID });
+        expect(r).toMatchObject({ success: true, convertedTo: { x: 47806, y: 53284, unit: "hid" } });
+    });
+
+    it("does not ask for the rotation in portrait", async () => {
+        await tap({ x: 697, y: 817, device: PHONE_UDID });
+        expect(calls.some((c) => c.args.includes("get-display-info"))).toBe(false);
+    });
+
+    it("tells a landscape caller to rotate when the phone does not say which way it is turned", async () => {
+        frame = LANDSCAPE;
+        orientation = null;
         const r = await tap({ x: 400, y: 400, device: PHONE_UDID });
         expect(r.success).toBe(false);
         expect(r.suggestion).toMatch(/portrait/);

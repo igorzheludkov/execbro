@@ -28,6 +28,7 @@ jest.unstable_mockModule("../../core/exec.js", () => ({
 jest.unstable_mockModule("../../core/iosPhysical.js", () => ({
     isPhysicalIosUdid: (u: string) => u === PHONE,
     physicalIosScreenshot: physicalIosScreenshotMock,
+    physicalIosOrientation: jest.fn(),
     // Reached through tap.ts -> physicalTap.ts, never called here.
     physicalIosTap: jest.fn(),
     resolvePhysicalIosDevice: jest.fn(),

@@ -27,6 +27,7 @@ const {
     listPhysicalIosDevices,
     resolvePhysicalIosDevice,
     resetPmd3VersionCache,
+    physicalIosOrientation,
     PMD3_HID_MIN_VERSION,
     PMD3_MISSING_ERROR,
 } = await import("../../core/iosPhysical.js");
@@ -50,6 +51,7 @@ let session: Handler = async () => ({ stdout: "", stderr: "" });
 let screenshot: Handler = async () => ({ stdout: "", stderr: "" });
 let mounterList: Handler = async () => ({ stdout: "[]", stderr: "" });
 let usbmux: Handler | null = null;
+let displayInfo: Handler = async () => ({ stdout: "{}", stderr: "" });
 
 function abortable(opts: ExecOpts, ms?: number): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
@@ -71,6 +73,7 @@ beforeEach(() => {
     screenshot = async () => ({ stdout: "", stderr: "" });
     mounterList = async () => ({ stdout: "[]", stderr: "" });
     usbmux = null;
+    displayInfo = async () => ({ stdout: "{}", stderr: "" });
     execAsyncMock.mockImplementation(async (_file, args, opts = {}) => {
         if (args[0] === "version") return { stdout: `${pmd3Version}\n`, stderr: "" };
         if (args[0] === "usbmux") {
@@ -80,6 +83,7 @@ beforeEach(() => {
         if (args.includes("session")) return session(args, opts);
         if (args.includes("screenshot")) return screenshot(args, opts);
         if (args[0] === "mounter") return mounterList(args, opts);
+        if (args.includes("get-display-info")) return displayInfo(args, opts);
         return { stdout: "", stderr: "" };
     });
 });
@@ -101,8 +105,16 @@ describe("toHidPoint", () => {
         expect(toHidPoint(-1, 10, { width: 828, height: 1792, scaleFactor: 1 })).toHaveProperty("error");
         expect(toHidPoint(10, 1793, { width: 828, height: 1792, scaleFactor: 1 })).toHaveProperty("error");
     });
-    it("refuses a landscape frame", () => {
-        expect((toHidPoint(10, 10, { width: 1792, height: 828, scaleFactor: 1 }) as { error: string }).error).toMatch(/landscape/i);
+    const LANDSCAPE = { width: 1792, height: 828, scaleFactor: 1 };
+    it("maps a landscape point turned rot270 (measured 2026-11-14: the iCloud banner's close button)", () => {
+        expect(toHidPoint(1457, 224, LANDSCAPE, "rot270")).toEqual({ x: 47806, y: 53284 });
+    });
+    it("maps a landscape point turned rot90 the opposite way", () => {
+        expect(toHidPoint(1457, 224, LANDSCAPE, "rot90")).toEqual({ x: 17729, y: 12251 });
+    });
+    it("refuses a landscape frame whose rotation is unknown", () => {
+        expect((toHidPoint(10, 10, LANDSCAPE) as { error: string }).error).toMatch(/landscape/i);
+        expect((toHidPoint(10, 10, LANDSCAPE, "rot0") as { error: string }).error).toMatch(/landscape/i);
     });
 });
 
@@ -306,5 +318,21 @@ describe("resolvePhysicalIosDevice", () => {
         await expect(resolvePhysicalIosDevice(" ")).resolves.toBeNull();
         await expect(resolvePhysicalIosDevice("")).resolves.toBeNull();
         expect(execAsyncMock).not.toHaveBeenCalled();
+    });
+});
+
+describe("physicalIosOrientation", () => {
+    it("reads the built-in display's rotation over --native", async () => {
+        displayInfo = async () => ({ stdout: JSON.stringify({ displays: [{ external: false, currentOrientation: "rot270" }] }), stderr: "" });
+        await expect(physicalIosOrientation(phone.udid)).resolves.toBe("rot270");
+        const call = execAsyncMock.mock.calls.find(([, a]) => a.includes("get-display-info"))!;
+        expect(call[1]).toContain("--native");
+        expect(call[2]?.env?.PYMOBILEDEVICE3_UDID).toBe(phone.udid);
+    });
+    it("is null when the phone does not answer", async () => {
+        displayInfo = async () => {
+            throw Object.assign(new Error("Command failed"), { stderr: "boom" });
+        };
+        await expect(physicalIosOrientation(phone.udid)).resolves.toBeNull();
     });
 });

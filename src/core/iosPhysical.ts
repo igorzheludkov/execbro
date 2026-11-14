@@ -232,16 +232,38 @@ async function runPmd3(bin: string, args: string[], udid: string | undefined, de
 }
 
 /**
- * Delivered-screenshot px -> HID 0..65535 (0 = left/top), against the raw
- * frame of a physical capture: `hid = round(raw * 65535 / size)`.
+ * The built-in display's rotation (`rot0`, `rot90`, `rot180`, `rot270`), or
+ * null when the phone does not say. Only asked for a landscape capture: HID
+ * coordinates stay fixed to the upright panel while the capture turns with the UI.
+ */
+export async function physicalIosOrientation(udid: string): Promise<string | null> {
+    return withPhoneLock(udid, async () => {
+        const run = await runPmd3(resolveBinary()!, ["developer", "core-device", "get-display-info", "--native"], udid, PMD3_SHORT_DEADLINE_MS);
+        if (!run.ok) return null;
+        try {
+            const info = JSON.parse(run.stdout) as { displays?: Array<{ external?: boolean; currentOrientation?: string }> };
+            return info.displays?.find((d) => !d.external)?.currentOrientation ?? null;
+        } catch {
+            return null;
+        }
+    });
+}
+
+/**
+ * Delivered-screenshot px -> HID 0..65535 (0 = left/top of the upright
+ * panel), against the raw frame of a physical capture:
+ * `hid = round(raw * 65535 / size)`. A landscape frame is turned back to the
+ * panel by `orientation`; rot270 was measured on device (2026-11-14), rot90 is its mirror.
  */
 export function toHidPoint(
     x: number,
     y: number,
     frame: { width: number; height: number; scaleFactor: number },
+    orientation?: string | null,
 ): { x: number; y: number } | { error: string } {
-    if (frame.width > frame.height) {
-        return { error: "Landscape is not supported on a physical iPhone yet: the HID origin was only measured in portrait. Rotate the phone to portrait." };
+    const landscape = frame.width > frame.height;
+    if (landscape && orientation !== "rot90" && orientation !== "rot270") {
+        return { error: "The phone is in landscape, and it did not report which way it is turned, so a tap could land in the wrong place. Rotate the phone to portrait, or retry." };
     }
     const scale = frame.scaleFactor || 1;
     const rawX = x * scale;
@@ -251,9 +273,18 @@ export function toHidPoint(
         const h = Math.round(frame.height / scale);
         return { error: `(${x}, ${y}) is outside the screen (${w}x${h} in screenshot pixels). Take a screenshot and use coordinates from it.` };
     }
+    if (!landscape) {
+        return {
+            x: Math.round((rawX * 65535) / frame.width),
+            y: Math.round((rawY * 65535) / frame.height),
+        };
+    }
+    // The upright panel is the landscape frame turned on its side.
+    const panelX = orientation === "rot270" ? frame.height - rawY : rawY;
+    const panelY = orientation === "rot270" ? rawX : frame.width - rawX;
     return {
-        x: Math.round((rawX * 65535) / frame.width),
-        y: Math.round((rawY * 65535) / frame.height),
+        x: Math.round((panelX * 65535) / frame.height),
+        y: Math.round((panelY * 65535) / frame.width),
     };
 }
 

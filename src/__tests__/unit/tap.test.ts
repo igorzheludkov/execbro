@@ -18,6 +18,7 @@ jest.unstable_mockModule("../../core/iosPhysical.js", () => ({
     resolvePhysicalIosDevice: async () => null,
     capturePhysicalIosScreenshot: async () => ({ ok: false, error: "mocked" }),
     physicalIosScreenshot: async () => ({ success: false, error: "mocked" }),
+    physicalIosOrientation: async () => null,
     isPhysicalIosUdid: () => false,
     withPhoneLock: <T>(_u: string, t: () => Promise<T>) => t(),
     toHidPoint: () => ({ error: "mocked" }),

@@ -1,6 +1,7 @@
 import type { ResolveResult } from "../core/deviceResolver.js";
 import {
     IOS_HID_MIN_MAJOR,
+    physicalIosOrientation,
     physicalIosScreenshot,
     physicalIosTap,
     resolvePhysicalIosDevice,
@@ -104,9 +105,11 @@ export async function physicalTap(phone: PhysicalIosDevice, query: TapQuery, opt
         );
     }
     const frame = { width: before.originalWidth || 0, height: before.originalHeight || 0, scaleFactor: before.scaleFactor || 1 };
-    const hid = toHidPoint(query.x, query.y, frame);
+    const landscape = frame.width > frame.height;
+    const orientation = landscape ? await physicalIosOrientation(phone.udid) : null;
+    const hid = toHidPoint(query.x, query.y, frame, orientation);
     if ("error" in hid) {
-        return fail(hid.error, frame.width > frame.height ? "Rotate the phone to portrait, then retry." : "Take a screenshot and use coordinates from it.");
+        return fail(hid.error, landscape ? "Rotate the phone to portrait, or retry." : "Take a screenshot and use coordinates from it.");
     }
 
     const sent = await physicalIosTap(phone, hid, options.duration);
