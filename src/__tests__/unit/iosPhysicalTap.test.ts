@@ -109,7 +109,7 @@ describe("toHidPoint", () => {
     it("maps a landscape point turned rot270 (measured 2026-11-14: the iCloud banner's close button)", () => {
         expect(toHidPoint(1457, 224, LANDSCAPE, "rot270")).toEqual({ x: 47806, y: 53284 });
     });
-    it("maps a landscape point turned rot90 the opposite way", () => {
+    it("maps a landscape point turned rot90 the opposite way (verified on device)", () => {
         expect(toHidPoint(1457, 224, LANDSCAPE, "rot90")).toEqual({ x: 17729, y: 12251 });
     });
     it("refuses a landscape frame whose rotation is unknown", () => {

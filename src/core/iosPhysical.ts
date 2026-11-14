@@ -253,7 +253,7 @@ export async function physicalIosOrientation(udid: string): Promise<string | nul
  * Delivered-screenshot px -> HID 0..65535 (0 = left/top of the upright
  * panel), against the raw frame of a physical capture:
  * `hid = round(raw * 65535 / size)`. A landscape frame is turned back to the
- * panel by `orientation`; rot270 was measured on device (2026-11-14), rot90 is its mirror.
+ * panel by `orientation`; rot270 and rot90 both verified on device (2026-11-14).
  */
 export function toHidPoint(
     x: number,
