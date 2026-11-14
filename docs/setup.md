@@ -217,23 +217,37 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
 
 > **Troubleshooting**: If you see errors like `"IDB is not installed"` or `"AXe is not installed"` in tap results, install the appropriate driver with the commands above and retry.
 
-## Physical iOS device — screenshots
+## Physical iOS device
 
-`ios_screenshot` can capture a USB-attached iPhone or iPad. This is **capture only**: no tapping, swiping or text input, because iOS exposes no touch injection to a host below iOS 17 and ExecBro does not implement the iOS 17+ path yet.
+A USB-attached iPhone or iPad. What works depends on its iOS version:
 
-Install the transport. There is no Homebrew formula for it, and plain `pip install` is refused on
-current macOS (`externally-managed-environment`), so install it as an isolated CLI tool:
+- **iOS 15 and later:** `screenshot`.
+- **iOS 27 and later:** `tap` by `x`/`y` coordinates, including long press (`duration`), in portrait and landscape.
+
+Not on a phone yet: `swipe`, `input_text`, and `tap` by `testID`, `text` or `component`.
+
+### 1. Install pymobiledevice3
+
+There is no Homebrew formula for it, and plain `pip install` is refused on current macOS (`externally-managed-environment`), so install it as an isolated CLI tool:
 
 ```bash
 brew install pipx
 pipx install pymobiledevice3
 ```
 
-If you already use [uv](https://docs.astral.sh/uv/), `uv tool install pymobiledevice3` does the same
-thing. Both land the binary in `~/.local/bin`, which ExecBro checks directly — so it works even when
-your MCP client is launched from the GUI and does not inherit your shell `PATH`.
+If you already use [uv](https://docs.astral.sh/uv/), `uv tool install pymobiledevice3` does the same thing. Both land the binary in `~/.local/bin`, which ExecBro checks directly, so it works even when your MCP client is launched from the GUI and does not inherit your shell `PATH`.
 
-Then mount the DeveloperDiskImage once per device. `pymobiledevice3 mounter auto-mount` is the documented route but fails on a stock machine — it tries to write into a root-owned Xcode directory — so mount Xcode's existing image instead:
+Taps need version 11.32.0 or later. To update an older install: `pipx upgrade pymobiledevice3`.
+
+### 2. Mount the developer disk image
+
+**iOS 17 and later:** let pymobiledevice3 fetch and mount the image:
+
+```bash
+pymobiledevice3 mounter auto-mount
+```
+
+**iOS 16 and below:** `auto-mount` fails on a stock machine (it tries to write into a root-owned Xcode directory), so mount Xcode's existing image instead:
 
 ```bash
 X=/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/DeviceSupport/15.5
@@ -243,11 +257,40 @@ pymobiledevice3 mounter mount-developer \
 
 Pick the directory closest to your device's iOS version; a 15.5 image mounts fine on a 15.8 device. Verify with `pymobiledevice3 mounter list`.
 
-The device then appears in `list_devices` under "iOS physical", and `ios_screenshot` accepts its UDID or name:
+### 3. Screenshots
+
+The device appears in `list_devices` under "iOS physical", and `screenshot` accepts its UDID or name:
 
 ```
-ios_screenshot with udid="fdc2d1b5937ce66..."
-ios_screenshot with udid="Ihor"
+screenshot with device="00008030-001D69C00192802E"
 ```
 
 Without `pymobiledevice3` installed, `list_devices` simply shows no physical devices and a direct capture attempt tells you what to install.
+
+### 4. Taps (iOS 27 and later)
+
+On top of steps 1 to 3:
+
+1. **Developer Mode on** the phone: Settings > Privacy & Security > Developer Mode (the phone restarts).
+2. **The Xcode 27 disk image mounted.** The touch service ships only in Xcode 27's image; Xcode 26's (build `17A400`) does not have it. An open Xcode 26 remounts its own image within a second of any change, so quit Xcode first, then:
+
+   ```bash
+   pymobiledevice3 mounter umount-personalized
+   pymobiledevice3 mounter auto-mount
+   pymobiledevice3 mounter list
+   ```
+
+   `auto-mount` downloads the image, so Xcode 27 does not need to be installed. In the `mounter list` output, `ProductBuildVersion` should start with `27`. If it says `17A400`, Xcode 26 is still running.
+3. **The phone unlocked, with the screen on.** A tap on a dark screen would wake it and land on the lock screen, so `tap` refuses instead. Setting Auto-Lock to Never (Settings > Display & Brightness) keeps the phone awake during a session.
+
+Then take a screenshot and tap with coordinates from it:
+
+```
+screenshot with device="00008030-001D69C00192802E"
+tap with x=697, y=817, device="00008030-001D69C00192802E"
+tap with x=697, y=817, device="00008030-001D69C00192802E", duration=800
+```
+
+Pass the UDID from `list_devices` rather than the name: a phone is often just called "iPhone", which also matches simulators.
+
+A tap takes about 6 s, or about 9 s with the default before/after check (`verify: false` skips it). In landscape, `tap` asks the phone which way it is turned, which adds a second or two. If the phone stops answering, the tap is stopped after 15 s and never retried, because the touch may already have landed: take a screenshot before trying again.

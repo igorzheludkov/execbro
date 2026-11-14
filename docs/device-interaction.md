@@ -127,7 +127,7 @@ Take a screenshot:
 ios_screenshot
 ```
 
-A USB-attached physical iPhone/iPad works too — pass its UDID or name from `list_devices`. Capture only: none of the interaction tools on this page reach a physical device. See [setup.md](setup.md) for the one-time `pymobiledevice3` install.
+A USB-attached physical iPhone/iPad works too: pass its UDID from `list_devices`. On iOS 27 and later `tap` also reaches it, by `x`/`y` coordinates only (long press included); the other interaction tools on this page do not reach a phone yet. See [setup.md](setup.md#physical-ios-device) for what to install and set up.
 
 Launch an app:
 

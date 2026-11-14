@@ -43,6 +43,7 @@ Linking is only for the dashboard: it attaches your installs to your account so 
 
 - **iOS Simulator** - Screenshots, app management, URL handling, boot/terminate (via simctl)
 - **Android Devices** - Screenshots, app install/launch, package management (via ADB)
+- **Physical iPhone/iPad over USB** - Screenshots on iOS 15+, and coordinate taps and long press on iOS 27+ (portrait and landscape), via [pymobiledevice3](https://github.com/doronz88/pymobiledevice3). See [physical iOS setup](docs/setup.md#physical-ios-device)
 - **Unified Tap** - Single `tap` tool with automatic fallback chain: fiber tree → accessibility → OCR → coordinates. Auto-detects platform, accepts coordinates from screenshots and layout tools unchanged. Returns post-tap screenshot and verifies visual change by default
 - **Unified Swipe** - Single `swipe` tool that auto-routes to iOS or Android based on the connected device. Takes coordinates in the same screen space as the layout tools and screenshots — no conversion — and returns a `verification.meaningful` signal so agents detect end-of-list, non-scrollable surfaces, and missed coordinates — and on a screen with no React Native connection it says it could not inspect rather than guessing. Essential for scrolling virtualized lists (FlatList/SectionList) where off-screen items aren't in the fiber tree
 - **Real Multi-Touch Pinch** *(Android emulator only — iOS in progress)* - A `pinch` tool that sends two genuine kernel touch contacts through the Android emulator's multi-touch bridge, so it zooms maps, galleries, WebViews, and native views alike — it works below the app, not through React Native. Returns the same `verification.meaningful` signal as `swipe`, and refuses on unsupported targets instead of faking a result
@@ -125,6 +126,7 @@ It's one `npm install` plus a single `init()` call in your app's entry file. See
 - React Native app running with Metro bundler
 - **Recommended**: [`execbro-sdk`](#install-the-sdk-recommended) in your app — wires stores and the network layer into the agent for dramatically better debugging (optional; ExecBro works without it)
 - **iOS UI automation**: [AXe CLI](https://github.com/cameroncooke/AXe) (`brew install cameroncooke/axe/axe`, default) or [Facebook IDB](https://fbidb.io/) (`brew install idb-companion`, opt in via `IOS_DRIVER=idb`) — required for tap, swipe, text input, accessibility on iOS Simulator
+- **Physical iPhone/iPad**: [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) (`pipx install pymobiledevice3`) and a mounted developer disk image; taps also need iOS 27+, pymobiledevice3 11.32.0+, Developer Mode and the Xcode 27 disk image. See [physical iOS setup](docs/setup.md#physical-ios-device)
 - **Optional for offline OCR fallback**: Python 3.6+ (only needed when cloud OCR is unavailable, see [OCR guide](docs/ocr.md))
 
 ## Claude Code Skills
@@ -143,12 +145,12 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | `get_timeline`                          | Actions, route changes, requests, logs and restarts in one time-ordered list              |
 | `get_screen_state`                      | **Orientation snapshot** — active route, overlays, and every element with a tap-ready `(x, y)` |
 | `get_screen_layout`                     | Screen map of visible components with positions, sizes, and text content                 |
-| `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates |
+| `tap`                                   | **Unified tap** — auto-detects platform, tries fiber → accessibility → OCR → coordinates. Also taps a USB iPhone on iOS 27+ by coordinates |
 | `pinch`                                 | **Real two-finger pinch-to-zoom** — Android emulator only (iOS in progress)              |
 | `input_text`                            | Type text — targets and focuses a field itself, or `native:true` for whatever's focused. `replace:true` clears first (Fabric) |
 | `dismiss_keyboard`                      | Blur the focused input and close the on-screen keyboard                                  |
 | `execute_in_app`                        | Run JS expressions in the app runtime (REPL-style)                                       |
-| `screenshot`                            | Take a screenshot on any platform: iOS simulator, Android, Electron or Chrome, and a USB-attached physical iPhone/iPad (capture only) |
+| `screenshot`                            | Take a screenshot on any platform: iOS simulator, Android, Electron or Chrome, and a USB-attached physical iPhone/iPad |
 
 ## Usage
 
