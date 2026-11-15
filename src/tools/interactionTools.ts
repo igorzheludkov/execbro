@@ -48,7 +48,7 @@ import { chromiumPressKey } from "../pro/chromiumKeys.js";
 import { answerDialog, pickDialogApp } from "../core/chromiumDialogAnswer.js";
 import { androidKeyFor } from "../core/android.js";
 import { hidKeyFor, iosKeyCombo, iosKeyEvent, iosKeySequence } from "../core/ios.js";
-import { resolvePhysicalIosDevice, physicalIosType } from "../core/iosPhysical.js";
+import { resolvePhysicalIosDevice, physicalIosType, physicalIosKey, phoneKeyFor } from "../core/iosPhysical.js";
 import { outcomeHintFor, physicalTargetFor, physicalSwipe } from "../pro/physicalTap.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
@@ -1128,7 +1128,7 @@ export function registerInteractionTools(server: McpServer): void {
                 "Press a keyboard key or shortcut in the focused element: Enter, Escape, Tab, arrows, Backspace, or a combo like Shift+Tab / Meta+K.\n" +
                 "PURPOSE: Keys that are not text: submit with Enter, close a dialog with Escape, move focus with Tab, walk a list with arrows, delete with Backspace.\n" +
                 "WHEN TO USE: After input_text, or on any focused element. Pass testID or text to focus a target first; otherwise the key goes to whatever has focus. For typing text use input_text.\n" +
-                "PLATFORMS: chromium (Electron / Chrome) sends real key events through CDP and reports the focused element before and after. Android sends adb keyevents (no modifier combos). iOS simulator sends HID keys through AXe or IDB (combos need AXe); keys are not built for a physical iPhone yet.\n" +
+                "PLATFORMS: chromium (Electron / Chrome) sends real key events through CDP and reports the focused element before and after. Android sends adb keyevents (no modifier combos). iOS simulator sends HID keys through AXe or IDB (combos need AXe). A physical iPhone (iOS 27+) takes Enter, Backspace, Escape, Tab, arrows and printable characters, without modifiers.\n" +
                 "WORKFLOW: input_text({ testID, text }) -> press_key({ key: \"Enter\" }).\n" +
                 "GOOD: press_key({ key: \"Backspace\", repeat: 3 })\n" +
                 "GOOD: press_key({ key: \"Meta+K\", device: \"FluentTalk\" })\n" +
@@ -1159,12 +1159,20 @@ export function registerInteractionTools(server: McpServer): void {
 
             const fail = (msg: string) => ({ content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true });
             const resolved = await resolveDeviceTarget(device);
-            if (!resolved.ok) {
-                if (device && (await resolvePhysicalIosDevice(device).catch(() => null))) {
-                    return fail("press_key does not reach a physical iPhone yet (tap by x/y does, on iOS 27+). Use a simulator for keys.");
+            const phone = await physicalTargetFor(resolved, device);
+            if (phone) {
+                const k = phoneKeyFor(combo);
+                if ("error" in k) return fail(k.error);
+                if (testID !== undefined || text !== undefined) {
+                    const focused = await tap({ testID, text, device, screenshot: false, verify: false });
+                    if (!focused.success) return fail(`could not focus the target before pressing the key: ${focused.error ?? "tap failed"}`);
                 }
-                return fail(formatResolverError(resolved.error));
+                const sent = "named" in k ? await physicalIosKey(phone, k.named, times) : await physicalIosType(phone, k.char.repeat(times));
+                if (!sent.success) return fail(sent.error);
+                const phoneBody = { success: true, platform: "ios", device: phone.name, key, repeat: times };
+                return { content: [{ type: "text" as const, text: JSON.stringify(phoneBody, null, 2) }], isError: false };
             }
+            if (!resolved.ok) return fail(formatResolverError(resolved.error));
             const { platform, iosUdid, androidSerial, deviceName } = resolved.target;
             // Map before focusing, so a refused key does not tap anything first.
             const android = platform === "android" ? androidKeyFor(combo) : null;

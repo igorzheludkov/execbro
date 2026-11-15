@@ -472,6 +472,38 @@ export async function physicalIosDrag(
     }
 }
 
+/** DOM key names -> the named keys `universal-hid-service key` knows. */
+const PHONE_NAMED_KEYS: Record<string, string> = {
+    Enter: "enter", Backspace: "backspace", Escape: "escape", Tab: "tab",
+    ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
+};
+/** MOD bits from parseKeyCombo (chromium.ts): Alt 1, Control 2, Meta 4, Shift 8. */
+const MOD_SHIFT = 8;
+
+/**
+ * What a parsed key becomes on a phone: a named HID key, or one printable
+ * character typed through the same virtual keyboard as input_text.
+ * pymobiledevice3 holds no modifiers for named keys, so any combo is refused
+ * rather than sent as a bare key (Shift+Tab arriving as Tab moves focus the
+ * wrong way). Shift on a character is fine: `type` shifts capitals itself.
+ */
+export function phoneKeyFor(combo: { mods: number; key: { key: string; text?: string } }): { named: string } | { char: string } | { error: string } {
+    const named = PHONE_NAMED_KEYS[combo.key.key];
+    if (named) {
+        if (combo.mods) return { error: `A physical iPhone takes ${combo.key.key} without modifiers only: pymobiledevice3 holds no modifier keys. Use a simulator for combos.` };
+        return { named };
+    }
+    if (combo.mods & ~MOD_SHIFT) return { error: "Modifier shortcuts (Control, Alt, Meta) do not reach a physical iPhone: pymobiledevice3 holds no modifier keys. Use a simulator." };
+    const ch = combo.key.text;
+    if (ch && ch.length === 1 && ch >= " " && ch <= "~") return { char: ch };
+    return { error: `"${combo.key.key}" has no key on a physical iPhone. Supported: Enter, Backspace, Escape, Tab, the arrows, and printable ASCII characters.` };
+}
+
+/** Press a named key (`phoneKeyFor`) `count` times on a USB iPhone running iOS 27+. */
+export async function physicalIosKey(device: PhysicalIosDevice, name: string, count: number): Promise<HidOutcome> {
+    return runHid(device, ["key", "--native", name, "--count", String(count)], HID_SESSION_DEADLINE_MS + count * TYPE_MS_PER_CHAR, "key");
+}
+
 /** Per-character time `type` takes (0.04 s down + 0.02 s between), plus slack. */
 const TYPE_MS_PER_CHAR = 80;
 

@@ -40,3 +40,35 @@ describe("buildHidDragScript", () => {
         expect(buildHidDragScript({ x: 100, y: 200 }, { x: 100, y: 50 }, 300)).toBe("sleep 0.5\ndrag 100 200 100 50 19 0.3\n");
     });
 });
+
+const { phoneKeyFor } = await import("../../core/iosPhysical.js");
+const { parseKeyCombo } = await import("../../core/chromium.js");
+
+describe("phoneKeyFor", () => {
+    const map = (k: string) => {
+        const c = parseKeyCombo(k);
+        if ("error" in c) throw new Error(c.error);
+        return phoneKeyFor(c);
+    };
+
+    it("sends named keys by their pymobiledevice3 names", () => {
+        expect(map("Enter")).toEqual({ named: "enter" });
+        expect(map("Backspace")).toEqual({ named: "backspace" });
+        expect(map("ArrowLeft")).toEqual({ named: "left" });
+        expect(map("esc")).toEqual({ named: "escape" });
+    });
+
+    it("types printable characters, Shift included", () => {
+        expect(map("a")).toEqual({ char: "a" });
+        expect(map("Shift+a")).toEqual({ char: "A" });
+        expect(map("Space")).toEqual({ char: " " });
+    });
+
+    it("refuses what it cannot send faithfully instead of sending a bare key", () => {
+        // Shift+Tab arriving as Tab would move focus the wrong way.
+        expect(map("Shift+Tab")).toHaveProperty("error");
+        expect(map("Meta+K")).toHaveProperty("error");
+        expect(map("Home")).toHaveProperty("error");
+        expect(map("F5")).toHaveProperty("error");
+    });
+});

@@ -194,7 +194,7 @@ otherwise pass its UDID from list_devices (or the identifier devicectl prints) a
 x/y from screenshot({ device }), or testID/text/component, resolved through the React tree.
 get_screen_state, get_screen_layout and inspect_at_point read in the same screenshot pixels.
 input_text types real keystrokes and verifies them against React Native's own record of the text.
-press_key does not reach a phone yet. If the phone locks, its app drops off Metro: execbro keeps
+press_key takes Enter, Backspace, Escape, Tab, arrows and printable characters, without modifiers. If the phone locks, its app drops off Metro: execbro keeps
 checking every 15 s and reattaches once it is unlocked. Prerequisites: pymobiledevice3 11.32.0+,
 Developer Mode on, the phone unlocked (a sleeping screen is refused), and the Xcode 27 disk image
 mounted: an open Xcode 26 remounts its own image, so install Xcode 27 or quit Xcode first. Portrait
