@@ -11,6 +11,7 @@ import {
 } from "../core/iosPhysical.js";
 import sharp from "sharp";
 import { connectedApps } from "../core/state.js";
+import type { ConnectedApp } from "../core/types.js";
 import { verifyAndCapture } from "./verifyAction.js";
 import {
     buildLongPressReport,
@@ -36,6 +37,12 @@ export async function physicalTargetFor(resolved: ResolveResult, device?: string
     }
     if (resolved.target.platform !== "ios" || resolved.target.iosUdid) return null;
     return resolvePhysicalIosDevice(device ?? resolved.target.deviceName).catch(() => null);
+}
+
+/** The RN app running on this phone: same name first, else the only app off a simulator. */
+export function appOnPhone(phoneName: string): ConnectedApp | undefined {
+    const offSim = Array.from(connectedApps.values()).filter((a) => a.platform === "ios" && !a.simulatorUdid);
+    return offSim.find((a) => a.deviceInfo.deviceName === phoneName) ?? offSim[0];
 }
 
 // The last alternative is a CoreDevice identifier (what `xcrun devicectl list devices`
@@ -173,8 +180,8 @@ export type PhysicalSwipeResult =
 /**
  * A swipe on a USB iPhone running iOS 27+: one HID drag, sized from a capture of
  * the phone, so `direction` and explicit coordinates both speak screenshot pixels.
- * The scroll-offset probe the simulator path runs is skipped here.
- * ponytail: no outcome.scroll on a phone; probeScrollAt with the in-app metrics would add it.
+ * `beforeDrag` runs once the start point is known and before the finger moves:
+ * the caller's scroll probe needs both.
  */
 export async function physicalSwipe(
     phone: PhysicalIosDevice,
@@ -186,6 +193,7 @@ export async function physicalSwipe(
         verify?: boolean;
         screenshot?: boolean;
     },
+    beforeDrag?: (start: { x: number; y: number }) => Promise<void>,
 ): Promise<PhysicalSwipeResult> {
     if (!(parseInt(phone.version, 10) >= IOS_HID_MIN_MAJOR)) {
         return { success: false, error: `swipe on a physical iPhone needs iOS ${IOS_HID_MIN_MAJOR} or later; this device runs iOS ${phone.version}. Use a simulator.` };
@@ -206,6 +214,7 @@ export async function physicalSwipe(
     if ("error" in from) return { success: false, error: from.error };
     if ("error" in to) return { success: false, error: to.error };
 
+    await beforeDrag?.({ x: g.startX, y: g.startY });
     const sent = await physicalIosDrag(phone, from, to, args.durationMs ?? 300);
     if (!sent.success) return { success: false, error: sent.error };
 

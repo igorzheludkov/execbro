@@ -18,7 +18,7 @@ import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js
 import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice, chromiumAppFor } from "../core/connection.js";
 import { chromiumTap } from "./chromiumTap.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
-import { physicalTargetFor, physicalTap } from "./physicalTap.js";
+import { appOnPhone, physicalTargetFor, physicalTap } from "./physicalTap.js";
 import { notifyDriverMissing } from "../core/logbox.js";
 import { captureFailureArtifact, type ArtifactOutcome, type CaptureSignals } from "../core/failureArtifact.js";
 import { diagnoseStaleness, recordScreen, type StalenessVerdict } from "../core/screenStaleness.js";
@@ -2189,10 +2189,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         if (query.x !== undefined && query.y !== undefined) return physicalTap(phone, query, options);
         // testID / text / component: the fiber walk finds and measures the element in
         // points; the phone's own scale turns that into the screenshot pixels HID takes.
-        const rnApp = Array.from(connectedApps.values()).find(
-            (a) => a.platform === "ios" && !a.simulatorUdid && a.deviceInfo.deviceName === phone.name
-        ) ?? Array.from(connectedApps.values()).find((a) => a.platform === "ios" && !a.simulatorUdid);
-        const rnDevice = rnApp?.deviceInfo.deviceName;
+        const rnDevice = appOnPhone(phone.name)?.deviceInfo.deviceName;
         if (!rnDevice) return physicalTap(phone, query, options);
         const found = await tryFiberStrategy(query, options.index, options.maxTraversalDepth, undefined, rnDevice, options.duration !== undefined);
         const { resolvePhysicalIosMetrics } = await import("../core/screenSpaceDevice.js");

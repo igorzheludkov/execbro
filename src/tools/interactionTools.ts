@@ -27,9 +27,9 @@ import {
     type TapResult,
 } from "../pro/tap.js";
 import { androidSystemBarInsets } from "../core/androidSystemBars.js";
-import { resolveDeliveredScaleFactor, resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
+import { resolveDeliveredScaleFactor, resolveScreenSpaceMetrics, resolvePhysicalIosMetrics } from "../core/screenSpaceDevice.js";
 import { androidForegroundPackage, foregroundLossWarning } from "../core/androidForeground.js";
-import { probeScrollAt, explainNoOpSwipe } from "../core/swipeDiagnosis.js";
+import { probeScrollAt, explainNoOpSwipe, type ScrollProbe } from "../core/swipeDiagnosis.js";
 import { bundleStaleWarning } from "../core/metroIdentity.js";
 import { beginActionOutcome, finishActionOutcome } from "../core/actionOutcomeCollect.js";
 import { changedSinceLastShown } from "../core/sessionOnce.js";
@@ -49,7 +49,7 @@ import { answerDialog, pickDialogApp } from "../core/chromiumDialogAnswer.js";
 import { androidKeyFor } from "../core/android.js";
 import { hidKeyFor, iosKeyCombo, iosKeyEvent, iosKeySequence } from "../core/ios.js";
 import { resolvePhysicalIosDevice, physicalIosType, physicalIosKey, phoneKeyFor } from "../core/iosPhysical.js";
-import { outcomeHintFor, physicalTargetFor, physicalSwipe } from "../pro/physicalTap.js";
+import { appOnPhone, outcomeHintFor, physicalTargetFor, physicalSwipe } from "../pro/physicalTap.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
@@ -437,13 +437,36 @@ export function registerInteractionTools(server: McpServer): void {
             const phone = await physicalTargetFor(resolved, device);
             if (phone) {
                 const phoneHandle = await beginActionOutcome(device);
-                const r = await physicalSwipe(phone, { direction, distance, startX, startY, endX, endY, durationMs, verify, screenshot });
+                // Same scroll probe as the simulator path, in the phone's own pixels: it gives
+                // outcome.scroll, and names why a swipe that moved nothing did not.
+                const rnName = phoneHandle.connected ? appOnPhone(phone.name)?.deviceInfo.deviceName : undefined;
+                const phoneMetrics = rnName ? await resolvePhysicalIosMetrics(rnName) : undefined;
+                let probeStart: { x: number; y: number } | null = null;
+                let phoneProbeBefore: ScrollProbe | null = null;
+                const r = await physicalSwipe(phone, { direction, distance, startX, startY, endX, endY, durationMs, verify, screenshot }, async (start) => {
+                    probeStart = start;
+                    if (rnName && phoneMetrics?.pixelScale) phoneProbeBefore = await probeScrollAt(start.x, start.y, rnName, phoneMetrics);
+                });
                 if (!r.success) return { content: [{ type: "text", text: `Error: ${r.error}` }], isError: true };
-                const phoneOutcome = await finishActionOutcome(phoneHandle, { visualSettleRan: !!r.verification && !r.verification.skipped });
+                const [phoneProbeAfter, phoneOutcome] = await Promise.all([
+                    phoneProbeBefore && probeStart ? probeScrollAt(r.from.x, r.from.y, rnName, phoneMetrics) : Promise.resolve(null),
+                    finishActionOutcome(phoneHandle, { visualSettleRan: !!r.verification && !r.verification.skipped }),
+                ]);
+                const phoneNoOp = !!r.verification && !r.verification.skipped && r.verification.meaningful === false;
+                const phoneWarning = [
+                    phoneNoOp
+                        ? `Swipe executed but nothing moved: ${explainNoOpSwipe(
+                            phoneProbeAfter ?? { found: false, unavailable: true },
+                            r.from,
+                            { dx: r.to.x - r.from.x, dy: r.to.y - r.from.y }
+                        )}`
+                        : undefined,
+                    burst ? "burst is not supported on a physical iPhone; verified with single frames." : undefined,
+                ].filter(Boolean).join(" ") || undefined;
                 const body = renderSwipeResponse({
                     verification: r.verification,
-                    outcome: phoneOutcome,
-                    warning: burst ? "burst is not supported on a physical iPhone; verified with single frames." : undefined,
+                    outcome: withScroll(phoneOutcome, phoneProbeBefore, phoneProbeAfter),
+                    warning: phoneWarning,
                     platform: "ios",
                     from: r.from,
                     to: r.to,
