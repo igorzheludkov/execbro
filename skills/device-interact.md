@@ -172,7 +172,7 @@ Use `maxTraversalDepth` when `tap(component=...)` fails because the component is
 
 **Keys** — `mcp__execbro__press_key`, one tool across chromium, Android and the iOS simulator:
 - A named key (`Enter`, `Escape`, `Tab`, `Backspace`, arrows, `Home`/`End`, `F1`-`F12`) or one character, with optional modifiers (`Shift+Tab`, `Meta+K`); `repeat` up to 50
-- `testID`/`text` focus a target first. Android refuses modifiers; iOS character keys follow the active keyboard layout; a physical iPhone is refused
+- `testID`/`text` focus a target first. Android refuses modifiers; iOS character keys follow the active keyboard layout; a physical iPhone (iOS 27+) takes named keys and characters, never modifiers
 - `android_key_event` stays for Android-only keys (BACK, HOME, MENU)
 
 **Hardware buttons:**

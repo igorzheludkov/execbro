@@ -222,9 +222,9 @@ Opt in by setting `IOS_DRIVER=idb` in your MCP server configuration:
 A USB-attached iPhone or iPad. What works depends on its iOS version:
 
 - **iOS 15 and later:** `screenshot`.
-- **iOS 27 and later:** `tap` by `x`/`y` coordinates, including long press (`duration`), in portrait and landscape.
+- **iOS 27 and later:** `tap` by `x`/`y` or by `testID` / `text` / `component`, including long press (`duration`), in portrait and landscape; `swipe`; `input_text`; and `press_key` (named keys and characters, no modifier combos).
 
-Not on a phone yet: `swipe`, `input_text`, and `tap` by `testID`, `text` or `component`.
+Not on a phone yet: modifier key combos. Set Auto-Lock to Never while testing: a locked phone drops its app off Metro (execbro reattaches once it is unlocked).
 
 Which devices and iOS versions this was actually run on, and what has not been tested yet: [what works and what was tested](../README.md#physical-iphoneipad-what-works-and-what-was-tested).
 

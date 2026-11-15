@@ -127,7 +127,7 @@ Take a screenshot:
 ios_screenshot
 ```
 
-A USB-attached physical iPhone/iPad works too: pass its UDID from `list_devices`. On iOS 27 and later `tap` also reaches it, by `x`/`y` coordinates only (long press included); the other interaction tools on this page do not reach a phone yet. See [setup.md](setup.md#physical-ios-device) for what to install and set up.
+A USB-attached physical iPhone/iPad works too: pass its UDID from `list_devices`. On iOS 27 and later `tap` (by `x`/`y` or by `testID` / `text` / `component`, long press included), `swipe`, `input_text` and `press_key` (no modifier combos) reach it too. See [setup.md](setup.md#physical-ios-device) for what to install and set up.
 
 Launch an app:
 
