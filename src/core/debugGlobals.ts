@@ -401,6 +401,30 @@ export async function reloadApp(device?: string): Promise<ExecutionResult> {
                 };
             }
 
+            // The socket is up as soon as the runtime is, but the bundle may still be
+            // downloading: a phone on Wi-Fi took about a minute (2026-11-15), and every
+            // fiber tool meanwhile failed with "React DevTools hook not found". Wait a
+            // bounded while for Metro's __r, and say so when it has not run yet.
+            const BUNDLE_WAIT_MS = 15000;
+            const bundleDeadline = Date.now() + BUNDLE_WAIT_MS;
+            // Only a definite "not yet" keeps waiting; a probe that cannot answer at
+            // all says nothing about the bundle, so it is not reported as loading.
+            let bundleRunning = false;
+            while (Date.now() < bundleDeadline) {
+                const probe = await executeInApp("typeof globalThis.__r === 'function'", false,
+                    { timeoutMs: 2000, originatingToolName: "_reload_bundle_wait" }, targetDevice.deviceName).catch(() => null);
+                if (!probe?.success || String(probe.result) === "true") { bundleRunning = true; break; }
+                await delay(500);
+            }
+            if (!bundleRunning) {
+                return {
+                    success: true,
+                    result: `App reloaded and reconnected to ${targetDevice.deviceName || targetDevice.title}, but its JS bundle has not run yet after ${BUNDLE_WAIT_MS / 1000}s (still downloading or starting; a physical device on Wi-Fi can take a minute). ` +
+                        "Tools that read the React tree will fail until it has: check with a screenshot, or retry in a little while."
+                        + RELOAD_STATE_NOTE
+                };
+            }
+
             // If the SDK was the source before reload, wait for the new context
             // to re-run init() and re-expose __RN_AI_DEVTOOLS__ before returning,
             // so the caller's next get_network_requests reads the SDK buffer

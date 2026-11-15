@@ -26,6 +26,7 @@ jest.unstable_mockModule("../../core/iosPhysical.js", () => ({
     versionAtLeast: () => false,
     resetPmd3VersionCache: () => undefined,
     physicalIosTap: async () => ({ success: false, error: "mocked" }),
+    physicalIosDrag: async () => ({ success: false, error: "mocked" }),
 }));
 
 const {

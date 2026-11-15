@@ -72,8 +72,12 @@ function __eb_fiberRoots(all) {
 }
 function __eb_noRootsReason() {
     if (typeof document !== 'undefined' && document) return 'No fiber roots found on this page: it is not a React app, or React has not rendered yet.';
-    return globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__
-        ? 'No fiber roots found. The app may not have rendered yet.'
-        : 'React DevTools hook not found. Make sure you are running a development build.';
+    if (globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__) return 'No fiber roots found. The app may not have rendered yet.';
+    // Metro defines __r when the bundle starts running. Without it the runtime is
+    // up but the app is not: right after a reload, a phone on Wi-Fi spends many
+    // seconds downloading the bundle, and "not a development build" sent agents
+    // after a build problem that did not exist.
+    if (typeof globalThis.__r !== 'function') return 'The JS bundle has not run yet (still downloading or starting up, e.g. right after reload_app). Retry in a few seconds.';
+    return 'React DevTools hook not found. Make sure you are running a development build.';
 }
 `;

@@ -97,11 +97,37 @@ export async function resolvePhysicalIosDevice(hint: string): Promise<PhysicalIo
     // A blank hint would substring-match any name with a space in it.
     if (!h) return null;
     const devices = await listPhysicalIosDevices();
-    return (
+    const hit =
         devices.find((d) => d.udid.toLowerCase() === h) ??
-        devices.find((d) => d.name.toLowerCase().includes(h)) ??
-        null
+        devices.find((d) => d.name.toLowerCase().includes(h));
+    if (hit || !COREDEVICE_ID.test(h)) return hit ?? null;
+    // `xcrun devicectl list devices` prints a CoreDevice identifier, not the
+    // UDID usbmux knows, and it is the id an agent that just installed the app
+    // has in hand. Asked only on a miss, so the normal path pays nothing.
+    const udid = (await coreDeviceUdids().catch(() => new Map<string, string>())).get(h);
+    return udid ? devices.find((d) => d.udid.toLowerCase() === udid) ?? null : null;
+}
+
+const COREDEVICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** CoreDevice identifier → hardware UDID, both lower-cased. */
+async function coreDeviceUdids(): Promise<Map<string, string>> {
+    const { stdout } = await execFileAsync(
+        "xcrun",
+        ["devicectl", "list", "devices", "-q", "--json-output", "/dev/stdout"],
+        { timeout: PMD3_SHORT_DEADLINE_MS }
     );
+    const devices = (JSON.parse(stdout)?.result?.devices ?? []) as Array<{
+        identifier?: string;
+        hardwareProperties?: { udid?: string };
+    }>;
+    const map = new Map<string, string>();
+    for (const d of devices) {
+        if (d.identifier && d.hardwareProperties?.udid) {
+            map.set(d.identifier.toLowerCase(), d.hardwareProperties.udid.toLowerCase());
+        }
+    }
+    return map;
 }
 
 /**
@@ -336,6 +362,75 @@ async function mountedImageBuild(bin: string, udid: string): Promise<string | nu
     return run.stdout.match(/"ProductBuildVersion":\s*"([^"]+)"/)?.[1] ?? null;
 }
 
+type HidOutcome = { success: true } | { success: false; error: string };
+
+/**
+ * One `universal-hid-service` command on a USB iPhone running iOS 27+, behind the
+ * phone's queue, the version gate and the shared error reading. `what` names the
+ * action in errors ("touch", "keystrokes").
+ */
+async function runHid(
+    device: PhysicalIosDevice,
+    args: string[],
+    deadlineMs: number,
+    what: string,
+    /** Runs inside the phone's queue, so the call keeps its place in line while it prepares. */
+    prepare?: () => Promise<void>,
+): Promise<HidOutcome> {
+    const major = parseInt(device.version, 10);
+    if (!(major >= IOS_HID_MIN_MAJOR)) {
+        return {
+            success: false,
+            error: `${what} on a physical iPhone needs iOS ${IOS_HID_MIN_MAJOR} or later; this device runs iOS ${device.version}. Older iOS has no host input injection. Use a simulator.`,
+        };
+    }
+    const bin = resolveBinary()!;
+    return withPhoneLock(device.udid, async () => {
+        await prepare?.();
+        const v = await pmd3Version(bin, device.udid);
+        if ("missing" in v) return { success: false as const, error: PMD3_MISSING_ERROR };
+        if ("unknown" in v) return { success: false as const, error: `Could not read the pymobiledevice3 version: ${v.unknown}` };
+        if (!versionAtLeast(v.version, PMD3_HID_MIN_VERSION)) {
+            return {
+                success: false as const,
+                error: `pymobiledevice3 ${v.version} is too old for physical-device input (${PMD3_HID_MIN_VERSION} or later). Upgrade with: pipx upgrade pymobiledevice3`,
+            };
+        }
+        const run = await runPmd3(bin, ["developer", "core-device", "universal-hid-service", ...args], device.udid, deadlineMs);
+        if (run.ok) return { success: true as const };
+        if (run.missing) return { success: false as const, error: PMD3_MISSING_ERROR };
+        if (run.aborted) {
+            // Never retried: input that did land, sent again, lands twice.
+            return {
+                success: false as const,
+                error: `The HID session did not answer within ${deadlineMs / 1000} s and was killed (a RemoteXPC hang). The ${what} may or may not have landed: take a screenshot before retrying.`,
+            };
+        }
+        if (/Failed to start service/i.test(run.stderr)) {
+            const build = await mountedImageBuild(bin, device.udid);
+            // Image builds lead with the Xcode major (27B52); Xcode 26's is 17A400.
+            if (build && parseInt(build, 10) >= IOS_HID_MIN_MAJOR) {
+                return {
+                    success: false as const,
+                    error:
+                        `The phone's input service did not start, though the mounted developer disk image (build ${build}) carries it. ` +
+                        "Check that Developer Mode is on and the phone is unlocked, then unplug and replug it. " +
+                        `pymobiledevice3 said: ${run.stderr}`,
+                };
+            }
+            return {
+                success: false as const,
+                error:
+                    `The phone's input service is missing from the mounted developer disk image${build ? ` (build ${build})` : ""}. It comes from the Xcode 27 image. ` +
+                    "Install Xcode 27, or quit Xcode (an open Xcode 26 remounts its own image within a second), then run " +
+                    "`pymobiledevice3 mounter umount-personalized` and `pymobiledevice3 mounter auto-mount`, and check `pymobiledevice3 mounter list`. " +
+                    "Developer Mode must be on.",
+            };
+        }
+        return { success: false as const, error: `HID ${what} failed: ${run.stderr || run.message}` };
+    });
+}
+
 /**
  * A real touch on a USB iPhone running iOS 27+. `point` is in HID units
  * (see toHidPoint); `durationMs` makes it a long press.
@@ -344,70 +439,48 @@ export async function physicalIosTap(
     device: PhysicalIosDevice,
     point: { x: number; y: number },
     durationMs?: number,
-): Promise<{ success: true } | { success: false; error: string }> {
-    const major = parseInt(device.version, 10);
-    if (!(major >= IOS_HID_MIN_MAJOR)) {
-        return {
-            success: false,
-            error: `tap on a physical iPhone needs iOS ${IOS_HID_MIN_MAJOR} or later; this device runs iOS ${device.version}. Older iOS has no host touch injection. Use a simulator.`,
-        };
+): Promise<HidOutcome> {
+    const scriptPath = path.join(os.tmpdir(), `execbro-hid-${device.udid}-${Date.now()}.txt`);
+    try {
+        // ponytail: one stream per tap (~2.5 s). A long-lived helper holding one stream per phone makes a tap one HID report; build it when tap latency on a phone is the complaint, and give it a per-command deadline that kills and respawns it, because long-lived RemoteXPC connections are where pymobiledevice3 hangs (#1446, #1583, #2068).
+        return await runHid(device, ["session", "--native", "--script", scriptPath], HID_SESSION_DEADLINE_MS + (durationMs ?? 0), "touch",
+            () => writeFile(scriptPath, buildHidTapScript(point, durationMs)));
+    } finally {
+        await unlink(scriptPath).catch(() => undefined);
     }
-    const bin = resolveBinary()!;
-    return withPhoneLock(device.udid, async () => {
-        const v = await pmd3Version(bin, device.udid);
-        if ("missing" in v) return { success: false as const, error: PMD3_MISSING_ERROR };
-        if ("unknown" in v) return { success: false as const, error: `Could not read the pymobiledevice3 version: ${v.unknown}` };
-        if (!versionAtLeast(v.version, PMD3_HID_MIN_VERSION)) {
-            return {
-                success: false as const,
-                error: `pymobiledevice3 ${v.version} is too old for physical-device taps (${PMD3_HID_MIN_VERSION} or later). Upgrade with: pipx upgrade pymobiledevice3`,
-            };
-        }
+}
 
-        const scriptPath = path.join(os.tmpdir(), `execbro-hid-${device.udid}-${Date.now()}.txt`);
-        await writeFile(scriptPath, buildHidTapScript(point, durationMs));
-        const deadlineMs = HID_SESSION_DEADLINE_MS + (durationMs ?? 0);
-        try {
-            // ponytail: one stream per tap (~2.5 s). A long-lived helper holding one stream per phone makes a tap one HID report; build it when tap latency on a phone is the complaint, and give it a per-command deadline that kills and respawns it, because long-lived RemoteXPC connections are where pymobiledevice3 hangs (#1446, #1583, #2068).
-            const run = await runPmd3(
-                bin,
-                ["developer", "core-device", "universal-hid-service", "session", "--native", "--script", scriptPath],
-                device.udid,
-                deadlineMs,
-            );
-            if (run.ok) return { success: true as const };
-            if (run.missing) return { success: false as const, error: PMD3_MISSING_ERROR };
-            if (run.aborted) {
-                // Never retried: a touch that did land, sent again, is a double tap.
-                return {
-                    success: false as const,
-                    error: `The HID session did not answer within ${deadlineMs / 1000} s and was killed (a RemoteXPC hang). The touch may or may not have landed: take a screenshot before retrying.`,
-                };
-            }
-            if (/Failed to start service/i.test(run.stderr)) {
-                const build = await mountedImageBuild(bin, device.udid);
-                // Image builds lead with the Xcode major (27B52); Xcode 26's is 17A400.
-                if (build && parseInt(build, 10) >= IOS_HID_MIN_MAJOR) {
-                    return {
-                        success: false as const,
-                        error:
-                            `The phone's touch service did not start, though the mounted developer disk image (build ${build}) carries it. ` +
-                            "Check that Developer Mode is on and the phone is unlocked, then unplug and replug it. " +
-                            `pymobiledevice3 said: ${run.stderr}`,
-                    };
-                }
-                return {
-                    success: false as const,
-                    error:
-                        `The phone's touch service is missing from the mounted developer disk image${build ? ` (build ${build})` : ""}. It comes from the Xcode 27 image. ` +
-                        "Install Xcode 27, or quit Xcode (an open Xcode 26 remounts its own image within a second), then run " +
-                        "`pymobiledevice3 mounter umount-personalized` and `pymobiledevice3 mounter auto-mount`, and check `pymobiledevice3 mounter list`. " +
-                        "Developer Mode must be on.",
-                };
-            }
-            return { success: false as const, error: `HID tap failed: ${run.stderr || run.message}` };
-        } finally {
-            await unlink(scriptPath).catch(() => undefined);
-        }
-    });
+/** HID session script for a one-finger drag, `steps` contact samples over `durationMs`. */
+export function buildHidDragScript(from: { x: number; y: number }, to: { x: number; y: number }, durationMs: number): string {
+    const steps = Math.max(2, Math.round(durationMs / 16));
+    return `sleep 0.5\ndrag ${from.x} ${from.y} ${to.x} ${to.y} ${steps} ${durationMs / 1000}\n`;
+}
+
+/** A real one-finger drag on a USB iPhone running iOS 27+, in HID units (see toHidPoint). */
+export async function physicalIosDrag(
+    device: PhysicalIosDevice,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    durationMs: number,
+): Promise<HidOutcome> {
+    const scriptPath = path.join(os.tmpdir(), `execbro-hid-drag-${device.udid}-${Date.now()}.txt`);
+    try {
+        return await runHid(device, ["session", "--native", "--script", scriptPath], HID_SESSION_DEADLINE_MS + durationMs, "swipe",
+            () => writeFile(scriptPath, buildHidDragScript(from, to, durationMs)));
+    } finally {
+        await unlink(scriptPath).catch(() => undefined);
+    }
+}
+
+/** Per-character time `type` takes (0.04 s down + 0.02 s between), plus slack. */
+const TYPE_MS_PER_CHAR = 80;
+
+/**
+ * Real keystrokes into whatever is focused on a USB iPhone running iOS 27+, through
+ * a virtual HID keyboard. Printable ASCII only (newline = Return, tab = Tab), the
+ * same limit as the simulator's HID path. Verified 2026-11-15 on an iPhone 11,
+ * iOS 27.2.1: "Hello 123" reached the app's onChangeText (autocorrected to "Help 123").
+ */
+export async function physicalIosType(device: PhysicalIosDevice, text: string): Promise<HidOutcome> {
+    return runHid(device, ["type", "--native", text], HID_SESSION_DEADLINE_MS + text.length * TYPE_MS_PER_CHAR, "keystrokes");
 }

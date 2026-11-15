@@ -31,6 +31,7 @@ jest.unstable_mockModule("../../core/iosPhysical.js", () => ({
     physicalIosOrientation: jest.fn(),
     // Reached through tap.ts -> physicalTap.ts, never called here.
     physicalIosTap: jest.fn(),
+    physicalIosDrag: jest.fn(),
     resolvePhysicalIosDevice: jest.fn(),
     toHidPoint: jest.fn(),
     IOS_HID_MIN_MAJOR: 27,

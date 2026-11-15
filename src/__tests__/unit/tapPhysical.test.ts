@@ -147,7 +147,7 @@ describe("tap on a physical iPhone", () => {
     it("refuses a testID on a phone and points at screenshot", async () => {
         const r = await tap({ testID: "login-btn", device: PHONE_UDID });
         expect(r.success).toBe(false);
-        expect(r.error).toMatch(/coordinate taps only/);
+        expect(r.error).toMatch(/debugger connection/);
         expect(r.error).toMatch(/screenshot/);
         expect(scripts).toHaveLength(0);
     });

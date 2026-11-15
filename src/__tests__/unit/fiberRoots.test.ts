@@ -102,7 +102,16 @@ describe("__eb_noRootsReason", () => {
         g.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { renderers: new Map() };
         expect(reason()).toMatch(/may not have rendered yet/);
     });
-    it("with neither, points at a development build", () => {
-        expect(reason()).toMatch(/development build/);
+    it("with neither, while the bundle has not run, says it is still loading", () => {
+        expect(reason()).toMatch(/bundle has not run yet/);
+        expect(reason()).not.toMatch(/development build/);
+    });
+    it("with neither and the bundle running, points at a development build", () => {
+        g.__r = () => undefined;
+        try {
+            expect(reason()).toMatch(/development build/);
+        } finally {
+            delete g.__r;
+        }
     });
 });

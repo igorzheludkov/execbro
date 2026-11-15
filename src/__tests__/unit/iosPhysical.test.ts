@@ -83,4 +83,14 @@ describe("resolvePhysicalIosDevice", () => {
     it("returns null for a hint that matches nothing, so the simulator error stands", async () => {
         await expect(resolvePhysicalIosDevice("Pixel_9")).resolves.toBeNull();
     });
+
+    it("maps a devicectl CoreDevice identifier to the usbmux UDID", async () => {
+        const DEVICECTL = JSON.stringify({
+            result: { devices: [{ identifier: "922236A0-C7BD-5E25-9751-639615E97848", hardwareProperties: { udid: "FDC2D1B5937CE66395B17A9C540B3A45BBD54431" } }] },
+        });
+        execAsyncMock.mockImplementation(async (file) => ({ stdout: file === "xcrun" ? DEVICECTL : USBMUX_LIST, stderr: "" }));
+        const d = await resolvePhysicalIosDevice("922236A0-C7BD-5E25-9751-639615E97848");
+        expect(d?.udid).toBe("fdc2d1b5937ce66395b17a9c540b3a45bbd54431");
+        await expect(resolvePhysicalIosDevice("00000000-0000-0000-0000-000000000000")).resolves.toBeNull();
+    });
 });

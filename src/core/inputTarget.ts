@@ -97,6 +97,16 @@ export type InputFound = {
      */
     controlled: boolean;
     hasOnChangeText: boolean;
+    /**
+     * The text RN's own TextInput last received from native, read from its
+     * `lastNativeText` state hook. Null when that hook could not be found, and
+     * always null for a secure field (see `secure`). Only native input events
+     * update it — a setNativeProps write does not — so it is a read-back for
+     * keystrokes, used where no accessibility tree exists (a physical iPhone).
+     */
+    nativeText?: string | null;
+    /** secureTextEntry: the text is never read out, `nativeText` stays null. */
+    secure?: boolean;
     ok: boolean;
     via?: string;
     /**
@@ -564,6 +574,24 @@ function prelude(query: InputQuery | undefined): string {
     ? __eb_props_host.maxLength : null;
   var __eb_keyboardType = __eb_props_host && __eb_props_host.keyboardType != null
     ? String(__eb_props_host.keyboardType) : null;
+  var __eb_secure = !!(__eb_props_host && __eb_props_host.secureTextEntry);
+  // RN's InternalTextInput keeps the last text native reported in a useState
+  // hook, the one right before the {mostRecentEventCount, selection} state
+  // (useTextInputStateSynchronization). Found by that neighbour, not by hook
+  // position, so a hook added upstream does not silently read the wrong one.
+  var __eb_nativeText = null;
+  if (!__eb_secure) {
+    for (var nf = __eb_host, nd = 0; nf && nd < 8 && __eb_nativeText === null; nf = nf.return, nd++) {
+      if (nf.tag !== 0 && nf.tag !== 11 && nf.tag !== 15) continue;
+      for (var nh = nf.memoizedState; nh && nh.next; nh = nh.next) {
+        var ns = nh.next.memoizedState;
+        if (ns && typeof ns === "object" && "mostRecentEventCount" in ns && "selection" in ns) {
+          __eb_nativeText = typeof nh.memoizedState === "string" ? nh.memoizedState : "";
+          break;
+        }
+      }
+    }
+  }
   var __eb_focused = !!(__eb_pubi && __eb_pubi.isFocused && __eb_pubi.isFocused());
   var __eb_tag = __eb_pubi && __eb_pubi.__nativeTag != null ? __eb_pubi.__nativeTag : null;
 `;
@@ -580,7 +608,9 @@ const BASE = `
     maxLength: __eb_maxLength,
     keyboardType: __eb_keyboardType,
     controlled: __eb_controlled,
-    hasOnChangeText: !!__eb_ownerFiber`;
+    hasOnChangeText: !!__eb_ownerFiber,
+    nativeText: __eb_nativeText,
+    secure: __eb_secure`;
 
 export function buildInputExpression(op: InputOp, query?: InputQuery): string {
     let action: string;

@@ -1,5 +1,6 @@
 import { findDisconnectedDeviceName, getConnectedApps } from "./connection.js";
 import { listAllDevices, resetDeviceDiscoveryCache } from "./deviceDiscovery.js";
+import { awaitingDeviceKeys, getConnectionMetadata } from "./connectionState.js";
 import { listDevices, recordDevice } from "./projectMemory.js";
 
 // Chromium apps have no simulator or adb identity, so every native path below
@@ -360,6 +361,18 @@ async function resolveDeviceTargetInner(
                 deviceName: m.deviceInfo.deviceName,
                 source: "default"
             });
+        }
+        // The app under test was on a phone that dropped off Metro (locked, or
+        // the app went to the background). "Boot a simulator" points at the
+        // wrong fix; name the phone instead.
+        const away = awaitingDeviceKeys().map((k) => getConnectionMetadata(k)?.deviceInfo.deviceName).filter(Boolean);
+        if (away.length > 0) {
+            return err(
+                "NO_DEVICES_FOUND",
+                `${away.join(", ")} (physical device) dropped off Metro, most often because the phone locked, the app went to the background, or the app was closed. ` +
+                `Unlock it and bring the app to the front (or relaunch it); execbro reattaches by itself within 15s. ` +
+                `Coordinate taps still reach it with device: "<UDID from list_devices>".`
+            );
         }
         return err(
             "NO_DEVICES_FOUND",

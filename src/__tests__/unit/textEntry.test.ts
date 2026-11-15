@@ -747,3 +747,30 @@ describe("pinning the resolved field across the write", () => {
         expect(r.retried).toBeFalsy();
     });
 });
+
+describe("enterText on a physical iPhone (keystrokeReadBackOnly)", () => {
+    const uncontrolled = (over: Partial<Extract<InputResult, { found: true }>> = {}) =>
+        found({ controlled: false, value: null, testID: "f", ...over });
+
+    it("verifies typed text against RN's own record of it", async () => {
+        let text = "";
+        const d = deps([uncontrolled(), uncontrolled()], {
+            typeHid: jest.fn(async (t: string) => { text += t; return { success: true }; }),
+            readNativeFields: jest.fn(async () => ({ fields: [{ id: "f", text, focused: true }] })),
+            keystrokeReadBackOnly: true
+        });
+        const r = await enterText({ text: "abc", testID: "f" }, d);
+        expect(r).toMatchObject({ success: true, path: "hid", verified: true, value: "abc" });
+    });
+
+    it("reports a setNativeProps write unverified instead of comparing it to a stale read", async () => {
+        // Non-ASCII cannot be typed, so it is set natively. lastNativeText never sees that,
+        // and comparing against it would retry a write that had landed.
+        const readNativeFields = jest.fn(async () => ({ fields: [{ id: "f", text: "", focused: true }] }));
+        const d = deps([uncontrolled(), uncontrolled(), uncontrolled()], { readNativeFields, keystrokeReadBackOnly: true });
+        const r = await enterText({ text: "Привіт", testID: "f" }, d);
+        expect(r).toMatchObject({ success: true, path: "native", verified: false });
+        expect(r.retried).toBeFalsy();
+        expect(r.error).toMatch(/physical iPhone/);
+    });
+});

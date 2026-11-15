@@ -48,8 +48,8 @@ import { chromiumPressKey } from "../pro/chromiumKeys.js";
 import { answerDialog, pickDialogApp } from "../core/chromiumDialogAnswer.js";
 import { androidKeyFor } from "../core/android.js";
 import { hidKeyFor, iosKeyCombo, iosKeyEvent, iosKeySequence } from "../core/ios.js";
-import { resolvePhysicalIosDevice } from "../core/iosPhysical.js";
-import { outcomeHintFor } from "../pro/physicalTap.js";
+import { resolvePhysicalIosDevice, physicalIosType } from "../core/iosPhysical.js";
+import { outcomeHintFor, physicalTargetFor, physicalSwipe } from "../pro/physicalTap.js";
 import { runInputOp } from "../core/inputTargetTools.js";
 import { raiseKeyboard } from "../core/keyboardRaise.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
@@ -153,7 +153,7 @@ export function registerInteractionTools(server: McpServer): void {
                         "(b) an Android adb serial like 'emulator-5554', " +
                         "(c) the iOS simulator or Android emulator/device name (substring match), or " +
                         "(d) a connected RN app's deviceName (substring match against get_apps output). " +
-                        "(e) a USB iPhone's UDID from list_devices: iOS 27+, x/y taps only (needs pymobiledevice3 and the Xcode 27 disk image). " +
+                        "(e) a USB iPhone's UDID from list_devices: iOS 27+, by x/y or by testID/text/component while its app is connected (needs pymobiledevice3 and the Xcode 27 disk image). " +
                         "Omit when exactly one device is available. Call list_devices to enumerate."
                     ),
                 screenshot: z
@@ -433,6 +433,31 @@ export function registerInteractionTools(server: McpServer): void {
             }
             const resolvedPlatform: "ios" | "android" = resolved.target.platform;
             const resolvedUdid: string | undefined = resolved.target.iosUdid;
+
+            const phone = await physicalTargetFor(resolved, device);
+            if (phone) {
+                const phoneHandle = await beginActionOutcome(device);
+                const r = await physicalSwipe(phone, { direction, distance, startX, startY, endX, endY, durationMs, verify, screenshot });
+                if (!r.success) return { content: [{ type: "text", text: `Error: ${r.error}` }], isError: true };
+                const phoneOutcome = await finishActionOutcome(phoneHandle, { visualSettleRan: !!r.verification && !r.verification.skipped });
+                const body = renderSwipeResponse({
+                    verification: r.verification,
+                    outcome: phoneOutcome,
+                    warning: burst ? "burst is not supported on a physical iPhone; verified with single frames." : undefined,
+                    platform: "ios",
+                    from: r.from,
+                    to: r.to,
+                }, { verbose: verbose === true, showDeviceNote: false });
+                const phoneContent: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [
+                    { type: "text" as const, text: JSON.stringify(body, null, 2) },
+                ];
+                if (screenshot !== false && r.screenshot) phoneContent.push({ type: "image" as const, data: r.screenshot.image, mimeType: "image/jpeg" });
+                return {
+                    content: phoneContent,
+                    isError: false,
+                    _meaningful: r.verification && !r.verification.skipped ? r.verification.meaningful : undefined,
+                };
+            }
 
             const shouldVerify = verify !== false;
             const shouldScreenshot = screenshot !== false;
@@ -1293,6 +1318,46 @@ export function registerInteractionTools(server: McpServer): void {
 
             const { platform, iosUdid, androidSerial } = resolved.target;
             const hasRnTarget = testID !== undefined || component !== undefined || textMatch !== undefined;
+
+            // A USB iPhone: no simctl, no accessibility dump. Keystrokes go through
+            // pymobiledevice3's virtual HID keyboard, and the read-back comes from
+            // RN's own record of what native typed (lastNativeText).
+            const phone = await physicalTargetFor(resolved, device);
+            if (phone) {
+                if (native === true) {
+                    const typed = await physicalIosType(phone, text);
+                    return {
+                        content: [{ type: "text" as const, text: typed.success
+                            ? `Typed ${text.length} character(s) into the focused field on ${phone.name} (physical iPhone). Not verified: native mode has no field to read back.`
+                            : `Error: ${typed.error}` }],
+                        isError: !typed.success
+                    };
+                }
+                const query = { testID, component, textMatch, index };
+                const phoneResult = await enterText(
+                    { text, testID, component, textMatch, index, replace, device },
+                    {
+                        runOp: (op, q, dev) => runInputOp(op, q, dev),
+                        typeHid: (t) => physicalIosType(phone, t),
+                        readNativeFields: async () => {
+                            const r = await runInputOp({ kind: "read" }, query, device);
+                            if (!r.found) return { fields: [], error: r.reason };
+                            if (r.secure) return { fields: [{ id: r.testID, text: null, focused: true, secure: true }] };
+                            if (r.nativeText == null) return { fields: [], error: "React Native's text state was not found on this input" };
+                            return { fields: [{ id: r.testID, text: r.nativeText, focused: true }] };
+                        },
+                        keystrokeReadBackOnly: true
+                    }
+                );
+                const formattedPhone = formatTextEntryResponse(phoneResult);
+                return await decorateTextEntryTelemetry(
+                    dismissAfter === true ? await dismissAfterEntry(formattedPhone, () => dismissKeyboard(device)) : formattedPhone,
+                    phoneResult,
+                    { text, testID, component, textMatch, index, replace },
+                    "ios",
+                    phone.udid
+                );
+            }
 
             if (native === true) {
                 const r = await nativeTextEntry(text, replace === true, platform, iosUdid, androidSerial, device);

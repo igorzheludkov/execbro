@@ -2185,7 +2185,46 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // when ambiguous; surface that to the caller so they can disambiguate.
     const resolved = await resolveDeviceTarget(options.device);
     const phone = await physicalTargetFor(resolved, options.device);
-    if (phone) return physicalTap(phone, query, options);
+    if (phone) {
+        if (query.x !== undefined && query.y !== undefined) return physicalTap(phone, query, options);
+        // testID / text / component: the fiber walk finds and measures the element in
+        // points; the phone's own scale turns that into the screenshot pixels HID takes.
+        const rnApp = Array.from(connectedApps.values()).find(
+            (a) => a.platform === "ios" && !a.simulatorUdid && a.deviceInfo.deviceName === phone.name
+        ) ?? Array.from(connectedApps.values()).find((a) => a.platform === "ios" && !a.simulatorUdid);
+        const rnDevice = rnApp?.deviceInfo.deviceName;
+        if (!rnDevice) return physicalTap(phone, query, options);
+        const found = await tryFiberStrategy(query, options.index, options.maxTraversalDepth, undefined, rnDevice, options.duration !== undefined);
+        const { resolvePhysicalIosMetrics } = await import("../core/screenSpaceDevice.js");
+        const { toDeliveredPxX, toDeliveredPxY } = await import("../core/screenSpace.js");
+        const metrics = await resolvePhysicalIosMetrics(rnDevice);
+        if (!found.convertedTo || !found.pressed || found.convertedTo.unit !== "points") {
+            // Candidates come back in points; hand them out in the pixels tap(x, y) takes.
+            if (found.matches && metrics.pixelScale) {
+                found.matches = found.matches.map((m) => m.x !== undefined && m.y !== undefined
+                    ? { ...m, x: Math.round(toDeliveredPxX(m.x, metrics)), y: Math.round(toDeliveredPxY(m.y, metrics)) }
+                    : m);
+            }
+            return {
+                ...formatTapFailure({
+                    query,
+                    error: found.reason ?? "No element matched",
+                    attempted: [{ strategy: "fiber", reason: found.reason ?? "no match" }],
+                    suggestion: found.ambiguous ? "Pass index to pick one of the matches." : "Call get_screen_state to see what is on screen, or tap by x/y.",
+                    device: phone.name
+                }),
+                ...(found.matches ? { matches: found.matches } : {}),
+                platform: "ios"
+            } as TapResult;
+        }
+        if (!metrics.pixelScale) {
+            return { ...formatTapFailure({ query, error: "Could not read the phone's screen scale from the app, so the element's position cannot be turned into a tap.", attempted: [{ strategy: "fiber", reason: "scale unknown" }], suggestion: "Tap by x/y from a screenshot.", device: phone.name }), platform: "ios" } as TapResult;
+        }
+        const px = { x: Math.round(toDeliveredPxX(found.convertedTo.x, metrics)), y: Math.round(toDeliveredPxY(found.convertedTo.y, metrics)) };
+        const result = await physicalTap(phone, { ...query, ...px }, options, { hasLongPress: found.hasLongPress, element: found.pressed });
+        if (result.success) result.method = "fiber+device-hid";
+        return result;
+    }
     if (!resolved.ok) {
         return {
             success: false,

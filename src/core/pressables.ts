@@ -72,7 +72,7 @@ export async function pressElement(options: {
             var roots = __eb_fiberRoots(false);
             if (roots.length === 0) return hook
                 ? { error: 'No fiber roots found. Is a React Native app mounted?' }
-                : { error: 'React DevTools hook not found. Ensure app is running in __DEV__ mode.' };
+                : { error: __eb_noRootsReason() };
 
             var wantLongPress = ${longPress ? "true" : "false"};
 

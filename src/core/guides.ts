@@ -188,10 +188,14 @@ iOS interaction tools (tap, ios_button) require a UI driver:
 - Alternative: IDB — brew install idb-companion (set IOS_DRIVER=idb in MCP server env to use it)
 Without a UI driver installed, these tools will fail.
 
-Physical iOS devices (USB): tap by x/y works on iOS 27+, through pymobiledevice3 (not AXe/IDB).
-Pass the phone's UDID from list_devices as device (its name is often just "iPhone", which matches
-simulators first) and take coordinates from screenshot({ device }). testID/text/component, swipe,
-input_text and press_key do not reach a phone yet. Prerequisites: pymobiledevice3 11.32.0+,
+Physical iOS devices (USB): tap, swipe and input_text work on iOS 27+, through pymobiledevice3
+(not AXe/IDB). With the app connected to Metro and no simulator booted, plain calls reach the phone;
+otherwise pass its UDID from list_devices (or the identifier devicectl prints) as device. tap takes
+x/y from screenshot({ device }), or testID/text/component, resolved through the React tree.
+get_screen_state, get_screen_layout and inspect_at_point read in the same screenshot pixels.
+input_text types real keystrokes and verifies them against React Native's own record of the text.
+press_key does not reach a phone yet. If the phone locks, its app drops off Metro: execbro keeps
+checking every 15 s and reattaches once it is unlocked. Prerequisites: pymobiledevice3 11.32.0+,
 Developer Mode on, the phone unlocked (a sleeping screen is refused), and the Xcode 27 disk image
 mounted: an open Xcode 26 remounts its own image, so install Xcode 27 or quit Xcode first. Portrait
 and landscape both work. Each tap takes about 6 s (about 9 s with verification). While a tap runs the status bar may show a remote-control indicator. A tap that

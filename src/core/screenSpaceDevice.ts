@@ -114,3 +114,65 @@ export async function resolveScreenSpaceMetrics(opts: {
         pixelScale: pixelScaleFrom(densityScale, pixelSize)
     };
 }
+
+/**
+ * Screen-space metrics for an iOS app on a **physical** device, read from the app itself.
+ *
+ * Every probe above goes through simctl, which cannot see a USB iPhone, so the scale came
+ * back unknown and the layout tools printed points while screenshot and tap spoke pixels
+ * (an iPhone 11 is 414x896 pt, 828x1792 px). The app knows both numbers: Dimensions has the
+ * scale and point size, StatusBarManager the top inset. Cached per device name: none of
+ * them change while the app runs, except the inset on rotation.
+ * ponytail: cache never invalidates, so a phone rotated mid-session keeps the portrait inset.
+ */
+const inAppMetricsCache = new Map<string, ScreenSpaceMetrics>();
+
+const IN_APP_METRICS_JS = `(function () {
+    var D = __eb_require('Libraries/Utilities/Dimensions.js'); D = D && (D.default || D);
+    var S = __eb_require('Libraries/Components/StatusBar/NativeStatusBarManagerIOS.js'); S = S && (S.default || S);
+    var s = D && D.get ? D.get('screen') : null;
+    var c = S && S.getConstants ? S.getConstants() : null;
+    return JSON.stringify({ scale: s && s.scale, width: s && s.width, height: s && s.height, top: c && c.HEIGHT });
+})()`;
+
+export function parseInAppMetrics(raw: string | undefined): ScreenSpaceMetrics | null {
+    try {
+        const m = JSON.parse(raw ?? "") as { scale?: number; width?: number; height?: number; top?: number };
+        if (!m.scale || !m.width || !m.height) return null;
+        return {
+            platform: "ios",
+            topInset: m.top && m.top > 0 ? m.top : IOS_DEFAULT_SAFE_AREA_TOP,
+            pixelScale: pixelScaleFrom(m.scale, { width: m.width * m.scale, height: m.height * m.scale })
+        };
+    } catch {
+        return null;
+    }
+}
+
+export async function resolvePhysicalIosMetrics(deviceName: string): Promise<ScreenSpaceMetrics> {
+    const cached = inAppMetricsCache.get(deviceName);
+    if (cached) return cached;
+    const { executeInApp } = await import("./jsExecute.js");
+    const r = await executeInApp(IN_APP_METRICS_JS, false, { timeoutMs: 3000 }, deviceName).catch(() => null);
+    const m = r?.success ? parseInAppMetrics(r.result) : null;
+    if (!m) return { platform: "ios", topInset: IOS_DEFAULT_SAFE_AREA_TOP };
+    inAppMetricsCache.set(deviceName, m);
+    return m;
+}
+
+/** {@link resolveScreenSpaceMetrics} for a connected app, including one on a physical iPhone. */
+export async function resolveScreenSpaceMetricsForApp(app: {
+    platform: "ios" | "android";
+    simulatorUdid?: string | null;
+    adbSerial?: string | null;
+    deviceInfo: { deviceName?: string };
+}): Promise<ScreenSpaceMetrics> {
+    if (app.platform === "ios" && !app.simulatorUdid && app.deviceInfo.deviceName) {
+        return resolvePhysicalIosMetrics(app.deviceInfo.deviceName);
+    }
+    return resolveScreenSpaceMetrics({
+        platform: app.platform,
+        udid: app.simulatorUdid ?? undefined,
+        deviceId: app.adbSerial ?? undefined
+    });
+}

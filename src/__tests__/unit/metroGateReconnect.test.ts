@@ -217,3 +217,36 @@ describe("the no-Metro hint", () => {
         expect(hint).toContain("ensure_connection({ waitMs: 60000 })");
     });
 });
+
+describe("a phone polled past the fast backoff", () => {
+    it("is not waited on, and the hint says the phone is away", async () => {
+        const { initConnectionState, updateConnectionState, clearConnectionState, saveConnectionMetadata, pendingReconnectionKeys, awaitingDeviceKeys } =
+            await import("../../core/connectionState.js");
+        connectedApps.clear();
+        initConnectionState("phone-1");
+        saveConnectionMetadata("phone-1", {
+            port: 8081,
+            deviceInfo: { id: "phone-1", title: "App (iPhone)", description: "", appId: "a", type: "node", webSocketDebuggerUrl: "ws://x", deviceName: "iPhone" },
+            webSocketUrl: "ws://x",
+            physicalDevice: true
+        });
+        updateConnectionState("phone-1", { reconnectionAttempts: 9 });
+        saveReconnectionTimer("phone-1", setTimeout(() => {}, 60_000));
+
+        expect(pendingReconnectionKeys()).not.toContain("phone-1");
+        expect(awaitingDeviceKeys()).toEqual(["phone-1"]);
+
+        // With nothing worth waiting for, the gate connects at once instead of sleeping.
+        const { waits, sleep } = fakeSleep();
+        let connected = false;
+        await awaitMetro({ sleep, connect: async () => { connected = true; return { ports: [8081], failures: ["no app"] }; } });
+        expect(waits).toEqual([]);
+        expect(connected).toBe(true);
+
+        const hint = buildMetroMissingHint({ toolName: "get_screen_state", awaiting: ["iPhone"] });
+        expect(hint).toContain("iPhone (physical device) dropped off Metro");
+
+        cancelReconnectionTimer("phone-1");
+        clearConnectionState("phone-1");
+    });
+});

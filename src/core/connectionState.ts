@@ -228,8 +228,22 @@ export function shouldTerminateForMissedPong(args: {
     return true;
 }
 
+/**
+ * Reconnections still inside the fast backoff: worth waiting a few seconds for.
+ * A phone past it is polled for as long as it stays locked, so waiting on it
+ * would tax every call for nothing; `awaitingDeviceKeys` lists those.
+ */
 export function pendingReconnectionKeys(): string[] {
-    return Array.from(reconnectionTimers.keys());
+    return Array.from(reconnectionTimers.keys()).filter((k) => !isSlowPolling(k));
+}
+
+/** Physical devices off Metro (locked, asleep, app in the background), polled until they return. */
+export function awaitingDeviceKeys(): string[] {
+    return Array.from(reconnectionTimers.keys()).filter(isSlowPolling);
+}
+
+function isSlowPolling(appKey: string): boolean {
+    return (connectionStates.get(appKey)?.reconnectionAttempts ?? 0) > DEFAULT_RECONNECTION_CONFIG.maxAttempts;
 }
 
 /**

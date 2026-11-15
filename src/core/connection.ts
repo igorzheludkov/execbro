@@ -239,6 +239,8 @@ const PING_INTERVAL_MS = 5_000;
 // A socket that produced a CDP message this recently is alive whatever the pong
 // says. Two ping intervals, so a single stalled pong never decides it alone.
 const CDP_QUIET_WINDOW_MS = PING_INTERVAL_MS * 2;
+/** Reconnect pace for a physical device once the fast backoff is spent. */
+const PHYSICAL_POLL_MS = 15_000;
 
 /**
  * Max time (ms) to wait for a Runtime.evaluate("1+1") reply during liveness probing.
@@ -1551,6 +1553,9 @@ export async function connectToDevice(
                     resolveAdbSerialForDeviceName(device.deviceName).catch(() => null)
                 ]);
 
+                const meta = getConnectionMetadata(appKey);
+                if (meta) meta.physicalDevice = !simulatorUdid && !adbSerial?.startsWith("emulator-");
+
                 const connectedApp = connectedApps.get(appKey);
                 if (connectedApp) {
                     if (simulatorUdid) {
@@ -1658,6 +1663,20 @@ function scheduleReconnection(
     const deviceTitle = meta?.deviceInfo.title;
 
     const attempts = state.reconnectionAttempts;
+    if (attempts >= config.maxAttempts && meta?.physicalDevice) {
+        // A phone leaves Metro's list whenever it locks and comes back whenever
+        // someone wakes it, minutes later. Giving up after ~30 s left it detached
+        // until a manual ensure_connection (seen 2026-11-15: 36 minutes). Keep
+        // looking at a slow pace instead; one /json/list fetch per tick, and
+        // attemptReconnection still stops for good if Metro itself goes down.
+        if (attempts === config.maxAttempts) {
+            console.error(`[execbro] ${deviceTitle ?? appKey} is a physical device: polling every ${PHYSICAL_POLL_MS / 1000}s until it is back`);
+            recordConnectionEvent("reconnect-scheduled", appKey, deviceTitle, `physical device: polling every ${PHYSICAL_POLL_MS / 1000}s until it returns (locked or asleep?)`);
+            updateConnectionState(appKey, { status: "disconnected", reconnectionAttempts: attempts + 1 });
+        }
+        saveReconnectionTimer(appKey, setTimeout(() => attemptReconnection(appKey, config), PHYSICAL_POLL_MS));
+        return;
+    }
     if (attempts >= config.maxAttempts) {
         console.error(`[execbro] Max reconnection attempts (${config.maxAttempts}) reached for ${appKey}`);
         updateConnectionState(appKey, { status: "disconnected" });
@@ -1696,7 +1715,11 @@ async function attemptReconnection(
         return false;
     }
     const deviceTitle = metadata.deviceInfo.title;
-    recordConnectionEvent("reconnect-attempt", appKey, deviceTitle);
+    // Past the fast backoff a phone is polled every 15 s for as long as it is
+    // locked. Logging each tick would push the 200-entry event log past the
+    // `closed` event that says why it dropped, so the slow ticks stay silent.
+    const quiet = (getConnectionState(appKey)?.reconnectionAttempts ?? 0) > config.maxAttempts;
+    if (!quiet) recordConnectionEvent("reconnect-attempt", appKey, deviceTitle);
 
     // Quick check: is Metro even running on this port?
     const { scanMetroPorts } = await import("./metro.js");
@@ -1726,8 +1749,10 @@ async function attemptReconnection(
             return false;
         }
         if (!device) {
-            console.error(`[execbro] Device no longer available for ${appKey}`);
-            recordConnectionEvent("reconnect-failed", appKey, deviceTitle, "device no longer advertised by Metro");
+            if (!quiet) {
+                console.error(`[execbro] Device no longer available for ${appKey}`);
+                recordConnectionEvent("reconnect-failed", appKey, deviceTitle, "device no longer advertised by Metro");
+            }
             // Schedule next attempt
             scheduleReconnection(appKey, config);
             return false;

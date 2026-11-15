@@ -127,6 +127,12 @@ export type TextEntryDeps = {
     readNativeFields?: () => Promise<NativeFieldsResult>;
     /** Injected so the native read-back's settle poll is testable without waiting. */
     delay?: (ms: number) => Promise<void>;
+    /**
+     * `readNativeFields` sees keystrokes only (a physical iPhone, where it reads
+     * RN's own lastNativeText: setNativeProps never updates it). A setNativeProps
+     * write is then reported unverified instead of compared against a stale read.
+     */
+    keystrokeReadBackOnly?: boolean;
 };
 
 /**
@@ -428,7 +434,13 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // HID, which appends at the caret rather than setting a value: typing the
     // delta into a populated field is right, but typing it into a cleared one
     // would lose whatever came before.
+    let lastWritePath: WritePath | null = null;
     const write = async (fromEmpty: boolean): Promise<{ path: WritePath; ok: boolean; error?: string }> => {
+        const r = await writeOnce(fromEmpty);
+        lastWritePath = r.path;
+        return r;
+    };
+    const writeOnce = async (fromEmpty: boolean): Promise<{ path: WritePath; ok: boolean; error?: string }> => {
         if (target.controlled) {
             const r = await deps.runOp({ kind: "setValue", value: desired }, opQuery, args.device);
             return { path: "react", ok: r.found && r.ok, error: r.found ? r.via : r.reason };
@@ -452,6 +464,7 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
             return r.found ? r.value : undefined;
         }
         if (!usesNativeReadBack) return undefined;
+        if (deps.keystrokeReadBackOnly && lastWritePath !== "hid") return undefined;
         // A native write updates the view asynchronously, and the accessibility
         // dump is a separate process — reading immediately captures the state
         // from before the write. Poll until the text appears, then stop. Going
@@ -524,6 +537,8 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
                   " so the accessibility tree exposes bullets instead of its contents"
                 : target.controlled
                   ? "the value could not be read back"
+                  : deps.keystrokeReadBackOnly
+                  ? "this field is uncontrolled and was written with setNativeProps, which React Native's own text state does not record, so on a physical iPhone there is nothing to read it back from"
                   : "this field is uncontrolled and could not be located in the accessibility tree" +
                     (target.testID ? "" : " (it has no testID, and no single field's text changed)")
         };

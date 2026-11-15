@@ -240,6 +240,8 @@ export interface ConnectionMetadata {
     port: number;
     deviceInfo: DeviceInfo;
     webSocketUrl: string;
+    /** No simulator or emulator behind it: a USB/Wi-Fi phone, which drops off Metro whenever it locks. */
+    physicalDevice?: boolean;
 }
 
 // Configuration for reconnection behavior

@@ -23,6 +23,7 @@ import {
 } from "../core/index.js";
 import { screenStateToScreenSpace } from "../core/screenSpace.js";
 import { resolvePhysicalIosDevice, physicalIosScreenshot } from "../core/iosPhysical.js";
+import { physicalTargetFor } from "../pro/physicalTap.js";
 import type { PhysicalIosDevice } from "../core/iosPhysical.js";
 import { writeFileSync } from "node:fs";
 import type { ConnectedApp } from "../core/types.js";
@@ -86,8 +87,8 @@ async function capturePhysicalDevice(
         ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${deliveredWidth}x${deliveredHeight} px (downscaled ${(1 / result.scaleFactor!).toFixed(3)}× to fit API limits).`
         : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
     infoText += `\n📸 Captured from: ${phys.name} — physical device, iOS ${phys.version} (${phys.udid})`;
-    infoText += `\n👆 Physical device: tap({ x, y, device: "${phys.udid}" }) works on iOS 27+ with coordinates from this screenshot (needs the Xcode 27 disk image mounted). swipe and input_text do not reach a phone yet.`;
-    infoText += `\nℹ️ No pressable enrichment: the accessibility probe and screen-state lookup are simulator-only.`;
+    infoText += `\n👆 Physical device (iOS 27+, Xcode 27 disk image mounted): tap by x/y from this screenshot, or by testID/text/component while the app is connected; swipe and input_text work too.`;
+    infoText += `\nℹ️ No element list here: call get_screen_state for tap-ready pressables in these same pixels.`;
 
     imageBuffer.add({
         id: `ios-device-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -745,7 +746,7 @@ export function registerScreenshotTools(server: McpServer): void {
                 "WHEN TO USE: Visual verification, before/after comparison, or the starting point for tapping by coordinates.\n" +
                 "WORKFLOW: screenshot -> pick a pressable -> tap(text=...) if exact and unique, else tap(x, y) -> screenshot to verify.\n" +
                 "COORDINATES: image pixels are the coordinates tap(x, y) takes, on every platform. Never scale them yourself.\n" +
-                "PHYSICAL iOS: pass the UDID from list_devices. No pressables; tap by x/y works on iOS 27+, swipe/input_text do not.\n" +
+                "PHYSICAL iOS: pass the UDID from list_devices (bare calls reach it when the app is connected and no simulator runs). No pressables here; get_screen_state lists them in the same pixels. tap, swipe and input_text work on iOS 27+.\n" +
                 "LIMITATIONS: a hidden or minimised chromium window cannot be captured: the call fails at once and says so.\n" +
                 "GOOD: screenshot(); screenshot({ device: \"FluentTalk\" })\n" +
                 "BAD: a made-up device name or UDID, run list_devices first.\n" +
@@ -764,11 +765,12 @@ export function registerScreenshotTools(server: McpServer): void {
             const chromeApp = chromiumAppFor("screenshot", device);
             if (chromeApp) return { ...(await chromiumScreenshotResponse(chromeApp, outputPath)), _targetPlatform: "chromium" };
             const resolved = await resolveDeviceTarget(device);
+            // A USB iPhone is invisible to the resolver (simctl + adb only).
+            // Same rule tap uses: a named device the resolver missed, or an RN
+            // app with no simulator behind it (a bare call with only a phone).
+            const phys = await physicalTargetFor(resolved, device);
+            if (phys) return { ...(await capturePhysicalDevice(phys, outputPath)), _targetPlatform: "ios" };
             if (!resolved.ok) {
-                // A USB iPhone is invisible to the resolver (simctl + adb only),
-                // so try it on a miss, the same fallback ios_screenshot uses.
-                const phys = device ? await resolvePhysicalIosDevice(device) : null;
-                if (phys) return { ...(await capturePhysicalDevice(phys, outputPath)), _targetPlatform: "ios" };
                 return {
                     content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
                     isError: true as const,

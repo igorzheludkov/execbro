@@ -1,7 +1,7 @@
 import { connectedApps } from "./state.js";
 import { getActiveOrBootedSimulatorUdid } from "./ios.js";
 import { getDefaultAndroidDevice } from "./android.js";
-import { pendingReconnectionKeys, getConnectionMetadata } from "./connectionState.js";
+import { pendingReconnectionKeys, awaitingDeviceKeys, getConnectionMetadata } from "./connectionState.js";
 import type { AutoConnectOutcome } from "./connection.js";
 
 export function hasMetro(): boolean {
@@ -28,10 +28,17 @@ export function takeLastAutoConnect(): AutoConnectOutcome | null {
 
 /** Device names, where known, for the reconnections currently in flight. */
 export function reconnectingDeviceNames(): string[] {
-    return pendingReconnectionKeys().map((key) => {
-        const meta = getConnectionMetadata(key);
-        return meta?.deviceInfo.deviceName || meta?.deviceInfo.title || key;
-    });
+    return pendingReconnectionKeys().map(deviceNameFor);
+}
+
+/** Phones that dropped off Metro and are being polled until they return. */
+export function awaitingDeviceNames(): string[] {
+    return awaitingDeviceKeys().map(deviceNameFor);
+}
+
+function deviceNameFor(key: string): string {
+    const meta = getConnectionMetadata(key);
+    return meta?.deviceInfo.deviceName || meta?.deviceInfo.title || key;
 }
 
 /**
@@ -104,14 +111,26 @@ export type MetroMissingHintOptions = {
     reconnecting?: string[];
     /** What the gate's own connect attempt found, when it ran one. */
     autoConnect?: AutoConnectOutcome;
+    /** Physical devices that dropped off Metro and have not come back. */
+    awaiting?: string[];
 };
 
-export function buildMetroMissingHint({ toolName, devices, reconnecting, autoConnect }: MetroMissingHintOptions): string {
+export function buildMetroMissingHint({ toolName, devices, reconnecting, autoConnect, awaiting }: MetroMissingHintOptions): string {
     const fallbacks = NATIVE_FALLBACKS[toolName] ?? [];
     const lines: string[] = [];
     lines.push("[NO METRO] This tool reads data from the JS runtime, which requires an attached debugger.");
 
-    if (reconnecting && reconnecting.length > 0) {
+    if (awaiting && awaiting.length > 0 && !(reconnecting && reconnecting.length > 0)) {
+        // A phone's app leaves Metro when the phone locks or the app goes to the
+        // background, and comes back only when someone brings it forward. Saying
+        // "start your app" or "run scan_metro" sends the agent after a fault
+        // that is not there.
+        lines.push(
+            `${awaiting.join(", ")} (physical device) dropped off Metro, most often because the phone locked, the app went to the background, or the app was closed. ` +
+            `Unlock the phone and bring the app to the front (or relaunch it): execbro checks every 15s and reattaches by itself, and this call connects at once if it is back. ` +
+            `To stop it recurring while testing, set Auto-Lock to Never (Settings > Display & Brightness).`
+        );
+    } else if (reconnecting && reconnecting.length > 0) {
         // Telling the user to run scan_metro here is wrong advice: the connection
         // existed, dropped, and is already coming back on its own. Naming the
         // device also keeps an unrelated attached device out of the diagnosis.
@@ -150,6 +169,7 @@ export async function metroMissingHintIfAbsent(toolName: string): Promise<string
     const autoConnect = takeLastAutoConnect() ?? undefined;
     if (hasMetro()) return "";
     const reconnecting = reconnectingDeviceNames();
+    const awaiting = awaitingDeviceNames();
     const devices = await detectNativeDevices();
-    return "\n\n" + buildMetroMissingHint({ toolName, devices, reconnecting, autoConnect });
+    return "\n\n" + buildMetroMissingHint({ toolName, devices, reconnecting, autoConnect, awaiting });
 }

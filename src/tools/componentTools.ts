@@ -38,7 +38,7 @@ import {
     unresolvedScaleNote,
     type ScreenSpaceMetrics
 } from "../core/screenSpace.js";
-import { resolveScreenSpaceMetrics } from "../core/screenSpaceDevice.js";
+import { resolveScreenSpaceMetricsForApp } from "../core/screenSpaceDevice.js";
 import { readKeyboardState } from "../core/keyboardMetrics.js";
 import { formatKeyboardLine, isBehindKeyboardPx } from "../core/screenState.js";
 import { primaryInteractionBanner } from "../core/toolHelpers.js";
@@ -57,11 +57,7 @@ async function resolveScreenSpaceMetricsFor(device?: string): Promise<ScreenSpac
     // topInset 0 means "leave coordinates alone", which is also the right answer
     // for chromium: CSS pixels have no status bar to subtract.
     if (!app || app.platform === "chromium") return { platform: "ios", topInset: 0 };
-    return resolveScreenSpaceMetrics({
-        platform: app.platform,
-        udid: app.simulatorUdid,
-        deviceId: app.adbSerial
-    });
+    return resolveScreenSpaceMetricsForApp({ ...app, platform: app.platform });
 }
 
 function collectMetaNotes(r: ExecutionResult): string[] {
