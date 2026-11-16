@@ -21,8 +21,9 @@ import { planElectronLaunch, launchElectron } from "../core/electronLaunch.js";
 import { basename } from "path";
 import { homedir } from "os";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
-import { listPhysicalIosDevices } from "../core/iosPhysical.js";
+import { listPhysicalIosDevices, resolvePhysicalIosDevice, physicalIosLaunchApp, physicalIosTerminateApp, type PhysicalIosDevice } from "../core/iosPhysical.js";
 import { recordDevice, listDevices } from "../core/projectMemory.js";
+import { resolveDeviceTarget } from "../core/deviceResolver.js";
 
 /**
  * A launch is the agent naming the device it works on, so it becomes the default
@@ -38,6 +39,28 @@ export function rememberLaunchedDevice(platform: "ios" | "android", identifier: 
     } catch {
         // Memory is a convenience; the launch already happened.
     }
+}
+
+/**
+ * The USB iPhone a launch/terminate goes to, or null for the simctl path. A
+ * named hint is tried as a phone only when simctl found no usable simulator for
+ * it (never on an ambiguity); a bare call reaches a phone only when no simulator
+ * is booted and exactly one phone is attached, so a charging phone never takes
+ * a call meant for a simulator. A shut-down simulator counts as no match: it
+ * cannot run the app, and "iPhone" would otherwise lose the phone to "iPhone Air".
+ */
+const PHONE_FALLBACK_CODES = new Set(["DEVICE_NOT_FOUND", "NO_DEVICES_FOUND", "SIMULATOR_NOT_BOOTED"]);
+
+async function phoneForAppTool(hint: string | undefined, simResolved: boolean): Promise<PhysicalIosDevice | null> {
+    if (hint) {
+        if (simResolved) return null;
+        const r = await resolveDeviceTarget(hint);
+        if (r.ok || !PHONE_FALLBACK_CODES.has(r.error.code)) return null;
+        return resolvePhysicalIosDevice(hint).catch(() => null);
+    }
+    if (await getActiveOrBootedSimulatorUdid()) return null;
+    const phones = await listPhysicalIosDevices().catch(() => []);
+    return phones.length === 1 ? phones[0] : null;
 }
 
 export function registerDeviceTools(server: McpServer): void {
@@ -282,7 +305,7 @@ export function registerDeviceTools(server: McpServer): void {
         server,
         "ios_launch_app",
         {
-            description: "Launch an app on an iOS simulator by bundle ID" +
+            description: "Launch an app on an iOS simulator, or a USB iPhone (pass its UDID or name from list_devices), by bundle ID" +
                 platformUniqueBanner("launching an iOS app by bundle ID") +
                 "\nPURPOSE: Start an installed iOS app by its bundle ID so the next tool calls hit a running process." +
                 "\nWHEN TO USE: After ios_terminate_app or an install, or when the app isn't foregrounded before interaction.",
@@ -293,6 +316,14 @@ export function registerDeviceTools(server: McpServer): void {
         },
         async ({ bundleId, udid }) => {
             const r = await resolveIosUdid(udid);
+            const phone = await phoneForAppTool(udid, r.ok);
+            if (phone) {
+                const result = await physicalIosLaunchApp(phone, bundleId);
+                return {
+                    content: [{ type: "text", text: result.success ? result.result! + LAUNCH_ATTACH_HINT : `Error: ${result.error}` }],
+                    isError: !result.success
+                };
+            }
             if (!r.ok) return r.response;
             const launchUdid = r.udid ?? (await getActiveOrBootedSimulatorUdid()) ?? undefined;
             const result = await iosLaunchApp(bundleId, launchUdid);
@@ -349,7 +380,7 @@ export function registerDeviceTools(server: McpServer): void {
         server,
         "ios_terminate_app",
         {
-            description: "Terminate a running app on an iOS simulator" +
+            description: "Terminate a running app on an iOS simulator, or a USB iPhone (pass its UDID or name from list_devices)" +
                 platformUniqueBanner("force-terminating an iOS app") +
                 "\nPURPOSE: Force-kill an iOS app process so the next launch starts from a cold state." +
                 "\nWHEN TO USE: To reset app state fully (beyond what reload_app does), or before reinstalling a new build.",
@@ -360,8 +391,9 @@ export function registerDeviceTools(server: McpServer): void {
         },
         async ({ bundleId, udid }) => {
             const r = await resolveIosUdid(udid);
-            if (!r.ok) return r.response;
-            const result = await iosTerminateApp(bundleId, r.udid);
+            const phone = await phoneForAppTool(udid, r.ok);
+            if (!phone && !r.ok) return r.response;
+            const result = phone ? await physicalIosTerminateApp(phone, bundleId) : await iosTerminateApp(bundleId, r.ok ? r.udid : undefined);
     
             return {
                 content: [

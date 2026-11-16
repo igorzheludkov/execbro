@@ -255,7 +255,7 @@ Modular MCP server with entry point at `src/index.ts` and core logic in `src/cor
 **Device Management:**
 - `list_devices`: Find available simulators, emulators, and physical devices in one call. Physical iPhones/iPads are listed in their own section, labelled screenshot plus x/y tap on iOS 27+ — simctl cannot see them at all, so they need a separate usbmux probe
 - `ios_boot_simulator`: Boot an iOS simulator by UDID
-- `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name
+- `ios_launch_app` / `android_launch_app`: Launch app by bundle ID or package name. `ios_launch_app` and `ios_terminate_app` also reach a USB iPhone (`devicectl`, iOS 17+): by its UDID or name when simctl has no booted match (never on an ambiguity), or bare when no simulator is booted and exactly one phone is attached. Terminate looks the pid up with pymobiledevice3 DVT, because `devicectl device info apps` listed no apps on an iOS 27 phone that had three installed
 - `electron_launch_app`: Start an Electron project from its source folder with the CDP port open and connect its windows as chromium targets. Zero-config: no `appendSwitch` line needed in the app
 - `ios_terminate_app`: Terminate app on iOS simulator. An app that had already quit is reported as stopped rather than as a failure — simctl returns the same error for an uninstalled bundle id, so the result never claims a termination happened
 - `android_list_packages`: List installed packages on Android device

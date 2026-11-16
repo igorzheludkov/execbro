@@ -187,6 +187,65 @@ export async function physicalIosScreenshot(
 }
 
 // ---------------------------------------------------------------------------
+// App launch / terminate, through `xcrun devicectl` (Xcode 15+, iOS 17+).
+// ---------------------------------------------------------------------------
+
+const DEVICECTL_DEADLINE_MS = 30000;
+
+/** devicectl's own message (its stderr leads with "ERROR: "), else the exec error. */
+function devicectlError(error: unknown): string {
+    const stderr = ((error as { stderr?: string }).stderr ?? "").trim();
+    return stderr || (error instanceof Error ? error.message : String(error));
+}
+
+export async function physicalIosLaunchApp(device: PhysicalIosDevice, bundleId: string): Promise<iOSResult> {
+    try {
+        // devicectl takes the hardware UDID usbmux reports, no CoreDevice id needed.
+        await execFileAsync("xcrun", ["devicectl", "device", "process", "launch", "--device", device.udid, "-q", bundleId], {
+            timeout: DEVICECTL_DEADLINE_MS,
+        });
+        return { success: true, result: `Launched ${bundleId} on ${device.name} (USB, iOS ${device.version})` };
+    } catch (error) {
+        return { success: false, error: `Failed to launch ${bundleId} on ${device.name}: ${devicectlError(error)}` };
+    }
+}
+
+/**
+ * devicectl terminates by pid only, and its app listing came back empty on an
+ * iOS 27 phone with three user apps installed, so bundle id → pid goes through
+ * DVT instead. pid 0 means not running (or not installed: DVT does not tell them apart).
+ */
+export async function physicalIosTerminateApp(device: PhysicalIosDevice, bundleId: string): Promise<iOSResult> {
+    const bin = resolveBinary();
+    if (!bin) return { success: false, error: PMD3_MISSING_ERROR };
+    const major = parseInt(device.version, 10);
+    const lookup = await withPhoneLock(device.udid, () =>
+        runPmd3(bin, ["developer", "dvt", "process-id-for-bundle-id", ...(major >= 17 ? ["--native"] : ["--udid", device.udid]), bundleId], device.udid, PMD3_LIST_DEADLINE_MS)
+    );
+    if (!lookup.ok) {
+        if (lookup.missing) return { success: false, error: PMD3_MISSING_ERROR };
+        return { success: false, error: `Could not find ${bundleId}'s process on ${device.name}: ${lookup.stderr || lookup.message}\n\n${DDI_HINT}` };
+    }
+    const pid = parseInt(lookup.stdout.trim(), 10);
+    if (!pid) {
+        return { success: true, result: `${bundleId} was not running on ${device.name} (nothing to terminate). If you expected it to be running, check the bundle id.` };
+    }
+    try {
+        await execFileAsync("xcrun", ["devicectl", "device", "process", "terminate", "--device", device.udid, "--pid", String(pid), "-q"], {
+            timeout: DEVICECTL_DEADLINE_MS,
+        });
+        return { success: true, result: `Terminated ${bundleId} on ${device.name} (pid ${pid})` };
+    } catch (error) {
+        const msg = devicectlError(error);
+        // Exited between the lookup and the signal: stopped, which is what was asked.
+        if (msg.includes("No such process")) {
+            return { success: true, result: `${bundleId} exited on ${device.name} before it could be terminated.` };
+        }
+        return { success: false, error: `Failed to terminate ${bundleId} on ${device.name}: ${msg}` };
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HID touch (iOS 27+), through `universal-hid-service session`. Spec §2.2.
 // ---------------------------------------------------------------------------
 
