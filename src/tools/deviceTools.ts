@@ -15,7 +15,7 @@ import {
 } from "../core/index.js";
 import { platformUniqueBanner } from "../core/toolHelpers.js";
 import { listAllDevices } from "../core/deviceDiscovery.js";
-import { getConnectedApps, connectToDevice } from "../core/connection.js";
+import { getConnectedApps, connectToDevice, expectLaunchedApp } from "../core/connection.js";
 import { isPortOpen } from "../core/metro.js";
 import { planElectronLaunch, launchElectron } from "../core/electronLaunch.js";
 import { basename } from "path";
@@ -253,7 +253,10 @@ export function registerDeviceTools(server: McpServer): void {
             // unrecorded launch left the default target on whatever device was used before.
             const serial = r.serial ?? (await getDefaultAndroidDevice()) ?? undefined;
             const result = await androidLaunchApp(packageName, activityName, serial);
-            if (result.success && serial) rememberLaunchedDevice("android", serial, packageName);
+            if (result.success && serial) {
+                rememberLaunchedDevice("android", serial, packageName);
+                expectLaunchedApp({ platform: "android", id: serial, label: serial });
+            }
     
             return {
                 content: [
@@ -319,6 +322,7 @@ export function registerDeviceTools(server: McpServer): void {
             const phone = await phoneForAppTool(udid, r.ok);
             if (phone) {
                 const result = await physicalIosLaunchApp(phone, bundleId);
+                if (result.success) expectLaunchedApp({ platform: "ios", phoneName: phone.name, label: `${phone.name} (USB)` });
                 return {
                     content: [{ type: "text", text: result.success ? result.result! + LAUNCH_ATTACH_HINT : `Error: ${result.error}` }],
                     isError: !result.success
@@ -327,7 +331,10 @@ export function registerDeviceTools(server: McpServer): void {
             if (!r.ok) return r.response;
             const launchUdid = r.udid ?? (await getActiveOrBootedSimulatorUdid()) ?? undefined;
             const result = await iosLaunchApp(bundleId, launchUdid);
-            if (result.success && launchUdid) rememberLaunchedDevice("ios", launchUdid, bundleId);
+            if (result.success && launchUdid) {
+                rememberLaunchedDevice("ios", launchUdid, bundleId);
+                expectLaunchedApp({ platform: "ios", id: launchUdid, label: launchUdid });
+            }
     
             return {
                 content: [

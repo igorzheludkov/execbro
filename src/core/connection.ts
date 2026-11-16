@@ -2369,6 +2369,28 @@ async function findFirstMetroPort(): Promise<number | null> {
 }
 
 /**
+ * The device a launch tool last started an app on. `ensure_connection({ waitMs })`
+ * waits for that device, not just for any app: with another app already
+ * connected (an Electron window, a second simulator) it used to return at once,
+ * before the launched one had attached, and bare taps went to the other app.
+ * A simulator or emulator is matched by its UDID / serial, a USB iPhone (no
+ * simulator UDID) by the name Metro reports for it.
+ */
+type ExpectedLaunch = { platform: "ios" | "android"; id?: string; phoneName?: string; label: string; until: number };
+let expectedLaunch: ExpectedLaunch | null = null;
+const EXPECTED_LAUNCH_TTL_MS = 10 * 60 * 1000;
+
+export function expectLaunchedApp(target: { platform: "ios" | "android"; id?: string; phoneName?: string; label: string }): void {
+    expectedLaunch = { ...target, until: Date.now() + EXPECTED_LAUNCH_TTL_MS };
+}
+
+export function matchesExpectedLaunch(app: ConnectedApp, e: Omit<ExpectedLaunch, "until" | "label">): boolean {
+    if (app.platform !== e.platform) return false;
+    if (e.id) return app.simulatorUdid === e.id || app.adbSerial === e.id;
+    return !!e.phoneName && !app.simulatorUdid && app.deviceInfo.deviceName === e.phoneName;
+}
+
+/**
  * Ensure a healthy connection to a React Native app
  * This will verify or establish a connection, optionally running a health check
  */
@@ -2483,6 +2505,34 @@ export async function ensureConnection(options: {
             connectionInfos: [],
             error: "Connection succeeded but app is not available",
         };
+    }
+
+    // A just-launched app, while another app is already connected: wait for that
+    // device specifically, connecting new Metro targets as they appear.
+    const expected = expectedLaunch && expectedLaunch.until > Date.now() ? expectedLaunch : null;
+    if (expected && waitMs > 0) {
+        const deadline = Date.now() + waitMs;
+        const found = () => cdpApps().some(a => matchesExpectedLaunch(a, expected));
+        while (!found() && Date.now() < deadline) {
+            const ports = port ? [port] : await scanMetroPorts().catch(() => []);
+            if (ports.length > 0) await autoConnectSweep(ports).catch(() => []);
+            if (!found()) await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        if (!found()) {
+            return {
+                connected: false,
+                wasReconnected,
+                healthCheckPassed: false,
+                connectionInfos: [],
+                error: `The app launched on ${expected.label} did not attach to Metro in ${Math.round(waitMs / 1000)}s ` +
+                    `(connected: ${cdpApps().map(a => a.deviceInfo.deviceName).join(", ") || "nothing"}). ` +
+                    `Next: screenshot that device (a red box, or a splash that never finishes), get_bundle_errors, and check it loads from this machine's Metro.`,
+                failureKind: "no_debuggable_devices",
+            };
+        }
+        expectedLaunch = null;
+        wasReconnected = true;
+        openApps = cdpApps();
     }
 
     // Per-device health-check; reconnect failed devices individually so a dead
