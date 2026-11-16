@@ -20,7 +20,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `get_apps`              | List connected apps. Run `scan_metro` first if none connected                                                                |
 | `get_connection_status` | Get detailed connection health, uptime, and recent disconnects                                                               |
 | `electron_launch_app`   | Start an Electron project from its source folder with the CDP port open and connect its windows as chromium targets. Source folders only (a `.app` / `.asar` is refused); follows the port if the app pins its own |
-| `ensure_connection`     | Verify/establish connection with health checks; `waitMs` waits for a just-launched app to attach                             |
+| `ensure_connection`     | Verify/establish connection with health checks; `waitMs` waits for a just-launched app to attach (after a launch tool, for that device even when other apps are connected) |
 | `get_logs`              | Retrieve console logs (filtering, truncation, summary)                                                                       |
 | `search_logs`           | Search logs for specific text (truncation)                                                                                   |
 | `clear_logs`            | Clear the log buffer                                                                                                         |
@@ -122,14 +122,14 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 | Tool                   | Description                                               |
 | ---------------------- | --------------------------------------------------------- |
 | `ios_screenshot`       | Legacy iOS-only alias of `screenshot`                     |
-| `ios_launch_app`       | Launch an app by bundle ID                                |
+| `ios_launch_app`       | Launch an app by bundle ID, on a simulator or a USB iPhone (iOS 17+, through `devicectl`). `ensure_connection({ waitMs })` afterwards waits for that device |
 | `ios_open_url`         | Open a URL (deep links or web URLs)                       |
-| `ios_terminate_app`    | Terminate a running app. An app that had already quit is reported as stopped, not as a failure — simctl gives the same error for an uninstalled bundle id, so the result never claims a termination happened |
+| `ios_terminate_app`    | Terminate a running app, on a simulator or a USB iPhone. An app that had already quit is reported as stopped, not as a failure — simctl gives the same error for an uninstalled bundle id, so the result never claims a termination happened |
 | `ios_boot_simulator`   | Boot a simulator by UDID                                  |
 | `ios_button`           | Press hardware button: HOME, LOCK, SIRI (requires IDB)    |
 
 ### Physical iOS devices
 
-A USB-attached iPhone or iPad is reached by `screenshot` (iOS 15 and later), and on iOS 27 and later by `tap` (by `x`/`y`, or by `testID` / `text` / `component` while the app is connected; long press with `duration`; portrait and landscape), `swipe` (with the scroll offset and the reason a swipe did nothing), `input_text` (real keystrokes, read back from React Native's own text state) and `press_key` (named keys and characters, no modifiers). `get_screen_state`, `get_screen_layout` and `inspect_at_point` read the phone's app in the same screenshot pixels. With the app connected and no simulator booted, calls reach the phone without `device`; otherwise pass its UDID from `list_devices` (or the identifier `xcrun devicectl list devices` prints). The physical lookup runs only after the simulator lookup fails, so nothing changes for simulator use. If the phone locks, its app drops off Metro; execbro checks every 15 s and reattaches once it is unlocked.
+A USB-attached iPhone or iPad is reached by `screenshot` (iOS 15 and later), `ios_launch_app` / `ios_terminate_app` (iOS 17 and later), and on iOS 27 and later by `tap` (by `x`/`y`, or by `testID` / `text` / `component` while the app is connected; long press with `duration`; portrait and landscape), `swipe` (with the scroll offset and the reason a swipe did nothing), `input_text` (real keystrokes, read back from React Native's own text state) and `press_key` (named keys and characters, no modifiers). `get_screen_state`, `get_screen_layout` and `inspect_at_point` read the phone's app in the same screenshot pixels. With the app connected and no simulator booted, calls reach the phone without `device`; otherwise pass its UDID from `list_devices` (or the identifier `xcrun devicectl list devices` prints). The physical lookup runs only after the simulator lookup fails, so nothing changes for simulator use. If the phone locks, its app drops off Metro; execbro checks every 15 s and reattaches once it is unlocked.
 
 Not on a phone yet: the pressable list inside the `screenshot` response (use `get_screen_state`), and modifier key combos. Requires `pymobiledevice3` (11.32.0 or later for taps), a mounted developer disk image, and for taps Developer Mode, the Xcode 27 disk image and an unlocked phone; see [setup.md](setup.md#physical-ios-device).

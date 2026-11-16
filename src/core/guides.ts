@@ -31,13 +31,14 @@ const guides: Guide[] = [
 
 ## If No App Running
 - list_devices — iOS simulators, Android emulators, and physical devices in one call. A USB-attached
-  iPhone/iPad appears under "iOS physical": screenshot reaches it, and on iOS 27+ so does tap by
-  x/y; every other interaction tool does not
+  iPhone/iPad appears under "iOS physical": screenshot reaches it, and on iOS 27+ so do tap, swipe,
+  input_text and press_key. Pass its UDID or name as device
 - ios_boot_simulator — boot an iOS simulator if needed
-- ios_launch_app / android_launch_app — launch the app
-- ios_terminate_app — kill an app that is in a bad state before relaunching
+- ios_launch_app / android_launch_app — launch the app (ios_launch_app also on a USB iPhone, iOS 17+)
+- ios_terminate_app — kill an app that is in a bad state before relaunching (simulator or USB iPhone)
 - android_list_packages — find the package name when you only know the app by sight
-- Then ensure_connection({ waitMs: 60000 }) — returns as soon as the app's JS runtime attaches. A cold
+- Then ensure_connection({ waitMs: 60000 }) — returns as soon as the launched device's app attaches,
+  even when another app (an Electron window, a second simulator) is already connected. A cold
   first bundle can take a minute or more, and until it loads Metro lists no app: scan_metro then says
   "Metro is running, but no app has attached yet", which means wait, not that Metro is down
 

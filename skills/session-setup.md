@@ -63,7 +63,7 @@ Start the React Native app on the device:
 
 **iOS:**
 ```
-mcp__execbro__ios_launch_app with bundleId
+mcp__execbro__ios_launch_app with bundleId (also a USB iPhone: pass its UDID or name as udid)
 ```
 
 **Android:**
