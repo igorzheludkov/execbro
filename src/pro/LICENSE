@@ -1,23 +1,27 @@
-react-native-ai-devtools Commercial License
+ExecBro Free-Use License
 
 Copyright (c) 2025-2026 Ihor Zheludkov. All rights reserved.
 
-The software code, files, and assets contained in the `src/pro/` directory and its subdirectories (the "Pro Software") is commercial software.
+This license covers the code, files and assets in the `src/pro/` directory and its subdirectories (the "Software"). All other code in this repository is under the MIT License; see the LICENSE file at the repository root.
 
 1. Grant of License
-Subject to your compliance with the terms and conditions of this commercial license, and payment of the applicable subscription fees, you are granted a non-exclusive, non-transferable, non-sublicensable license to use the Pro Software for the features, usage limits, or number of seats you have purchased.
+You may use the Software free of charge, for any purpose, including commercial work, as part of ExecBro. No fee, subscription, license key or account is required.
 
 2. Restrictions
-Unless explicitly permitted by a separate written agreement, you may not:
-- Distribute, lease, rent, sell, or sublicense the Pro Software or any part of it.
-- Modify, bypass, disable, or tamper with the license validation mechanisms built into the Pro Software.
-- Use the Pro Software to create a product that directly competes with react-native-ai-devtools.
+Unless the author permits it in writing, you may not:
+- Distribute, sell, lease, rent or sublicense the Software, or any part of it, separately from ExecBro.
+- Use the Software, or code derived from it, in a product that competes with ExecBro.
 
-3. Ownership
-All rights, title, and interest in and to the Pro Software, including all intellectual property rights therein, are and will remain the exclusive property of the author.
+Reading, studying and modifying the Software for your own use is allowed. So is contributing changes back to ExecBro.
 
-4. Termination
-This license is effective until terminated. Your rights under this license will terminate automatically without notice if you fail to comply with any of its terms or if your subscription expires.
+3. Changes to These Terms
+The author may offer future versions of the Software under different terms. Any version you received under this license stays under this license.
 
-5. Warranty Disclaimer
-THE PRO SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE PRO SOFTWARE OR THE USE OR OTHER DEALINGS IN THE PRO SOFTWARE.
+4. Ownership
+All rights, title and interest in the Software, including all intellectual property rights, remain with the author.
+
+5. Termination
+Your rights under this license end automatically if you break its terms.
+
+6. Warranty Disclaimer
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
