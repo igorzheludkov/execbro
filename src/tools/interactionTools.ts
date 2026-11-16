@@ -425,15 +425,8 @@ export function registerInteractionTools(server: McpServer): void {
                 return attachOutcome(chromeResult, await finishActionOutcome(chromeHandle, { visualSettleRan: verify !== false }));
             }
             const resolved = await resolveDeviceTarget(device);
-            if (!resolved.ok) {
-                return {
-                    content: [{ type: "text", text: `Error: ${formatResolverError(resolved.error)}` }],
-                    isError: true
-                };
-            }
-            const resolvedPlatform: "ios" | "android" = resolved.target.platform;
-            const resolvedUdid: string | undefined = resolved.target.iosUdid;
-
+            // Phone first: a named USB iPhone comes back from the resolver as an error
+            // (no simulator has it), and physicalTargetFor is what turns that into a target.
             const phone = await physicalTargetFor(resolved, device);
             if (phone) {
                 const phoneHandle = await beginActionOutcome(device);
@@ -481,6 +474,14 @@ export function registerInteractionTools(server: McpServer): void {
                     _meaningful: r.verification && !r.verification.skipped ? r.verification.meaningful : undefined,
                 };
             }
+            if (!resolved.ok) {
+                return {
+                    content: [{ type: "text", text: `Error: ${formatResolverError(resolved.error)}` }],
+                    isError: true
+                };
+            }
+            const resolvedPlatform: "ios" | "android" = resolved.target.platform;
+            const resolvedUdid: string | undefined = resolved.target.iosUdid;
 
             const shouldVerify = verify !== false;
             const shouldScreenshot = screenshot !== false;
@@ -1340,15 +1341,6 @@ export function registerInteractionTools(server: McpServer): void {
                 );
             }
             const resolved = await resolveDeviceTarget(device);
-            if (!resolved.ok) {
-                return {
-                    content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
-                    isError: true
-                };
-            }
-
-            const { platform, iosUdid, androidSerial } = resolved.target;
-            const hasRnTarget = testID !== undefined || component !== undefined || textMatch !== undefined;
 
             // A USB iPhone: no simctl, no accessibility dump. Keystrokes go through
             // pymobiledevice3's virtual HID keyboard, and the read-back comes from
@@ -1389,6 +1381,15 @@ export function registerInteractionTools(server: McpServer): void {
                     phone.udid
                 );
             }
+
+            if (!resolved.ok) {
+                return {
+                    content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
+                    isError: true
+                };
+            }
+            const { platform, iosUdid, androidSerial } = resolved.target;
+            const hasRnTarget = testID !== undefined || component !== undefined || textMatch !== undefined;
 
             if (native === true) {
                 const r = await nativeTextEntry(text, replace === true, platform, iosUdid, androidSerial, device);
