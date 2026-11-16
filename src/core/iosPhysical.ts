@@ -564,13 +564,26 @@ export async function physicalIosKey(device: PhysicalIosDevice, name: string, co
 }
 
 /**
- * Gap between characters for `type`. pymobiledevice3's default 0.02 s lost the
- * second character of the first word typed after an app launch, every time
- * ("igor" -> "Ior", iPhone 11, iOS 27.2.1, 2026-11-16); later typing kept it,
- * so the retry recovered it, visibly: wrong text, cleared, typed again. 0.1 s
- * kept it on a fresh launch.
+ * Gap between characters for `type` (pymobiledevice3's default is 0.02 s). Raised
+ * for the lost-second-character bug below, which it turned out not to fix; kept
+ * because it was the setting every later verification ran with.
  */
 const TYPE_INTER_DELAY_S = 0.1;
+
+/**
+ * How to split `text` into `type` sessions. Typing into a field that was just
+ * focused goes wrong in one session: the keystroke after the first is dropped, and
+ * a leading capital latches Shift ("Igor" landed "IOR" and "IORG", "Hello" landed
+ * "Hllo"; iPhone 11, iOS 27.2.1, 2026-11-16, "IOR" reproduced with the bare CLI).
+ * Typing the first character alone and the rest in a second session landed "Igor"
+ * exactly; a second write into the already-focused field is clean in one session.
+ * Without the split the read-back caught it and the retry fixed it, visibly: wrong
+ * text, cleared, typed again. The split costs one more session (~3 s), less than
+ * the retry it replaces.
+ */
+export function typeSessions(text: string, splitFirst: boolean): string[] {
+    return splitFirst && text.length > 1 ? [text[0], text.slice(1)] : [text];
+}
 /** Per-character time `type` takes (0.04 s down + the gap), plus slack. */
 const TYPE_MS_PER_CHAR = 40 + TYPE_INTER_DELAY_S * 1000 + 40;
 
@@ -580,6 +593,11 @@ const TYPE_MS_PER_CHAR = 40 + TYPE_INTER_DELAY_S * 1000 + 40;
  * same limit as the simulator's HID path. Verified 2026-11-15 on an iPhone 11,
  * iOS 27.2.1: "Hello 123" reached the app's onChangeText (autocorrected to "Help 123").
  */
-export async function physicalIosType(device: PhysicalIosDevice, text: string): Promise<HidOutcome> {
-    return runHid(device, ["type", "--native", "--inter-delay", String(TYPE_INTER_DELAY_S), "--", text], HID_SESSION_DEADLINE_MS + text.length * TYPE_MS_PER_CHAR, "keystrokes");
+export async function physicalIosType(device: PhysicalIosDevice, text: string, splitFirst = false): Promise<HidOutcome> {
+    let outcome: HidOutcome = { success: true };
+    for (const chunk of typeSessions(text, splitFirst)) {
+        outcome = await runHid(device, ["type", "--native", "--inter-delay", String(TYPE_INTER_DELAY_S), "--", chunk], HID_SESSION_DEADLINE_MS + chunk.length * TYPE_MS_PER_CHAR, "keystrokes");
+        if (!outcome.success) return outcome;
+    }
+    return outcome;
 }

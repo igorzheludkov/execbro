@@ -1357,11 +1357,13 @@ export function registerInteractionTools(server: McpServer): void {
                     };
                 }
                 const query = { testID, component, textMatch, index };
+                let typedOnce = false;
                 const phoneResult = await enterText(
                     { text, testID, component, textMatch, index, replace, device },
                     {
                         runOp: (op, q, dev) => runInputOp(op, q, dev),
-                        typeHid: (t) => physicalIosType(phone, t),
+                        // Only the first write lands in a just-focused field; a retry types into a focused one.
+                        typeHid: (t) => physicalIosType(phone, t, !typedOnce && (typedOnce = true)),
                         readNativeFields: async () => {
                             const r = await runInputOp({ kind: "read" }, query, device);
                             if (!r.found) return { fields: [], error: r.reason };
