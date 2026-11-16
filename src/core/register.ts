@@ -250,7 +250,11 @@ export function registerToolWithTelemetry(
                 }
             }
             // First-install feedback hint — fires once on first successful Metro-connected tool
-            if (!NON_METRO_TOOLS.has(toolName) && shouldShowFeedbackHint()) {
+            // Only into an app that is already connected: pushLogBox with nothing
+            // connected scans Metro and attaches to whatever app it serves, so a tool
+            // that never touches the app (list_secrets, a unit test calling one) used
+            // to open a device connection just to greet.
+            if (!NON_METRO_TOOLS.has(toolName) && connectedApps.size > 0 && shouldShowFeedbackHint()) {
                 markFeedbackHintShown();
                 // Fire-and-forget — don't block the tool response
                 pushLogBox(
