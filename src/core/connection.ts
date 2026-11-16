@@ -2460,10 +2460,23 @@ export async function ensureConnection(options: {
             // after probe.
             clearReconnectionSuppression();
 
-            const connectResult = await connectToDevice(mainDevice, targetPort);
+            let connectResult = await connectToDevice(mainDevice, targetPort);
+            // Metro lists a cold-launched app's target a moment before its JS context
+            // answers, so the first probe can read stale on a runtime that is seconds
+            // from alive. Within waitMs, keep probing instead of failing the wait.
+            // Not on chromium: there a stale page is an open dialog, which waiting
+            // does not fix.
+            while (
+                connectResult.includes("stale CDP target") && !isChromiumTarget(mainDevice) &&
+                Date.now() < deadline && cdpApps().length === 0
+            ) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                mainDevice = selectMainDevice(await fetchDevices(targetPort)) ?? mainDevice;
+                connectResult = await connectToDevice(mainDevice, targetPort);
+            }
             wasReconnected = true;
 
-            if (connectResult.includes("stale CDP target")) {
+            if (connectResult.includes("stale CDP target") && cdpApps().length === 0) {
                 return {
                     connected: false,
                     wasReconnected: false,
