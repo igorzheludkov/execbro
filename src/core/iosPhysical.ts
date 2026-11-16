@@ -563,8 +563,16 @@ export async function physicalIosKey(device: PhysicalIosDevice, name: string, co
     return runHid(device, ["key", "--native", name, "--count", String(count)], HID_SESSION_DEADLINE_MS + count * TYPE_MS_PER_CHAR, "key");
 }
 
-/** Per-character time `type` takes (0.04 s down + 0.02 s between), plus slack. */
-const TYPE_MS_PER_CHAR = 80;
+/**
+ * Gap between characters for `type`. pymobiledevice3's default 0.02 s lost the
+ * second character of the first word typed after an app launch, every time
+ * ("igor" -> "Ior", iPhone 11, iOS 27.2.1, 2026-11-16); later typing kept it,
+ * so the retry recovered it, visibly: wrong text, cleared, typed again. 0.1 s
+ * kept it on a fresh launch.
+ */
+const TYPE_INTER_DELAY_S = 0.1;
+/** Per-character time `type` takes (0.04 s down + the gap), plus slack. */
+const TYPE_MS_PER_CHAR = 40 + TYPE_INTER_DELAY_S * 1000 + 40;
 
 /**
  * Real keystrokes into whatever is focused on a USB iPhone running iOS 27+, through
@@ -573,5 +581,5 @@ const TYPE_MS_PER_CHAR = 80;
  * iOS 27.2.1: "Hello 123" reached the app's onChangeText (autocorrected to "Help 123").
  */
 export async function physicalIosType(device: PhysicalIosDevice, text: string): Promise<HidOutcome> {
-    return runHid(device, ["type", "--native", text], HID_SESSION_DEADLINE_MS + text.length * TYPE_MS_PER_CHAR, "keystrokes");
+    return runHid(device, ["type", "--native", "--inter-delay", String(TYPE_INTER_DELAY_S), "--", text], HID_SESSION_DEADLINE_MS + text.length * TYPE_MS_PER_CHAR, "keystrokes");
 }
