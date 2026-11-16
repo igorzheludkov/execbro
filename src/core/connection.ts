@@ -2401,6 +2401,7 @@ export async function ensureConnection(options: {
     waitMs?: number;
 } = {}): Promise<EnsureConnectionResult> {
     const { port, healthCheck = true, forceRefresh = false, waitMs = 0 } = options;
+    const waitDeadline = Date.now() + waitMs;
 
     let wasReconnected = false;
 
@@ -2567,6 +2568,14 @@ export async function ensureConnection(options: {
 
         if (healthCheck) {
             healthy = await runQuickHealthCheck(app);
+
+            // A runtime this call just attached (cold launch) can miss the first probe
+            // while its bundle is still starting. Within waitMs, keep probing rather than
+            // report a stale context on an app seconds from answering.
+            while (!healthy && wasReconnected && app.platform !== "chromium" && Date.now() < waitDeadline) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                healthy = await runQuickHealthCheck(app);
+            }
 
             if (!healthy && !wasReconnected) {
                 const failedTitle = app.deviceInfo.title;
