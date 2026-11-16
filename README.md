@@ -271,7 +271,7 @@ Physical device support is new and has been checked on very few devices. This ta
 | `tap` of any kind                                              | 26 and below | ✗ Not possible: the phone itself refuses remote touch below iOS 27 |
 | `tap` by testID / text / component                             | 27+        | ✓ Tested (iPhone 11, iOS 27.2.1)                     |
 | `swipe` (direction, distance, scroll offset, no-op reason)     | 27+        | ✓ Tested (iPhone 11, iOS 27.2.1)                     |
-| `input_text` (controlled, uncontrolled, append, replace, masked, maxLength) | 27+ | ✓ Tested (iPhone 11, iOS 27.2.1); the first write of a session sometimes needs its one retry |
+| `input_text` (controlled, uncontrolled, append, replace, masked, maxLength) | 27+ | ✓ Tested (iPhone 11, iOS 27.2.1); since 2.26.2 the first word after an app launch no longer loses a character |
 | `press_key` (named keys, characters, Shift on a character)     | 27+        | ✓ Tested (iPhone 11, iOS 27.2.1); modifier combos are refused |
 | `get_screen_state`, `get_screen_layout`, `inspect_at_point` in screenshot pixels | any | ✓ Tested (iPhone 11, iOS 27.2.1)          |
 | `ios_launch_app` / `ios_terminate_app`                         | 17+        | ✓ Tested on 27 (iPhone 11, iOS 27.2.1); 17 - 26 expected to work, not tested |
