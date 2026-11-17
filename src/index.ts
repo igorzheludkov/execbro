@@ -20,6 +20,7 @@ import {
 import { installToolRegistryInterceptor, toolRegistry } from "./core/register.js";
 import { isPublishedBuild } from "./core/buildInfo.js";
 import { createSerialQueue } from "./core/serialQueue.js";
+import { updateNotice, refreshLatestVersion } from "./core/updateNotice.js";
 
 import { registerAccountTools } from "./tools/accountTools.js";
 import { registerMetaTools } from "./tools/metaTools.js";
@@ -49,6 +50,8 @@ export { toolRegistry };
 const httpRequested = process.argv.includes("--http");
 const httpAllowed = httpRequested && !isPublishedBuild();
 
+const UPDATE_NOTICE = updateNotice();
+
 /**
  * Sent to every agent when it connects. The untrusted-data rule leads, before
  * the decision tree: an agent that reads only the opening lines should still
@@ -64,7 +67,9 @@ export const SERVER_INSTRUCTIONS: string = [
     "Call get_usage_guide with no arguments for the same decision tree plus a summary of every guide.",
     // Said once at connect, so the agent can warn the user before a token
     // lands in the transcript rather than after.
-    ...(redactionEnabled() ? [] : ["", REDACTION_OFF_NOTE])
+    ...(redactionEnabled() ? [] : ["", REDACTION_OFF_NOTE]),
+    // Only installs frozen by npx's cache ever see this; @latest configs are current.
+    ...(UPDATE_NOTICE ? ["", UPDATE_NOTICE] : [])
 ].join("\n");
 
 const server = new McpServer(
@@ -119,6 +124,7 @@ function responseClosed(res: ServerResponse): Promise<void> {
 
 async function main() {
     initTelemetry();
+    void refreshLatestVersion();
     identifyIfDevMode(getInstallationId());
 
     // License validation is intentionally NOT pre-loaded here. It runs lazily on
