@@ -16,7 +16,7 @@ export function registerNavigationTools(server: McpServer): void {
                 "WHY THIS EXISTS: hand-written router calls report success whenever nothing throws. A path sent to a React Navigation ref changes nothing and warns only in LogBox, so a no-op reads as a success.\n" +
                 "DESTINATIONS ARE NOT INTERCHANGEABLE: Expo Router takes paths (\"/event-details?id=1\"); React Navigation takes route names (\"TarotNav\"). The response reports which router resolved. Unknown React Navigation names are rejected before dispatch, with nearest-match suggestions.\n" +
                 "WORKFLOW: navigate({ to: \"/settings\" }) -> check changed -> get_screen_state.\n" +
-                "LIMITATIONS: push/replace are unavailable on a React Navigation root ref (stack-scoped). changed=false means it settled without moving; indeterminate=true means no settled reading.\n" +
+                "LIMITATIONS: on React Navigation, push/replace go to the focused stack (a route name that stack does not own is not handled). changed=false means it settled without moving; indeterminate=true means no settled reading.\n" +
                 "DISCOVERY: navigate({ routeTable: true }) with no destination just LISTS the registered route names — call it first when you do not know them.\n" +
                 "NATIVE ANDROID: on an app with execbro-sdk-android, drives its Jetpack Navigation NavController. to is a route pattern (\"settings\", \"detail/{id}\") and params fill its placeholders.\n" +
                 "GOOD: navigate({ to: \"TarotNav\" }); navigate({ action: \"back\" }); navigate({ routeTable: true })\n" +

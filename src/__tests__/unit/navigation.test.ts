@@ -356,12 +356,45 @@ describe("buildNavigateSource", () => {
         expect(expoCalls).toContain("back");
     });
 
-    it("reports that push is unavailable on a React Navigation root ref", () => {
+    it("reports that push is unavailable on a root ref that has no dispatch", () => {
         const calls: string[] = [];
         const out = run(rnStub(calls), "push", "TarotNav");
         expect(out.ok).toBe(false);
         expect(String(out.error)).toContain("push");
         expect(calls).toHaveLength(0);
+    });
+
+    it("dispatches push and replace through the root ref, which routes them to the focused stack", () => {
+        // A container ref has no push/replace methods, and refusing sent agents back to plain navigate: 27 refusals in 2 weeks.
+        const dispatched: unknown[] = [];
+        const stub = rnStub([]);
+        (stub.__EB_TEST_FIBER_NAV__ as Record<string, unknown>).dispatch = (a: unknown) => dispatched.push(a);
+        expect(run(stub, "push", "TarotNav", { id: 1 }).ok).toBe(true);
+        expect(run(stub, "replace", "TarotNav").ok).toBe(true);
+        expect(dispatched).toEqual([
+            { type: "PUSH", payload: { name: "TarotNav", params: { id: 1 } } },
+            { type: "REPLACE", payload: { name: "TarotNav" } }
+        ]);
+    });
+
+    it("resets to the destination with a real state instead of an empty resetRoot()", () => {
+        // resetRoot() with no state threw "Cannot read property 'routes' of undefined" inside BaseRouter.
+        const states: unknown[] = [];
+        const stub = rnStub([]);
+        (stub.__EB_TEST_FIBER_NAV__ as Record<string, unknown>).resetRoot = (s: unknown) => states.push(s);
+        expect(run(stub, "reset", "TarotNav", { id: 2 }).ok).toBe(true);
+        expect(run(stub, "reset", null).ok).toBe(true);
+        expect(states).toEqual([
+            { index: 0, routes: [{ name: "TarotNav", params: { id: 2 } }] },
+            // No destination: back to the first root route.
+            { index: 0, routes: [{ name: "Home" }] }
+        ]);
+    });
+
+    it("flags a missing router and counts the fiber roots, so the caller can wait or tag it", () => {
+        const out = run({}, "navigate", "Anywhere") as { noRouter?: boolean; fiberRoots?: number };
+        expect(out.noRouter).toBe(true);
+        expect(out.fiberRoots).toBe(0);
     });
 
     it("fails clearly when no router resolved", () => {
