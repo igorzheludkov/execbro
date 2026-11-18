@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "./types.js";
-import { executeInApp } from "./jsExecute.js";
+import { executeInApp, delay } from "./jsExecute.js";
+import { fiberReadFailureKind } from "./errors.js";
 import { waitForMeasurements, buildPendingMeasurementExpression } from "./measureWait.js";
 import { iconSemanticHint } from "./iconSemantics.js";
 import { VISIBILITY_HELPERS_JS, detectNativeSheet, NATIVE_SHEET_MARKER_RE_SRC } from "./injected/visibility.js";
@@ -1889,15 +1890,21 @@ export async function getScreenState(
 })()
     `;
 
-    const dispatchResult = await executeInApp(dispatchExpression, false, { timeoutMs: 30000, originatingToolName: "get_screen_state" }, device);
+    const dispatch = async () => {
+        const r = await executeInApp(dispatchExpression, false, { timeoutMs: 30000, originatingToolName: "get_screen_state" }, device);
+        let parsed: { error?: string; count?: number } = {};
+        try { parsed = JSON.parse(r.result || "{}"); } catch { /* ignore */ }
+        return { r, parsed };
+    };
+    let { r: dispatchResult, parsed: dp } = await dispatch();
+    // Same early-startup race get_screen_layout waits out: the hook registers a moment after the runtime is reachable.
+    if (dispatchResult.success && dp.error && /React DevTools hook not found/.test(dp.error)) {
+        await delay(400);
+        ({ r: dispatchResult, parsed: dp } = await dispatch());
+    }
     if (!dispatchResult.success) return dispatchResult;
-
-    let dispatchedNodes = 0;
-    try {
-        const dp = JSON.parse(dispatchResult.result || "{}");
-        if (dp.error) return { success: false, error: dp.error };
-        if (typeof dp.count === "number") dispatchedNodes = dp.count;
-    } catch { /* ignore */ }
+    if (dp.error) return { success: false, error: dp.error, failureKind: fiberReadFailureKind(dp.error) };
+    const dispatchedNodes = typeof dp.count === "number" ? dp.count : 0;
 
     // Poll until every measureInWindow callback has landed, with a deadline that scales
     // with the node count.

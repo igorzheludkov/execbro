@@ -157,7 +157,8 @@ export function registerComponentTools(server: McpServer): void {
                 const errText = metaNotes.length > 0 ? `Error: ${result.error}\n\n${metaNotes.join("\n")}` : `Error: ${result.error}`;
                 return {
                     content: [{ type: "text", text: errText }],
-                    isError: true
+                    isError: true,
+                    ...(result.failureKind && { _failureKind: result.failureKind })
                 };
             }
 
@@ -330,7 +331,8 @@ export function registerComponentTools(server: McpServer): void {
                     : `Error: ${result.error}`;
                 return {
                     content: [{ type: "text", text: errText }],
-                    isError: true
+                    isError: true,
+                    ...(result.failureKind && { _failureKind: result.failureKind })
                 };
             }
 

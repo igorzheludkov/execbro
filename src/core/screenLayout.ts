@@ -1,5 +1,6 @@
 import type { ExecutionResult } from "./types.js";
 import { executeInApp, delay } from "./jsExecute.js";
+import { fiberReadFailureKind } from "./errors.js";
 import { waitForMeasurements, buildPendingMeasurementExpression } from "./measureWait.js";
 import { VISIBILITY_HELPERS_JS } from "./injected/visibility.js";
 import { SCREEN_SPACE_HELPER_JS, type ScreenSpaceMetrics } from "./screenSpace.js";
@@ -604,11 +605,12 @@ export async function getScreenLayout(
                     "React DevTools hook not registered (likely a production / non-__DEV__ build). " +
                     "Fiber-based layout is unavailable. Use screenshot for a visual " +
                     "snapshot; tap(text=...) still falls back to OCR when the fiber tree is unreadable.",
+                failureKind: "devtools_hook_missing",
             };
         }
     }
 
-    if (dispatchError) return { success: false, error: dispatchError };
+    if (dispatchError) return { success: false, error: dispatchError, failureKind: fiberReadFailureKind(dispatchError) };
 
     // Wait for measureInWindow callbacks (polled; see waitForMeasurements)
     await waitForMeasurements({

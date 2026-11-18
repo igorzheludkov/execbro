@@ -1,9 +1,11 @@
 import { existsSync } from "fs";
+import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
 import { notifyDriverMissing } from "./logbox.js";
 import { execFileAsync, quoteForDeviceShell } from "./exec.js";
+import { execFailureMessage, type FailureKind } from "./errors.js";
 
 // XML parsing for uiautomator dump
 import { XMLParser } from "fast-xml-parser";
@@ -33,6 +35,10 @@ export interface AdbResult {
     originalHeight?: number;
     // For listAndroidDevices: structured device list
     devices?: AndroidDevice[];
+    // Structured cause for telemetry, forwarded by tools as `_failureKind`
+    failureKind?: FailureKind;
+    // Screenshot captured, but copying it to the caller's outputPath failed
+    saveError?: string;
 }
 
 // Module-level cache for ADB availability — checked once per session.
@@ -128,7 +134,7 @@ const ADB_MISSING_ERROR = "ADB is not installed or not in PATH. To fix:\n1. Inst
 async function requireAdb(): Promise<AdbResult | null> {
     if (await isAdbAvailable()) return null;
     notifyDriverMissing("android");
-    return { success: false, error: ADB_MISSING_ERROR };
+    return { success: false, error: ADB_MISSING_ERROR, failureKind: "driver_not_installed" };
 }
 
 /**
@@ -336,42 +342,32 @@ export async function androidScreenshot(
         if (!device) {
             return {
                 success: false,
-                error: "No Android device connected. Connect a device or start an emulator."
+                error: "No Android device connected. Connect a device or start an emulator.",
+                failureKind: "no_android_device"
             };
         }
 
         const deviceArgs = buildDeviceArgs(device);
+        const png = await captureScreencap(deviceArgs, signal);
 
-        // Generate output path if not provided
+        // Write where the caller asked, creating the folder; if that fails the capture is still good, so keep it in tmp and say the copy failed.
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const finalOutputPath =
-            outputPath || path.join(os.tmpdir(), `android-screenshot-${timestamp}.png`);
-
-        // Capture screenshot on device
-        const remotePath = "/sdcard/screenshot-temp.png";
-        await execFileAsync("adb", [...deviceArgs, "shell", `screencap -p ${remotePath}`], {
-            timeout: ADB_TIMEOUT,
-            signal
-        });
-
-        // Pull screenshot to local machine
-        await execFileAsync("adb", [...deviceArgs, "pull", remotePath, finalOutputPath], {
-            timeout: ADB_TIMEOUT,
-            signal
-        });
-
-        // Clean up remote file
-        await execFileAsync("adb", [...deviceArgs, "shell", `rm ${remotePath}`], {
-            timeout: ADB_TIMEOUT,
-            signal
-        }).catch(() => {
-            // Ignore cleanup errors
-        });
+        const tmpPath = path.join(os.tmpdir(), `android-screenshot-${timestamp}.png`);
+        let finalOutputPath = outputPath || tmpPath;
+        let saveError: string | undefined;
+        try {
+            await mkdir(path.dirname(finalOutputPath), { recursive: true });
+            await writeFile(finalOutputPath, png);
+        } catch (error) {
+            saveError = `Could not save to ${outputPath}: ${error instanceof Error ? error.message : String(error)}`;
+            finalOutputPath = tmpPath;
+            await writeFile(finalOutputPath, png);
+        }
 
         // Resize image if needed (API limit: 2000px max for multi-image requests)
         // Return scale factor so AI can convert image coords to device coords
         const MAX_DIMENSION = 2000;
-        const image = sharp(finalOutputPath);
+        const image = sharp(png);
         const metadata = await image.metadata();
         const originalWidth = metadata.width || 0;
         const originalHeight = metadata.height || 0;
@@ -402,13 +398,50 @@ export async function androidScreenshot(
             data: imageData,
             scaleFactor,
             originalWidth,
-            originalHeight
+            originalHeight,
+            ...(saveError && { saveError })
         };
     } catch (error) {
         return {
             success: false,
-            error: `Failed to capture screenshot: ${error instanceof Error ? error.message : String(error)}`
+            error: `Failed to capture screenshot: ${execFailureMessage(error)}`
         };
+    }
+}
+
+// Capture budget. The old two-step path waited up to 30s per step, and the production failures were exactly that: 30s+ hangs with no output.
+const SCREENCAP_TIMEOUT = 15000;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
+/**
+ * PNG bytes of the current screen. Streams over `adb exec-out` (one round trip, no file left on the device). Falls back to screencap-to-sdcard + pull only when exec-out failed fast or returned something that is not a PNG: adb older than platform-tools 21 and pre-Lollipop devices have no exec-out. A timeout does not fall back, since the device is hung and the old path would only wait again.
+ */
+async function captureScreencap(deviceArgs: string[], signal?: AbortSignal): Promise<Buffer> {
+    try {
+        // latin1 maps every byte to one char, so the PNG survives execFileAsync's string stdout intact.
+        const { stdout } = await execFileAsync("adb", [...deviceArgs, "exec-out", "screencap", "-p"], {
+            timeout: SCREENCAP_TIMEOUT,
+            maxBuffer: 64 * 1024 * 1024,
+            encoding: "latin1",
+            signal
+        });
+        const png = Buffer.from(stdout, "latin1");
+        if (png.subarray(0, 4).equals(PNG_SIGNATURE)) return png;
+    } catch (error) {
+        if ((error as { killed?: boolean }).killed || signal?.aborted) throw error;
+    }
+
+    const remotePath = "/sdcard/screenshot-temp.png";
+    const localPath = path.join(os.tmpdir(), `android-screencap-${Date.now()}.png`);
+    await execFileAsync("adb", [...deviceArgs, "shell", `screencap -p ${remotePath}`], { timeout: SCREENCAP_TIMEOUT, signal });
+    await execFileAsync("adb", [...deviceArgs, "pull", remotePath, localPath], { timeout: SCREENCAP_TIMEOUT, signal });
+    await execFileAsync("adb", [...deviceArgs, "shell", `rm ${remotePath}`], { timeout: ADB_TIMEOUT, signal }).catch(() => {
+        // Ignore cleanup errors
+    });
+    try {
+        return await readFile(localPath);
+    } finally {
+        await unlink(localPath).catch(() => {});
     }
 }
 

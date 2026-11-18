@@ -1,13 +1,29 @@
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
-import type { ResolveDeviceOptions } from "../core/deviceResolver.js";
+import type { ResolveDeviceOptions, DeviceResolverError } from "../core/deviceResolver.js";
+import { findDisconnectedDeviceName } from "../core/connection.js";
+import type { FailureKind } from "../core/errors.js";
 
 export type ToolErrorResponse = {
     content: [{ type: "text"; text: string }];
     isError: true;
+    _failureKind?: FailureKind;
 };
 
-function errResponse(text: string): ToolErrorResponse {
-    return { content: [{ type: "text", text }], isError: true };
+function errResponse(text: string, kind?: FailureKind): ToolErrorResponse {
+    return { content: [{ type: "text", text }], isError: true, ...(kind && { _failureKind: kind }) };
+}
+
+/**
+ * Resolver failure -> telemetry kind. Same rules as `failureKindForResolution` (connection.ts), which keys off the connected-app resolution rather than this device inventory: a device that dropped off or nothing attached is environment, an ambiguous name stays untagged, a name nothing matches is the caller's argument.
+ */
+export function failureKindForResolverError(error: DeviceResolverError, hint?: string): FailureKind | undefined {
+    switch (error.code) {
+        case "NO_DEVICES_FOUND": return "no_devices_attached";
+        case "SIMULATOR_NOT_BOOTED": return "no_ios_simulator";
+        case "DEVICE_NOT_FOUND": return hint && findDisconnectedDeviceName(hint) ? "no_devices_attached" : "bad_arguments";
+        case "CONFLICTING_IDENTIFIERS": return "bad_arguments";
+        default: return undefined;
+    }
 }
 
 /**
@@ -31,13 +47,14 @@ export async function resolveAndroidDeviceId(
     if (!hint) return { ok: true, serial: undefined };
     const resolved = await resolveDeviceTarget(hint);
     if (!resolved.ok) {
-        return { ok: false, response: errResponse(`Error: ${formatResolverError(resolved.error)}`) };
+        return { ok: false, response: errResponse(`Error: ${formatResolverError(resolved.error)}`, failureKindForResolverError(resolved.error, hint)) };
     }
     if (resolved.target.platform !== "android") {
         return {
             ok: false,
             response: errResponse(
-                `Error: "${hint}" resolved to an iOS device (${resolved.target.deviceName}) — this tool only targets Android. Use the iOS-equivalent tool.`
+                `Error: "${hint}" resolved to an iOS device (${resolved.target.deviceName}) — this tool only targets Android. Use the iOS-equivalent tool.`,
+                "platform_mismatch"
             )
         };
     }
@@ -63,13 +80,14 @@ export async function resolveIosUdid(
     if (!hint) return { ok: true, udid: undefined };
     const resolved = await resolveDeviceTarget(hint, options);
     if (!resolved.ok) {
-        return { ok: false, response: errResponse(`Error: ${formatResolverError(resolved.error)}`) };
+        return { ok: false, response: errResponse(`Error: ${formatResolverError(resolved.error)}`, failureKindForResolverError(resolved.error, hint)) };
     }
     if (resolved.target.platform !== "ios") {
         return {
             ok: false,
             response: errResponse(
-                `Error: "${hint}" resolved to an Android device (${resolved.target.deviceName}) — this tool only targets iOS. Use the Android-equivalent tool.`
+                `Error: "${hint}" resolved to an Android device (${resolved.target.deviceName}) — this tool only targets iOS. Use the Android-equivalent tool.`,
+                "platform_mismatch"
             )
         };
     }
