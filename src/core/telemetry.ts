@@ -738,6 +738,8 @@ export function trackAutoReconnect(
     outcome: AutoReconnectOutcome,
     originatingToolName: string,
     transportPattern?: string,
+    durationMs = 0,
+    failureKind?: string,
 ): void {
     if (!telemetryEnabled) return;
     // No-op outcomes ('not_needed') account for ~98% of events and carry zero
@@ -752,8 +754,9 @@ export function trackAutoReconnect(
         timestamp: Date.now(),
         toolName: "_auto_reconnect",
         success: outcome === "success",
-        duration: 0,
+        duration: durationMs,
         isFirstRun: isFirstRun(),
+        ...(failureKind && { failureKind }),
         errorContext: JSON.stringify({
             outcome,
             tool: originatingToolName,

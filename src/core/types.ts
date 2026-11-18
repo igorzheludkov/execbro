@@ -167,6 +167,8 @@ export interface ExecutionResult {
     // which some callers fill with free-form prose, this is always one of a
     // closed set, so telemetry can classify on it instead of regex-matching.
     failureKind?: FailureKind;
+    // Slot of a promise still pending when the poll budget ran out. execute_in_app hands it to the caller to collect; internal callers cannot, so the result stays a failure for them.
+    pendingHandle?: string;
     _meta?: {
         reconnected?: boolean;
         transportError?: string;

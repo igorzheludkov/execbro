@@ -532,7 +532,7 @@ export function registerLogTools(server: McpServer): void {
         },
         async ({ text: textArg, query, maxResults, maxMessageLength, verbose, device }) => {
             const text = textArg ?? query;
-            if (text === undefined) throw new UserInputError("search_logs needs `text` to search for.", "missing_text");
+            if (text === undefined) throw new UserInputError("search_logs needs `text` to search for.", "missing_text", "bad_arguments");
             // The buffer already holds the SDK's entries (mirrored) plus the CDP
             // console stream, across every app run. Refresh, then read once.
             await refreshMirror(device);

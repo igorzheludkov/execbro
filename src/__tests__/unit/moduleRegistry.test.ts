@@ -49,6 +49,23 @@ describe("buildRequireSource", () => {
         expect(req("expo-router").entry).toBe(true);
     });
 
+    // 37 round trips in 2026-11-04..18: '@/services/query-client' missed, then the "Did you mean" named exactly 'src/services/query-client.ts'.
+    it("resolves tsconfig path aliases (@/, ~/, @/src/)", () => {
+        const modules = new Map<number, { verboseName?: string }>([
+            [7, { verboseName: "src/services/query-client.ts" }],
+            [8, { verboseName: "node_modules/@tanstack/query-core/build/index.js" }]
+        ]);
+        const loaded: Record<number, unknown> = { 7: { client: true }, 8: { core: true } };
+        const fakeR = Object.assign((id: number) => loaded[id], { getModules: () => modules });
+        const run = new Function("globalThis", source + "; return __eb_require;");
+        const req = run({ __r: fakeR }) as (name: string) => Record<string, unknown>;
+        expect(req("@/services/query-client").client).toBe(true);
+        expect(req("~/services/query-client").client).toBe(true);
+        expect(req("@/src/services/query-client").client).toBe(true);
+        // A scoped package is not an alias.
+        expect(req("@tanstack/query-core").core).toBe(true);
+    });
+
     it("throws a descriptive error when nothing matches", () => {
         const fakeR = Object.assign(() => undefined, { getModules: () => new Map([[1, { verboseName: "a/b.js" }]]) });
         const run = new Function("globalThis", buildRequireSource() + "; return __eb_require;");

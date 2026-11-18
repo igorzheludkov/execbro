@@ -171,6 +171,8 @@ describe("formatTimeline", () => {
         expect(lines[3]).toBe('+905ms  ✖ error "Failed"  [j813]');
         expect(text).toContain('get_log_details({ id: "j813" })');
         expect(text).toContain('get_request_details({ requestId: "42" })');
+        // Ids carry no n since 60c43de; the old "drop the n" hint sent agents looking for one.
+        expect(text).not.toContain("drop the n");
         expect(text).toContain("a note");
     });
 

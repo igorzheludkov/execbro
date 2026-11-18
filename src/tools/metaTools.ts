@@ -73,7 +73,8 @@ export function registerMetaTools(server: McpServer, opts: MetaToolOptions): voi
                             text: `Unknown topic: "${topic}". Available topics: ${available}`
                         }
                     ],
-                    isError: true
+                    isError: true,
+                    _failureKind: "bad_arguments" as const
                 };
             }
 
