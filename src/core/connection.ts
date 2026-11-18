@@ -249,6 +249,11 @@ const PHYSICAL_POLL_MS = 15_000;
 const PROBE_TIMEOUT_MS = 1500;
 const RECONNECT_SETTLE_MS = 500;
 
+/**
+ * How long ensure_connection keeps trying an app it is attaching for the first time, even with waitMs: 0. A just-launched or just-reloaded runtime misses the probe or the first health check for a few seconds, and an attempt already in flight holds the device meanwhile. Before this, those cases failed at once: 304 of 523 ensure_connection failures in 2026-11-04..18, nearly all answering on the agent's retry 9-18s later. Raise it if they still show in telemetry.
+ */
+const FRESH_ATTACH_GRACE_MS = 5000;
+
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1", "0.0.0.0"]);
 
 export function isLoopbackHost(hostname: string): boolean {
@@ -2401,9 +2406,10 @@ export async function ensureConnection(options: {
     waitMs?: number;
 } = {}): Promise<EnsureConnectionResult> {
     const { port, healthCheck = true, forceRefresh = false, waitMs = 0 } = options;
-    const waitDeadline = Date.now() + waitMs;
+    const settleDeadline = Date.now() + Math.max(waitMs, FRESH_ATTACH_GRACE_MS);
 
     let wasReconnected = false;
+    let connectResult = "";
 
     // forceRefresh: close every currently-connected app, then fall through to
     // single-device fresh connect. Full multi-device re-discovery is scan_metro's
@@ -2461,17 +2467,13 @@ export async function ensureConnection(options: {
             // after probe.
             clearReconnectionSuppression();
 
-            let connectResult = await connectToDevice(mainDevice, targetPort);
-            // Metro lists a cold-launched app's target a moment before its JS context
-            // answers, so the first probe can read stale on a runtime that is seconds
-            // from alive. Within waitMs, keep probing instead of failing the wait.
-            // Not on chromium: there a stale page is an open dialog, which waiting
-            // does not fix.
+            connectResult = await connectToDevice(mainDevice, targetPort);
+            // Metro lists a just-launched or reloaded app's target a moment before its JS context answers, so the first probe can read stale on a runtime that is seconds from alive. And an attempt already in flight (an auto-reconnect, a parallel tool) holds the device: "Connection already in progress". Both settle within seconds, so keep trying for the grace, or for waitMs when longer. Not a stale chromium page: that is an open dialog, which waiting does not fix.
             while (
-                connectResult.includes("stale CDP target") && !isChromiumTarget(mainDevice) &&
-                Date.now() < deadline && cdpApps().length === 0
+                cdpApps().length === 0 && Date.now() < settleDeadline &&
+                !(isChromiumTarget(mainDevice) && connectResult.includes("stale CDP target"))
             ) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 500));
                 mainDevice = selectMainDevice(await fetchDevices(targetPort)) ?? mainDevice;
                 connectResult = await connectToDevice(mainDevice, targetPort);
             }
@@ -2517,7 +2519,8 @@ export async function ensureConnection(options: {
             wasReconnected: false,
             healthCheckPassed: false,
             connectionInfos: [],
-            error: "Connection succeeded but app is not available",
+            // Keeps "app is not available": telemetry's categorizeError matches it.
+            error: `App is not available after attaching (${connectResult || "no attach attempt"}). Run scan_metro to see what Metro lists, then retry.`,
         };
     }
 
@@ -2569,10 +2572,8 @@ export async function ensureConnection(options: {
         if (healthCheck) {
             healthy = await runQuickHealthCheck(app);
 
-            // A runtime this call just attached (cold launch) can miss the first probe
-            // while its bundle is still starting. Within waitMs, keep probing rather than
-            // report a stale context on an app seconds from answering.
-            while (!healthy && wasReconnected && app.platform !== "chromium" && Date.now() < waitDeadline) {
+            // A runtime this call just attached (cold launch, reload) can miss the first probe while its bundle is still starting. Within the grace (or waitMs), keep probing rather than report a stale context on an app seconds from answering.
+            while (!healthy && wasReconnected && app.platform !== "chromium" && Date.now() < settleDeadline) {
                 await new Promise(resolve => setTimeout(resolve, 500));
                 healthy = await runQuickHealthCheck(app);
             }
