@@ -265,7 +265,7 @@ export function registerNetworkTools(server: McpServer): void {
         },
         async ({ urlPattern: patternArg, query, maxResults, device }) => {
             const urlPattern = patternArg ?? query;
-            if (urlPattern === undefined) throw new UserInputError("search_network needs `urlPattern` to search for.", "missing_url_pattern");
+            if (urlPattern === undefined) throw new UserInputError("search_network needs `urlPattern` to search for.", "missing_url_pattern", "bad_arguments");
             await refreshMirror(device);
 
             const networkBuffer = resolveNetworkBuffer(device);
@@ -494,7 +494,8 @@ export function registerNetworkTools(server: McpServer): void {
                 if (!args.id) {
                     throw new UserInputError(
                         "action=\"remove\" needs an id. Get it from network_mock({action:\"list\"}).",
-                        "missing_rule_id"
+                        "missing_rule_id",
+                        "bad_arguments"
                     );
                 }
                 const removed = removeRule(deviceName, args.id);
@@ -527,7 +528,8 @@ export function registerNetworkTools(server: McpServer): void {
             if (!args.url && !args.operation) {
                 throw new UserInputError(
                     "action=\"add\" needs a url to match on (a substring like \"/orders\", or slash-wrapped for a regex), or a GraphQL operation name.",
-                    "missing_rule_url"
+                    "missing_rule_url",
+                    "bad_arguments"
                 );
             }
             const rule = addRule(deviceName, {
