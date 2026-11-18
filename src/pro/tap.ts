@@ -17,7 +17,8 @@ import { compareScreenshots, type DiffRegion } from "./screenshot-diff.js";
 import { scanMetroPorts, fetchDevices, selectMainDevice } from "../core/metro.js";
 import { connectToDevice, clearReconnectionSuppression, getConnectedAppByDevice, chromiumAppFor } from "../core/connection.js";
 import { chromiumTap } from "./chromiumTap.js";
-import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
+import { resolveDeviceTarget, formatResolverError, type DeviceResolverError } from "../core/deviceResolver.js";
+import type { FailureKind } from "../core/errors.js";
 import { appOnPhone, physicalTargetFor, physicalTap } from "./physicalTap.js";
 import { notifyDriverMissing } from "../core/logbox.js";
 import { captureFailureArtifact, type ArtifactOutcome, type CaptureSignals } from "../core/failureArtifact.js";
@@ -324,6 +325,8 @@ export interface TapResult {
      * Metro connection.
      */
     missDiagnosis?: CoordinateMissDiagnosis;
+    /** Structured cause for telemetry, set only when the setup or the arguments made the tap impossible. */
+    failureKind?: FailureKind;
 }
 
 // --- Helpers ---
@@ -769,7 +772,7 @@ export function formatTapFailure(data: {
     screenshot?: TapScreenshot;
     verification?: TapVerification;
 }): TapResult {
-    const errorMsg = data.error || buildErrorMessage(data.query);
+    const errorMsg = data.error || buildErrorMessage(data.query, data.attempted);
     const warning =
         data.verification && !data.verification.skipped && data.verification.meaningful === false
             ? "Tap executed but no visual change detected. The element may not exist at these coordinates. Examine the screenshot to verify and retry with adjusted coordinates."
@@ -791,11 +794,13 @@ export function formatTapFailure(data: {
     };
 }
 
-function buildErrorMessage(query: TapQuery): string {
+function buildErrorMessage(query: TapQuery, attempted: TapAttempt[]): string {
   const parts: string[] = [];
   if (query.text) parts.push(`text="${query.text}"`);
   if (query.testID) parts.push(`testID="${query.testID}"`);
   if (query.component) parts.push(`component="${query.component}"`);
+  // An x/y tap has no predicate to name; its real cause is the last attempt's reason.
+  if (parts.length === 0) return attempted[attempted.length - 1]?.reason ?? "Tap failed";
   return `No element found matching ${parts.join(", ")}`;
 }
 
@@ -862,6 +867,8 @@ export interface EvidenceSink {
             componentName?: string;
             bounds?: { x: number; y: number; width: number; height: number };
         }>;
+        /** True when fiber found no pressables on the whole screen. `pressables` holds query matches only, so it cannot say this. */
+        screenEmpty?: boolean;
     };
     accessibility: {
         ran: boolean;
@@ -963,6 +970,9 @@ export function findClosestOcrText(
 
 // --- Strategy Functions ---
 
+// pressables.ts answers these when the tree has no pressables at all (or no tree yet), as opposed to none matching the query.
+const SCREEN_EMPTY_RE = /^(No pressable or focusable elements found\. Searched for|No fiber roots found|The JS bundle has not run yet)/;
+
 async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDepth?: number, sink?: EvidenceSink, device?: string, longPress = false): Promise<StrategyResult> {
     if (sink) {
         sink.fiber.ran = true;
@@ -1000,6 +1010,7 @@ async function tryFiberStrategy(query: TapQuery, index?: number, maxTraversalDep
             lastResult = result;
         }
 
+        if (sink) sink.fiber.screenEmpty = SCREEN_EMPTY_RE.test(lastResult!.reason);
         return lastResult!;
     } finally {
         if (sink) sink.fiber.durationMs = Date.now() - startedAt;
@@ -1601,6 +1612,7 @@ export function screenLooksUnmounted(evidence: EvidenceSink | undefined): boolea
     return (
         evidence.fiber.ran &&
         evidence.fiber.pressables.length === 0 &&
+        evidence.fiber.screenEmpty === true &&
         evidence.accessibility.ran &&
         evidence.accessibility.elements.length === 0
     );
@@ -1639,11 +1651,21 @@ function maxStrategyMs(strategy: string, platform: "ios" | "android"): number {
 // Nested sub-operation errors inside a strategy (e.g. "CDP getProperties timed out after 150ms")
 // must NOT be classified as a tap-level timeout.
 const STRATEGY_TIMEOUT_RE = /^(fiber|accessibility|ocr|coordinate) timed out after \d+ms$/;
+// Only a skip for lack of budget is a timeout. Precondition skips (no Metro, no UI driver) must report their own reason.
+const BUDGET_SKIP_RE = /^Skipped — only \d+ms remaining/;
 
 export function isTapTimeout(attempted: readonly { reason: string; strategy?: string; outcome?: TapAttemptOutcome }[]): boolean {
     return attempted.some(
-        (a) => a.outcome === "timeout" || a.outcome === "skipped" || STRATEGY_TIMEOUT_RE.test(a.reason) || a.reason.startsWith("Skipped —")
+        (a) => a.outcome === "timeout" || STRATEGY_TIMEOUT_RE.test(a.reason) || BUDGET_SKIP_RE.test(a.reason)
     );
+}
+
+/** Ceiling for the pre-tap frame. Its capture processes time out at 30s, longer than the whole tap budget, so one hung screencap left every strategy "Skipped, only 0ms remaining". */
+const BEFORE_SCREENSHOT_MS = 4000;
+
+/** The before frame, or null when it fails or outlasts its cap: verification then reports itself skipped and the tap still runs. */
+function captureBeforeScreenshot(platform: "ios" | "android", udid: string | undefined, serial: string | undefined, remaining: number): ReturnType<typeof captureScreenshot> {
+    return withTimeout(captureScreenshot(platform, udid, serial), Math.min(BEFORE_SCREENSHOT_MS, remaining), "before-screenshot").catch(() => null);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -2019,6 +2041,19 @@ function attachArtifactSignals(result: TapResult, signals: CaptureSignals | unde
     return result;
 }
 
+/** Resolver failures as telemetry failure kinds. Mirrors connection.ts failureKindForResolution, which takes a different resolution type. */
+function failureKindForResolverError(error: DeviceResolverError, device: string | undefined): FailureKind | undefined {
+    switch (error.code) {
+        case "NO_DEVICES_FOUND": return "no_devices_attached";
+        case "SIMULATOR_NOT_BOOTED": return "no_ios_simulator";
+        // Devices are attached, just not the one named.
+        case "DEVICE_NOT_FOUND": return "platform_mismatch";
+        // With no device named, the agent omitted a required argument; a name matching several is ambiguity, left untagged as the connection.ts helper does.
+        case "MULTIPLE_DEVICES_MATCH": return device ? undefined : "bad_arguments";
+        default: return undefined;
+    }
+}
+
 // --- Orchestrator ---
 
 export async function tap(options: TapOptions): Promise<TapResult> {
@@ -2065,7 +2100,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             return {
                 success: false,
                 query,
-                error: formatResolverError(nativeResolved.error)
+                error: formatResolverError(nativeResolved.error),
+                failureKind: failureKindForResolverError(nativeResolved.error, options.device)
             };
         }
         const platform: "ios" | "android" = nativeResolved.target.platform;
@@ -2078,7 +2114,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         let nativeBeforeBuffer: Buffer | null = null;
         let nativeScreenshotMeta: { originalWidth: number; originalHeight: number; scaleFactor: number } | undefined;
         if (nativeShouldVerify) {
-            const before = await captureScreenshot(platform, nativeUdid, nativeSerial);
+            const before = await captureBeforeScreenshot(platform, nativeUdid, nativeSerial, remainingMs());
             nativeBeforeBuffer = before?.buffer || null;
             if (before) {
                 nativeScreenshotMeta = {
@@ -2091,7 +2127,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
 
         // If no screenshot was taken for verification, take one just for scaleFactor
         if (!nativeScreenshotMeta) {
-            const ref = await captureScreenshot(platform, nativeUdid, nativeSerial);
+            const ref = await captureBeforeScreenshot(platform, nativeUdid, nativeSerial, remainingMs());
             if (ref) {
                 nativeScreenshotMeta = {
                     originalWidth: ref.width,
@@ -2172,11 +2208,13 @@ export async function tap(options: TapOptions): Promise<TapResult> {
             if (nativeLongPress) nativeSuccess.longPress = nativeLongPress;
             return nativeSuccess;
         }
-        return formatTapFailure({
+        const nativeFailure = formatTapFailure({
             query,
             attempted: [{ strategy: "native-coordinate", reason: result.reason }],
             suggestion: `Call screenshot to verify coordinates.`
         });
+        if (platform === "ios" && !(await isUiDriverAvailable())) nativeFailure.failureKind = "driver_not_installed";
+        return nativeFailure;
     }
 
     // Resolve device target via the unified resolver. Replaces the prior chain
@@ -2226,7 +2264,8 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return {
             success: false,
             query,
-            error: formatResolverError(resolved.error)
+            error: formatResolverError(resolved.error),
+            failureKind: failureKindForResolverError(resolved.error, options.device)
         };
     }
     const deviceNote = resolved.note;
@@ -2334,18 +2373,20 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         return true;
     });
 
+    const driverMissingMessage = () => `Cannot tap on iOS Simulator — ${getUiDriverInstallHint()}\n\nThe iOS UI driver is required for tapping, swiping, text input, and accessibility queries on iOS Simulators.\n\nAfter installing, retry the tap.`;
     if (filteredStrategies.length === 0) {
         if (uiDriverMissing) {
             notifyDriverMissing("ios");
         }
         const errorMessage = uiDriverMissing
-            ? `Cannot tap on iOS Simulator — ${getUiDriverInstallHint()}\n\nThe iOS UI driver is required for tapping, swiping, text input, and accessibility queries on iOS Simulators.\n\nAfter installing, retry the tap.`
+            ? driverMissingMessage()
             : "All strategies require Metro connection, which is unavailable.\n\nTo fix:\n1. Make sure your React Native app is running\n2. Run scan_metro to connect\n3. Or use tap(x, y, native=true) for coordinate-based taps";
         return {
             success: false,
             query,
             attempted,
-            error: errorMessage
+            error: errorMessage,
+            failureKind: uiDriverMissing ? "driver_not_installed" : "no_metro"
         };
     }
 
@@ -2433,7 +2474,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // otherwise shell out for a screenshot of its own to learn exactly this.
     let beforeDims: { width: number; height: number } | undefined;
     {
-        const before = await captureScreenshot(platform, targetUdid, targetSerial);
+        const before = await captureBeforeScreenshot(platform, targetUdid, targetSerial, remainingMs());
         beforeBuffer = before?.buffer || null;
         beforeScaleFactor = before?.scaleFactor;
         if (before && before.width > 0 && before.height > 0) {
@@ -2958,7 +2999,10 @@ export async function tap(options: TapOptions): Promise<TapResult> {
     // Pick the right error framing: a definitive "not found" is different from
     // "all strategies timed out — we don't know whether it exists".
     let errorOverride: string | undefined;
-    if (hitTimeout) {
+    // Accessibility, OCR and the native tap all need the driver; whatever fiber found, the driver is why the tap could not land.
+    if (uiDriverMissing) {
+        errorOverride = driverMissingMessage();
+    } else if (hitTimeout) {
         errorOverride = `Tap timed out after ${elapsed}ms (budget ${TAP_TIMEOUT_MS}ms)`;
     } else if (allTimedOut) {
         errorOverride = `All tap strategies timed out before completing — element presence is UNKNOWN`;
@@ -2973,6 +3017,7 @@ export async function tap(options: TapOptions): Promise<TapResult> {
         device: deviceName,
         screenshot: failScreenshot
     });
+    if (uiDriverMissing) failureResult.failureKind = "driver_not_installed";
     // Before the artifact, so the verdict can ride into it — and before any
     // other recordScreen, because the diagnosis re-baselines as it decides.
     const staleness = diagnoseTapStaleness(deviceName, evidence);

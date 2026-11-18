@@ -275,6 +275,7 @@ export function registerInteractionTools(server: McpServer): void {
                     ? `${JSON.stringify(result.query)}|${result.error || ""}`
                     : undefined,
                 _errorContext: errorContext,
+                ...(result.failureKind && { _failureKind: result.failureKind }),
                 _meaningful: result.verification?.meaningful,
                 _changeRate: result.verification?.changeRate,
                 _tapStrategy: result.method,
