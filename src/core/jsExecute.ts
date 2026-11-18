@@ -5,6 +5,7 @@ import { pendingExecutions, getNextMessageId, connectedApps } from "./state.js";
 import { getFirstConnectedApp, getConnectedAppByDevice, getConnectedAppBySimulatorUdid, getConnectedAppByAndroidDeviceId, connectToDevice, clearReconnectionSuppression, purgeStaleConnectionsForPorts } from "./connection.js";
 import { fetchDevices, selectMainDevice, filterDebuggableDevices, scanMetroPorts } from "./metro.js";
 import type { DeviceInfo } from "./types.js";
+import type { FailureKind } from "./errors.js";
 import { DEFAULT_RECONNECTION_CONFIG, cancelReconnectionTimer } from "./connectionState.js";
 import { trackAutoReconnect } from "./telemetry.js";
 import { probeCdpAlive } from "./probe.js";
@@ -656,24 +657,38 @@ export function delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** How long the auto-reconnect waits for Metro to list the target and the attach to land. Metro's list lags a reload or launch: 32 of 66 `_auto_reconnect` scan failures in 2026-11-04..18 had the app back within 30s, while the single scan gave up in 12-45ms. */
+const QUICK_RECONNECT_BUDGET_MS = 4000;
+
 /**
- * Attempt quick reconnection to Metro
+ * Attempt quick reconnection to Metro. True only once the target is in connectedApps: connectToDevice resolves (not throws) on "Connection already in progress" and on a stale target, which used to read as connected and retry against nothing. With a budget, keeps looking every 500ms; without one, looks once. No Metro at all fails at once, since waiting will not start it.
  */
-async function attemptQuickReconnect(preferredPort?: number): Promise<boolean> {
+export async function attemptQuickReconnect(preferredPort?: number, budgetMs = 0, connect = connectToDevice): Promise<boolean> {
+    const deadline = Date.now() + budgetMs;
+    let targetPort: number | undefined;
     try {
         const ports = await scanMetroPorts();
-        const targetPort = preferredPort && ports.includes(preferredPort) ? preferredPort : ports[0];
-
-        if (!targetPort) return false;
-
-        const devices = await fetchDevices(targetPort);
-        const mainDevice = selectMainDevice(devices);
-        if (!mainDevice) return false;
-
-        await connectToDevice(mainDevice, targetPort);
-        return true;
+        targetPort = preferredPort && ports.includes(preferredPort) ? preferredPort : ports[0];
     } catch {
         return false;
+    }
+    if (!targetPort) return false;
+
+    for (;;) {
+        try {
+            const mainDevice = selectMainDevice(await fetchDevices(targetPort));
+            if (mainDevice) {
+                await connect(mainDevice, targetPort);
+                const name = mainDevice.deviceName || mainDevice.title;
+                for (const a of connectedApps.values()) {
+                    if (a.ws.readyState === WebSocket.OPEN && (a.deviceInfo.deviceName || a.deviceInfo.title) === name) return true;
+                }
+            }
+        } catch {
+            // A failed attach can succeed on the next look, like a missing target.
+        }
+        if (Date.now() + 500 > deadline) return false;
+        await delay(500);
     }
 }
 
@@ -689,11 +704,11 @@ async function executeExpressionCore(
     const app = targetApp ?? getFirstConnectedApp();
 
     if (!app) {
-        return { success: false, error: "No apps connected. Run 'scan_metro' first." };
+        return { success: false, error: "No apps connected. Run 'scan_metro' first.", failureKind: "no_apps_connected" };
     }
 
     if (app.ws.readyState !== WebSocket.OPEN) {
-        return { success: false, error: "WebSocket connection is not open." };
+        return { success: false, error: "WebSocket connection is not open.", failureKind: "ws_closed" };
     }
 
     // Validate and preprocess the expression
@@ -708,7 +723,7 @@ async function executeExpressionCore(
     // reject before spending a round trip on a guaranteed compiler error.
     const deviceKey = app.deviceInfo?.deviceName || "__default__";
     if (isAsyncEvalUnsupported(deviceKey) && looksLikeAsyncFunction(cleanedExpression)) {
-        return { success: false, error: ASYNC_UNSUPPORTED_GUIDANCE };
+        return { success: false, error: ASYNC_UNSUPPORTED_GUIDANCE, failureKind: "app_exception" };
     }
 
     // Hermes CDP does not support awaitPromise — it serializes the Promise's
@@ -723,7 +738,8 @@ async function executeExpressionCore(
     // the raw message with something the caller can act on.
     if (!result.success && result.error && ASYNC_UNSUPPORTED_HERMES.test(result.error)) {
         markAsyncEvalUnsupported(deviceKey);
-        return { success: false, error: ASYNC_UNSUPPORTED_GUIDANCE };
+        // The caller's code is what Hermes cannot compile, so it stays the app_exception the raw error was.
+        return { success: false, error: ASYNC_UNSUPPORTED_GUIDANCE, failureKind: "app_exception" };
     }
 
     return result;
@@ -748,7 +764,7 @@ function executeCDP(
     // throw; it simply never gets a reply, so without this the call burns its
     // full timeout and then reports a misleading "took too long".
     if (app.ws.readyState !== WebSocket.OPEN) {
-        return Promise.resolve({ success: false, error: "WebSocket connection is not open." });
+        return Promise.resolve({ success: false, error: "WebSocket connection is not open.", failureKind: "ws_closed" });
     }
 
     return new Promise((resolveRaw) => {
@@ -905,7 +921,8 @@ else{return __v}})()`;
         try {
             const parsed = typeof poll.result === "string" ? JSON.parse(poll.result) : poll.result;
             if (parsed?.status === "err") {
-                return { success: false, error: parsed.value || "Promise rejected" };
+                // The caller's promise rejected: the same app_exception the sync throw path in connection.ts reports.
+                return { success: false, error: parsed.value || "Promise rejected", failureKind: "app_exception" };
             }
             const value = parsed?.value;
             return {
@@ -928,6 +945,7 @@ else{return __v}})()`;
     registerHandle(app.deviceInfo?.deviceName || "__default__", slotId);
     return {
         success: false,
+        pendingHandle: slotId,
         error:
             `Promise did not settle within ${budgetMs}ms — but the result is NOT lost. ` +
             `Collect it once the operation has had time to finish: ` +
@@ -968,7 +986,7 @@ async function executeInAppInner(
                     continue;
                 }
             }
-            return { success: false, error: "No apps connected. Run 'scan_metro' first." };
+            return { success: false, error: "No apps connected. Run 'scan_metro' first.", failureKind: "no_apps_connected" };
         }
 
         // WebSocket not open - try to reconnect
@@ -993,7 +1011,7 @@ async function executeInAppInner(
                     continue;
                 }
             }
-            return { success: false, error: "WebSocket connection is not open." };
+            return { success: false, error: "WebSocket connection is not open.", failureKind: "ws_closed" };
         }
 
         // Best-effort one-shot bootstrap of globalThis.__rn__ for this app
@@ -1176,6 +1194,10 @@ export async function executeInApp(
         return withClampMeta(first);
     }
 
+    // Every transport failure below carries a kind, including in-flight calls failed at socket close (state.ts) and a silent probe on a target Metro no longer lists (stale_target).
+    const transportKind: FailureKind = first.failureKind ?? (classification.pattern === "no_apps" ? "no_apps_connected" : "ws_closed");
+    first = { ...first, failureKind: transportKind };
+
     // 'no_apps' without any prior successful exec means Metro/app simply isn't
     // running — scanning will only re-confirm that. Return the original error
     // so the user sees the actionable message ("Run 'scan_metro' first") instead
@@ -1202,12 +1224,14 @@ export async function executeInApp(
     const currentApp = getConnectedAppByDevice(device);
     const preferredPort = currentApp?.port;
 
-    const reconnected = await attemptQuickReconnect(preferredPort);
+    const reconnectStarted = Date.now();
+    const reconnected = await attemptQuickReconnect(preferredPort, QUICK_RECONNECT_BUDGET_MS);
     if (!reconnected) {
-        trackAutoReconnect("scan_failed", toolName, classification.pattern);
+        trackAutoReconnect("scan_failed", toolName, classification.pattern, Date.now() - reconnectStarted, transportKind);
         return withClampMeta({
             success: false,
             error: `reconnect_attempted: ${first.error ?? "unknown"}`,
+            failureKind: transportKind,
             _meta: { reconnected: false, transportError: first.error ?? "unknown" },
         });
     }
@@ -1220,17 +1244,18 @@ export async function executeInApp(
     );
 
     if (retry.success) {
-        trackAutoReconnect("success", toolName, classification.pattern);
+        trackAutoReconnect("success", toolName, classification.pattern, Date.now() - reconnectStarted);
         return withClampMeta({
             ...retry,
             _meta: { reconnected: true, transportError: first.error ?? "unknown" },
         });
     }
 
-    trackAutoReconnect("retry_failed", toolName, classification.pattern);
+    trackAutoReconnect("retry_failed", toolName, classification.pattern, Date.now() - reconnectStarted, retry.failureKind ?? transportKind);
     return withClampMeta({
         success: false,
         error: `reconnected_but_still_failed: ${first.error ?? "unknown"} | ${retry.error ?? "unknown"}`,
+        failureKind: retry.failureKind ?? transportKind,
         _meta: { reconnected: true, transportError: first.error ?? "unknown" },
     });
 }

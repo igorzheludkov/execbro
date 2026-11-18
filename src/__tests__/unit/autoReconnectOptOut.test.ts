@@ -64,5 +64,6 @@ describe("executeInApp and options.autoReconnect", () => {
         expect(scanMetroPorts).toHaveBeenCalledTimes(1);
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/^reconnect_attempted: /);
-    });
+        // The reconnect now polls Metro for its bounded budget before giving up.
+    }, 10000);
 });

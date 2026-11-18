@@ -159,6 +159,11 @@ export function registerExecutionTools(server: McpServer): void {
                 metaNotes.push(`[warning: timeoutMs ${result._meta.timeoutClampedFrom} clamped to 120000]`);
             }
 
+            // A deferred result the caller collects next is the call doing its job, not a failure.
+            if (!result.success && result.pendingHandle) {
+                return { content: [{ type: "text", text: [result.error, ...metaNotes].join("\n\n") }] };
+            }
+
             if (!result.success) {
                 let errorText = `Error: ${result.error}`;
 
