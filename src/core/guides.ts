@@ -575,6 +575,7 @@ Use the navigate tool, which verifies the route actually moved (see the "interac
 ## Hermes Limitations
 - require('<module>') works (Metro registry); import and top-level await do not
 - NO async/await — use simple expressions or .then() chains
+- Multi-statement input must END WITH A BARE EXPRESSION: a last statement that is if/else, try, a loop or a declaration has no value and is rejected. End with a ternary or the variable (\`var ids = []; for (var p of list) ids.push(p.id); ids\`), or write an IIFE with an explicit return
 - NO emoji or non-ASCII in string literals
 - Use globalThis instead of global
 
