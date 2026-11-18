@@ -282,7 +282,10 @@ export function buildNavigateSource(
     var params = ${paramsLit};
     var nav = __eb_nav;
     if (!nav || !nav.navigator) {
-        return { ok: false, kind: null, error: nav && nav.note ? nav.note : 'No router resolved.' };
+        // The caller waits on noRouter (an app still mounting after a reload) and tags an empty tree as no_fiber_roots.
+        var roots = 0;
+        try { roots = __eb_fiberRoots(true).length; } catch (e) { roots = 0; }
+        return { ok: false, kind: null, noRouter: true, fiberRoots: roots, error: nav && nav.note ? nav.note : 'No router resolved.' };
     }
     var n = nav.navigator;
     var table = __eb_routeTable();
@@ -335,17 +338,29 @@ export function buildNavigateSource(
             else if (typeof n.goBack === 'function') { n.goBack(); }
             else { return { ok: false, kind: nav.kind, before: before, error: 'This router exposes neither back() nor goBack().' }; }
         } else if (action === 'reset') {
-            if (typeof n.resetRoot === 'function') { n.resetRoot(); }
+            if (typeof n.resetRoot === 'function') {
+                // resetRoot() with no state threw "Cannot read property 'routes' of undefined" in BaseRouter, so always hand it one: the destination, else the first root route.
+                var rs = null;
+                try { rs = n.getRootState(); } catch (e) { rs = null; }
+                var first = to || (rs && rs.routes && rs.routes[0] ? rs.routes[0].name : (rs && rs.routeNames ? rs.routeNames[0] : null));
+                if (!first) return { ok: false, kind: nav.kind, before: before, error: 'Could not read a root route to reset to. Pass to.' };
+                var resetRoute = { name: first };
+                if (params) resetRoute.params = params;
+                n.resetRoot({ index: 0, routes: [resetRoute] });
+            }
             else if (typeof n.dismissAll === 'function') { n.dismissAll(); }
             else { return { ok: false, kind: nav.kind, before: before, error: 'This router exposes neither resetRoot() nor dismissAll().' }; }
-        } else {
-            if (typeof n[action] !== 'function') {
+        } else if (typeof n[action] !== 'function') {
+            if (typeof n.dispatch !== 'function') {
                 return {
                     ok: false, kind: nav.kind, before: before,
                     error: 'Action "' + action + '" is not available on this router (' + nav.kind +
                            '). A React Navigation root ref exposes navigate/goBack/reset only; push and replace are stack-scoped.'
                 };
             }
+            // A container ref has no push/replace, but its dispatch hands the action to the focused navigator, which is the stack that owns them.
+            n.dispatch({ type: action === 'push' ? 'PUSH' : 'REPLACE', payload: params ? { name: to, params: params } : { name: to } });
+        } else {
             var chain = (nav.kind === 'react-navigation' && action === 'navigate' && to) ? table.paths[to] : null;
             if (chain && chain.length) {
                 // React Navigation 7 resolves a bare name only along the focused

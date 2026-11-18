@@ -59,3 +59,14 @@ describe("runInputOp", () => {
         expect(spy.mock.calls[0][0]).toContain("email-input");
     });
 });
+
+describe("runInputOp failure kinds", () => {
+    it("forwards the executor's failure kind with the miss", async () => {
+        const r = await runInputOp({ kind: "find" }, undefined, undefined, async () => ({
+            success: false,
+            error: "No apps connected",
+            failureKind: "no_apps_connected"
+        }));
+        expect(r).toEqual({ found: false, reason: "No apps connected", failureKind: "no_apps_connected" });
+    });
+});

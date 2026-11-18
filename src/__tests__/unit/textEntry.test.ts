@@ -774,3 +774,53 @@ describe("enterText on a physical iPhone (keystrokeReadBackOnly)", () => {
         expect(r.error).toMatch(/physical iPhone/);
     });
 });
+
+describe("an empty screen, right after a tap or a launch", () => {
+    // 18 "no TextInput found on screen" failures, many 0.5s after a tap that started a screen transition.
+    const empty: InputResult = { found: false, reason: "no TextInput found on screen", totalInputs: 0 };
+
+    it("re-resolves once, even untargeted, before failing", async () => {
+        const delay = jest.fn(async (_ms: number) => {});
+        const d = deps([empty, found(), found({ value: "hi" }), found({ value: "hi" })], { delay });
+        const r = await enterText({ text: "hi" }, d);
+        expect(r.success).toBe(true);
+        const waited = delay.mock.calls[0][0] as number;
+        expect(waited).toBeGreaterThanOrEqual(500);
+        expect(waited).toBeLessThanOrEqual(800);
+    });
+
+    it("points at native: true when the screen still has no RN input", async () => {
+        const d = deps([empty, empty], { delay: jest.fn(async () => {}) });
+        const r = await enterText({ text: "hi" }, d);
+        expect(r.success).toBe(false);
+        expect(r.error).toContain("native: true");
+    });
+});
+
+describe("failure kinds", () => {
+    const quick = { delay: jest.fn(async () => {}) };
+
+    it("tags a target nothing answers to as bad_arguments", async () => {
+        const miss: InputResult = { found: false, reason: "no TextInput matched that target", badTarget: true, candidates: [], totalInputs: 2 };
+        const r = await enterText({ text: "hi", testID: "nope" }, deps([miss, miss], quick));
+        expect(r.failureKind).toBe("bad_arguments");
+    });
+
+    it("tags an ambiguous target and an out-of-range index as bad_arguments", async () => {
+        const amb = await enterText({ text: "hi", testID: "x" }, deps([{ found: false, ambiguous: true, reason: "2 inputs match this target" }], quick));
+        expect(amb.failureKind).toBe("bad_arguments");
+        const idx = await enterText({ text: "hi", testID: "x", index: 3 }, deps([{ found: false, matchedOnly: true, reason: "index 3 is out of range" }], quick));
+        expect(idx.failureKind).toBe("bad_arguments");
+    });
+
+    it("forwards the evaluation's own failure kind", async () => {
+        const dead: InputResult = { found: false, reason: "No apps connected", failureKind: "no_apps_connected" };
+        const r = await enterText({ text: "hi", testID: "x" }, deps([dead, dead], quick));
+        expect(r.failureKind).toBe("no_apps_connected");
+    });
+
+    it("leaves a no-focus miss untagged", async () => {
+        const r = await enterText({ text: "hi" }, deps([{ found: false, reason: "no focused TextInput", candidates: [], totalInputs: 2 }], quick));
+        expect(r.failureKind).toBeUndefined();
+    });
+});

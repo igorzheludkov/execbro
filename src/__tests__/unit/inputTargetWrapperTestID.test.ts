@@ -104,3 +104,35 @@ describe("input targeting by a wrapper's testID", () => {
         expect((r as { placeholder?: string }).placeholder).toBe("Inner");
     });
 });
+
+describe("miss shape, for failure classification", () => {
+    const run = async (query?: { testID?: string }) =>
+        (await new Function(`return (${buildInputExpression({ kind: "find" }, query)});`)()) as Record<string, unknown>;
+
+    it("reports zero mounted inputs structurally, not only in the message", async () => {
+        install(node({ name: "Splash" }, {}, [node("RCTView", {})]));
+        const r = await run();
+        expect(r.found).toBe(false);
+        expect(r.totalInputs).toBe(0);
+    });
+
+    it("flags a targeted miss as a bad target", async () => {
+        install(node({ name: "Form" }, {}, [field({ placeholder: "Name", testID: "name" })]));
+        const r = await run({ testID: "nope" });
+        expect(r.found).toBe(false);
+        expect(r.badTarget).toBe(true);
+    });
+
+    it("does not flag an untargeted miss: nothing focused is not a wrong target", async () => {
+        install(node({ name: "Form" }, {}, [field({ placeholder: "A" }), field({ placeholder: "B" })]));
+        const r = await run();
+        expect(r.found).toBe(false);
+        expect(r.badTarget).toBeFalsy();
+    });
+
+    it("tags an empty fiber tree", async () => {
+        (globalThis as Record<string, unknown>).__REACT_DEVTOOLS_GLOBAL_HOOK__ = { renderers: new Map(), getFiberRoots: () => new Set() };
+        const r = await run({ testID: "x" });
+        expect(r.failureKind).toBe("no_fiber_roots");
+    });
+});

@@ -23,7 +23,7 @@ export async function runInputOp(
     const exec = await execute(buildInputExpression(op, query), device);
 
     if (!exec.success) {
-        return { found: false, reason: exec.error ?? "executor failed" };
+        return { found: false, reason: exec.error ?? "executor failed", ...(exec.failureKind && { failureKind: exec.failureKind }) };
     }
 
     try {

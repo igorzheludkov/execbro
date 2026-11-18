@@ -1,4 +1,5 @@
 import type { FailureKind } from "./errors.js";
+import type { ExecutionResult } from "./types.js";
 import { executeInApp } from "./jsExecute.js";
 import {
     buildNavHandlesSource,
@@ -19,6 +20,21 @@ import {
  * round trip rather than four.
  */
 export const POLL_DELAYS_MS = [150, 350, 600, 900];
+
+/**
+ * How long to wait for a router to appear before refusing. "No router resolved" used to fail in 15-90ms, and about half of those came within 10s of reload_app or scan_metro, while the app was still mounting.
+ */
+const ROUTER_WAIT_MS = 3000;
+const ROUTER_POLL_MS = 300;
+
+function isNoRouter(r: ExecutionResult): boolean {
+    if (!r.success) return false;
+    try {
+        return (JSON.parse(String(r.result)) as { noRouter?: boolean }).noRouter === true;
+    } catch {
+        return false;
+    }
+}
 
 /** Shorter poll per parent route tried for an unmounted screen: up to 8 are tried. */
 const PARENT_POLL_DELAYS_MS = [150, 350, 600];
@@ -162,16 +178,23 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
         }
     }
 
-    const performed = await executeInApp(performSource(action, to, params), false, { originatingToolName: "navigate" }, device);
+    const perform = () => executeInApp(performSource(action, to, params), false, { originatingToolName: "navigate" }, device);
+    let performed = await perform();
+    // Nothing was dispatched while no router resolved, so asking again is safe.
+    for (let waited = 0; waited < ROUTER_WAIT_MS && isNoRouter(performed); waited += ROUTER_POLL_MS) {
+        await new Promise((r) => setTimeout(r, ROUTER_POLL_MS));
+        performed = await perform();
+    }
     if (!performed.success) {
         return {
             success: false, kind: null, action, to,
             route: { before: null, after: null }, changed: false, indeterminate: false,
+            ...(performed.failureKind && { failureKind: performed.failureKind }),
             error: performed.error
         };
     }
 
-    let head: { ok: boolean; badArgs?: boolean; kind: string | null; error?: string; before?: string | null; beforeId?: string | null; routes?: string[]; parents?: string[] };
+    let head: { ok: boolean; badArgs?: boolean; noRouter?: boolean; fiberRoots?: number; kind: string | null; error?: string; before?: string | null; beforeId?: string | null; routes?: string[]; parents?: string[] };
     try {
         head = JSON.parse(String(performed.result));
     } catch {
@@ -213,6 +236,7 @@ export async function performNavigation(opts: PerformNavigationOptions): Promise
             // is free to be reworded and the classification must not move
             // with it.
             ...(head.badArgs === true && { failureKind: "bad_arguments" as const }),
+            ...(head.noRouter === true && head.fiberRoots === 0 && { failureKind: "no_fiber_roots" as const }),
             error: `${head.error ?? "Navigation failed"}${hint}`
         };
     }
