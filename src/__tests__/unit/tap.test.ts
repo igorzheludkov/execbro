@@ -624,6 +624,19 @@ describe("formatTapFailure with all strategies exhausted", () => {
 });
 
 
+describe("formatTapFailure for a coordinate tap", () => {
+    // 76 rows read "No element found matching " with nothing after it: an x/y tap has no predicate to name.
+    it("reports the last attempt's full reason instead of an empty not-found", () => {
+        const reason = "Coordinate tap failed: Failed to tap: Error: simulator HID connection was interrupted while sending the event";
+        const result = formatTapFailure({
+            query: { x: 100, y: 200 },
+            attempted: [{ strategy: "coordinate", reason }],
+            suggestion: "",
+        });
+        expect(result.error).toBe(reason);
+    });
+});
+
 describe("isTapTimeout", () => {
     it("returns true when a strategy wrapper fired at its cap", () => {
         expect(
@@ -661,6 +674,27 @@ describe("isTapTimeout", () => {
 
     it("returns false for an empty attempted list", () => {
         expect(isTapTimeout([])).toBe(false);
+    });
+
+    // A skip for a missing precondition is not the budget running out: 33 rows in 2026-11 read "Tap timed out" after 2s.
+    it("returns false for precondition skips (no Metro, no UI driver)", () => {
+        expect(
+            isTapTimeout([
+                { strategy: "fiber", reason: "Skipped — no Metro connection (required for fiber)", outcome: "skipped" },
+                { strategy: "accessibility", reason: "No iOS accessibility match", outcome: "not-found" },
+            ])
+        ).toBe(false);
+        expect(
+            isTapTimeout([
+                { strategy: "ocr", reason: "Skipped — iOS UI driver is not installed (required for iOS tap/accessibility/OCR)", outcome: "skipped" },
+            ])
+        ).toBe(false);
+    });
+
+    it("returns true for a budget skip that carries the skipped outcome", () => {
+        expect(
+            isTapTimeout([{ strategy: "ocr", reason: "Skipped — only 0ms remaining (budget 25000ms)", outcome: "skipped" }])
+        ).toBe(true);
     });
 
     it("accepts accessibility, ocr, and coordinate wrapper formats", () => {

@@ -1048,9 +1048,11 @@ export async function iosTap(
       result: `Tapped at (${Math.round(x)}, ${Math.round(y)})`,
     };
   } catch (error) {
+    // The driver's stderr is the reason; the "Command failed: <argv>" line in front of it only repeats x, y and the UDID.
+    const stderr = String((error as { stderr?: unknown })?.stderr ?? "").trim();
     return {
       success: false,
-      error: `Failed to tap: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Failed to tap: ${stderr || (error instanceof Error ? error.message : String(error))}`,
     };
   }
 }
