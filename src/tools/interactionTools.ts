@@ -62,7 +62,6 @@ import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver
 import { PINCH_IN_DEFAULT_SPAN } from "../core/pinchThresholds.js";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import type { ConnectedApp } from "../core/types.js";
-import type { FailureKind } from "../core/errors.js";
 
 /**
  * Default swipe gesture duration. Android has always used 300ms; iOS passed no
