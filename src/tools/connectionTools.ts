@@ -41,7 +41,7 @@ import {
 } from "../core/index.js";
 import type { DeviceInfo, ConnectionGap } from "../core/index.js";
 import { DEVICE_ALL_DESC } from "./_deviceArg.js";
-import { noAppAttachedMessage, orderAppsOnDevice } from "../core/connection.js";
+import { noAppAttachedMessage, orderAppsOnDevice, findDisconnectedDeviceName, resolveConnectedAppByDevice } from "../core/connection.js";
 import { chromiumScanPorts, isChromiumListing, isChromiumTarget, isPortOpen, otherAppsOnDevice, selectConnectTargets } from "../core/metro.js";
 
 export function registerConnectionTools(server: McpServer): void {
@@ -764,6 +764,18 @@ export function registerConnectionTools(server: McpServer): void {
     
             // Targeted disconnect: only disconnect a specific device
             if (device) {
+                // A device that dropped off is already what the caller asked for. Stop a pending auto-reconnect from reviving it, as the tool promises.
+                const dropped = resolveConnectedAppByDevice(device).kind === "none" ? findDisconnectedDeviceName(device) : null;
+                if (dropped) {
+                    for (const [key, meta] of getAllConnectionMetadata()) {
+                        if ((meta.deviceInfo.deviceName || meta.deviceInfo.title) !== dropped.name) continue;
+                        suppressReconnectionForKey(key);
+                        cancelReconnectionTimer(key);
+                    }
+                    return {
+                        content: [{ type: "text", text: `${dropped.name} is already disconnected (it dropped off earlier), so there was nothing to close. Use scan_metro to reconnect.` }]
+                    };
+                }
                 const app = getConnectedAppByDevice(device);
                 if (!app) {
                     return {
@@ -871,7 +883,8 @@ export function registerConnectionTools(server: McpServer): void {
                     // Low-cardinality tag for telemetry clustering — the message
                     // alone can't distinguish "no Metro" from "Metro up, connect
                     // failed" from "device name mismatch" without regexes.
-                    ...(result.errorContext && { _errorContext: result.errorContext })
+                    ...(result.errorContext && { _errorContext: result.errorContext }),
+                    ...(result.failureKind && { _failureKind: result.failureKind })
                 };
             }
     
