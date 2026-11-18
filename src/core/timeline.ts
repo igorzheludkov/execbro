@@ -195,7 +195,7 @@ export function formatTimeline(input: FormatInput): string {
         logId ? `get_log_details({ id: "${logId}" })` : "",
         reqId ? `get_request_details({ requestId: "${reqId}" })` : "",
     ].filter(Boolean);
-    if (hints.length) footer.push(`Details: ${hints.join(", ")}. Request ids drop the n.`);
+    if (hints.length) footer.push(`Details: ${hints.join(", ")}.`);
     footer.push(...notes);
     return footer.length ? `${lines.join("\n")}\n\n${footer.join("\n")}` : lines.join("\n");
 }

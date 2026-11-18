@@ -43,8 +43,8 @@ var __eb_require = (function () {
         if (entries.length === 0) {
             throw new Error('Metro module registry exposed no module names (verboseName absent, likely a minified bundle). Only pre-existing globals are reachable.');
         }
-        // './src/a' and '../src/a' name the registry's 'src/a.ts' or 'src/a/index.ts'.
-        var needle = String(name).replace(/^(\\.\\.?\\/)+/, '');
+        // './src/a', '../src/a' and the path aliases '@/src/a', '@/a', '~/a' name the registry's 'src/a.ts' or 'src/a/index.ts'. '@scope/pkg' has no slash after the @.
+        var needle = String(name).replace(/^((\\.\\.?|[@~])\\/)+/, '');
         var base = needle.replace(EXT, '');
         var wanted = [needle];
         var exts = ['.ts', '.tsx', '.js', '.jsx'];
