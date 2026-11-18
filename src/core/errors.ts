@@ -128,3 +128,26 @@ export class EnvironmentError extends Error {
         this.kind = kind;
     }
 }
+
+/**
+ * A failed child process as "<stderr or reason> (command: <cmd>)". Node's own message leads with `Command failed: <full command line>`, and telemetry keeps only the first 200 chars, so the device's actual complaint was cut off behind a long path.
+ */
+export function execFailureMessage(error: unknown): string {
+    if (!(error instanceof Error)) return String(error);
+    const e = error as Error & { cmd?: string; stderr?: unknown; killed?: boolean; code?: unknown };
+    if (!e.cmd) return e.message;
+    const stderr = typeof e.stderr === "string" ? e.stderr.trim() : "";
+    const reason = e.killed
+        ? `timed out${stderr ? `: ${stderr}` : " with no output"}`
+        : stderr || (typeof e.code === "number" ? `exited with code ${e.code}` : e.message.split("\n")[0]);
+    return `${reason} (command: ${e.cmd})`;
+}
+
+/**
+ * Kind for the reasons the injected fiber walk gives up (`__eb_noRootsReason`, fiberRoots.ts). The app has not rendered or its bundle has not run, which is a setup state, not a defect of the screen-reading tool.
+ */
+export function fiberReadFailureKind(error: string): FailureKind | undefined {
+    if (/^No fiber roots found/.test(error)) return "no_fiber_roots";
+    if (/DevTools hook not (found|registered)|JS bundle has not run yet/.test(error)) return "devtools_hook_missing";
+    return undefined;
+}

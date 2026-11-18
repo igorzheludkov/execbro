@@ -20,7 +20,7 @@ jest.unstable_mockModule("../../core/ios.js", () => ({
     finalizeScreenshotFile: jest.fn(),
 }));
 
-const { listPhysicalIosDevices, resolvePhysicalIosDevice } = await import("../../core/iosPhysical.js");
+const { listPhysicalIosDevices, resolvePhysicalIosDevice, physicalMissReason } = await import("../../core/iosPhysical.js");
 
 const USBMUX_LIST = JSON.stringify([
     {
@@ -92,5 +92,44 @@ describe("resolvePhysicalIosDevice", () => {
         const d = await resolvePhysicalIosDevice("922236A0-C7BD-5E25-9751-639615E97848");
         expect(d?.udid).toBe("fdc2d1b5937ce66395b17a9c540b3a45bbd54431");
         await expect(resolvePhysicalIosDevice("00000000-0000-0000-0000-000000000000")).resolves.toBeNull();
+    });
+});
+
+describe("physicalMissReason", () => {
+    // 19 production rows (2026-11) were phone UDIDs answered with a generic "did not match", because a failed listing looked exactly like no phone.
+    const PHONE = "00008110-001A2B3C4D5E6F70";
+
+    it("names a missing pymobiledevice3 as driver_not_installed", async () => {
+        execAsyncMock.mockRejectedValue(Object.assign(new Error("spawn pymobiledevice3 ENOENT"), { code: "ENOENT" }));
+        await resolvePhysicalIosDevice(PHONE);
+        const why = physicalMissReason(PHONE, false);
+        expect(why?.kind).toBe("driver_not_installed");
+        expect(why?.message).toContain("pipx install pymobiledevice3");
+    });
+
+    it("says the phone is not on USB when the listing worked", async () => {
+        execAsyncMock.mockResolvedValue({ stdout: "[]", stderr: "" });
+        await resolvePhysicalIosDevice(PHONE);
+        const why = physicalMissReason(PHONE, false);
+        expect(why?.kind).toBe("no_devices_attached");
+        expect(why?.message).toMatch(/USB/);
+    });
+
+    it("passes the listing's own error through when usbmux fails", async () => {
+        execAsyncMock.mockRejectedValue(Object.assign(new Error("Command failed"), { stderr: "usbmuxd not running", code: 1 }));
+        await resolvePhysicalIosDevice(PHONE);
+        expect(physicalMissReason(PHONE, false)?.message).toContain("usbmuxd not running");
+    });
+
+    it("stays out of a simulator-name typo", async () => {
+        execAsyncMock.mockRejectedValue(Object.assign(new Error("spawn pymobiledevice3 ENOENT"), { code: "ENOENT" }));
+        await resolvePhysicalIosDevice("iPhone 71");
+        expect(physicalMissReason("iPhone 71", false)).toBeNull();
+    });
+
+    it("answers for a name the registry knows is a phone", async () => {
+        execAsyncMock.mockResolvedValue({ stdout: "[]", stderr: "" });
+        await resolvePhysicalIosDevice("Ihor's iPhone");
+        expect(physicalMissReason("Ihor's iPhone", true)?.kind).toBe("no_devices_attached");
     });
 });

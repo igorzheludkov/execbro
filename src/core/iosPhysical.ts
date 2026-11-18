@@ -6,6 +6,7 @@ import { execFileAsync } from "./exec.js";
 import { createSerialQueue, type SerialQueue } from "./serialQueue.js";
 import { defaultScreenshotPath, finalizeScreenshotFile } from "./ios.js";
 import type { iOSResult } from "./ios.js";
+import type { FailureKind } from "./errors.js";
 
 
 export interface PhysicalIosDevice {
@@ -66,6 +67,7 @@ export async function listPhysicalIosDevices(): Promise<PhysicalIosDevice[]> {
     // Every phone tap lists first, so a hung listing must not cost the 30 s
     // general timeout, and needs the same SIGKILL escalation as the session.
     const run = await runPmd3(bin, ["usbmux", "list"], undefined, PMD3_LIST_DEADLINE_MS);
+    lastListFailure = run.ok ? null : { missing: run.missing, detail: run.stderr || run.message };
     if (!run.ok) return [];
     try {
         const rows = JSON.parse(run.stdout) as Array<Record<string, string>>;
@@ -83,6 +85,30 @@ export async function listPhysicalIosDevices(): Promise<PhysicalIosDevice[]> {
     } catch {
         return [];
     }
+}
+
+// Why the last listing came back empty, kept so the error a caller finally sees can name the cause instead of a generic "did not match".
+let lastListFailure: { missing: boolean; detail: string } | null = null;
+
+// usbmux UDIDs: 8-16 hex (A12 and newer) or 40 hex (older). Simulators never look like this.
+const PHONE_UDID = /^[0-9A-F]{8}-[0-9A-F]{16}$|^[0-9a-f]{40}$/i;
+
+/**
+ * Why a USB iPhone the caller meant was not found, read from the listing the lookup just ran (call it right after `resolvePhysicalIosDevice`). Null when the hint is not phone-shaped and nothing says the caller meant a phone, so a simulator typo keeps its own error.
+ */
+export function physicalMissReason(hint: string, knownPhysical: boolean): { message: string; kind: FailureKind } | null {
+    if (!knownPhysical && !PHONE_UDID.test(hint.trim())) return null;
+    if (lastListFailure?.missing) return { message: PMD3_MISSING_ERROR, kind: "driver_not_installed" };
+    if (lastListFailure) {
+        return {
+            message: `USB devices could not be listed (pymobiledevice3 usbmux list failed: ${lastListFailure.detail.slice(0, 200)}). Check the cable, unlock the phone and tap Trust.`,
+            kind: "no_devices_attached",
+        };
+    }
+    return {
+        message: `No iPhone/iPad matching "${hint}" is attached over USB. Connect it with a cable, unlock it and tap Trust (Wi-Fi pairing is not enough); list_devices shows what is attached.`,
+        kind: "no_devices_attached",
+    };
 }
 
 /**
@@ -175,7 +201,9 @@ export async function physicalIosScreenshot(
 ): Promise<iOSResult> {
     const finalOutputPath = outputPath || defaultScreenshotPath("ios-device-screenshot");
     const captured = await capturePhysicalIosScreenshot(udid, finalOutputPath);
-    if (!captured.ok) return { success: false, error: captured.error };
+    if (!captured.ok) {
+        return { success: false, error: captured.error, ...(captured.error === PMD3_MISSING_ERROR && { failureKind: "driver_not_installed" as const }) };
+    }
     try {
         return await finalizeScreenshotFile(finalOutputPath);
     } catch (error) {

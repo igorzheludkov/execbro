@@ -1,11 +1,12 @@
 import { existsSync } from "fs";
-import { writeFile } from "fs/promises";
+import { copyFile, mkdir, writeFile } from "fs/promises";
 import path from "path";
 import os from "os";
 import sharp from "sharp";
 import { getActiveSimulatorUdid } from "./state.js";
 import { notifyDriverMissing } from "./logbox.js";
 import { execFileAsync } from "./exec.js";
+import { EnvironmentError, execFailureMessage, type FailureKind } from "./errors.js";
 
 // simctl command timeout in milliseconds
 const SIMCTL_TIMEOUT = 30000;
@@ -141,6 +142,22 @@ export function getUiDriverInstallHint(): string {
   return "IDB is not installed. Install with: brew install idb-companion\nTip: Consider switching to AXe (recommended) — brew install cameroncooke/axe/axe and set IOS_DRIVER=axe";
 }
 
+const AXE_FRAMEWORKS_HINT =
+  "AXe could not load Xcode's private simulator frameworks, so it cannot drive the simulator. " +
+  "Update AXe (brew upgrade cameroncooke/axe/axe) and check that xcode-select points at a full Xcode: " +
+  "xcode-select -p should print .../Xcode.app/Contents/Developer (fix with sudo xcode-select -s /Applications/Xcode.app).";
+
+/** A UI-driver command failure. AXe's private-framework load error means the driver cannot work on this machine at all, so it is tagged like a missing driver. */
+function driverFailure(action: string, error: unknown): iOSResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const detail = execFailureMessage(error);
+  // Checked on stderr too, so the match does not depend on how the exec layer words its message.
+  if (/Failed to load essential private frameworks/i.test(`${message}\n${detail}`)) {
+    return { success: false, error: `Failed to ${action}: ${AXE_FRAMEWORKS_HINT}\n${detail}`, failureKind: "driver_not_installed" };
+  }
+  return { success: false, error: `Failed to ${action}: ${message}` };
+}
+
 /**
  * Map IDB button names (uppercase/underscores) to AXe button names (lowercase/hyphens).
  */
@@ -207,7 +224,7 @@ async function ensureUiDriverReady(
       notifyDriverMissing("ios");
       return {
         ready: false,
-        error: { success: false, error: getUiDriverInstallHint() },
+        error: { success: false, error: getUiDriverInstallHint(), failureKind: "driver_not_installed" },
       };
     }
   } else {
@@ -215,7 +232,7 @@ async function ensureUiDriverReady(
       notifyDriverMissing("ios");
       return {
         ready: false,
-        error: { success: false, error: getUiDriverInstallHint() },
+        error: { success: false, error: getUiDriverInstallHint(), failureKind: "driver_not_installed" },
       };
     }
   }
@@ -227,6 +244,7 @@ async function ensureUiDriverReady(
       error: {
         success: false,
         error: await buildNoSimulatorError(),
+        failureKind: "no_ios_simulator",
       },
     };
   }
@@ -266,6 +284,10 @@ export interface iOSResult {
   originalHeight?: number;
   // For listIOSSimulators: structured simulator list
   simulators?: iOSSimulator[];
+  // Structured cause for telemetry, forwarded by tools as `_failureKind`
+  failureKind?: FailureKind;
+  // Screenshot captured, but copying it to the caller's outputPath failed
+  saveError?: string;
 }
 
 // Accessibility element from IDB describe commands
@@ -559,16 +581,17 @@ export async function iosScreenshot(
       return {
         success: false,
         error: await buildNoSimulatorError(),
+        failureKind: "no_ios_simulator",
       };
     }
 
-    // Generate output path if not provided
-    const finalOutputPath = outputPath || defaultScreenshotPath();
+    // Always capture into tmp: simctl writing straight to a caller's path is what failed whenever that folder did not exist.
+    const capturePath = defaultScreenshotPath();
 
     const [, { rotation }] = await Promise.all([
       execFileAsync(
         "xcrun",
-        ["simctl", "io", targetUdid, "screenshot", finalOutputPath],
+        ["simctl", "io", targetUdid, "screenshot", capturePath],
         {
           timeout: SIMCTL_TIMEOUT,
         },
@@ -578,15 +601,26 @@ export async function iosScreenshot(
     // simctl captures the portrait framebuffer; turn it to the app's frame so
     // the image and every layout coordinate agree.
     if (rotation !== "none") {
-      const turned = await sharp(finalOutputPath).rotate(rotation === "ccw" ? -90 : 90).toBuffer();
-      await writeFile(finalOutputPath, turned);
+      const turned = await sharp(capturePath).rotate(rotation === "ccw" ? -90 : 90).toBuffer();
+      await writeFile(capturePath, turned);
     }
 
-    return await finalizeScreenshotFile(finalOutputPath);
+    const result = await finalizeScreenshotFile(capturePath);
+    if (outputPath) {
+      try {
+        await mkdir(path.dirname(outputPath), { recursive: true });
+        await copyFile(capturePath, outputPath);
+        result.result = outputPath;
+      } catch (error) {
+        // The capture is good; a bad path must not throw it away.
+        result.saveError = `Could not save to ${outputPath}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+    return result;
   } catch (error) {
     return {
       success: false,
-      error: `Failed to capture screenshot: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Failed to capture screenshot: ${execFailureMessage(error)}`,
     };
   }
 }
@@ -680,6 +714,7 @@ export async function iosInstallApp(
       return {
         success: false,
         error: await buildNoSimulatorError(),
+        failureKind: "no_ios_simulator",
       };
     }
 
@@ -722,6 +757,7 @@ export async function iosLaunchApp(
       return {
         success: false,
         error: await buildNoSimulatorError(),
+        failureKind: "no_ios_simulator",
       };
     }
 
@@ -770,6 +806,7 @@ export async function iosOpenUrl(
       return {
         success: false,
         error: await buildNoSimulatorError(),
+        failureKind: "no_ios_simulator",
       };
     }
 
@@ -821,6 +858,7 @@ export async function iosTerminateApp(
       return {
         success: false,
         error: await buildNoSimulatorError(),
+        failureKind: "no_ios_simulator",
       };
     }
 
@@ -1115,10 +1153,7 @@ export async function iosSwipe(
       result: `Swiped from (${Math.round(startX)}, ${Math.round(startY)}) to (${Math.round(endX)}, ${Math.round(endY)})`,
     };
   } catch (error) {
-    return {
-      success: false,
-      error: `Failed to swipe: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    return driverFailure("swipe", error);
   }
 }
 
@@ -1246,10 +1281,7 @@ export async function iosKeyEvent(
       result: `Sent key event: ${keycode}`,
     };
   } catch (error) {
-    return {
-      success: false,
-      error: `Failed to send key event: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    return driverFailure("send key event", error);
   }
 }
 
@@ -1294,7 +1326,7 @@ export async function iosKeyCombo(modifiers: number[], keycode: number, udid?: s
     await runAxe("key-combo", "--modifiers", modifiers.join(","), "--key", String(keycode), "--udid", preflight.targetUdid);
     return { success: true, result: `Sent key combo: ${modifiers.join("+")}+${keycode}` };
   } catch (error) {
-    return { success: false, error: `Failed to send key combo: ${error instanceof Error ? error.message : String(error)}` };
+    return driverFailure("send key combo", error);
   }
 }
 
@@ -1342,10 +1374,7 @@ export async function iosKeySequence(
       result: `Sent key sequence: ${keycodes.join(", ")}`,
     };
   } catch (error) {
-    return {
-      success: false,
-      error: `Failed to send key sequence: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    return driverFailure("send key sequence", error);
   }
 }
 
@@ -2251,7 +2280,7 @@ export async function getDevicePixelRatio(
 
   const resolvedUdid = udid || (await getActiveOrBootedSimulatorUdid());
   if (!resolvedUdid) {
-    throw new Error(await buildNoSimulatorError());
+    throw new EnvironmentError(await buildNoSimulatorError(), "no_ios_simulator");
   }
 
   let pixelWidth: number;

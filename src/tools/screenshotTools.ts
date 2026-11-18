@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
-import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
+import { resolveAndroidDeviceId, resolveIosUdid, failureKindForResolverError, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import { recordScreenMetrics } from "../core/projectMemory.js";
 import {
     iosScreenshot,
@@ -22,7 +22,7 @@ import {
     androidGetDensity,
 } from "../core/index.js";
 import { screenStateToScreenSpace } from "../core/screenSpace.js";
-import { resolvePhysicalIosDevice, physicalIosScreenshot } from "../core/iosPhysical.js";
+import { resolvePhysicalIosDevice, physicalIosScreenshot, physicalMissReason } from "../core/iosPhysical.js";
 import { physicalTargetFor } from "../pro/physicalTap.js";
 import type { PhysicalIosDevice } from "../core/iosPhysical.js";
 import { writeFileSync } from "node:fs";
@@ -30,11 +30,18 @@ import type { ConnectedApp } from "../core/types.js";
 import { chromiumAppFor } from "../core/connection.js";
 import { chromiumScreenState } from "../core/chromiumScreen.js";
 import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver.js";
+import type { FailureKind } from "../core/errors.js";
 import { chromiumCapture } from "../core/chromium.js";
 import { isNearUniform, BLANK_RETRY_MS } from "../core/blankFrame.js";
 import { changedSinceLastShown } from "../core/sessionOnce.js";
 
 const BLANK_FRAME_NOTE = "\nℹ️ The captured frame is blank (the app may not have painted yet). The element list below comes from the React tree, not from this image.";
+
+const failed = (text: string, kind?: FailureKind) => ({
+    content: [{ type: "text" as const, text: `Error: ${text}` }],
+    isError: true as const,
+    ...(kind && { _failureKind: kind }),
+});
 
 /**
  * A capture that lands before the app's first paint is a flat frame, while the
@@ -70,12 +77,7 @@ async function capturePhysicalDevice(
     outputPath?: string
 ) {
     const result = await physicalIosScreenshot(phys.udid, outputPath);
-    if (!result.success || !result.data) {
-        return {
-            content: [{ type: "text" as const, text: `Error: ${result.error}` }],
-            isError: true as const
-        };
-    }
+    if (!result.success || !result.data) return failed(String(result.error), result.failureKind);
 
     const pixelWidth = result.originalWidth || 0;
     const pixelHeight = result.originalHeight || 0;
@@ -121,6 +123,9 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
         const hint = udid ?? device;
         const phys = hint ? await resolvePhysicalIosDevice(hint) : null;
         if (phys) return await capturePhysicalDevice(phys, outputPath);
+        const text = resolved.response.content[0].text;
+        const why = hint ? physicalMissReason(hint, text.includes("physical iOS device")) : null;
+        if (why) return failed(`${text.replace(/^Error: /, "")}\n${why.message}`, why.kind);
         return resolved.response;
     }
     // Resolve ONCE to a single canonical UDID and use it for BOTH the
@@ -146,17 +151,7 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
 
     const { result, blankNote } = await retryBlankCapture(await capturePromise, !!earlyTargetApp, () => iosScreenshot(outputPath, targetUdid ?? undefined));
     
-    if (!result.success) {
-        return {
-            content: [
-                {
-                    type: "text" as const,
-                    text: `Error: ${result.error}`
-                }
-            ],
-            isError: true
-        };
-    }
+    if (!result.success) return failed(String(result.error), result.failureKind);
     
     // Include image data if available
     if (result.data) {
@@ -291,6 +286,7 @@ async function iosScreenshotHandler({ outputPath, udid, device }: { outputPath?:
             infoText = `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
         }
         infoText += blankNote;
+        if (result.saveError) infoText += `\n${result.saveError}`;
         if (resolved.udid) {
             recordScreenMetrics(resolved.udid, {
                 rawWidth: pixelWidth,
@@ -426,17 +422,7 @@ async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, dev
 
     const { result, blankNote } = await retryBlankCapture(await capturePromise, !!androidTargetApp, () => androidScreenshot(outputPath, resolved.serial));
     
-    if (!result.success) {
-        return {
-            content: [
-                {
-                    type: "text" as const,
-                    text: `Error: ${result.error}`
-                }
-            ],
-            isError: true
-        };
-    }
+    if (!result.success) return failed(String(result.error), result.failureKind);
     
     // Include image data if available
     if (result.data) {
@@ -468,6 +454,7 @@ async function androidScreenshotHandler({ outputPath, deviceId: deviceIdArg, dev
             ? `Screenshot: raw ${pixelWidth}x${pixelHeight} px → delivered ${androidDeliveredW}x${androidDeliveredH} px (downscaled ${(1 / result.scaleFactor).toFixed(3)}× to fit API limits). Pressable coordinates below are in delivered-image pixels.`
             : `Screenshot captured (${pixelWidth}x${pixelHeight} pixels)`;
         infoText += blankNote;
+        if (result.saveError) infoText += `\n${result.saveError}`;
 
         if (resolved.serial) {
             // Android device scale/points (dp) require the density fetched
@@ -771,12 +758,17 @@ export function registerScreenshotTools(server: McpServer): void {
             const phys = await physicalTargetFor(resolved, device);
             if (phys) return { ...(await capturePhysicalDevice(phys, outputPath)), _targetPlatform: "ios" };
             if (!resolved.ok) {
-                return {
-                    content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
-                    isError: true as const,
-                };
+                // A phone the USB lookup could not see otherwise reads as a typo: say why it was missed.
+                const why = device ? physicalMissReason(device, resolved.error.message.includes("physical iOS device")) : null;
+                const text = formatResolverError(resolved.error) + (why ? `\n${why.message}` : "");
+                return failed(text, why?.kind ?? failureKindForResolverError(resolved.error, device));
             }
             const t = resolved.target;
+            // An RN app off any simulator is a USB phone, unless a simulator is booted: then the app may be on it with its UDID not backfilled yet, so keep the old fallback.
+            if (t.platform === "ios" && !t.iosUdid && !(await getActiveOrBootedSimulatorUdid())) {
+                const why = physicalMissReason(device ?? t.deviceName, true);
+                if (why) return { ...failed(`"${t.deviceName}" is a physical iOS device that cannot be reached over USB. ${why.message}`, why.kind), _targetPlatform: "ios" };
+            }
             const shot = t.platform === "ios"
                 ? await iosScreenshotHandler({ outputPath, udid: t.iosUdid ?? device })
                 : await androidScreenshotHandler({ outputPath, deviceId: t.androidSerial ?? device });

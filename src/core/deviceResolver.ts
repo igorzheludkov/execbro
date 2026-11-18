@@ -239,7 +239,7 @@ async function resolveDeviceTargetInner(
                 else if (inv) {
                     return err(
                         "DEVICE_NOT_FOUND",
-                        `"${m.deviceInfo.deviceName}" is a physical iOS device, not a simulator, and this tool has no physical-device path. screenshot, tap, swipe, input_text, press_key and ios_launch_app / ios_terminate_app reach it (interaction on iOS 27+).`
+                        `"${m.deviceInfo.deviceName}" is a physical iOS device, not a simulator, and this tool has no physical-device path. screenshot, tap, swipe, input_text, press_key and ios_launch_app / ios_terminate_app reach it over USB through pymobiledevice3 (interaction on iOS 27+). If one of those returned this message, the phone is not visible over USB: check the cable and that pymobiledevice3 is installed.`
                     );
                 }
             }

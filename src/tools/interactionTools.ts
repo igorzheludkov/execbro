@@ -62,6 +62,7 @@ import { resolveDeviceTarget, formatResolverError } from "../core/deviceResolver
 import { PINCH_IN_DEFAULT_SPAN } from "../core/pinchThresholds.js";
 import { resolveAndroidDeviceId, resolveIosUdid, ANDROID_ARG_DESC, IOS_ARG_DESC } from "./_deviceArg.js";
 import type { ConnectedApp } from "../core/types.js";
+import type { FailureKind } from "../core/errors.js";
 
 /**
  * Default swipe gesture duration. Android has always used 300ms; iOS passed no
@@ -617,7 +618,7 @@ export function registerInteractionTools(server: McpServer): void {
                     ? await androidForegroundPackage(resolved.target.androidSerial)
                     : null;
 
-            let driverResult: { success: boolean; result?: string; error?: string };
+            let driverResult: { success: boolean; result?: string; error?: string; failureKind?: FailureKind };
             if (resolvedPlatform === "ios") {
                 const dpr = await getDevicePixelRatio(resolvedUdid, dprHint);
                 const start = convertScreenshotToTapCoords(startX, startY, "ios", dpr, swipeScaleFactor);
@@ -638,7 +639,8 @@ export function registerInteractionTools(server: McpServer): void {
             if (!driverResult.success) {
                 return {
                     content: [{ type: "text", text: `Error: ${driverResult.error}` }],
-                    isError: true
+                    isError: true,
+                    ...(driverResult.failureKind && { _failureKind: driverResult.failureKind })
                 };
             }
 
@@ -1212,7 +1214,7 @@ export function registerInteractionTools(server: McpServer): void {
                 if (!focused.success) return fail(`could not focus the target before pressing the key: ${focused.error ?? "tap failed"}`);
             }
 
-            let result: { success: boolean; error?: string };
+            let result: { success: boolean; error?: string; failureKind?: FailureKind };
             let note: string | undefined;
             if (android && "keycode" in android) {
                 result = { success: true };
@@ -1233,7 +1235,7 @@ export function registerInteractionTools(server: McpServer): void {
             } else {
                 return fail(`press_key does not support platform ${platform}.`);
             }
-            if (!result.success) return fail(result.error ?? "the key could not be sent");
+            if (!result.success) return { ...fail(result.error ?? "the key could not be sent"), ...(result.failureKind && { _failureKind: result.failureKind }) };
             const body = { success: true, platform, device: deviceName, key, repeat: times, ...(note && { note }), deviceNote: resolved.note };
             return { content: [{ type: "text" as const, text: JSON.stringify(body, null, 2) }], isError: false };
         }
