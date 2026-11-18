@@ -23,10 +23,18 @@ export function registerExecutionTools(server: McpServer): void {
                 "PRECONDITIONS: set up the state a check needs (full cart, signed-in user) with one store.dispatch or a deep link, then spend real taps on the user's action and its outcome.\n\n" +
                 "LIMITATIONS (Hermes engine):\n" +
                 "- Async: use `Promise.resolve(foo()).then(function(r){ return r; })` (resolved for you when awaitPromise:true). `async`/`await` syntax is engine-dependent; many Hermes builds reject it.\n" +
-                "- Multi-statement input is auto-wrapped into an IIFE returning the last statement's value. If that can't yield a value (`if`/`for`/declaration), write the IIFE yourself with an explicit `return`.\n" +
+                "- Multi-statement input is auto-wrapped into an IIFE returning the last statement's value, so END WITH A BARE EXPRESSION. A script whose last statement is `if`/`else`, `try`, a loop or a declaration has no value and is rejected: end with a ternary or the variable, or write the IIFE yourself with an explicit `return`.\n" +
                 "- Non-ASCII in string literals (emoji, Arabic, CJK) is auto-escaped server-side. Write it as-is.\n\n" +
-                "GOOD examples: `state.shop.cart.length`, `store.dispatch({ type: 'shop/addToCart', payload: state.shop.products[0] })`, `__DEV__`\n" +
-                "BAD examples: `await fetch(...)` (bare top-level await)\n" +
+                "GOOD examples:\n" +
+                "- `state.shop.cart.length`, `__DEV__`, `store.dispatch({ type: 'shop/addToCart', payload: state.shop.products[0] })`\n" +
+                "- `state.user ? state.user.id : null`\n" +
+                "- `var ids = []; for (var p of state.shop.products) ids.push(p.id); ids`\n" +
+                "- `(function(){ try { return JSON.parse(raw); } catch (e) { return e.message; } })()`\n" +
+                "BAD examples:\n" +
+                "- `await fetch(...)`: bare top-level await\n" +
+                "- `var u = state.user; if (u) { u.id } else { null }`: ends in if/else, use the ternary\n" +
+                "- `var ids = []; for (var p of state.shop.products) ids.push(p.id)`: ends in a loop, add `; ids`\n" +
+                "- `var raw = state.draft; try { JSON.parse(raw) } catch (e) { e.message }`: ends in try, use the IIFE with `return`\n" +
                 "Pass timeoutMs (ms) for long-running expressions; capped at 120000. Auto-reconnect surfaces _meta.reconnected when a transport drop was self-healed.\n",
             inputSchema: {
                 expression: z

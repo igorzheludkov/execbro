@@ -12,6 +12,7 @@ process.env.RN_AI_DEVTOOLS_TEST_MODE = "1";
 
 import { describe, it, expect } from "@jest/globals";
 import { toolRegistry } from "../../index.js";
+import { validateAndPreprocessExpression } from "../../core/jsExecute.js";
 
 // Tools exempt from the "must contain PURPOSE or WHEN TO USE" and minimum-length
 // checks. These are meta/account/admin tools where a short description reads
@@ -28,6 +29,9 @@ const SEMANTIC_ALLOWLIST = new Set([
     "execute_in_app",
     "dev",
 ]);
+
+// The most-called tool, whose do/don't examples are worth the extra tokens: its multi-statement rejections were the largest unlabeled failure family.
+const DESCRIPTION_CAP_OVERRIDES: Record<string, number> = { execute_in_app: 2000 };
 
 // Non-tool identifiers that appear in descriptions (prop names, JS globals,
 // schema keys, natural-language nouns that happen to match the tool-name
@@ -81,11 +85,32 @@ describe("Tool descriptions (registration enforcement)", () => {
         expect(tools.length).toBeGreaterThan(30);
     });
 
+    // 94 multi-statement rejections in 2026-11-04..18 ended in if/else (64), try (12) or a loop (10): show each shape next to its fix.
+    it("execute_in_app shows the multi-statement endings Hermes rejects, each with a fix", () => {
+        const { description } = tools.find((t) => t.name === "execute_in_app") as { description: string };
+        const bad = description.split("BAD examples:")[1] ?? "";
+        expect(bad).toContain("if (");
+        expect(bad).toContain("for (");
+        expect(bad).toContain("try {");
+        expect(description).toContain("END WITH A BARE EXPRESSION");
+    });
+
+    // Keeps the examples honest: a GOOD one the validator refuses would teach agents the wrong shape.
+    it("execute_in_app GOOD examples pass the validator and its multi-statement BAD examples are refused", () => {
+        const { description } = tools.find((t) => t.name === "execute_in_app") as { description: string };
+        const [good, bad] = description.split("GOOD examples:")[1].split("BAD examples:");
+        const codes = (s: string) => s.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.match(/`([^`]+)`/)![1]);
+        for (const code of codes(good)) expect(validateAndPreprocessExpression(code).valid).toBe(true);
+        for (const code of codes(bad).filter((c) => c.includes(";") || c.includes("}"))) {
+            expect(validateAndPreprocessExpression(code).valid).toBe(false);
+        }
+    });
+
     describe("each tool has a rich description", () => {
         it.each(tools.map((t) => [t.name, t]))("%s", (_name, tool) => {
             const { name, description } = tool as { name: string; description: string };
             expect(description.length).toBeGreaterThan(0);
-            expect(description.length).toBeLessThanOrEqual(1500);
+            expect(description.length).toBeLessThanOrEqual(DESCRIPTION_CAP_OVERRIDES[name] ?? 1500);
 
             if (!SEMANTIC_ALLOWLIST.has(name)) {
                 // Minimum length protects against regressions to one-liners.
