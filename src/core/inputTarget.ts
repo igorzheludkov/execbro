@@ -46,6 +46,7 @@ export type InputCandidate = {
     testID: string | null;
 };
 
+import type { FailureKind } from "./errors.js";
 import { RN_PRIMITIVES_SRC, GENERIC_COMPONENT_SRC } from "./injectedFilters.js";
 import { FIBER_ROOTS_JS } from "./injected/fiberRoots.js";
 import { SECURE_VALUE_JS } from "./injected/secureValue.js";
@@ -140,6 +141,10 @@ export type InputMissing = {
      * the cut.
      */
     totalInputs?: number;
+    /** The caller named a target and no mounted input answered to it: their mistake, not the tool's. */
+    badTarget?: boolean;
+    /** Structured cause when the miss is a setup state (no fiber roots, or a failed evaluation). */
+    failureKind?: FailureKind;
 };
 
 export type InputResult = InputFound | InputMissing;
@@ -161,7 +166,7 @@ function prelude(query: InputQuery | undefined): string {
   ${FIBER_ROOTS_JS}
   ${SECURE_VALUE_JS}
   var allRoots = __eb_fiberRoots(true);
-  if (allRoots.length === 0) return hook ? { found: false, reason: "no fiber roots" } : { found: false, reason: "no devtools hook" };
+  if (allRoots.length === 0) return hook ? { found: false, reason: "no fiber roots", failureKind: "no_fiber_roots" } : { found: false, reason: "no devtools hook", failureKind: "devtools_hook_missing" };
 
   var HOSTS = ${HOST_INPUT_TYPES};
   var wantTestID = ${wantTestID};
@@ -369,7 +374,7 @@ function prelude(query: InputQuery | undefined): string {
       if (f.sibling) walk(f.sibling, depth);
     })(allRoots[k].current, 0);
   }
-  if (__eb_inputs.length === 0) return { found: false, reason: "no TextInput found on screen" };
+  if (__eb_inputs.length === 0) return { found: false, reason: "no TextInput found on screen", totalInputs: 0 };
 
   // EVERY match is collected. Taking the first silently is how a form gets the
   // right text written into the wrong field and still verifies clean — the
@@ -508,6 +513,7 @@ function prelude(query: InputQuery | undefined): string {
     return {
       found: false,
       reason: reason,
+      badTarget: targeted,
       candidates: candidates,
       totalInputs: __eb_inputs.length
     };

@@ -41,7 +41,8 @@ import {
 } from "../pro/verifyAction.js";
 import { clearFocusedInput, dismissKeyboard } from "../core/focusedInputTools.js";
 import { enterText, textEntryAxes, type TextEntryResult } from "../core/textEntry.js";
-import { chromiumAppFor } from "../core/connection.js";
+import { chromiumAppFor, failureKindForResolution, resolveConnectedAppByDevice } from "../core/connection.js";
+import type { FailureKind } from "../core/errors.js";
 import { chromiumInputText, parseKeyCombo } from "../core/chromium.js";
 import { chromiumSwipe } from "../pro/chromiumSwipe.js";
 import { chromiumPressKey } from "../pro/chromiumKeys.js";
@@ -1102,7 +1103,8 @@ export function registerInteractionTools(server: McpServer): void {
         },
         async ({ device }) => {
             const result = await dismissKeyboard(device);
-            if (!result.success && (result.error ?? "").includes("no focused TextInput")) {
+            // A screen with no inputs at all has nothing focused either, so the keyboard check below applies to it too.
+            if (!result.success && /no focused TextInput|no TextInput found on screen/.test(result.error ?? "")) {
                 // Nothing has React focus. Whether that is a failure depends
                 // entirely on the keyboard, which this never looked at: the
                 // caller asked for the keyboard to be down, and with no focused
@@ -1385,9 +1387,11 @@ export function registerInteractionTools(server: McpServer): void {
             }
 
             if (!resolved.ok) {
+                const kind = failureKindForResolution(resolveConnectedAppByDevice(device));
                 return {
                     content: [{ type: "text" as const, text: `Error: ${formatResolverError(resolved.error)}` }],
-                    isError: true
+                    isError: true,
+                    ...(kind && { _failureKind: kind })
                 };
             }
             const { platform, iosUdid, androidSerial } = resolved.target;
@@ -1397,7 +1401,8 @@ export function registerInteractionTools(server: McpServer): void {
                 const r = await nativeTextEntry(text, replace === true, platform, iosUdid, androidSerial, device);
                 return {
                     content: [{ type: "text", text: r.success ? r.message : `Error: ${r.message}` }],
-                    isError: !r.success
+                    isError: !r.success,
+                    ...(!r.success && r.message.startsWith(NO_SIMULATOR_PREFIX) && { _failureKind: "no_ios_simulator" as const })
                 };
             }
 
@@ -1432,7 +1437,8 @@ export function registerInteractionTools(server: McpServer): void {
                             ? `${r.message}\n  (no React Native screen found — fell back to native typing)`
                             : `Error: ${r.message}`
                     }],
-                    isError: !r.success
+                    isError: !r.success,
+                    ...(!r.success && r.message.startsWith(NO_SIMULATOR_PREFIX) && { _failureKind: "no_ios_simulator" as const })
                 };
             }
 
@@ -1573,9 +1579,13 @@ export async function dismissAfterEntry<T extends { content: Array<{ type: "text
     return { ...resp, content: [{ ...resp.content[0], text: `${resp.content[0].text}\n${line}` }, ...resp.content.slice(1)] };
 }
 
+// buildNoSimulatorError (core/ios.ts) is the one source of this message, and the iOS typing path hands it back as prose with no kind.
+const NO_SIMULATOR_PREFIX = "No iOS simulator is currently running";
+
 export function formatTextEntryResponse(r: TextEntryResult): {
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
+    _failureKind?: FailureKind;
 } {
     const lines: string[] = [];
 
@@ -1638,8 +1648,9 @@ export function formatTextEntryResponse(r: TextEntryResult): {
         );
     }
 
+    const failureKind = r.failureKind ?? (r.error?.startsWith(NO_SIMULATOR_PREFIX) ? "no_ios_simulator" as const : undefined);
     return {
         content: [{ type: "text" as const, text: lines.join("\n") }],
-        ...(r.success ? {} : { isError: true })
+        ...(r.success ? {} : { isError: true, ...(failureKind && { _failureKind: failureKind }) })
     };
 }

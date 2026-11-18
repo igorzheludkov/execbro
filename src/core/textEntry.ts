@@ -1,3 +1,4 @@
+import type { FailureKind } from "./errors.js";
 import type { InputCandidate, InputOp, InputQuery, InputResult } from "./inputTarget.js";
 import type { RaiseResult } from "./keyboardRaise.js";
 import { resolveWrittenField, type NativeField, type NativeFieldsResult } from "./nativeInputValue.js";
@@ -59,6 +60,8 @@ export type TextEntryResult = {
      * and must not be counted as one — see core/screenStaleness.ts.
      */
     staleness?: StalenessVerdict;
+    /** Structured cause, forwarded to telemetry by the tool layer. */
+    failureKind?: FailureKind;
 };
 
 /**
@@ -110,6 +113,7 @@ export function textEntryAxes(r: TextEntryResult): TextEntryAxes {
  * enough that a genuine miss still answers fast.
  */
 const RESOLVE_SETTLE_MS = 500;
+const EMPTY_SCREEN_SETTLE_MS = 800;
 
 export type TextEntryDeps = {
     runOp: (op: InputOp, query?: InputQuery, device?: string) => Promise<InputResult>;
@@ -290,11 +294,18 @@ function missResult(miss: Extract<InputResult, { found: false }>, device?: strin
             })
             : undefined;
 
+    const screenMoved = staleness !== undefined && staleness.kind !== "genuine_miss";
+    // A wrong, ambiguous or out-of-range target is the caller's to fix, unless the screen moved under it.
+    const failureKind = miss.failureKind ??
+        ((miss.badTarget || miss.ambiguous || miss.matchedOnly) && !screenMoved ? "bad_arguments" as const : undefined);
+    // Zero React Native inputs can also mean the field is native, which only native: true can type into.
+    const nativeHint = miss.totalInputs === 0 ? ". If the field is native (not a React Native TextInput), retry with native: true" : "";
     return {
         success: false,
-        error: staleness && staleness.kind !== "genuine_miss"
-            ? `${miss.reason}\n  ${staleness.note}`
-            : miss.reason,
+        error: screenMoved
+            ? `${miss.reason}${nativeHint}\n  ${staleness.note}`
+            : `${miss.reason}${nativeHint}`,
+        ...(failureKind && { failureKind }),
         ...(miss.ambiguous && { ambiguous: true }),
         ...(miss.matchedOnly && { matchedOnly: true }),
         ...(miss.candidates && { candidates: miss.candidates }),
@@ -334,9 +345,11 @@ export async function enterText(args: EnterTextArgs, deps: TextEntryDeps): Promi
     // predicate resolved when the agent retried by hand. One re-resolve buys
     // that whole class back. Only for a targeted query — an untargeted call
     // reports what has focus right now, and waiting cannot change that.
-    if (!target.found && q && !target.ambiguous && !target.matchedOnly) {
+    // A screen with no inputs at all is the same transition seen earlier (or a launch still mounting), so it is retried even untargeted, and waits longer: a whole screen is mounting, not one field.
+    const emptyScreen = !target.found && target.totalInputs === 0;
+    if (!target.found && (q || emptyScreen) && !target.ambiguous && !target.matchedOnly) {
         const wait = deps.delay ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-        await wait(RESOLVE_SETTLE_MS);
+        await wait(emptyScreen ? EMPTY_SCREEN_SETTLE_MS : RESOLVE_SETTLE_MS);
         target = await deps.runOp({ kind: "find" }, q, args.device);
     }
     if (!target.found) return missResult(target, args.device);

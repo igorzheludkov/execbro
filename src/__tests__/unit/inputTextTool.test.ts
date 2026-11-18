@@ -127,6 +127,23 @@ describe("formatTextEntryResponse", () => {
     });
 });
 
+describe("formatTextEntryResponse failure kinds", () => {
+    it("forwards the result's failure kind to telemetry", () => {
+        const r = formatTextEntryResponse({ success: false, error: "no TextInput matched that target", failureKind: "bad_arguments" });
+        expect(r._failureKind).toBe("bad_arguments");
+    });
+
+    it("tags a missing iOS simulator", () => {
+        const r = formatTextEntryResponse({ success: false, path: "hid", error: "No iOS simulator is currently running. Boot one with `ios_boot_simulator`" });
+        expect(r._failureKind).toBe("no_ios_simulator");
+    });
+
+    it("never tags a success", () => {
+        const r = formatTextEntryResponse({ success: true, path: "react", verified: true, value: "x", failureKind: "bad_arguments" });
+        expect(r._failureKind).toBeUndefined();
+    });
+});
+
 // Benchmark traces: 27 of 31 dismiss_keyboard calls came straight after input_text, before
 // a tap on a button under the keyboard. input_text({ dismissKeyboard: true }) folds that
 // round trip into the write.
