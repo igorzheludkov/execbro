@@ -52,11 +52,12 @@ export function selectBackfillLines(
     lines: RawLogLine[],
     opts: { until: Date; notBefore?: Date; platform: "ios" | "android" }
 ): RawLogLine[] {
-    let out = lines.filter((l) => l.ts < opts.until);
-    if (out.length === 0) return out;
-
-    const pid = out.reduce((a, b) => (b.ts >= a.ts ? b : a)).pid;
-    out = out.filter((l) => l.pid === pid);
+    if (lines.length === 0) return [];
+    // The current process is the pid of the newest line READ, not the newest
+    // before the cut: an attach can land before the new process logs anything,
+    // and the previous process's run must not stand in for it.
+    const pid = lines.reduce((a, b) => (b.ts >= a.ts ? b : a)).pid;
+    let out = lines.filter((l) => l.pid === pid && l.ts < opts.until);
 
     let runStart = -1;
     out.forEach((l, i) => { if (l.message.startsWith(RUN_START)) runStart = i; });
@@ -123,7 +124,10 @@ async function runBackfill(deviceName: string, attachAt: Date): Promise<void> {
     // before the first live line came over it; with no live line yet, nothing
     // logged before this read did either. The seam dedupe covers a line in flight.
     // ponytail: cut uses host time against the device clock; exact on a simulator, skews on a physical Android whose clock drifts
-    if (getLogBuffer(deviceName) !== buffer || buffer.clearCount !== clearsAtStart) return;
+    // A clear or a restart during the read: the lines no longer have a place.
+    // After a restart they would land behind the new run's live lines, or (a
+    // bump before the read) be the new run's own lines, already live, again.
+    if (getLogBuffer(deviceName) !== buffer || buffer.clearCount !== clearsAtStart || getEpoch(deviceName) !== epoch) return;
     const live = buffer.getAll().filter((e) => !e.origin && e.epoch === epoch && e.timestamp >= attachAt);
     const until = live.length > 0
         ? new Date(Math.min(...live.map((e) => e.timestamp.getTime())))

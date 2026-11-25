@@ -61,6 +61,16 @@ describe("selectBackfillLines", () => {
         expect(messages(out)).toEqual(["live"]);
     });
 
+    it("takes the process from every line read, not only those before the cut", () => {
+        // Attach before the new process logged anything: its lines are all after the cut,
+        // and the previous process's last run must not be taken for it (final review, focus 3).
+        const out = selectBackfillLines(
+            [line(1, 'Running "App"', 90), line(2, "old run", 90), line(6, 'Running "App"', 100)],
+            { until: at(5), platform: "ios" }
+        );
+        expect(out).toEqual([]);
+    });
+
     it("notBefore drops what a previous connection already saw", () => {
         const out = selectBackfillLines([line(1, "seen"), line(3, "gap")], { until: at(4), notBefore: at(2), platform: "ios" });
         expect(messages(out)).toEqual(["gap"]);
@@ -173,16 +183,19 @@ describe("startColdStartBackfill", () => {
         expect(getLogBuffer("iPhone 17").getAll().map((e) => e.message)).toEqual(["logged before the read"]);
     });
 
-    it("stamps the epoch of the run it read, even when a restart lands meanwhile", async () => {
+    it("inserts nothing when a restart lands meanwhile", async () => {
         // Seen on device: a backfill still reading when reload_app bumped the epoch
-        // filed the previous run's lines under the new one.
+        // filed the previous run's lines under the new one. Final review: inserting
+        // under the old epoch instead put them after the new run's live lines, and a
+        // bump before the read filed the new run's lines (already live) twice.
         fetchIosLinesMock.mockImplementation(async () => {
             bumpEpoch("iPhone 17");
+            getLogBuffer("iPhone 17").add({ timestamp: at(20), level: "log", message: "new run live" });
             return [line(3, "mounted")];
         });
         startColdStartBackfill("iPhone 17", at(10));
         await awaitColdStartBackfill("iPhone 17");
-        expect(getLogBuffer("iPhone 17").getAll().map((e) => e.epoch)).toEqual([1]);
+        expect(getLogBuffer("iPhone 17").getAll().map((e) => [e.message, e.epoch])).toEqual([["new run live", 2]]);
     });
 
     it("inserts nothing when the buffer was cleared meanwhile", async () => {
