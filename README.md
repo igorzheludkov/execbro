@@ -31,7 +31,7 @@ Linking is only for the dashboard: it attaches your installs to your account so 
 
 ### Runtime Interaction
 
-- **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. Note: on a cold start (first app launch), logs emitted before the MCP server connects are missed — subsequent reloads capture everything. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) to buffer logs from the very first line of app startup
+- **Console Log Capture** - Capture `console.log`, `warn`, `error`, `info`, `debug` with filtering and search. On a cold start, lines the app logged before the MCP server connected are recovered from the system log (iOS Simulator, Android) and marked `(syslog)`; objects in them arrive as text
 - **Network Request Tracking** - Monitor HTTP requests/responses with headers, timing, and body content. Like logs, early network requests on cold start may be missed before the connection is established. Install the optional [SDK](https://www.npmjs.com/package/execbro-sdk) for full capture from app startup including request/response bodies
 - **Response Mocking** - Replace or tamper with HTTP responses so error paths are reached through the app's real code — the request builder, the error branch, the retry — instead of being faked by writing state directly. Simulate offline, delay responses, fail only the first attempt to test a retry, or re-issue a captured request with one field changed. Rules survive reload, and altered traffic is always tagged. See the [mocking tutorial](docs/network-mocking.md)
 - **JavaScript Execution** - Run code directly in your app (REPL-style) and inspect results
@@ -115,7 +115,7 @@ ExecBro works with zero app changes, but installing the companion [`execbro-sdk`
 | State stores (Redux, TanStack Query, …)  | Manual via `execute_in_app` | **Wired up — direct references** |
 | Request/response bodies                  | Not available           | Full (including GraphQL)       |
 | Startup network requests (auth, config)  | Missed                  | Captured from first fetch      |
-| Console logs from startup                | May miss early logs     | Captured from first log        |
+| Console logs from startup                | Recovered from the system log (iOS Simulator, Android) | Captured from first log, objects intact |
 | Works on Bridgeless (Expo SDK 52+)       | Partial                 | Full                           |
 
 It's one `npm install` plus a single `init()` call in your app's entry file. See the [SDK guide](docs/sdk.md) for install, initialization, and every config option.
@@ -231,7 +231,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 - Ensure the app is actively running (not just Metro)
 - Try `clear_logs` then trigger some actions in the app
 - Check `get_apps` to verify connection status
-- **On cold start (first launch):** The CDP connection is established after the app's early initialization code has already run, so startup logs and network requests are missed. Once connected, use `reload_app` — the subsequent reload captures everything from the beginning because the connection is already in place. To capture startup events on every launch, install the optional [SDK](https://www.npmjs.com/package/execbro-sdk)
+- **On cold start (first launch):** The CDP connection is established after the app's early initialization code has already run. Console lines from before that are recovered from the system log on the iOS Simulator and Android, marked `(syslog)`; startup network requests are still missed. Once connected, `reload_app` captures everything from the beginning because the connection is already in place. To capture startup requests on every launch, install the optional [SDK](https://www.npmjs.com/package/execbro-sdk)
 
 ## Telemetry & Privacy
 
