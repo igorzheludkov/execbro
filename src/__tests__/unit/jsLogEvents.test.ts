@@ -65,3 +65,19 @@ describe("findJsEvent", () => {
         expect(findJsEvent("jabc")).toBeUndefined();
     });
 });
+
+// get_logs renders JS rows through formatEventRow, not formatLogs: the marker
+// has to survive the entry -> event conversion to be seen at all.
+describe("system-log origin", () => {
+    it("a backfilled entry renders (syslog) in its get_logs row", async () => {
+        const { formatEventRow } = await import("../../core/logEventFormat.js");
+        const [event] = jsEventsFromEntries([entry({ origin: "systemLog", level: "info", message: "Screen mounted" })], "iPhone Air");
+        expect(formatEventRow(event, { showDevice: false })).toMatch(/INFO {2}\(syslog\) {2}Screen mounted$/);
+    });
+
+    it("a live entry renders no marker", async () => {
+        const { formatEventRow } = await import("../../core/logEventFormat.js");
+        const [event] = jsEventsFromEntries([entry({})], "iPhone Air");
+        expect(formatEventRow(event, { showDevice: false })).not.toContain("syslog");
+    });
+});

@@ -52,6 +52,7 @@ export function formatEventRow(event: LogEvent, opts: RowOptions): string {
     const cols = [`[${event.id}]`, time, event.level.toUpperCase()];
     if (opts.showDevice) cols.push(event.deviceName);
     if (event.owner) cols.push(event.owner);
+    if (event.origin === "systemLog") cols.push("(syslog)");
     // Compactness matters for crashes/ANRs/exceptions — they keep the
     // one-line title, and get_log_details exists to expand them. Fidelity
     // matters for plain messages, which have no separate summary.

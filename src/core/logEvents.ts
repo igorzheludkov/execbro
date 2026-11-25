@@ -63,6 +63,8 @@ export interface LogEvent {
      * a formatter (symbolication is a network call to Metro).
      */
     stackTrace?: CDPStackFrame[];
+    /** JS events only: recovered from the system log before CDP attached. */
+    origin?: "systemLog";
 }
 
 /** An event before the buffer assigns it an id. */

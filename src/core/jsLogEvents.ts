@@ -52,6 +52,7 @@ export function jsEventsFromEntries(entries: LogEntry[], deviceName: string): Lo
             fingerprint: createHash("sha1").update(`js|${entry.seq}`).digest("hex"),
             lines: [line],
             stackTrace: entry.stackTrace,
+            ...(entry.origin && { origin: entry.origin }),
         };
     });
 }
