@@ -24,7 +24,7 @@ jest.unstable_mockModule("../../core/logSourceAndroid.js", () => ({
 
 const { selectBackfillLines, startColdStartBackfill, awaitColdStartBackfill } = await import("../../core/coldStartBackfill.js");
 const { markCdpConsoleOpen, markCdpConsoleClosed, previousCdpConsoleEnd, __resetMirrorState } = await import("../../core/sdkMirrorPoller.js");
-const { getLogBuffer, logBuffers, resetEpochs, connectedApps } = await import("../../core/state.js");
+const { getLogBuffer, logBuffers, resetEpochs, connectedApps, bumpEpoch } = await import("../../core/state.js");
 import type { ConnectedApp } from "../../core/types.js";
 
 // What the connect-time SDK probe loop leaves on the registry entry.
@@ -159,6 +159,29 @@ describe("startColdStartBackfill", () => {
         startColdStartBackfill("iPhone 17", new Date(now - 10_000));
         await awaitColdStartBackfill("iPhone 17");
         expect(getLogBuffer("iPhone 17").getAll().map((e) => e.message)).toEqual(["logged before the read"]);
+    });
+
+    it("stamps the epoch of the run it read, even when a restart lands meanwhile", async () => {
+        // Seen on device: a backfill still reading when reload_app bumped the epoch
+        // filed the previous run's lines under the new one.
+        fetchIosLinesMock.mockImplementation(async () => {
+            bumpEpoch("iPhone 17");
+            return [line(3, "mounted")];
+        });
+        startColdStartBackfill("iPhone 17", at(10));
+        await awaitColdStartBackfill("iPhone 17");
+        expect(getLogBuffer("iPhone 17").getAll().map((e) => e.epoch)).toEqual([1]);
+    });
+
+    it("inserts nothing when the buffer was cleared meanwhile", async () => {
+        // clear_logs during the read: the cleared lines must not come back.
+        fetchIosLinesMock.mockImplementation(async () => {
+            getLogBuffer("iPhone 17").clear();
+            return [line(3, "mounted")];
+        });
+        startColdStartBackfill("iPhone 17", at(10));
+        await awaitColdStartBackfill("iPhone 17");
+        expect(getLogBuffer("iPhone 17").getAll()).toEqual([]);
     });
 
     it("skips when the connect-time probe found the SDK", async () => {

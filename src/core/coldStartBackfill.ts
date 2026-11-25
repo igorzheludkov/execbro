@@ -83,6 +83,13 @@ export function selectBackfillLines(
 }
 
 async function runBackfill(deviceName: string, attachAt: Date): Promise<void> {
+    // Taken now, not at insert: a reload_app or clear_logs landing during the
+    // read would otherwise file the previous run under the new epoch, or bring
+    // cleared lines back (both seen on device).
+    const epoch = getEpoch(deviceName);
+    const buffer = getLogBuffer(deviceName);
+    const clearsAtStart = buffer.clearCount;
+
     // The SDK buffers from import time and its mirror already holds these lines.
     if (await sdkPresence(deviceName)) return;
 
@@ -114,8 +121,7 @@ async function runBackfill(deviceName: string, attachAt: Date): Promise<void> {
     // before the first live line came over it; with no live line yet, nothing
     // logged before this read did either. The seam dedupe covers a line in flight.
     // ponytail: cut uses host time against the device clock; exact on a simulator, skews on a physical Android whose clock drifts
-    const buffer = getLogBuffer(deviceName);
-    const epoch = getEpoch(deviceName);
+    if (getLogBuffer(deviceName) !== buffer || buffer.clearCount !== clearsAtStart) return;
     const live = buffer.getAll().filter((e) => !e.origin && e.epoch === epoch && e.timestamp >= attachAt);
     const until = live.length > 0
         ? new Date(Math.min(...live.map((e) => e.timestamp.getTime())))

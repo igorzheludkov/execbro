@@ -18,6 +18,7 @@ export class LogBuffer {
     private maxSize: number;
     private deviceName?: string;
     private dropped = 0;
+    private clears = 0;
 
     /**
      * @param deviceName When set, add() stamps this device's current epoch.
@@ -117,6 +118,7 @@ export class LogBuffer {
         const count = this.logs.length;
         this.logs = [];
         this.dropped = 0;
+        this.clears++;
         return count;
     }
 
@@ -128,6 +130,11 @@ export class LogBuffer {
 
     get size(): number {
         return this.logs.length;
+    }
+
+    /** How many times clear() ran; a background writer compares it to know it raced one. */
+    get clearCount(): number {
+        return this.clears;
     }
 
     /** Entries evicted by the capacity cap since the last clear(). */
