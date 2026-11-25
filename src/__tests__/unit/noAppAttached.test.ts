@@ -24,7 +24,7 @@ describe("noAppAttachedMessage", () => {
         stubMetro("packager-status:running");
         const msg = await noAppAttachedMessage(8081);
         expect(msg).toContain("Metro is running, but no app has attached yet");
-        expect(msg).toContain("ensure_connection({ waitMs: 60000 })");
+        expect(msg).toContain("ensure_connection({ waitMs: 20000 })");
     });
     it("does not call a port Metro when it does not answer as Metro", async () => {
         stubMetro(null);

@@ -221,7 +221,7 @@ export function registerDeviceTools(server: McpServer): void {
 
     // The launch returns before a dev build has a JS runtime; reading the screen or Metro
     // right away is how a still-loading bundle got reported as "Metro isn't running".
-    const LAUNCH_ATTACH_HINT = "\nA React Native dev build attaches to Metro only after its bundle loads, which can take a minute on a cold start. ensure_connection({ waitMs: 60000 }) returns once it has.";
+    const LAUNCH_ATTACH_HINT = "\nA React Native dev build attaches to Metro only after its bundle loads. ensure_connection({ waitMs: 20000 }) returns once it has, or earlier with the reason when the device shows one (screen off or locked, a bundle that failed to load). A first bundle Metro has not built yet can take longer: call it again.";
 
     // Tool: Android launch app
     registerToolWithTelemetry(
@@ -255,7 +255,7 @@ export function registerDeviceTools(server: McpServer): void {
             const result = await androidLaunchApp(packageName, activityName, serial);
             if (result.success && serial) {
                 rememberLaunchedDevice("android", serial, packageName);
-                expectLaunchedApp({ platform: "android", id: serial, label: serial });
+                expectLaunchedApp({ platform: "android", id: serial, appId: packageName, label: serial });
             }
     
             return {
@@ -333,7 +333,7 @@ export function registerDeviceTools(server: McpServer): void {
             const result = await iosLaunchApp(bundleId, launchUdid);
             if (result.success && launchUdid) {
                 rememberLaunchedDevice("ios", launchUdid, bundleId);
-                expectLaunchedApp({ platform: "ios", id: launchUdid, label: launchUdid });
+                expectLaunchedApp({ platform: "ios", id: launchUdid, appId: bundleId, label: launchUdid });
             }
     
             return {

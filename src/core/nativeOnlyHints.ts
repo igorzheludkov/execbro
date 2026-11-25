@@ -142,7 +142,7 @@ export function buildMetroMissingHint({ toolName, devices, reconnecting, autoCon
         lines.push("Scanned Metro ports 8081 to 8090: nothing is listening. If Metro runs on another port, call connect_metro({ port }). Otherwise start Metro and the app, then call scan_metro.");
     } else if (autoConnect) {
         const { ports, failures } = autoConnect;
-        lines.push(`Found Metro on port ${ports.join(", ")}, but no app attached: ${failures.join("; ")}. Right after a launch the bundle may still be loading: ensure_connection({ waitMs: 60000 }) waits for the app. Otherwise call scan_metro.`);
+        lines.push(`Found Metro on port ${ports.join(", ")}, but no app attached: ${failures.join("; ")}. Right after a launch the bundle may still be loading: ensure_connection({ waitMs: 20000 }) waits for the app. Otherwise call scan_metro.`);
     } else if (devices?.any) {
         // "Attached", not "detected": adb/simctl seeing a device says nothing
         // about whether an app on it is debuggable, and the old wording read as

@@ -37,10 +37,12 @@ const guides: Guide[] = [
 - ios_launch_app / android_launch_app — launch the app (ios_launch_app also on a USB iPhone, iOS 17+)
 - ios_terminate_app — kill an app that is in a bad state before relaunching (simulator or USB iPhone)
 - android_list_packages — find the package name when you only know the app by sight
-- Then ensure_connection({ waitMs: 60000 }) — returns as soon as the launched device's app attaches,
+- Then ensure_connection({ waitMs: 20000 }) — returns as soon as the launched device's app attaches,
   even when another app (an Electron window, a second simulator) is already connected. A cold
   first bundle can take a minute or more, and until it loads Metro lists no app: scan_metro then says
-  "Metro is running, but no app has attached yet", which means wait, not that Metro is down
+  "Metro is running, but no app has attached yet", which means wait, not that Metro is down. When the
+  launched device shows why the app cannot attach (an Android screen off or locked, another app in front,
+  a bundle that failed to load), ensure_connection returns that at once instead of waiting it out
 
 ## Stale Bundle After a Metro Restart
 scan_metro detects that the process serving a port CHANGED (pid via lsof) and says so. It means
@@ -62,7 +64,7 @@ exactly like "my fix didn't work".
 - scan_metro: auto-discover and connect React Native (Metro) and Chromium/Electron (CDP) targets (preferred)
 - connect_metro: connect to a specific port (when you know it); device=<name> to attach one Chromium target
 - disconnect_metro: close all connections (free CDP slot for native debugger)
-- ensure_connection: health check with healthCheck=true; waitMs=60000 waits for a just-launched app to attach
+- ensure_connection: health check with healthCheck=true; waitMs=20000 waits for a just-launched app to attach
 - get_connection_status: check uptime and gaps
 - get_license_status: installation id and license tier (activate_license / delete_account manage it)`
     },

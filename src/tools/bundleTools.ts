@@ -255,7 +255,7 @@ export function registerBundleTools(server: McpServer): void {
     
             const { formatted } = await getBundleStatusWithErrors(bundleErrorBuffer, metroPort);
             const coldHint = apps.length === 0 && metroPort
-                ? `\n\nNo app is attached to Metro yet. If one was just launched, ensure_connection({ waitMs: 60000 }) returns once its bundle has loaded and it attaches.`
+                ? `\n\nNo app is attached to Metro yet. If one was just launched, ensure_connection({ waitMs: 20000 }) returns once its bundle has loaded and it attaches.`
                 : "";
     
             return {

@@ -214,7 +214,7 @@ describe("the no-Metro hint", () => {
             }
         });
         expect(hint).toContain("Found Metro on port 8090, but no app attached:");
-        expect(hint).toContain("ensure_connection({ waitMs: 60000 })");
+        expect(hint).toContain("ensure_connection({ waitMs: 20000 })");
     });
 });
 

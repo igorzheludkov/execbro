@@ -18,6 +18,7 @@ import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
 import { startSdkMirrorPoller, stopSdkMirrorPoller, markCdpConsoleOpen, markCdpConsoleSeen, markCdpConsoleClosed } from "./sdkMirrorPoller.js";
 import { startColdStartBackfill } from "./coldStartBackfill.js";
+import { blockerWatch } from "./launchBlockers.js";
 import { rememberHostAddresses, hostAddressChangeHint } from "./hostAddress.js";
 import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate, formatDialog, DIALOG_BLOCKED_TOOLS } from "./chromiumDialogs.js";
 import {
@@ -2369,7 +2370,7 @@ export async function noAppAttachedMessage(port: number, waitedMs = 0): Promise<
     }
     return `Port ${port}: Metro is running, but no app has attached yet. Metro is NOT down. ` +
         `Right after a launch this is normal: the app is still downloading and running its bundle, and a cold first bundle can take a minute or more. ` +
-        `Next: ensure_connection({ waitMs: 60000 }) returns as soon as the app attaches.`;
+        `Next: ensure_connection({ waitMs: 20000 }) returns as soon as the app attaches.`;
 }
 
 async function findFirstMetroPort(): Promise<number | null> {
@@ -2385,15 +2386,27 @@ async function findFirstMetroPort(): Promise<number | null> {
  * A simulator or emulator is matched by its UDID / serial, a USB iPhone (no
  * simulator UDID) by the name Metro reports for it.
  */
-type ExpectedLaunch = { platform: "ios" | "android"; id?: string; phoneName?: string; label: string; until: number };
+type ExpectedLaunch = { platform: "ios" | "android"; id?: string; phoneName?: string; appId?: string; label: string; launchedAt: number; until: number };
 let expectedLaunch: ExpectedLaunch | null = null;
 const EXPECTED_LAUNCH_TTL_MS = 10 * 60 * 1000;
 
-export function expectLaunchedApp(target: { platform: "ios" | "android"; id?: string; phoneName?: string; label: string }): void {
-    expectedLaunch = { ...target, until: Date.now() + EXPECTED_LAUNCH_TTL_MS };
+export function expectLaunchedApp(target: { platform: "ios" | "android"; id?: string; phoneName?: string; appId?: string; label: string }): void {
+    expectedLaunch = { ...target, launchedAt: Date.now(), until: Date.now() + EXPECTED_LAUNCH_TTL_MS };
 }
 
-export function matchesExpectedLaunch(app: ConnectedApp, e: Omit<ExpectedLaunch, "until" | "label">): boolean {
+/** What the wait returns when the launched device says why the app cannot attach. */
+function launchBlockedResult(message: string, wasReconnected: boolean): EnsureConnectionResult {
+    return {
+        connected: false,
+        wasReconnected,
+        healthCheckPassed: false,
+        connectionInfos: [],
+        error: message,
+        failureKind: "no_debuggable_devices",
+    };
+}
+
+export function matchesExpectedLaunch(app: ConnectedApp, e: Pick<ExpectedLaunch, "platform" | "id" | "phoneName">): boolean {
     if (app.platform !== e.platform) return false;
     if (e.id) return app.simulatorUdid === e.id || app.adbSerial === e.id;
     return !!e.phoneName && !app.simulatorUdid && app.deviceInfo.deviceName === e.phoneName;
@@ -2446,10 +2459,15 @@ export async function ensureConnection(options: {
             };
         }
 
-        // A cold launch lists nothing until its bundle has loaded; waitMs polls for it.
+        // A cold launch lists nothing until its bundle has loaded; waitMs polls for it,
+        // and the launched device is asked why when nothing shows up.
         const deadline = Date.now() + waitMs;
+        const launched = waitMs > 0 && expectedLaunch && expectedLaunch.until > Date.now() ? expectedLaunch : null;
+        const blocker = launched ? blockerWatch(launched) : null;
         let mainDevice = selectMainDevice(await fetchDevices(targetPort));
         while (!mainDevice && Date.now() < deadline) {
+            const why = blocker ? await blocker() : null;
+            if (why) return launchBlockedResult(why, false);
             await new Promise(resolve => setTimeout(resolve, 1000));
             mainDevice = selectMainDevice(await fetchDevices(targetPort));
         }
@@ -2534,10 +2552,14 @@ export async function ensureConnection(options: {
     if (expected && waitMs > 0) {
         const deadline = Date.now() + waitMs;
         const found = () => cdpApps().some(a => matchesExpectedLaunch(a, expected));
+        const blocker = blockerWatch(expected);
         while (!found() && Date.now() < deadline) {
             const ports = port ? [port] : await scanMetroPorts().catch(() => []);
             if (ports.length > 0) await autoConnectSweep(ports).catch(() => []);
-            if (!found()) await new Promise(resolve => setTimeout(resolve, 1000));
+            if (found()) break;
+            const why = await blocker();
+            if (why) return launchBlockedResult(why, wasReconnected);
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
         if (!found()) {
             return {
