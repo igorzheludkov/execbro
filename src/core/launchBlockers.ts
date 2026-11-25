@@ -48,10 +48,13 @@ export function androidScreenState(dump: string): "asleep" | "locked" | null {
     return null;
 }
 
-/** The first line of RN's bundle-load failure, if the app logged one. */
+/** RN's bundle-load failure sentence, if the app logged one; the line around it is ReactHost internals. */
 export function bundleFailureIn(lines: RawLogLine[]): string | undefined {
-    const hit = lines.find((l) => BUNDLE_FAILURE.test(l.message));
-    return hit?.message.split("\n")[0].trim().slice(0, 300);
+    for (const l of lines) {
+        const m = l.message.match(BUNDLE_FAILURE);
+        if (m) return m[0] + ".";
+    }
+    return undefined;
 }
 
 /** The Metro status URLs an iOS app tried before giving up: where it looked for Metro. */
@@ -84,7 +87,7 @@ async function androidBlocker(p: LaunchProbe & { id: string }): Promise<string |
         if (failure) {
             const reverse = (await execFileAsync("adb", [...adb, "reverse", "--list"], { timeout: READ_TIMEOUT_MS })
                 .then((r) => r.stdout.trim(), () => "")) || "none";
-            return `The app on ${p.label} failed to load its JS bundle: "${failure}" It could not reach Metro. ` +
+            return `The app on ${p.label} failed to load its JS bundle: ${failure} It could not reach Metro. ` +
                 `adb reverse on this device: ${reverse.replace(/\n/g, "; ")}. A listed reverse can still be dead: ` +
                 `re-create it (adb -s ${p.id} reverse tcp:8081 tcp:<metro port>), or on an emulator point the app at 10.0.2.2:<metro port> from the dev menu, then reload.`;
         }
@@ -107,7 +110,7 @@ async function iosBlocker(p: LaunchProbe & { id: string }): Promise<string | nul
     const failure = bundleFailureIn(lines);
     if (!failure) return null;
     const tried = metroUrlsTried(lines);
-    return `The app on ${p.label} failed to load its JS bundle: "${failure}"` +
+    return `The app on ${p.label} failed to load its JS bundle: ${failure}` +
         (tried.length > 0 ? ` It looked for Metro at ${tried.join(", ")}.` : "") +
         ` Check that Metro runs on the port the app expects, then launch the app again.`;
 }

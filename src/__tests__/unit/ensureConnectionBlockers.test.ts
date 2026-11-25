@@ -35,6 +35,8 @@ describe("ensure_connection stops waiting when the launched device says why", ()
         expect(Date.now() - started).toBeLessThan(5000);
         expect(r.connected).toBe(false);
         expect(r.error).toContain(SCREEN_OFF);
+        // Where Metro really is: next to where the app looked, a port mismatch reads at once.
+        expect(r.error).toContain("Metro here is on port 1.");
         expect(probes[0]).toMatchObject({ platform: "android", id: "emulator-5554", appId: "com.rndebuggertestapp" });
         expect(typeof probes[0].launchedAt).toBe("number");
     }, 15_000);
@@ -53,6 +55,7 @@ describe("ensure_connection stops waiting when the launched device says why", ()
         const r = await ensureConnection({ port: 1, waitMs: 30_000, healthCheck: false });
         expect(Date.now() - started).toBeLessThan(5000);
         expect(r.error).toContain(SCREEN_OFF);
+        expect(r.error).toContain("Metro here is on port 1.");
     }, 15_000);
 
     it("keeps waiting when the device names nothing", async () => {

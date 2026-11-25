@@ -2394,14 +2394,18 @@ export function expectLaunchedApp(target: { platform: "ios" | "android"; id?: st
     expectedLaunch = { ...target, launchedAt: Date.now(), until: Date.now() + EXPECTED_LAUNCH_TTL_MS };
 }
 
-/** What the wait returns when the launched device says why the app cannot attach. */
-function launchBlockedResult(message: string, wasReconnected: boolean): EnsureConnectionResult {
+/**
+ * What the wait returns when the launched device says why the app cannot attach.
+ * Names where Metro really is: next to where the app looked, a port mismatch reads at once.
+ */
+function launchBlockedResult(message: string, wasReconnected: boolean, metroPorts: number[]): EnsureConnectionResult {
+    const where = metroPorts.length > 0 ? ` Metro here is on port ${metroPorts.join(", ")}.` : "";
     return {
         connected: false,
         wasReconnected,
         healthCheckPassed: false,
         connectionInfos: [],
-        error: message,
+        error: message + where,
         failureKind: "no_debuggable_devices",
     };
 }
@@ -2467,7 +2471,7 @@ export async function ensureConnection(options: {
         let mainDevice = selectMainDevice(await fetchDevices(targetPort));
         while (!mainDevice && Date.now() < deadline) {
             const why = blocker ? await blocker() : null;
-            if (why) return launchBlockedResult(why, false);
+            if (why) return launchBlockedResult(why, false, [targetPort]);
             await new Promise(resolve => setTimeout(resolve, 1000));
             mainDevice = selectMainDevice(await fetchDevices(targetPort));
         }
@@ -2558,7 +2562,7 @@ export async function ensureConnection(options: {
             if (ports.length > 0) await autoConnectSweep(ports).catch(() => []);
             if (found()) break;
             const why = await blocker();
-            if (why) return launchBlockedResult(why, wasReconnected);
+            if (why) return launchBlockedResult(why, wasReconnected, ports);
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
         if (!found()) {

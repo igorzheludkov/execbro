@@ -59,10 +59,11 @@ describe("androidScreenState", () => {
 
 describe("bundleFailureIn", () => {
     it("finds the Android failure", () => {
-        expect(bundleFailureIn([raw("some other error"), raw(ANDROID_FAILURE, "unknown:ReactHost")])).toContain("Unable to load script");
+        // Quoted as RN's sentence only: the logcat line around it is a stack of ReactHost internals.
+        expect(bundleFailureIn([raw("some other error"), raw(`BridgelessReact: ${ANDROID_FAILURE}`, "unknown")])).toBe("Unable to load script.");
     });
     it("finds the iOS failure", () => {
-        expect(bundleFailureIn([raw(IOS_FAILURE, "com.facebook.react.log:native")])).toBe(IOS_FAILURE);
+        expect(bundleFailureIn([raw(IOS_FAILURE, "com.facebook.react.log:native")])).toBe("No script URL provided.");
     });
     it("finds nothing in ordinary errors", () => {
         expect(bundleFailureIn([raw("nw_socket_handle_socket_event Socket SO_ERROR [61: Connection refused]")])).toBeUndefined();
