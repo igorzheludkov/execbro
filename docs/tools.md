@@ -15,6 +15,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | Tool                    | Description                                                                                                                  |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `scan_metro`            | Scan for Metro servers and auto-connect. **Called automatically by the agent** at session start — no need to invoke manually |
+| `list_devices`          | Simulators, emulators and physical devices in one call; USB iPhones in their own section |
 | `connect_metro`         | Connect to a specific Metro port. **Usually called automatically** — use manually only when you need a non-standard port     |
 | `disconnect_metro`      | Disconnect from all Metro servers. Frees the CDP slot for the built-in RN debugger. Reconnect with `scan_metro`              |
 | `get_apps`              | List connected apps. Run `scan_metro` first if none connected                                                                |
@@ -24,6 +25,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `get_logs`              | Retrieve console logs (filtering, truncation, summary)                                                                       |
 | `search_logs`           | Search logs for specific text (truncation)                                                                                   |
 | `clear_logs`            | Clear the log buffer                                                                                                         |
+| `get_log_details`       | Full payload of one log event: complete backtrace, stack trace or oversized message. Ids come from `get_logs` |
 | `get_timeline`          | Your own actions, route changes, network requests, console logs, app restarts and Fast Refresh edits in one time-ordered list. Defaults to the window since your last action, so `tap(...)` then `get_timeline()` shows what the tap caused. `since` / `until` take `"-5m"` or epoch ms; `sources` narrows it |
 
 ## Network Tracking
@@ -50,6 +52,8 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.)                         |
 | `run_app_command` | Run a command a native Android app registered with execbro-sdk-android; with no name, list them |
 | `inspect_global`     | Inspect a global object to see its properties and callable methods                          |
+| `redux_get_state`    | Read the Redux store, whole or at a path |
+| `redux_dispatch`     | Dispatch one action, or an array of actions in order against the same store in one round trip; `returnPath` reads the result once at the end |
 | `reload_app`         | Reload the app (auto-connects if needed, and reconnects afterwards - the reply says so when the fresh runtime is still booting). Use sparingly - Fast Refresh handles most changes |
 
 > **Tip:** Install the [SDK](https://www.npmjs.com/package/execbro-sdk) — optional, but recommended: full network capture from app startup (including request/response bodies), enhanced log collection, and direct agent control over navigation, state stores, and any custom reference you pass in.
@@ -64,6 +68,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 | `find_components`          | Find components by name pattern. Use `includeLayout=true` for styles                                            |
 | `inspect_component`        | Inspect a component's props, state (hooks), and children                                                        |
 | `inspect_at_point`         | Per-ancestor frames + props + style + `source: {file, line, column}` at (x, y) — pure JS, no overlay flicker    |
+| `measure`                  | On-screen `{x, y, width, height}` of a named component instance, in the same screen space as screenshots, the layout tools and `tap`; says when it sits behind the keyboard |
 | `get_images`               | Access shared image buffer (screenshots, tap verification frames)                                               |
 
 All of these tools — plus the screenshot summaries and `tap` — speak one screen-space coordinate system. A coordinate from any of them can be passed to any other unchanged, with no conversion.
@@ -78,6 +83,8 @@ See [Layout & Component Inspection guide](layout-inspection.md) for detailed wor
 | --------------------- | ------------------------------------------ |
 | `get_bundle_status`   | Get Metro bundler status and build state   |
 | `get_bundle_errors`   | Get compilation errors with file locations. `clear=true` also resets the buffer |
+| `get_refresh_status`  | Did the running JS runtime accept a Fast Refresh update since `since`? Answers "did my edit land" without polling logs or screenshots |
+| `logbox`              | React Native's LogBox overlay (dev only): `dismiss` clears it and returns its content, `push` shows a message, `ignore` adds patterns, `detect` reads it |
 
 ## UI Interaction (Cross-Platform)
 
@@ -133,3 +140,12 @@ swipe with startX=200 startY=600 endX=200 endY=200 burst=true # Catches overscro
 A USB-attached iPhone or iPad is reached by `screenshot` (iOS 15 and later), `ios_launch_app` / `ios_terminate_app` (iOS 17 and later), and on iOS 27 and later by `tap` (by `x`/`y`, or by `testID` / `text` / `component` while the app is connected; long press with `duration`; portrait and landscape), `swipe` (with the scroll offset and the reason a swipe did nothing), `input_text` (real keystrokes, read back from React Native's own text state) and `press_key` (named keys and characters, no modifiers). `get_screen_state`, `get_screen_layout` and `inspect_at_point` read the phone's app in the same screenshot pixels. With the app connected and no simulator booted, calls reach the phone without `device`; otherwise pass its UDID from `list_devices` (or the identifier `xcrun devicectl list devices` prints). The physical lookup runs only after the simulator lookup fails, so nothing changes for simulator use. If the phone locks, its app drops off Metro; execbro checks every 15 s and reattaches once it is unlocked.
 
 Not on a phone yet: the pressable list inside the `screenshot` response (use `get_screen_state`), and modifier key combos. Requires `pymobiledevice3` (11.32.0 or later for taps), a mounted developer disk image, and for taps Developer Mode, the Xcode 27 disk image and an unlocked phone; see [setup.md](setup.md#physical-ios-device).
+
+## Account & Feedback
+
+| Tool                 | Description                                                                 |
+| -------------------- | --------------------------------------------------------------------------- |
+| `get_license_status` | Installation ID and license tier                                            |
+| `activate_license`   | Activate a license key                                                      |
+| `delete_account`     | Delete the account tied to this installation                                |
+| `send_feedback`      | Send feedback, a feature request or a bug report; it becomes a GitHub issue |
