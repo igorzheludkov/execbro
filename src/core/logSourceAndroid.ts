@@ -52,6 +52,9 @@ export function buildLogcatArgs(opts: {
     // crash first: it is small, and it is where tombstones land.
     const buffers = opts.crashOnly ? "crash" : opts.tags ? "main" : "crash,main";
     parts.push("logcat", "-d", "-b", buffers, "-v", "epoch");
+    // The JS-mirror read joins a multi-line message's lines by their exact
+    // stamp; at millisecond precision two separate calls collide.
+    if (opts.tags) parts.push("-v", "usec");
     // argv form — the quotes these values used to carry were there to survive
     // the shell, and would now be taken literally by logcat itself.
     if (opts.sinceTs) {

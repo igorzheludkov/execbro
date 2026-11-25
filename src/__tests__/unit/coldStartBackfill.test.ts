@@ -66,10 +66,22 @@ describe("selectBackfillLines", () => {
         expect(messages(out)).toEqual(["gap"]);
     });
 
+    // logcat -v usec: the lines of one multi-line message share the exact
+    // microsecond stamp; two separate calls in the same millisecond do not
+    // (verified on an emulator: .920512 and .920991 for two console.log calls).
+    const logcat = (usec: string, message: string): RawLogLine => ({
+        ...line(1, message), raw: `  1795647686.${usec}  7815  7849 I ReactNativeJS: ${message}`,
+    });
+
     it("joins Android continuation lines into one entry, not on iOS", () => {
-        const split = [line(1, "Error: boom"), line(1, "    at foo")];
+        const split = [logcat("450781", "Error: boom"), logcat("450781", "    at foo")];
         expect(messages(selectBackfillLines(split, { until: at(2), platform: "android" }))).toEqual(["Error: boom\n    at foo"]);
         expect(selectBackfillLines(split, { until: at(2), platform: "ios" })).toHaveLength(2);
+    });
+
+    it("keeps two Android calls in the same millisecond apart", () => {
+        const two = [logcat("920512", "Loaded header image: devtools"), logcat("920991", "Loaded header image: network")];
+        expect(messages(selectBackfillLines(two, { until: at(2), platform: "android" }))).toEqual(["Loaded header image: devtools", "Loaded header image: network"]);
     });
 });
 

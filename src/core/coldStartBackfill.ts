@@ -68,12 +68,14 @@ export function selectBackfillLines(
     }
 
     if (opts.platform !== "android") return out;
-    // logcat splits a multi-line message into one line each, with the same header.
-    // ponytail: two console calls in the same ms with the same tid get joined; logcat has no message id
+    // logcat splits a multi-line message into one line each, with the same
+    // header down to the microsecond (read with -v usec). Two separate calls in
+    // the same millisecond differ there, so the raw stamp is the message id.
+    const stamp = (l: RawLogLine) => l.raw.trim().split(/\s+/, 1)[0];
     const joined: RawLogLine[] = [];
     for (const l of out) {
         const prev = joined[joined.length - 1];
-        if (prev && prev.pid === l.pid && prev.tid === l.tid && prev.level === l.level && prev.ts.getTime() === l.ts.getTime()) {
+        if (prev && prev.pid === l.pid && prev.tid === l.tid && prev.level === l.level && stamp(prev) === stamp(l)) {
             joined[joined.length - 1] = { ...prev, message: `${prev.message}\n${l.message}`, raw: `${prev.raw}\n${l.raw}` };
         } else {
             joined.push(l);

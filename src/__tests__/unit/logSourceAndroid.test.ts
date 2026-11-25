@@ -33,11 +33,17 @@ describe("buildLogcatArgs", () => {
 
     it("tags read only those tags from the main buffer", () => {
         expect(buildLogcatArgs({ serial: "emulator-5554", sinceTs: new Date(1785352265203), pid: 4242, tags: ["ReactNativeJS"] }))
-            .toEqual(["-s", "emulator-5554", "logcat", "-d", "-b", "main", "-v", "epoch", "-T", "1785352265.203", "--pid=4242", "ReactNativeJS:V", "*:S"]);
+            .toEqual(["-s", "emulator-5554", "logcat", "-d", "-b", "main", "-v", "epoch", "-v", "usec", "-T", "1785352265.203", "--pid=4242", "ReactNativeJS:V", "*:S"]);
     });
 });
 
 describe("parseLogcatEpoch", () => {
+    it("parses -v usec stamps (the JS-mirror read)", () => {
+        const [l] = parseLogcatEpoch("         1795647686.450781  7815  7849 I ReactNativeJS: eb-a");
+        expect(l).toMatchObject({ pid: 7815, tid: 7849, level: "info", tag: "ReactNativeJS", message: "eb-a" });
+        expect(l.ts.getTime()).toBe(1795647686451);
+    });
+
     const SAMPLE = [
         "--------- beginning of main",
         "         1785352265.203  1210 13886 I NearbyMediums: Wifi changed new SSID",
