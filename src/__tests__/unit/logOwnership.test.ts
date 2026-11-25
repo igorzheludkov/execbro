@@ -146,6 +146,16 @@ describe("isOwned on iOS", () => {
         processName: "AppA",
     };
 
+    it("does not own the RN JS console mirror, like ReactNativeJS on Android", () => {
+        // The CDP console buffer carries these lines; owning them here double-reported every console.error under source:"all".
+        expect(isOwned(line({
+            pid: 12736,
+            process: "AppA",
+            tag: "com.facebook.react.log:javascript",
+            message: "[TapTargetsScreen] Screen mounted",
+        }), IOS)).toEqual({ owned: false });
+    });
+
     it("owns ordinary app output via the emitting process", () => {
         expect(isOwned(line({
             pid: 12736,

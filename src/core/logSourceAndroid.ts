@@ -44,18 +44,25 @@ export function buildLogcatArgs(opts: {
     minPriority?: string;
     /** Read ONLY the crash buffer — used when app identity is unknown. */
     crashOnly?: boolean;
+    /** Read only these tags, from the main buffer. Replaces minPriority. */
+    tags?: string[];
 }): string[] {
     const parts: string[] = [];
     if (opts.serial) parts.push("-s", opts.serial);
     // crash first: it is small, and it is where tombstones land.
-    parts.push("logcat", "-d", "-b", opts.crashOnly ? "crash" : "crash,main", "-v", "epoch");
+    const buffers = opts.crashOnly ? "crash" : opts.tags ? "main" : "crash,main";
+    parts.push("logcat", "-d", "-b", buffers, "-v", "epoch");
     // argv form — the quotes these values used to carry were there to survive
     // the shell, and would now be taken literally by logcat itself.
     if (opts.sinceTs) {
         parts.push("-T", (opts.sinceTs.getTime() / 1000).toFixed(3));
     }
     if (opts.pid !== undefined) parts.push(`--pid=${opts.pid}`);
-    if (opts.minPriority) parts.push(`*:${opts.minPriority}`);
+    if (opts.tags) {
+        parts.push(...opts.tags.map((t) => `${t}:V`), "*:S");
+    } else if (opts.minPriority) {
+        parts.push(`*:${opts.minPriority}`);
+    }
     return parts;
 }
 
@@ -86,6 +93,7 @@ export async function fetchAndroidLines(opts: {
     pid?: number;
     minPriority?: string;
     crashOnly?: boolean;
+    tags?: string[];
     signal?: AbortSignal;
 }): Promise<RawLogLine[]> {
     const args = buildLogcatArgs(opts);

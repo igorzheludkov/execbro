@@ -54,6 +54,25 @@ describe("buildLogShowCommand", () => {
         expect(predicate).toContain(`process == "${hostile}"`);
         expect(args.filter((a) => a.includes("touch /tmp/pwned"))).toEqual([predicate]);
     });
+
+    it("jsMirror reads Info and Debug from the RN JS subsystem of one process", () => {
+        // RN mirrors console.* into os_log at Info; without --info, log show returns none of it.
+        const args = buildLogShowCommand({
+            udid: "U", processName: "RnDebuggerTestApp",
+            sinceTs: new Date(2026, 10, 25, 23, 48, 0), jsMirror: true,
+        });
+        expect(args).toEqual([
+            "simctl", "spawn", "U", "log", "show", "--style", "ndjson", "--info", "--debug",
+            "--start", "2026-11-25 23:48:00",
+            "--predicate", 'subsystem == "com.facebook.react.log" AND category == "javascript" AND process == "RnDebuggerTestApp"',
+        ]);
+    });
+
+    it("the native read is unchanged without jsMirror", () => {
+        const args = buildLogShowCommand({ udid: "U", processName: "RnDebuggerTestApp" });
+        expect(args).not.toContain("--info");
+        expect(args.join(" ")).toContain("com.apple.runningboard");
+    });
 });
 
 describe("parseLogShowNdjson", () => {

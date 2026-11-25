@@ -1,5 +1,5 @@
 import { execFileAsync, withCancelableTimeout } from "./exec.js";
-import { IOS_VERDICT_SUBSYSTEMS } from "./logOwnership.js";
+import { IOS_VERDICT_SUBSYSTEMS, RN_JS_MIRROR_TAG_IOS } from "./logOwnership.js";
 import type { EventLevel, RawLogLine } from "./logEvents.js";
 
 const MAX_BUFFER = 32 * 1024 * 1024;
@@ -40,9 +40,19 @@ export function buildLogShowCommand(opts: {
     sinceTs?: Date;
     /** "error" keeps error+fault; "fault" keeps fault only. */
     minMessageType?: "error" | "fault";
+    /**
+     * Read React Native's console mirror instead: the app's JS lines, which RN
+     * writes at Info (so `--info` is required) under one subsystem. Used by the
+     * cold-start backfill; the native read stays as it is.
+     */
+    jsMirror?: boolean;
 }): string[] {
     const predicates: string[] = [];
-    if (opts.processName) {
+    if (opts.jsMirror) {
+        const [subsystem, category] = RN_JS_MIRROR_TAG_IOS.split(":");
+        predicates.push(`subsystem == "${subsystem}"`, `category == "${category}"`);
+        if (opts.processName) predicates.push(`process == "${opts.processName}"`);
+    } else if (opts.processName) {
         // The app's own output AND the verdicts about it. runningboardd, not
         // the app, reports jetsam kills and launch failures, so a bare
         // `process ==` scoped them out of existence: IOS_VERDICT_SUBSYSTEMS
@@ -54,7 +64,9 @@ export function buildLogShowCommand(opts: {
     }
     // Enumerated explicitly — the predicate language has no ordering over
     // messageType, so a ">=" comparison silently matches nothing.
-    if (opts.minMessageType === "fault") {
+    if (opts.jsMirror) {
+        // no level floor: the mirror is the app's own console output
+    } else if (opts.minMessageType === "fault") {
         predicates.push("messageType == fault");
     } else if (opts.minMessageType === "error") {
         predicates.push("(messageType == error OR messageType == fault)");
@@ -63,6 +75,7 @@ export function buildLogShowCommand(opts: {
     // argv form: no shell parses this, so the predicate and timestamp carry
     // their spaces and quotes as literal argument bytes.
     const parts = ["simctl", "spawn", opts.udid, "log", "show", "--style", "ndjson"];
+    if (opts.jsMirror) parts.push("--info", "--debug");
     if (opts.sinceTs) {
         parts.push("--start", localStamp(opts.sinceTs));
     } else {
@@ -118,6 +131,7 @@ export async function fetchIosLines(opts: {
     processName?: string;
     sinceTs?: Date;
     minMessageType?: "error" | "fault";
+    jsMirror?: boolean;
     signal?: AbortSignal;
 }): Promise<RawLogLine[]> {
     const args = buildLogShowCommand(opts);

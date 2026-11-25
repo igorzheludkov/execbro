@@ -28,15 +28,22 @@ export const IOS_VERDICT_SUBSYSTEMS: ReadonlySet<string> = new Set([
     "com.apple.FrontBoard",
 ]);
 
+/** React Native's console mirror: logcat tag on Android, os_log "subsystem:category" on iOS. */
+export const RN_JS_MIRROR_TAG_ANDROID = "ReactNativeJS";
+export const RN_JS_MIRROR_TAG_IOS = "com.facebook.react.log:javascript";
+
 /**
  * Tags whose output is already carried by another source.
  *
- * React Native mirrors console.* into logcat under `ReactNativeJS`. Those lines
- * are in the CDP console buffer too, so owning them here would double-report
- * under source:"all" and bury crashes under ordinary app logging in
- * source:"native". Keeping the two sources disjoint is what makes merging safe.
+ * React Native mirrors console.* into the system log: logcat under
+ * `ReactNativeJS`, os_log under `com.facebook.react.log:javascript`. Those
+ * lines are in the JS buffer too (CDP, or the cold-start backfill before CDP
+ * attached), so owning them here would double-report under source:"all" and
+ * bury crashes under ordinary app logging in source:"native". On iOS the
+ * Error-type mirror lines (console.error) did reach source:"native" until the
+ * iOS tag was listed. Keeping the two sources disjoint is what makes merging safe.
  */
-const MIRRORED_TAGS: ReadonlySet<string> = new Set(["ReactNativeJS"]);
+const MIRRORED_TAGS: ReadonlySet<string> = new Set([RN_JS_MIRROR_TAG_ANDROID, RN_JS_MIRROR_TAG_IOS]);
 
 function isVerdictSource(line: RawLogLine, platform: AppIdentity["platform"]): boolean {
     if (platform === "android") return ANDROID_VERDICT_TAGS.has(line.tag);

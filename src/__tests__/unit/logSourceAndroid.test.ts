@@ -30,6 +30,11 @@ describe("buildLogcatArgs", () => {
     it("omits --pid when the app is dead", () => {
         expect(buildLogcatArgs({}).join(" ")).not.toContain("--pid");
     });
+
+    it("tags read only those tags from the main buffer", () => {
+        expect(buildLogcatArgs({ serial: "emulator-5554", sinceTs: new Date(1785352265203), pid: 4242, tags: ["ReactNativeJS"] }))
+            .toEqual(["-s", "emulator-5554", "logcat", "-d", "-b", "main", "-v", "epoch", "-T", "1785352265.203", "--pid=4242", "ReactNativeJS:V", "*:S"]);
+    });
 });
 
 describe("parseLogcatEpoch", () => {
