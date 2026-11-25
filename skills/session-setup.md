@@ -71,7 +71,7 @@ mcp__execbro__ios_launch_app with bundleId (also a USB iPhone: pass its UDID or 
 mcp__execbro__android_launch_app with packageName
 ```
 
-A cold first bundle can take a minute or more, and the app is not listed by Metro until it has loaded. Use `mcp__execbro__ensure_connection` with `waitMs=60000` to wait for it to attach instead of checking once.
+A cold first bundle can take a minute or more, and the app is not listed by Metro until it has loaded. Use `mcp__execbro__ensure_connection` with `waitMs=20000` to wait for it to attach instead of checking once; repeat while it is still loading. When the device shows why the app cannot attach (screen locked, another app in front, a bundle that failed), it returns that reason at once.
 
 ### 5. Connect to Metro
 
@@ -79,7 +79,7 @@ Scan for and connect to the Metro bundler:
 - If step 0 found an explicit Metro port, go straight to `mcp__execbro__connect_metro` with that `port`
 - Otherwise use `mcp__execbro__scan_metro` — it sweeps ports 8081-8090 and connects to what it finds
 
-**If scan_metro says "Metro is running, but no app has attached yet":** Metro is up and the app is still loading its bundle (or not running). Call `mcp__execbro__ensure_connection` with `waitMs=60000`; only if that times out, check the screen and `get_bundle_errors`.
+**If scan_metro says "Metro is running, but no app has attached yet":** Metro is up and the app is still loading its bundle (or not running). Call `mcp__execbro__ensure_connection` with `waitMs=20000` (repeat while the bundle is still loading); only if it keeps timing out, check the screen and `get_bundle_errors`.
 
 **If scan_metro finds no servers:**
 - First re-check the port from step 0. A Metro outside 8081-8090 is invisible to the scan, and reporting it as "not running" is a wrong diagnosis
