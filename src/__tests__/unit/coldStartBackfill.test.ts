@@ -32,7 +32,8 @@ function registerApp(sdkPresent: boolean | undefined): void {
     connectedApps.set("8081-t1", { deviceInfo: { deviceName: "iPhone 17" }, platform: "ios", sdkPresent } as unknown as ConnectedApp);
 }
 
-const at = (s: number) => new Date(2026, 10, 26, 12, 0, s);
+// In the past: a read cuts at its own start when no live line exists.
+const at = (s: number) => new Date(2026, 0, 5, 12, 0, s);
 const line = (s: number, message: string, pid = 100, tid = 1): RawLogLine => ({
     ts: at(s), level: "info", pid, tid, tag: "com.facebook.react.log:javascript", message, raw: message,
 });
@@ -42,7 +43,7 @@ describe("selectBackfillLines", () => {
     it("keeps the current run: from the last Running line, before attach", () => {
         const out = selectBackfillLines(
             [line(1, "old run"), line(2, 'Running "App" with {}'), line(3, "mounted"), line(5, "after attach")],
-            { attachAt: at(4), platform: "ios" }
+            { until: at(4), platform: "ios" }
         );
         expect(messages(out)).toEqual(['Running "App" with {}', "mounted"]);
     });
@@ -50,25 +51,25 @@ describe("selectBackfillLines", () => {
     it("keeps only the latest process", () => {
         const out = selectBackfillLines(
             [line(1, 'Running "App"', 90), line(2, "dead", 90), line(3, 'Running "App"', 100), line(4, "live", 100)],
-            { attachAt: at(5), platform: "ios" }
+            { until: at(5), platform: "ios" }
         );
         expect(out.map((l) => l.pid)).toEqual([100, 100]);
     });
 
     it("keeps the latest process even when it never printed a Running line", () => {
-        const out = selectBackfillLines([line(1, "dead", 90), line(2, "live", 100)], { attachAt: at(5), platform: "ios" });
+        const out = selectBackfillLines([line(1, "dead", 90), line(2, "live", 100)], { until: at(5), platform: "ios" });
         expect(messages(out)).toEqual(["live"]);
     });
 
     it("notBefore drops what a previous connection already saw", () => {
-        const out = selectBackfillLines([line(1, "seen"), line(3, "gap")], { attachAt: at(4), notBefore: at(2), platform: "ios" });
+        const out = selectBackfillLines([line(1, "seen"), line(3, "gap")], { until: at(4), notBefore: at(2), platform: "ios" });
         expect(messages(out)).toEqual(["gap"]);
     });
 
     it("joins Android continuation lines into one entry, not on iOS", () => {
         const split = [line(1, "Error: boom"), line(1, "    at foo")];
-        expect(messages(selectBackfillLines(split, { attachAt: at(2), platform: "android" }))).toEqual(["Error: boom\n    at foo"]);
-        expect(selectBackfillLines(split, { attachAt: at(2), platform: "ios" })).toHaveLength(2);
+        expect(messages(selectBackfillLines(split, { until: at(2), platform: "android" }))).toEqual(["Error: boom\n    at foo"]);
+        expect(selectBackfillLines(split, { until: at(2), platform: "ios" })).toHaveLength(2);
     });
 });
 
@@ -100,7 +101,7 @@ describe("startColdStartBackfill", () => {
         isSDKInstalledMock.mockResolvedValue(false);
         resolveLogTargetsMock.mockResolvedValue([IOS_TARGET]);
         resolveIosProcessNameMock.mockResolvedValue("App");
-        fetchIosLinesMock.mockResolvedValue([line(2, 'Running "App" with {}'), line(3, "mounted"), line(12, "after attach")]);
+        fetchIosLinesMock.mockResolvedValue([line(2, 'Running "App" with {}'), line(3, "mounted"), { ...line(0, "after the read"), ts: new Date(Date.now() + 60_000) }]);
     });
 
     it("iOS: reads the JS mirror of the app's process and inserts it", async () => {
@@ -134,6 +135,30 @@ describe("startColdStartBackfill", () => {
         await awaitColdStartBackfill("iPhone 17");
         expect(fetchIosLinesMock).toHaveBeenCalledWith(expect.objectContaining({ sinceTs: at(8) }));
         expect(getLogBuffer("iPhone 17").getAll()).toEqual([]);
+    });
+
+    it("keeps lines logged after attach until the first live CDP line", async () => {
+        // Seen on device: a line logged between the attach and Runtime.enable taking effect
+        // reached neither source when the cut was the attach moment.
+        const ms = (s: number) => new Date(at(0).getTime() + s * 1000);
+        fetchIosLinesMock.mockImplementation(async () => {
+            getLogBuffer("iPhone 17").add({ timestamp: ms(10.8), level: "log", message: "first live" });
+            return [line(9, "before attach"), { ...line(10, "in the gap"), ts: ms(10.3) }, line(12, "after first live")];
+        });
+        startColdStartBackfill("iPhone 17", at(10));
+        await awaitColdStartBackfill("iPhone 17");
+        expect(getLogBuffer("iPhone 17").getAll().map((e) => e.message)).toEqual(["before attach", "in the gap", "first live"]);
+    });
+
+    it("without a live line yet, cuts at the moment the read starts", async () => {
+        const now = Date.now();
+        fetchIosLinesMock.mockResolvedValue([
+            { ...line(0, "logged before the read"), ts: new Date(now - 1000) },
+            { ...line(0, "from the future"), ts: new Date(now + 60_000) },
+        ]);
+        startColdStartBackfill("iPhone 17", new Date(now - 10_000));
+        await awaitColdStartBackfill("iPhone 17");
+        expect(getLogBuffer("iPhone 17").getAll().map((e) => e.message)).toEqual(["logged before the read"]);
     });
 
     it("skips when the connect-time probe found the SDK", async () => {

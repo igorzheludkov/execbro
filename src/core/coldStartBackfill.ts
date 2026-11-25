@@ -47,12 +47,12 @@ async function sdkPresence(deviceName: string): Promise<boolean | undefined> {
     }
 }
 
-/** The lines of the current JS run of the current process, before attach. */
+/** The lines of the current JS run of the current process, logged before `until`. */
 export function selectBackfillLines(
     lines: RawLogLine[],
-    opts: { attachAt: Date; notBefore?: Date; platform: "ios" | "android" }
+    opts: { until: Date; notBefore?: Date; platform: "ios" | "android" }
 ): RawLogLine[] {
-    let out = lines.filter((l) => l.ts < opts.attachAt);
+    let out = lines.filter((l) => l.ts < opts.until);
     if (out.length === 0) return out;
 
     const pid = out.reduce((a, b) => (b.ts >= a.ts ? b : a)).pid;
@@ -96,6 +96,7 @@ async function runBackfill(deviceName: string, attachAt: Date): Promise<void> {
     const sinceTs = new Date(Math.max(attachAt.getTime() - BACKFILL_LOOKBACK_MS, notBeforeMs ?? 0));
     const notBefore = notBeforeMs === undefined ? undefined : new Date(notBeforeMs);
 
+    const readStart = new Date();
     let lines: RawLogLine[];
     if (target.platform === "android") {
         const pid = await resolveAndroidPid(target.identity.appId, target.adbSerial);
@@ -107,11 +108,22 @@ async function runBackfill(deviceName: string, attachAt: Date): Promise<void> {
         lines = await fetchIosLines({ udid: target.deviceKey, processName, sinceTs, jsMirror: true });
     }
 
+    // The cut is where CDP started delivering, not the attach: a line logged
+    // between the attach and Runtime.enable taking effect reached neither
+    // source (seen on device, ~100 ms). CDP delivers in order, so nothing
+    // before the first live line came over it; with no live line yet, nothing
+    // logged before this read did either. The seam dedupe covers a line in flight.
     // ponytail: cut uses host time against the device clock; exact on a simulator, skews on a physical Android whose clock drifts
-    const selected = selectBackfillLines(lines, { attachAt, notBefore, platform: target.platform });
-    const inserted = getLogBuffer(deviceName).insertBackfill(
+    const buffer = getLogBuffer(deviceName);
+    const epoch = getEpoch(deviceName);
+    const live = buffer.getAll().filter((e) => !e.origin && e.epoch === epoch && e.timestamp >= attachAt);
+    const until = live.length > 0
+        ? new Date(Math.min(...live.map((e) => e.timestamp.getTime())))
+        : readStart;
+    const selected = selectBackfillLines(lines, { until, notBefore, platform: target.platform });
+    const inserted = buffer.insertBackfill(
         selected.map((l) => ({ timestamp: l.ts, level: l.level, message: l.message, origin: "systemLog" as const })),
-        getEpoch(deviceName)
+        epoch
     );
     if (inserted > 0) console.error(`[execbro] Backfilled ${inserted} pre-attach log lines for ${deviceName} from the system log`);
 }
