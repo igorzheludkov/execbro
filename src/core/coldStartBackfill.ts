@@ -1,5 +1,4 @@
-import { getEpoch, getLogBuffer, matchDeviceName } from "./state.js";
-import { isSDKInstalled } from "./sdkBridge.js";
+import { connectedApps, getEpoch, getLogBuffer, matchDeviceName } from "./state.js";
 import { resolveLogTargets } from "./nativeLogs.js";
 import { fetchIosLines, resolveIosProcessName } from "./logSourceIos.js";
 import { fetchAndroidLines, resolveAndroidPid } from "./logSourceAndroid.js";
@@ -24,7 +23,29 @@ export const BACKFILL_LOOKBACK_MS = 10 * 60_000;
 // run's lines would come back under the new epoch.
 const RUN_START = 'Running "';
 
+// The connect-time probe fires 200 ms after attach; a slow JS thread answers later.
+const SDK_PROBE_WAIT_MS = 3000;
+const SDK_PROBE_POLL_MS = 100;
+
 const pending = new Map<string, Promise<void>>();
+
+/**
+ * The connect-time SDK probe's verdict for this device, waiting briefly for it.
+ * Reads the registry only: isSDKInstalled falls back to executeInApp, whose
+ * reconnect path scans Metro, which a background job must never trigger.
+ * Undefined when no probe answered (proceed; the seam dedupe still applies).
+ */
+async function sdkPresence(deviceName: string): Promise<boolean | undefined> {
+    const deadline = Date.now() + SDK_PROBE_WAIT_MS;
+    for (;;) {
+        const apps = [...connectedApps.values()].filter((a) => a.deviceInfo.deviceName === deviceName);
+        if (apps.length === 0) return undefined;
+        if (apps.some((a) => a.sdkPresent === true)) return true;
+        if (apps.every((a) => a.sdkPresent === false)) return false;
+        if (Date.now() >= deadline) return undefined;
+        await new Promise((resolve) => setTimeout(resolve, SDK_PROBE_POLL_MS));
+    }
+}
 
 /** The lines of the current JS run of the current process, before attach. */
 export function selectBackfillLines(
@@ -63,7 +84,7 @@ export function selectBackfillLines(
 
 async function runBackfill(deviceName: string, attachAt: Date): Promise<void> {
     // The SDK buffers from import time and its mirror already holds these lines.
-    if (await isSDKInstalled(deviceName)) return;
+    if (await sdkPresence(deviceName)) return;
 
     // No live target: Chromium, a physical iPhone (no log target), or an app
     // this device has no identity for.

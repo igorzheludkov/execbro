@@ -24,7 +24,13 @@ jest.unstable_mockModule("../../core/logSourceAndroid.js", () => ({
 
 const { selectBackfillLines, startColdStartBackfill, awaitColdStartBackfill } = await import("../../core/coldStartBackfill.js");
 const { markCdpConsoleOpen, markCdpConsoleClosed, previousCdpConsoleEnd, __resetMirrorState } = await import("../../core/sdkMirrorPoller.js");
-const { getLogBuffer, logBuffers, resetEpochs } = await import("../../core/state.js");
+const { getLogBuffer, logBuffers, resetEpochs, connectedApps } = await import("../../core/state.js");
+import type { ConnectedApp } from "../../core/types.js";
+
+// What the connect-time SDK probe loop leaves on the registry entry.
+function registerApp(sdkPresent: boolean | undefined): void {
+    connectedApps.set("8081-t1", { deviceInfo: { deviceName: "iPhone 17" }, platform: "ios", sdkPresent } as unknown as ConnectedApp);
+}
 
 const at = (s: number) => new Date(2026, 10, 26, 12, 0, s);
 const line = (s: number, message: string, pid = 100, tid = 1): RawLogLine => ({
@@ -90,6 +96,7 @@ describe("startColdStartBackfill", () => {
         __resetMirrorState();
         logBuffers.clear();
         resetEpochs();
+        connectedApps.clear();
         isSDKInstalledMock.mockResolvedValue(false);
         resolveLogTargetsMock.mockResolvedValue([IOS_TARGET]);
         resolveIosProcessNameMock.mockResolvedValue("App");
@@ -129,11 +136,34 @@ describe("startColdStartBackfill", () => {
         expect(getLogBuffer("iPhone 17").getAll()).toEqual([]);
     });
 
-    it("skips when the SDK is installed", async () => {
-        isSDKInstalledMock.mockResolvedValue(true);
+    it("skips when the connect-time probe found the SDK", async () => {
+        registerApp(true);
         startColdStartBackfill("iPhone 17", at(10));
         await awaitColdStartBackfill("iPhone 17");
         expect(fetchIosLinesMock).not.toHaveBeenCalled();
+    });
+
+    it("waits for the probe's answer before deciding", async () => {
+        registerApp(undefined);
+        startColdStartBackfill("iPhone 17", at(10));
+        setTimeout(() => registerApp(true), 150);
+        await awaitColdStartBackfill("iPhone 17", 3000);
+        expect(fetchIosLinesMock).not.toHaveBeenCalled();
+    });
+
+    it("reads when the probe found no SDK", async () => {
+        registerApp(false);
+        startColdStartBackfill("iPhone 17", at(10));
+        await awaitColdStartBackfill("iPhone 17");
+        expect(fetchIosLinesMock).toHaveBeenCalled();
+    });
+
+    it("never evaluates in the app to look for the SDK", async () => {
+        // isSDKInstalled falls back to executeInApp, whose reconnect path scans
+        // Metro: a background job must not trigger that.
+        startColdStartBackfill("iPhone 17", at(10));
+        await awaitColdStartBackfill("iPhone 17");
+        expect(isSDKInstalledMock).not.toHaveBeenCalled();
     });
 
     it("skips without a live identity", async () => {
