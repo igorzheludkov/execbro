@@ -146,6 +146,17 @@ export function markCdpConsoleClosed(device: string, at: number = Date.now()): v
     if (last && last.end === undefined) last.end = at;
 }
 
+/**
+ * When the device's previous CDP console period ended, or undefined when the
+ * latest period is the first. Call after markCdpConsoleOpen: the cold-start
+ * backfill reads from here, so a re-attach to the same run does not re-read
+ * what the earlier connection already captured.
+ */
+export function previousCdpConsoleEnd(device: string): number | undefined {
+    const windows = cdpConsoleWindows.get(device);
+    return windows && windows.length >= 2 ? windows[windows.length - 2].end : undefined;
+}
+
 function capturedByCdp(device: string, serverTs: number): boolean {
     const windows = cdpConsoleWindows.get(device);
     if (!windows) return false;
