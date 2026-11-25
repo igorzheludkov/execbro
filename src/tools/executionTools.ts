@@ -1,3 +1,4 @@
+import { authRefusalHint } from "../core/authRefusalHint.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerToolWithTelemetry } from "../core/register.js";
@@ -225,6 +226,9 @@ export function registerExecutionTools(server: McpServer): void {
                         `\nRead a narrower path, or raise maxResultLength, for full detail.`;
                 }
             }
+
+            const refusal = authRefusalHint(expression, result.result ?? "");
+            if (refusal) resultText = `${resultText}\n\n${refusal}`;
 
             if (metaNotes.length > 0) resultText = `${resultText}\n\n${metaNotes.join("\n")}`;
 
