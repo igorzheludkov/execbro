@@ -1,6 +1,9 @@
 import { LogEntry, LogLevel } from "./types.js";
 import { getEpoch } from "./state.js";
 
+/** A backfilled line within this of a buffered line with the same text and epoch is the same line. */
+export const BACKFILL_DEDUPE_MS = 2000;
+
 // Process-global so ids never collide across per-device buffers.
 let nextSeq = 1;
 
@@ -36,6 +39,34 @@ export class LogBuffer {
             this.logs.shift();
             this.dropped++;
         }
+    }
+
+    /**
+     * Insert lines logged before CDP attached, ahead of the live lines of the
+     * same run. A line the buffer already holds (same epoch, same text, within
+     * BACKFILL_DEDUPE_MS) is skipped: around the attach a line can arrive both
+     * ways. Returns how many were inserted.
+     */
+    insertBackfill(entries: Array<Omit<LogEntry, "seq" | "epoch">>, epoch: number): number {
+        // ponytail: O(n·m) dedupe scan, n ≤ buffer cap; index by message if backfills get large
+        const fresh = [...entries]
+            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+            .filter((e) => !this.logs.some((l) =>
+                l.epoch === epoch &&
+                l.message === e.message &&
+                Math.abs(l.timestamp.getTime() - e.timestamp.getTime()) <= BACKFILL_DEDUPE_MS
+            ))
+            .map((e): LogEntry => ({ ...e, seq: nextSeq++, epoch }));
+        if (fresh.length === 0) return 0;
+
+        const lastTs = fresh[fresh.length - 1].timestamp.getTime();
+        const at = this.logs.findIndex((l) => l.epoch === epoch && l.timestamp.getTime() > lastTs);
+        this.logs.splice(at === -1 ? this.logs.length : at, 0, ...fresh);
+        while (this.logs.length > this.maxSize) {
+            this.logs.shift();
+            this.dropped++;
+        }
+        return fresh.length;
     }
 
     get(count?: number, level?: string, startFromText?: string, epoch?: number): LogEntry[] {
@@ -154,7 +185,8 @@ export function formatLogs(
                 message = message.slice(0, maxMessageLength) + `... [truncated: ${log.message.length} chars]`;
             }
 
-            return `${time} ${levelTag} ${message}`;
+            const origin = log.origin === "systemLog" ? "(syslog) " : "";
+            return `${time} ${levelTag} ${origin}${message}`;
         })
         .join("\n");
 }

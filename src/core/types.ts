@@ -19,6 +19,9 @@ export interface LogEntry {
     // Metro, so it happens lazily at read time — the capture path must never
     // block or fail on it. Only kept for warn/error/fatal (see logStack.ts).
     stackTrace?: CDPStackFrame[];
+    // Recovered from the system log (os_log / logcat) for the window before
+    // CDP attached. Absent on lines that arrived live.
+    origin?: "systemLog";
 }
 
 // One frame of a CDP `stackTrace.callFrames` array. Line and column are
