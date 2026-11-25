@@ -199,7 +199,7 @@ See the [full tool reference](docs/tools.md) for all tools with descriptions. Ke
 | [Device Interaction](docs/device-interaction.md)           | Unified `tap`, platform-specific gestures, text input, key events               |
 | [OCR Text Extraction](docs/ocr.md)                         | Cloud Vision OCR inside `tap`, offline fallback, language config                |
 | [Claude Code Skills](docs/skills.md)                       | Pre-built skills for session setup, debugging, and automation                   |
-| [Full Tool Reference](docs/tools.md)                       | Complete list of all 62 tools with descriptions                                 |
+| [Full Tool Reference](docs/tools.md)                       | Complete list of all 68 tools with descriptions                                 |
 
 ## How It Works
 
