@@ -47,7 +47,7 @@ The server also sends instructions on connection, so MCP clients automatically l
 
 | Tool                 | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
-| `execute_in_app`     | Run a JS expression in the app. `state`/`store`, `apollo`/`cache()`/`deref()`, `router`, `summary()` and `require()` are pre-resolved in scope; oversized results are bounded structurally. `timeoutMs` sizes the promise poll ladder; a promise that outlives it returns a handle to collect with `collect`/`waitMs` |
+| `execute_in_app`     | Run a JS expression in the app. `state`/`store`, `apollo`/`cache()`/`deref()`, `router`, `summary()` and `require()` are pre-resolved in scope; oversized results are bounded structurally. `timeoutMs` sizes the promise poll ladder; a promise that outlives it returns a handle to collect with `collect`/`waitMs`. A fetch here carries no app auth; when one is refused (401/403) the reply points at `app_request` and the captured call |
 | `app_request`        | Issue an HTTP request from inside the app as the logged-in user. `auth="auto"` resolves the bearer token in-app, so no credential enters the transcript |
 | `list_debug_globals` | Discover available debug objects (Apollo, Redux, Expo Router, etc.)                         |
 | `run_app_command` | Run a command a native Android app registered with execbro-sdk-android; with no name, list them |

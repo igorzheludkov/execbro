@@ -217,7 +217,9 @@ For coordinate/accessibility/OCR taps, it also verifies if the tap caused a visu
 Every successful tap and swipe also returns outcome: what happened in the app while it ran.
 outcome.route is the route before and after ("Login → ProductList" or "unchanged (Login)"),
 outcome.text the text that changed on screen ("Taps: 0" → "Taps: 1", + "Invalid email or password"),
-outcome.network the requests made meanwhile with their status, outcome.console new errors and
+outcome.network the requests made meanwhile with their status (a request whose body has a field of a
+different JSON type than every other body on that host gets a "⚠" line under it, the same Notable
+finding get_request_details prints), outcome.console new errors and
 warnings, and for swipe outcome.scroll the scroll offset ("ScrollView y 0 → 473 of 758"). The tool
 waits up to 3s for requests the action started; any still running are listed as pending, and
 get_timeline() shows the rest. Read the outcome before taking a screenshot: it usually answers
@@ -560,6 +562,7 @@ If the app called \`init({ stores, navigation, custom })\`, prefer the SDK paths
 
 ## Common Patterns (no SDK)
 - \`store\`, \`state\`, \`router\` and \`require\` are bound in every execute_in_app evaluation; the store needs no global
+- A fetch written in execute_in_app carries none of the app's auth. For what the server sent, read the captured call (get_network_requests, get_request_details); for a new call as the logged-in user, use app_request. An auth-refused fetch in execute_in_app says so in its reply
 - Read Redux: execute_in_app("state.sliceName")
 - Dispatch action: execute_in_app("store.dispatch({ type: 'cart/add', payload: item })"). Use it to set up a precondition, then tap only the action under test
 - Current route: execute_in_app("globalThis.__getCurrentRoute__()")
