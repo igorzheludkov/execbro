@@ -29,6 +29,11 @@ export interface LaunchProbe {
 }
 
 const READ_TIMEOUT_MS = 5000;
+// How far before the launch the app's log is read. Launching an app that is
+// already up (on its red box) only brings it to the front and logs nothing new,
+// so a since-launch read missed the failure on device. Scoped to the running
+// pid, so an earlier process's failure is never this launch's.
+export const LOOKBACK_MS = 10 * 60_000;
 // An activity takes a moment to come up after `am start`; judging the
 // foreground earlier would name the launcher on a healthy launch.
 const FOREGROUND_GRACE_MS = 5000;
@@ -53,6 +58,15 @@ export function bundleFailureIn(lines: RawLogLine[]): string | undefined {
     for (const l of lines) {
         const m = l.message.match(BUNDLE_FAILURE);
         if (m) return m[0] + ".";
+    }
+    return undefined;
+}
+
+/** The running app's pid from `launchctl list` on a simulator ("91114\t0\tUIKitApplication:<bundleId>[b3f7][rb-legacy]"). */
+export function iosAppPid(list: string, bundleId: string): number | undefined {
+    for (const line of list.split("\n")) {
+        const [pid, , label] = line.split("\t");
+        if (label?.startsWith(`UIKitApplication:${bundleId}[`) && /^\d+$/.test(pid)) return Number(pid);
     }
     return undefined;
 }
@@ -82,7 +96,9 @@ async function androidBlocker(p: LaunchProbe & { id: string }): Promise<string |
 
     if (p.appId) {
         const pid = await resolveAndroidPid(p.appId, p.id, AbortSignal.timeout(READ_TIMEOUT_MS));
-        const lines = await fetchAndroidLines({ serial: p.id, sinceTs: new Date(p.launchedAt), pid, minPriority: "W" });
+        const lines = pid
+            ? await fetchAndroidLines({ serial: p.id, sinceTs: new Date(p.launchedAt - LOOKBACK_MS), pid, minPriority: "W" })
+            : [];
         const failure = bundleFailureIn(lines);
         if (failure) {
             const reverse = (await execFileAsync("adb", [...adb, "reverse", "--list"], { timeout: READ_TIMEOUT_MS })
@@ -106,7 +122,11 @@ async function iosBlocker(p: LaunchProbe & { id: string }): Promise<string | nul
     if (!p.appId) return null;
     const processName = await resolveIosProcessName(p.id, p.appId, AbortSignal.timeout(READ_TIMEOUT_MS));
     if (!processName) return null;
-    const lines = await fetchIosLines({ udid: p.id, processName, sinceTs: new Date(p.launchedAt), minMessageType: "error" });
+    const { stdout } = await execFileAsync("xcrun", ["simctl", "spawn", p.id, "launchctl", "list"], { timeout: READ_TIMEOUT_MS });
+    const pid = iosAppPid(stdout, p.appId);
+    if (!pid) return null;
+    const lines = (await fetchIosLines({ udid: p.id, processName, sinceTs: new Date(p.launchedAt - LOOKBACK_MS), minMessageType: "error" }))
+        .filter((l) => l.pid === pid);
     const failure = bundleFailureIn(lines);
     if (!failure) return null;
     const tried = metroUrlsTried(lines);

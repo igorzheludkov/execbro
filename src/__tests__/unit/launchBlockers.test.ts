@@ -26,7 +26,7 @@ jest.unstable_mockModule("../../core/androidForeground.js", () => ({
     androidForegroundPackage: androidForegroundPackageMock,
 }));
 
-const { androidScreenState, bundleFailureIn, metroUrlsTried, launchBlocker, blockerWatch } =
+const { androidScreenState, bundleFailureIn, metroUrlsTried, iosAppPid, launchBlocker, blockerWatch, LOOKBACK_MS } =
     await import("../../core/launchBlockers.js");
 
 const raw = (message: string, tag = "unknown:ReactNative", level: RawLogLine["level"] = "error"): RawLogLine => ({
@@ -70,6 +70,16 @@ describe("bundleFailureIn", () => {
     });
 });
 
+describe("iosAppPid", () => {
+    it("reads the app's pid from launchctl list", () => {
+        const list = "91000\t0\tUIKitApplication:com.other.App[aa11][rb-legacy]\n91114\t0\tUIKitApplication:org.reactjs.native.example.RnDebuggerTestApp[b3f7][rb-legacy]\n";
+        expect(iosAppPid(list, "org.reactjs.native.example.RnDebuggerTestApp")).toBe(91114);
+    });
+    it("is undefined when the app is not running", () => {
+        expect(iosAppPid("-\t0\tUIKitApplication:org.x.App[b3f7][rb-legacy]\n", "org.x.App")).toBeUndefined();
+    });
+});
+
 describe("metroUrlsTried", () => {
     it("names each status URL the app tried, once", () => {
         const lines = [raw(IOS_CFNETWORK, "com.apple.CFNetwork:Default"), raw(IOS_CFNETWORK.replace(/8090/g, "8081"), "com.apple.CFNetwork:Default"), raw(IOS_CFNETWORK, "com.apple.CFNetwork:Default")];
@@ -83,7 +93,12 @@ describe("launchBlocker", () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
-        execMock.mockImplementation(async (_f, args) => ({ stdout: args.join(" ").includes("reverse") ? "host-15 tcp:8081 tcp:8090\n" : POWER_AWAKE + WINDOW_OPEN, stderr: "" }));
+        execMock.mockImplementation(async (_f, args) => {
+            const cmd = args.join(" ");
+            if (cmd.includes("reverse")) return { stdout: "host-15 tcp:8081 tcp:8090\n", stderr: "" };
+            if (cmd.includes("launchctl")) return { stdout: "7243\t0\tUIKitApplication:org.x.RnDebuggerTestApp[b3f7][rb-legacy]\n", stderr: "" };
+            return { stdout: POWER_AWAKE + WINDOW_OPEN, stderr: "" };
+        });
         resolveAndroidPidMock.mockResolvedValue(7243);
         fetchAndroidLinesMock.mockResolvedValue([]);
         androidForegroundPackageMock.mockResolvedValue("com.rndebuggertestapp");
@@ -109,7 +124,8 @@ describe("launchBlocker", () => {
         const msg = await launchBlocker(ANDROID);
         expect(msg).toContain("Unable to load script");
         expect(msg).toContain("tcp:8081 tcp:8090");
-        expect(fetchAndroidLinesMock).toHaveBeenCalledWith(expect.objectContaining({ serial: "emulator-5554", pid: 7243, sinceTs: new Date(ANDROID.launchedAt) }));
+        // Looks back before the launch: launching an app already on its red box logs nothing new.
+        expect(fetchAndroidLinesMock).toHaveBeenCalledWith(expect.objectContaining({ serial: "emulator-5554", pid: 7243, sinceTs: new Date(ANDROID.launchedAt - LOOKBACK_MS) }));
     });
 
     it("Android: another app in front is named", async () => {
@@ -126,12 +142,23 @@ describe("launchBlocker", () => {
         expect(await launchBlocker(ANDROID)).toBeNull();
     });
 
+    it("Android: without a running process there is nothing to read", async () => {
+        resolveAndroidPidMock.mockResolvedValue(undefined);
+        expect(await launchBlocker(ANDROID)).toBeNull();
+        expect(fetchAndroidLinesMock).not.toHaveBeenCalled();
+    });
+
+    it("iOS: a failure of an earlier process of the app is not this launch's", async () => {
+        fetchIosLinesMock.mockResolvedValue([{ ...raw(IOS_FAILURE, "com.facebook.react.log:native"), pid: 80000 }]);
+        expect(await launchBlocker(IOS)).toBeNull();
+    });
+
     it("iOS: a bundle failure is quoted with the Metro URLs the app tried", async () => {
         fetchIosLinesMock.mockResolvedValue([raw(IOS_CFNETWORK, "com.apple.CFNetwork:Default"), raw(IOS_FAILURE, "com.facebook.react.log:native")]);
         const msg = await launchBlocker(IOS);
         expect(msg).toContain("No script URL provided");
         expect(msg).toContain("http://localhost:8090/status");
-        expect(fetchIosLinesMock).toHaveBeenCalledWith(expect.objectContaining({ udid: "F936", processName: "RnDebuggerTestApp", minMessageType: "error" }));
+        expect(fetchIosLinesMock).toHaveBeenCalledWith(expect.objectContaining({ udid: "F936", processName: "RnDebuggerTestApp", minMessageType: "error", sinceTs: new Date(IOS.launchedAt - LOOKBACK_MS) }));
     });
 
     it("a launch with no device id (USB iPhone) is not probed", async () => {
@@ -156,6 +183,7 @@ describe("blockerWatch", () => {
         const check = blockerWatch({ platform: "android", id: "emulator-5554", appId: "com.rndebuggertestapp", label: "emulator-5554", launchedAt: Date.now() - 10_000 }, 60_000);
         await check();
         await check();
-        expect(fetchAndroidLinesMock).toHaveBeenCalledTimes(1);
+        // One dumpsys read per check that reaches the device.
+        expect(execMock).toHaveBeenCalledTimes(1);
     });
 });
