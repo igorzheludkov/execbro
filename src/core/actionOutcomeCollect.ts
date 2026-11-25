@@ -15,6 +15,8 @@ import { chromiumScreenState } from "./chromiumScreen.js";
 import { readTextSnapshot } from "./textSnapshot.js";
 import { networkBuffers } from "./state.js";
 import { delay } from "./jsExecute.js";
+import { notableLines } from "./networkNotable.js";
+import type { NetworkRequest } from "./types.js";
 
 /** In-app rows carry the device clock; this much slack keeps them inside the window. */
 const CLOCK_PAD_MS = 250;
@@ -145,5 +147,16 @@ export async function finishActionOutcome(
         unavailable.push(h.connected ? "network and logs: read failed" : "network and logs: nothing captured for this device");
     }
 
-    return buildOutcome({ before: h.before, after, events, pending: idle.pending, capped: idle.capped, unavailable });
+    let all: NetworkRequest[] = [];
+    try {
+        all = deps.idleFor(h.deviceName).requests();
+    } catch {
+        // Without the buffer the requests still print, only without their notable lines.
+    }
+    const notable = (id: string) => {
+        const request = all.find((r) => r.requestId === id);
+        return request ? notableLines(request, all) : [];
+    };
+
+    return buildOutcome({ before: h.before, after, events, pending: idle.pending, capped: idle.capped, unavailable, notable });
 }

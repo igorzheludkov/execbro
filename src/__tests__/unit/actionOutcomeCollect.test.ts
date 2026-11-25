@@ -124,3 +124,18 @@ describe("action outcome collection", () => {
         expect(b.calls.sleeps).toEqual([]);
     });
 });
+
+describe("action outcome notable lines", () => {
+    it("flags a request body whose field type differs from every other body on the host", async () => {
+        const order = { requestId: "o1", timestamp: new Date(1000), method: "POST", url: "http://localhost:8092/carts/add", headers: {}, status: 201, completed: true, epoch: 1, postData: '{"price":"9.99"}' } as NetworkRequest;
+        const products = { ...order, requestId: "p1", method: "GET", url: "http://localhost:8092/products", postData: undefined, responseBody: '{"price":9.99}' } as NetworkRequest;
+        const { d } = deps({
+            collect: async (): Promise<CollectResult> => ({ events: [requestEvent(order, "d", false)], devices: ["d"], notes: [], unavailable: [] }),
+        });
+        const base = d.idleFor(undefined);
+        d.idleFor = () => ({ ...base, requests: () => [products, order] });
+        const h = await beginActionOutcome(undefined, d);
+        const o = await finishActionOutcome(h, { visualSettleRan: true }, d);
+        expect(o.network).toEqual([expect.stringContaining("[o1]"), expect.stringMatching(/^ {2}⚠ "price" is a string here, a number in 1 other bod/)]);
+    });
+});

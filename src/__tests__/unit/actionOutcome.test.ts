@@ -199,3 +199,26 @@ describe("snapshotFromScreenState", () => {
         ]));
     });
 });
+
+describe("buildOutcome notable lines", () => {
+    const order = { requestId: "r1", timestamp: new Date(1000), method: "POST", url: "http://localhost:8092/carts/add", headers: {}, status: 201, timing: { duration: 30 }, completed: true, epoch: 1 } as NetworkRequest;
+    const other = { ...order, requestId: "r2" } as NetworkRequest;
+
+    it("prints a request's notable finding right under the request", () => {
+        const o = buildOutcome({
+            ...none, before: null, after: null,
+            events: [requestEvent(order, "d", false), requestEvent(other, "d", false)],
+            notable: (id: string) => (id === "r1" ? ['"price" is a string here, a number in 2 other bodies on localhost:8092.'] : []),
+        });
+        expect(o.network).toEqual([
+            expect.stringContaining("[r1]"),
+            '  ⚠ "price" is a string here, a number in 2 other bodies on localhost:8092.',
+            expect.stringContaining("[r2]"),
+        ]);
+    });
+
+    it("prints the requests alone when no notable reader is given", () => {
+        const o = buildOutcome({ ...none, before: null, after: null, events: [requestEvent(order, "d", false)] });
+        expect(o.network).toEqual([expect.stringContaining("[r1]")]);
+    });
+});

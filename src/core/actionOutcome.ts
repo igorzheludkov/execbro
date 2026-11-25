@@ -183,8 +183,10 @@ export function buildOutcome(input: {
     pending: number;
     capped: boolean;
     unavailable: string[];
+    /** The `Notable:` lines get_request_details would print for a request id. */
+    notable?: (requestId: string) => string[];
 }): ActionOutcome {
-    const { before, after, events, pending, capped, unavailable } = input;
+    const { before, after, events, pending, capped, unavailable, notable } = input;
     const o: ActionOutcome = {};
 
     if (before && after) {
@@ -205,7 +207,12 @@ export function buildOutcome(input: {
         }
     }
 
-    const network = events.filter((e) => e.kind === "request").map((e) => e.text);
+    // A notable finding sits under its request: on the benchmark's A1 the agent saw
+    // "POST /carts/add 201" and never opened the body that sent the price as a string.
+    const network = events.filter((e) => e.kind === "request").flatMap((e) => [
+        e.text,
+        ...(notable && e.ids?.request ? notable(e.ids.request).map((l) => `  ⚠ ${l}`) : []),
+    ]);
     const console = events.filter((e) => e.kind === "log" && (e.tier === TIER.errorLog || e.tier === TIER.warnLog)).map((e) => e.text);
     const restart = events.find((e) => e.kind === "restart");
     if (network.length) o.network = network;
