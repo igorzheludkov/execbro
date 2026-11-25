@@ -6,7 +6,9 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 const execAsyncMock = jest.fn<(file: string, args: string[], opts?: unknown) => Promise<{ stdout: string; stderr: string }>>();
 jest.unstable_mockModule("../../core/exec.js", () => ({
     execFileAsync: execAsyncMock,
-    quoteForDeviceShell: (v: string) => `'${v.replace(/'/g, `'"'"'`)}'`
+    quoteForDeviceShell: (v: string) => `'${v.replace(/'/g, `'"'"'`)}'`,
+    // Imported through connection.ts -> coldStartBackfill.ts -> logSource*, never called here.
+    withCancelableTimeout: <T,>(make: (signal: AbortSignal) => Promise<T>) => make(new AbortController().signal),
 }));
 
 const { getAndroidEmulatorAvds, getAdbIdForAvd, resetAdbAvailabilityCache } =

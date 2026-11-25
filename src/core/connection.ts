@@ -17,6 +17,7 @@ import { UserInputError } from "./errors.js";
 import { scheduleAppDetection } from "./appDetection.js";
 import { markConnectionEstablished } from "./jsExecute.js";
 import { startSdkMirrorPoller, stopSdkMirrorPoller, markCdpConsoleOpen, markCdpConsoleSeen, markCdpConsoleClosed } from "./sdkMirrorPoller.js";
+import { startColdStartBackfill } from "./coldStartBackfill.js";
 import { rememberHostAddresses, hostAddressChangeHint } from "./hostAddress.js";
 import { noteDialogOpened, noteDialogClosed, openDialog, dialogGate, formatDialog, DIALOG_BLOCKED_TOOLS } from "./chromiumDialogs.js";
 import {
@@ -1474,6 +1475,9 @@ export async function connectToDevice(
             // skips SDK lines that CDP already delivered.
             markCdpConsoleOpen(bufferKey);
             startSdkMirrorPoller(device.deviceName);
+            // What the app logged before this attach is in the system log
+            // (os_log / logcat). Background job; attach does not wait for it.
+            if (!isChromiumTarget(device)) startColdStartBackfill(bufferKey);
 
             displacedApps.delete(appKey);
 

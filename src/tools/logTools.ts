@@ -24,6 +24,7 @@ import { diagnoseEmptyLogs, type LogDiagnosis } from "../core/logDiagnosis.js";
 import { UserInputError } from "../core/errors.js";
 import { isSDKInstalled, clearSDKConsole } from "../core/sdkBridge.js";
 import { refreshMirror } from "../core/sdkMirrorPoller.js";
+import { awaitColdStartBackfill } from "../core/coldStartBackfill.js";
 import { evictionNotice, resolveEpochFilter } from "../core/epochRender.js";
 import type { LogEntry } from "../core/types.js";
 
@@ -198,7 +199,7 @@ export function registerLogTools(server: McpServer): void {
                 "PURPOSE: Pull captured console output (log/warn/error/info/debug) from the in-memory buffer, and optionally native device logs (crashes, ANRs) via source=\"native\".\n" +
                 "WHEN TO USE: Start of any log-driven investigation, verifying a code change picked up via Fast Refresh, or confirming a reported error actually fires.\n" +
                 "WORKFLOW: scan_metro -> get_logs(summary=true) -> narrow with search_logs(text=\"...\") or get_logs(level=\"error\") -> clear_logs between reproductions.\n" +
-                "LIMITATIONS: Circular buffer (~500 entries). Only captures logs emitted after the app connected; pre-connect logs are lost.\n" +
+                "LIMITATIONS: Circular buffer (2000 entries by default). Lines the app logged before it connected are recovered from the system log (iOS simulator, Android) and marked (syslog); objects in them arrive as text. Not recovered on a physical iPhone or a Chromium target, or when execbro-sdk is installed (its own buffer has them).\n" +
                 "GOOD: get_logs({ summary: true }) then get_logs({ level: \"error\", maxLogs: 20 })\n" +
                 "BAD: get_logs({ maxLogs: 500, verbose: true }) as a first call — floods context; start with summary=true.\n",
             inputSchema: {
@@ -324,6 +325,7 @@ export function registerLogTools(server: McpServer): void {
             // the CDP console stream, and it retains prior app runs. Refresh it
             // first so this read is as current as a live SDK query would have been.
             await refreshMirror(device);
+            await awaitColdStartBackfill(device);
 
             // Return summary if requested
             if (summary) {
@@ -509,7 +511,7 @@ export function registerLogTools(server: McpServer): void {
                 "PURPOSE: Find log lines matching a substring across the connected app's console buffer.\n" +
                 "WHEN TO USE: User reports a known error/warning, or wants to trace a specific event (e.g., \"redux\", \"auth failed\"). For unfocused exploration, prefer get_logs.\n" +
                 "WORKFLOW: scan_metro -> search_logs(text=\"...\") -> if empty, get_logs to verify buffer populated.\n" +
-                "LIMITATIONS: Only matches text captured AFTER the app connected; won't find pre-connect logs.\n" +
+                "LIMITATIONS: Only matches text in the buffer; pre-connect lines are searchable once recovered from the system log (see get_logs).\n" +
                 "GOOD: search_logs({ text: \"TypeError\" })\n" +
                 "BAD: search_logs({ text: \"\" })  (use get_logs for a raw dump)\n",
             inputSchema: {
@@ -536,6 +538,7 @@ export function registerLogTools(server: McpServer): void {
             // The buffer already holds the SDK's entries (mirrored) plus the CDP
             // console stream, across every app run. Refresh, then read once.
             await refreshMirror(device);
+            await awaitColdStartBackfill(device);
 
             const { count, formatted } = searchLogs(resolveLogBuffer(device), text, { maxResults, maxMessageLength, verbose });
 

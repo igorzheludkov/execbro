@@ -24,6 +24,8 @@ jest.unstable_mockModule("../../core/exec.js", () => ({
     execFileAsync: execMock,
     execAsync: async () => ({ stdout: "", stderr: "" }),
     quoteForDeviceShell: (v: string) => v,
+    // Imported through connection.ts -> coldStartBackfill.ts -> logSource*, never called here.
+    withCancelableTimeout: <T,>(make: (signal: AbortSignal) => Promise<T>) => make(new AbortController().signal),
 }));
 jest.unstable_mockModule("../../core/iosPhysical.js", () => ({
     isPhysicalIosUdid: (u: string) => u === PHONE,
